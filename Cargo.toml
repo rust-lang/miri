@@ -9,3 +9,7 @@ license = "ISC"
 [[bin]]
 name = "miri"
 doc = false
+
+[dependencies]
+log = "*"
+env_logger = "*"

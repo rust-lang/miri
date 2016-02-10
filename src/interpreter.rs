@@ -278,10 +278,12 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
 
                 match proj.elem {
                     mir::ProjectionElem::Field(field) => {
+                        debug!("field index: {:?}", field);
                         base_ptr.offset(field.index())
                     }
 
                     mir::ProjectionElem::Downcast(_, variant) => {
+                        debug!("downcast: {:?}", variant);
                         let adt_val = self.read_pointer(base_ptr);
                         if let Value::Adt { variant: actual_variant, data_ptr } = adt_val {
                             debug_assert_eq!(variant, actual_variant);
@@ -292,6 +294,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                     }
 
                     mir::ProjectionElem::Deref => {
+                        debug!("deref");
                         let ptr_val = self.read_pointer(base_ptr);
                         if let Value::Pointer(ptr) = ptr_val {
                             ptr
@@ -407,10 +410,12 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn read_lvalue(&self, lvalue: &mir::Lvalue) -> Value {
+        debug!("read_lvalue: {:?}", lvalue);
         self.read_pointer(self.eval_lvalue(lvalue))
     }
 
     fn read_pointer(&self, p: Pointer) -> Value {
+        debug!("read_pointer: {:?}", p);
         let mut val = match p.kind {
             PointerKind::Stack(offset) => &self.value_stack[offset],
             PointerKind::Heap(idx) => {
@@ -453,7 +458,7 @@ pub fn interpret_start_points<'tcx>(tcx: &ty::ctxt<'tcx>, mir_map: &MirMap<'tcx>
             if attr.check_name("miri_run") {
                 let item = tcx.map.expect_item(id);
 
-                println!("Interpreting: {}", item.name);
+                print!("Interpreting: {}... ", item.name);
 
                 let mut interpreter = Interpreter::new(tcx, mir_map);
                 let return_ptr = Pointer::stack(0);
@@ -475,9 +480,11 @@ fn check_expected(actual: &str, attr: &Attribute) -> bool {
                 let expected = meta_item.value_str().unwrap();
 
                 if actual == &expected[..] {
-                    println!("Test passed!\n");
+                    println!("ok");
                 } else {
-                    println!("Actual value:\t{}\nExpected value:\t{}\n", actual, expected);
+                    println!("FAILED");
+                    println!("\tActual value:\t{}", actual);
+                    println!("\tExpected value:\t{}", expected);
                 }
 
                 return true;

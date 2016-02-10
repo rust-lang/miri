@@ -3,6 +3,7 @@
 extern crate miri;
 extern crate rustc;
 extern crate rustc_driver;
+extern crate env_logger;
 
 use miri::interpreter;
 use rustc::session::Session;
@@ -24,6 +25,7 @@ impl<'a> CompilerCalls<'a> for MiriCompilerCalls {
 }
 
 fn main() {
+    env_logger::init().unwrap();
     let mut args: Vec<String> = std::env::args().collect();
     args.push(String::from("--sysroot"));
     args.push(format!("{}/.multirust/toolchains/nightly", std::env::var("HOME").unwrap()));
