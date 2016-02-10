@@ -430,6 +430,9 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                 panic!("tried to offset a non-aggregate");
             }
         }
+        if let Value::Uninit = *val {
+            panic!("reading uninitialized value at {:?}", p);
+        }
         val.clone()
     }
 
