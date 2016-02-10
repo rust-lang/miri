@@ -17,18 +17,32 @@ enum Value {
     Pointer(Pointer),
     Adt { variant: usize, data_ptr: Pointer },
     Func(def_id::DefId),
+    Aggregate(Vec<Value>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Pointer {
+enum PointerKind {
     Stack(usize),
     // TODO(tsion): Heap
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Pointer {
+    projection: Vec<usize>,
+    kind: PointerKind,
+}
+
 impl Pointer {
-    fn offset(self, i: usize) -> Self {
-        match self {
-            Pointer::Stack(p) => Pointer::Stack(p + i),
+    fn offset(&self, offset: usize) -> Pointer {
+        Pointer {
+            projection: self.projection.iter().cloned().chain(Some(offset)).collect(),
+            kind: self.kind,
+        }
+    }
+    fn stack(ptr: usize) -> Pointer {
+        Pointer {
+            projection: Vec::new(),
+            kind: PointerKind::Stack(ptr),
         }
     }
 }
@@ -65,12 +79,12 @@ struct Frame {
     num_args: usize,
     num_vars: usize,
     num_temps: usize,
-    num_aggregate_fields: usize,
+    num_alloc: usize,
 }
 
 impl Frame {
     fn size(&self) -> usize {
-        self.num_args + self.num_vars + self.num_temps + self.num_aggregate_fields
+        self.num_args + self.num_vars + self.num_temps + self.num_alloc
     }
 
     fn arg_offset(&self, i: usize) -> usize {
@@ -110,7 +124,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
             num_args: mir.arg_decls.len(),
             num_vars: mir.var_decls.len(),
             num_temps: mir.temp_decls.len(),
-            num_aggregate_fields: 0,
+            num_alloc: 0,
         };
 
         self.value_stack.extend(iter::repeat(Value::Uninit).take(frame.size()));
@@ -128,12 +142,12 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
         self.value_stack.truncate(frame.offset);
     }
 
-    fn allocate_aggregate(&mut self, size: usize) -> Pointer {
+    fn stack_alloc(&mut self) -> Pointer {
         let frame = self.call_stack.last_mut().expect("missing call frame");
-        frame.num_aggregate_fields += size;
+        frame.num_alloc += 1;
 
-        let ptr = Pointer::Stack(self.value_stack.len());
-        self.value_stack.extend(iter::repeat(Value::Uninit).take(size));
+        let ptr = Pointer::stack(self.value_stack.len());
+        self.value_stack.push(Value::Uninit);
         ptr
     }
 
@@ -237,10 +251,13 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
 
         match *lvalue {
             mir::Lvalue::ReturnPointer =>
-                frame.return_ptr.expect("ReturnPointer used in a function with no return value"),
-            mir::Lvalue::Arg(i)  => Pointer::Stack(frame.arg_offset(i as usize)),
-            mir::Lvalue::Var(i)  => Pointer::Stack(frame.var_offset(i as usize)),
-            mir::Lvalue::Temp(i) => Pointer::Stack(frame.temp_offset(i as usize)),
+                frame.return_ptr
+                     .as_ref()
+                     .expect("ReturnPointer used in a function with no return value")
+                     .clone(),
+            mir::Lvalue::Arg(i)  => Pointer::stack(frame.arg_offset(i as usize)),
+            mir::Lvalue::Var(i)  => Pointer::stack(frame.var_offset(i as usize)),
+            mir::Lvalue::Temp(i) => Pointer::stack(frame.temp_offset(i as usize)),
 
             mir::Lvalue::Projection(ref proj) => {
                 // proj.base: Lvalue
@@ -330,20 +347,11 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                 Value::Pointer(self.eval_lvalue(lvalue))
             }
 
-            mir::Rvalue::Aggregate(mir::AggregateKind::Adt(ref adt_def, variant, _substs),
+            mir::Rvalue::Aggregate(mir::AggregateKind::Adt(_adt_def, variant, _substs),
                                    ref operands) => {
-                let max_fields = adt_def.variants
-                    .iter()
-                    .map(|v| v.fields.len())
-                    .max()
-                    .unwrap_or(0);
-
-                let ptr = self.allocate_aggregate(max_fields);
-
-                for (i, operand) in operands.iter().enumerate() {
-                    let val = self.eval_operand(operand);
-                    self.write_pointer(ptr.offset(i), val);
-                }
+                let operands = operands.iter().map(|operand| self.eval_operand(operand)).collect();
+                let ptr = self.stack_alloc();
+                self.write_pointer(ptr.clone(), Value::Aggregate(operands));
 
                 Value::Adt { variant: variant, data_ptr: ptr }
             }
@@ -390,14 +398,22 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn read_pointer(&self, p: Pointer) -> Value {
-        match p {
-            Pointer::Stack(offset) => self.value_stack[offset].clone(),
+        let mut val = match p.kind {
+            PointerKind::Stack(offset) => &self.value_stack[offset],
+        };
+        for offset in p.projection {
+            if let Value::Aggregate(ref v) = *val {
+                val = &v[offset];
+            } else {
+                panic!("tried to offset a non-aggregate");
+            }
         }
+        val.clone()
     }
 
     fn write_pointer(&mut self, p: Pointer, val: Value) {
-        match p {
-            Pointer::Stack(offset) => self.value_stack[offset] = val,
+        match p.kind {
+            PointerKind::Stack(offset) => self.value_stack[offset] = val,
         }
     }
 }
@@ -411,8 +427,8 @@ pub fn interpret_start_points<'tcx>(tcx: &ty::ctxt<'tcx>, mir_map: &MirMap<'tcx>
                 println!("Interpreting: {}", item.name);
 
                 let mut interpreter = Interpreter::new(tcx, mir_map);
-                let return_ptr = Pointer::Stack(0);
-                interpreter.call(mir, &[], Some(return_ptr));
+                let return_ptr = Pointer::stack(0);
+                interpreter.call(mir, &[], Some(return_ptr.clone()));
 
                 let val_str = format!("{:?}", interpreter.read_pointer(return_ptr));
                 if !check_expected(&val_str, attr) {

@@ -24,6 +24,8 @@ impl<'a> CompilerCalls<'a> for MiriCompilerCalls {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+    args.push(String::from("--sysroot"));
+    args.push(format!("{}/.multirust/toolchains/nightly", std::env::var("HOME").unwrap()));
     rustc_driver::run_compiler(&args, &mut MiriCompilerCalls);
 }
