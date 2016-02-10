@@ -474,6 +474,7 @@ pub fn interpret_start_points<'tcx>(tcx: &ty::ctxt<'tcx>, mir_map: &MirMap<'tcx>
                 if !check_expected(&val_str, attr) {
                     println!("=> {}\n", val_str);
                 }
+                break;
             }
         }
     }
