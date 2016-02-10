@@ -8,8 +8,6 @@ use syntax::attr::AttrMetaMethods;
 use std::iter;
 use std::collections::HashMap;
 
-const TRACE_EXECUTION: bool = false;
-
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
     Uninit,
@@ -163,15 +161,16 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn call(&mut self, mir: &Mir, args: &[Value], return_ptr: Option<Pointer>) {
+        debug!("call");
         self.push_stack_frame(mir, args, return_ptr);
         let mut block = mir::START_BLOCK;
 
         loop {
-            if TRACE_EXECUTION { println!("Entering block: {:?}", block); }
+            debug!("Entering block: {:?}", block);
             let block_data = mir.basic_block_data(block);
 
             for stmt in &block_data.statements {
-                if TRACE_EXECUTION { println!("{:?}", stmt); }
+                debug!("{:?}", stmt);
 
                 match stmt.kind {
                     mir::StatementKind::Assign(ref lvalue, ref rvalue) => {
@@ -186,7 +185,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                 }
             }
 
-            if TRACE_EXECUTION { println!("{:?}", block_data.terminator()); }
+            debug!("{:?}", block_data.terminator());
 
             match *block_data.terminator() {
                 mir::Terminator::Return => break,
@@ -340,6 +339,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn eval_rvalue(&mut self, rvalue: &mir::Rvalue) -> Value {
+        debug!("eval_rvalue: {:?}", rvalue);
         match *rvalue {
             mir::Rvalue::Use(ref operand) => self.eval_operand(operand),
 
