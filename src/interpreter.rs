@@ -6,6 +6,7 @@ use syntax::ast::Attribute;
 use syntax::attr::AttrMetaMethods;
 
 use std::iter;
+use std::collections::HashMap;
 
 const TRACE_EXECUTION: bool = false;
 
@@ -23,7 +24,7 @@ enum Value {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum PointerKind {
     Stack(usize),
-    // TODO(tsion): Heap
+    Heap(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -43,6 +44,12 @@ impl Pointer {
         Pointer {
             projection: Vec::new(),
             kind: PointerKind::Stack(ptr),
+        }
+    }
+    fn heap(ptr: usize) -> Pointer {
+        Pointer {
+            projection: Vec::new(),
+            kind: PointerKind::Heap(ptr),
         }
     }
 }
@@ -105,6 +112,8 @@ struct Interpreter<'a, 'tcx: 'a> {
     mir_map: &'a MirMap<'tcx>,
     value_stack: Vec<Value>,
     call_stack: Vec<Frame>,
+    heap: HashMap<usize, Value>,
+    heap_idx: usize,
 }
 
 impl<'a, 'tcx> Interpreter<'a, 'tcx> {
@@ -114,6 +123,8 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
             mir_map: mir_map,
             value_stack: vec![Value::Uninit], // Allocate a spot for the top-level return value.
             call_stack: Vec::new(),
+            heap: HashMap::new(),
+            heap_idx: 1,
         }
     }
 
@@ -356,6 +367,8 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                 Value::Adt { variant: variant, data_ptr: ptr }
             }
 
+            mir::Rvalue::Box(_) => Value::Pointer(self.heap_alloc()),
+
             ref r => panic!("can't handle rvalue: {:?}", r),
         }
     }
@@ -400,6 +413,10 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     fn read_pointer(&self, p: Pointer) -> Value {
         let mut val = match p.kind {
             PointerKind::Stack(offset) => &self.value_stack[offset],
+            PointerKind::Heap(idx) => {
+                debug_assert!(idx < self.heap_idx, "use before alloc");
+                self.heap.get(&idx).expect("use after free")
+            },
         };
         for offset in p.projection {
             if let Value::Aggregate(ref v) = *val {
@@ -414,7 +431,19 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     fn write_pointer(&mut self, p: Pointer, val: Value) {
         match p.kind {
             PointerKind::Stack(offset) => self.value_stack[offset] = val,
+            PointerKind::Heap(idx) => {
+                debug_assert!(idx < self.heap_idx, "use before alloc");
+                *self.heap.get_mut(&idx).expect("use after free") = val;
+            },
+
         }
+    }
+
+    fn heap_alloc(&mut self) -> Pointer {
+        let idx = self.heap_idx;
+        self.heap_idx += 1;
+        assert!(self.heap.insert(idx, Value::Uninit).is_none());
+        Pointer::heap(idx)
     }
 }
 

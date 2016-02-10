@@ -1,4 +1,4 @@
-#![feature(custom_attribute)]
+#![feature(custom_attribute, box_syntax)]
 #![allow(dead_code, unused_attributes)]
 
 #[miri_run(expected = "Int(1)")]
@@ -171,6 +171,13 @@ fn match_opt_some() -> i32 {
 #[miri_run(expected = "Int(1)")]
 fn cross_crate_fn_call() -> i32 {
     if 1i32.is_positive() { 1 } else { 0 }
+}
+
+/// Test boxing and unboxing a value
+#[miri_run(expected = "Int(42)")]
+fn boxing() -> i32 {
+    let x = box 42;
+    *x
 }
 
 fn main() {}
