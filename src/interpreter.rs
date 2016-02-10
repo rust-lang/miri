@@ -79,7 +79,7 @@ impl Pointer {
 #[derive(Debug)]
 struct Frame {
     /// A pointer to a stack cell to write the return value of the current call, if it's not a
-    /// divering call.
+    /// diverging call.
     return_ptr: Option<Pointer>,
 
     offset: usize,
