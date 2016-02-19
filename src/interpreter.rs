@@ -5,9 +5,7 @@ use rustc::mir::mir_map::MirMap;
 use syntax::ast::Attribute;
 use syntax::attr::AttrMetaMethods;
 
-use std::iter;
-
-const TRACE_EXECUTION: bool = false;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
@@ -17,18 +15,40 @@ enum Value {
     Pointer(Pointer),
     Adt { variant: usize, data_ptr: Pointer },
     Func(def_id::DefId),
+    Aggregate(Vec<Value>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Pointer {
-    Stack(usize),
-    // TODO(tsion): Heap
+enum PointerKind {
+    Stack { frame: usize, stack: usize },
+    Heap(usize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Pointer {
+    projection: Vec<usize>,
+    kind: PointerKind,
 }
 
 impl Pointer {
-    fn offset(self, i: usize) -> Self {
-        match self {
-            Pointer::Stack(p) => Pointer::Stack(p + i),
+    fn offset(&self, offset: usize) -> Pointer {
+        Pointer {
+            projection: self.projection.iter().cloned().chain(Some(offset)).collect(),
+            kind: self.kind,
+        }
+    }
+
+    fn stack(frame: usize, stack: usize) -> Pointer {
+        Pointer {
+            projection: Vec::new(),
+            kind: PointerKind::Stack { frame: frame, stack: stack },
+        }
+    }
+
+    fn heap(ptr: usize) -> Pointer {
+        Pointer {
+            projection: Vec::new(),
+            kind: PointerKind::Heap(ptr),
         }
     }
 }
@@ -58,39 +78,47 @@ impl Pointer {
 #[derive(Debug)]
 struct Frame {
     /// A pointer to a stack cell to write the return value of the current call, if it's not a
-    /// divering call.
+    /// diverging call.
     return_ptr: Option<Pointer>,
+    stack: Vec<Value>,
 
-    offset: usize,
     num_args: usize,
     num_vars: usize,
     num_temps: usize,
-    num_aggregate_fields: usize,
+
+    id: usize,
 }
 
 impl Frame {
-    fn size(&self) -> usize {
-        self.num_args + self.num_vars + self.num_temps + self.num_aggregate_fields
-    }
-
     fn arg_offset(&self, i: usize) -> usize {
-        self.offset + i
+        i
     }
 
     fn var_offset(&self, i: usize) -> usize {
-        self.offset + self.num_args + i
+        self.num_args + i
     }
 
     fn temp_offset(&self, i: usize) -> usize {
-        self.offset + self.num_args + self.num_vars + i
+        self.num_args + self.num_vars + i
+    }
+
+    fn stack_alloc(&mut self) -> Pointer {
+        let ptr = Pointer::stack(self.id, self.stack.len());
+        self.stack.push(Value::Uninit);
+        ptr
+    }
+
+    fn stack_ptr(&self, idx: usize) -> Pointer {
+        Pointer::stack(self.id, idx)
     }
 }
 
 struct Interpreter<'a, 'tcx: 'a> {
     tcx: &'a ty::ctxt<'tcx>,
     mir_map: &'a MirMap<'tcx>,
-    value_stack: Vec<Value>,
     call_stack: Vec<Frame>,
+    heap: HashMap<usize, Value>,
+    heap_idx: usize,
 }
 
 impl<'a, 'tcx> Interpreter<'a, 'tcx> {
@@ -98,25 +126,25 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
         Interpreter {
             tcx: tcx,
             mir_map: mir_map,
-            value_stack: vec![Value::Uninit], // Allocate a spot for the top-level return value.
             call_stack: Vec::new(),
+            heap: HashMap::new(),
+            heap_idx: 1,
         }
     }
 
     fn push_stack_frame(&mut self, mir: &Mir, args: &[Value], return_ptr: Option<Pointer>) {
-        let frame = Frame {
+        let mut frame = Frame {
             return_ptr: return_ptr,
-            offset: self.value_stack.len(),
             num_args: mir.arg_decls.len(),
             num_vars: mir.var_decls.len(),
             num_temps: mir.temp_decls.len(),
-            num_aggregate_fields: 0,
+            stack: vec![Value::Uninit; mir.arg_decls.len() + mir.var_decls.len() + mir.temp_decls.len()],
+            id: self.call_stack.len(),
         };
 
-        self.value_stack.extend(iter::repeat(Value::Uninit).take(frame.size()));
-
         for (i, arg) in args.iter().enumerate() {
-            self.value_stack[frame.arg_offset(i)] = arg.clone();
+            let i = frame.arg_offset(i);
+            frame.stack[i] = arg.clone();
         }
 
         self.call_stack.push(frame);
@@ -124,29 +152,20 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn pop_stack_frame(&mut self) {
-        let frame = self.call_stack.pop().expect("tried to pop stack frame, but there were none");
-        self.value_stack.truncate(frame.offset);
-    }
-
-    fn allocate_aggregate(&mut self, size: usize) -> Pointer {
-        let frame = self.call_stack.last_mut().expect("missing call frame");
-        frame.num_aggregate_fields += size;
-
-        let ptr = Pointer::Stack(self.value_stack.len());
-        self.value_stack.extend(iter::repeat(Value::Uninit).take(size));
-        ptr
+        self.call_stack.pop().expect("tried to pop stack frame, but there were none");
     }
 
     fn call(&mut self, mir: &Mir, args: &[Value], return_ptr: Option<Pointer>) {
+        debug!("call");
         self.push_stack_frame(mir, args, return_ptr);
         let mut block = mir::START_BLOCK;
 
         loop {
-            if TRACE_EXECUTION { println!("Entering block: {:?}", block); }
+            debug!("Entering block: {:?}", block);
             let block_data = mir.basic_block_data(block);
 
             for stmt in &block_data.statements {
-                if TRACE_EXECUTION { println!("{:?}", stmt); }
+                debug!("{:?}", stmt);
 
                 match stmt.kind {
                     mir::StatementKind::Assign(ref lvalue, ref rvalue) => {
@@ -157,7 +176,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                 }
             }
 
-            if TRACE_EXECUTION { println!("{:?}", block_data.terminator()); }
+            debug!("{:?}", block_data.terminator());
 
             match *block_data.terminator() {
                 mir::Terminator::Return => break,
@@ -230,15 +249,26 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
         self.pop_stack_frame();
     }
 
+    fn frame(&self) -> &Frame {
+        self.call_stack.last().expect("missing call frame")
+    }
+
+    fn frame_mut(&mut self) -> &mut Frame {
+        self.call_stack.last_mut().expect("missing call frame")
+    }
+
     fn eval_lvalue(&self, lvalue: &mir::Lvalue) -> Pointer {
-        let frame = self.call_stack.last().expect("missing call frame");
+        let frame = self.frame();
 
         match *lvalue {
             mir::Lvalue::ReturnPointer =>
-                frame.return_ptr.expect("ReturnPointer used in a function with no return value"),
-            mir::Lvalue::Arg(i)  => Pointer::Stack(frame.arg_offset(i as usize)),
-            mir::Lvalue::Var(i)  => Pointer::Stack(frame.var_offset(i as usize)),
-            mir::Lvalue::Temp(i) => Pointer::Stack(frame.temp_offset(i as usize)),
+                frame.return_ptr
+                     .as_ref()
+                     .expect("ReturnPointer used in a function with no return value")
+                     .clone(),
+            mir::Lvalue::Arg(i)  => frame.stack_ptr(frame.arg_offset(i as usize)),
+            mir::Lvalue::Var(i)  => frame.stack_ptr(frame.var_offset(i as usize)),
+            mir::Lvalue::Temp(i) => frame.stack_ptr(frame.temp_offset(i as usize)),
 
             mir::Lvalue::Projection(ref proj) => {
                 // proj.base: Lvalue
@@ -248,10 +278,12 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
 
                 match proj.elem {
                     mir::ProjectionElem::Field(field) => {
+                        debug!("field index: {:?}", field);
                         base_ptr.offset(field.index())
                     }
 
                     mir::ProjectionElem::Downcast(_, variant) => {
+                        debug!("downcast: {:?}", variant);
                         let adt_val = self.read_pointer(base_ptr);
                         if let Value::Adt { variant: actual_variant, data_ptr } = adt_val {
                             debug_assert_eq!(variant, actual_variant);
@@ -262,6 +294,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                     }
 
                     mir::ProjectionElem::Deref => {
+                        debug!("deref");
                         let ptr_val = self.read_pointer(base_ptr);
                         if let Value::Pointer(ptr) = ptr_val {
                             ptr
@@ -307,6 +340,7 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn eval_rvalue(&mut self, rvalue: &mir::Rvalue) -> Value {
+        debug!("eval_rvalue: {:?}", rvalue);
         match *rvalue {
             mir::Rvalue::Use(ref operand) => self.eval_operand(operand),
 
@@ -328,23 +362,16 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
                 Value::Pointer(self.eval_lvalue(lvalue))
             }
 
-            mir::Rvalue::Aggregate(mir::AggregateKind::Adt(ref adt_def, variant, _substs),
+            mir::Rvalue::Aggregate(mir::AggregateKind::Adt(_adt_def, variant, _substs),
                                    ref operands) => {
-                let max_fields = adt_def.variants
-                    .iter()
-                    .map(|v| v.fields.len())
-                    .max()
-                    .unwrap_or(0);
-
-                let ptr = self.allocate_aggregate(max_fields);
-
-                for (i, operand) in operands.iter().enumerate() {
-                    let val = self.eval_operand(operand);
-                    self.write_pointer(ptr.offset(i), val);
-                }
+                let operands = operands.iter().map(|operand| self.eval_operand(operand)).collect();
+                let ptr = self.frame_mut().stack_alloc();
+                self.write_pointer(ptr.clone(), Value::Aggregate(operands));
 
                 Value::Adt { variant: variant, data_ptr: ptr }
             }
+
+            mir::Rvalue::Box(_) => Value::Pointer(self.heap_alloc()),
 
             ref r => panic!("can't handle rvalue: {:?}", r),
         }
@@ -384,19 +411,48 @@ impl<'a, 'tcx> Interpreter<'a, 'tcx> {
     }
 
     fn read_lvalue(&self, lvalue: &mir::Lvalue) -> Value {
+        debug!("read_lvalue: {:?}", lvalue);
         self.read_pointer(self.eval_lvalue(lvalue))
     }
 
     fn read_pointer(&self, p: Pointer) -> Value {
-        match p {
-            Pointer::Stack(offset) => self.value_stack[offset].clone(),
+        debug!("read_pointer: {:?}", p);
+        let mut val = match p.kind {
+            PointerKind::Stack{ frame, stack } => &self.call_stack[frame].stack[stack],
+            PointerKind::Heap(idx) => {
+                debug_assert!(idx < self.heap_idx, "use before alloc");
+                self.heap.get(&idx).expect("use after free")
+            },
+        };
+        for offset in &p.projection {
+            if let Value::Aggregate(ref v) = *val {
+                val = &v[*offset];
+            } else {
+                panic!("tried to offset a non-aggregate");
+            }
         }
+        if let Value::Uninit = *val {
+            panic!("reading uninitialized value at {:?}", p);
+        }
+        val.clone()
     }
 
     fn write_pointer(&mut self, p: Pointer, val: Value) {
-        match p {
-            Pointer::Stack(offset) => self.value_stack[offset] = val,
+        match p.kind {
+            PointerKind::Stack{ frame, stack } => self.call_stack[frame].stack[stack] = val,
+            PointerKind::Heap(idx) => {
+                debug_assert!(idx < self.heap_idx, "use before alloc");
+                *self.heap.get_mut(&idx).expect("use after free") = val;
+            },
+
         }
+    }
+
+    fn heap_alloc(&mut self) -> Pointer {
+        let idx = self.heap_idx;
+        self.heap_idx += 1;
+        assert!(self.heap.insert(idx, Value::Uninit).is_none());
+        Pointer::heap(idx)
     }
 }
 
@@ -406,16 +462,17 @@ pub fn interpret_start_points<'tcx>(tcx: &ty::ctxt<'tcx>, mir_map: &MirMap<'tcx>
             if attr.check_name("miri_run") {
                 let item = tcx.map.expect_item(id);
 
-                println!("Interpreting: {}", item.name);
+                print!("Interpreting: {}... ", item.name);
 
                 let mut interpreter = Interpreter::new(tcx, mir_map);
-                let return_ptr = Pointer::Stack(0);
-                interpreter.call(mir, &[], Some(return_ptr));
+                let return_ptr = interpreter.heap_alloc();
+                interpreter.call(mir, &[], Some(return_ptr.clone()));
 
                 let val_str = format!("{:?}", interpreter.read_pointer(return_ptr));
                 if !check_expected(&val_str, attr) {
                     println!("=> {}\n", val_str);
                 }
+                break;
             }
         }
     }
@@ -428,9 +485,11 @@ fn check_expected(actual: &str, attr: &Attribute) -> bool {
                 let expected = meta_item.value_str().unwrap();
 
                 if actual == &expected[..] {
-                    println!("Test passed!\n");
+                    println!("ok");
                 } else {
-                    println!("Actual value:\t{}\nExpected value:\t{}\n", actual, expected);
+                    println!("FAILED");
+                    println!("\tActual value:\t{}", actual);
+                    println!("\tExpected value:\t{}", expected);
                 }
 
                 return true;
