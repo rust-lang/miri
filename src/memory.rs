@@ -317,7 +317,12 @@ impl Memory {
                          .unwrap() as usize;
         let alloc = try!(self.get(ptr.alloc_id));
         match alloc.relocations.get(&ptr.offset) {
-            Some(&alloc_id) => Ok(Pointer { alloc_id: alloc_id, offset: offset }),
+            Some(&alloc_id) => {
+                Ok(Pointer {
+                    alloc_id: alloc_id,
+                    offset: offset,
+                })
+            }
             None => Err(EvalError::ReadBytesAsPointer),
         }
     }
@@ -336,14 +341,14 @@ impl Memory {
         let pointer_size = self.pointer_size;
         match val {
             PrimVal::Bool(b) => self.write_bool(ptr, b),
-            PrimVal::I8(n)   => self.write_int(ptr, n as i64, 1),
-            PrimVal::I16(n)  => self.write_int(ptr, n as i64, 2),
-            PrimVal::I32(n)  => self.write_int(ptr, n as i64, 4),
-            PrimVal::I64(n)  => self.write_int(ptr, n as i64, 8),
-            PrimVal::U8(n)   => self.write_uint(ptr, n as u64, 1),
-            PrimVal::U16(n)  => self.write_uint(ptr, n as u64, 2),
-            PrimVal::U32(n)  => self.write_uint(ptr, n as u64, 4),
-            PrimVal::U64(n)  => self.write_uint(ptr, n as u64, 8),
+            PrimVal::I8(n) => self.write_int(ptr, n as i64, 1),
+            PrimVal::I16(n) => self.write_int(ptr, n as i64, 2),
+            PrimVal::I32(n) => self.write_int(ptr, n as i64, 4),
+            PrimVal::I64(n) => self.write_int(ptr, n as i64, 8),
+            PrimVal::U8(n) => self.write_uint(ptr, n as u64, 1),
+            PrimVal::U16(n) => self.write_uint(ptr, n as u64, 2),
+            PrimVal::U32(n) => self.write_uint(ptr, n as u64, 4),
+            PrimVal::U64(n) => self.write_uint(ptr, n as u64, 8),
             PrimVal::IntegerPtr(n) => self.write_uint(ptr, n as u64, pointer_size),
             PrimVal::AbstractPtr(_p) => unimplemented!(),
         }

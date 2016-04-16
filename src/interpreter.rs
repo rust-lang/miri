@@ -254,7 +254,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
             If { ref cond, targets: (then_target, else_target) } => {
                 let cond_ptr = try!(self.eval_operand(cond));
                 let cond_val = try!(self.memory.read_bool(cond_ptr));
-                TerminatorTarget::Block(if cond_val { then_target } else { else_target })
+                TerminatorTarget::Block(if cond_val {
+                    then_target
+                } else {
+                    else_target
+                })
             }
 
             SwitchInt { ref discr, ref values, ref targets, .. } => {
@@ -330,7 +334,8 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                                 // FnMut closure via FnOnce::call_once.
 
                                 // Only trait methods can have a Self parameter.
-                                let (resolved_def_id, resolved_substs) = if substs.self_ty().is_some() {
+                                let (resolved_def_id, resolved_substs) = if substs.self_ty()
+                                                                                  .is_some() {
                                     self.trait_method(def_id, substs)
                                 } else {
                                     (def_id, substs)
@@ -358,7 +363,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                                                 arg_srcs.push((src, ty));
                                             }
                                         }
-                                        ty => panic!("expected tuple as last argument in function with 'rust-call' ABI, got {:?}", ty),
+                                        ty => {
+                                            panic!("expected tuple as last argument in function \
+                                                    with 'rust-call' ABI, got {:?}",
+                                                   ty)
+                                        }
                                     }
                                 }
 
@@ -797,8 +806,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         match self.mir().lvalue_ty(self.tcx, lvalue) {
             LvalueTy::Ty { ty } => self.type_repr(ty),
             LvalueTy::Downcast { adt_def, substs, variant_index } => {
-                let field_tys = adt_def.variants[variant_index].fields.iter()
-                    .map(|f| f.ty(self.tcx, substs));
+                let field_tys = adt_def.variants[variant_index]
+                                    .fields
+                                    .iter()
+                                    .map(|f| f.ty(self.tcx, substs));
                 self.repr_arena.alloc(self.make_aggregate_repr(iter::once(field_tys)))
             }
         }
@@ -855,7 +866,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                             ty::TyTrait(_) => unimplemented!(),
                             _ => LvalueExtra::None,
                         };
-                        return Ok(Lvalue { ptr: ptr, extra: extra });
+                        return Ok(Lvalue {
+                            ptr: ptr,
+                            extra: extra,
+                        });
                     }
 
                     Index(ref operand) => {
@@ -874,7 +888,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
             }
         };
 
-        Ok(Lvalue { ptr: ptr, extra: LvalueExtra::None })
+        Ok(Lvalue {
+            ptr: ptr,
+            extra: LvalueExtra::None,
+        })
     }
 
     // TODO(tsion): Try making const_to_primval instead.
@@ -910,13 +927,13 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 try!(self.memory.write_bool(ptr, b));
                 Ok(ptr)
             }
-            Char(_c)          => unimplemented!(),
-            Struct(_node_id)  => unimplemented!(),
-            Tuple(_node_id)   => unimplemented!(),
+            Char(_c) => unimplemented!(),
+            Struct(_node_id) => unimplemented!(),
+            Tuple(_node_id) => unimplemented!(),
             Function(_def_id) => unimplemented!(),
-            Array(_, _)       => unimplemented!(),
-            Repeat(_, _)      => unimplemented!(),
-            Dummy             => unimplemented!(),
+            Array(_, _) => unimplemented!(),
+            Repeat(_, _) => unimplemented!(),
+            Dummy => unimplemented!(),
         }
     }
 
@@ -965,7 +982,7 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         let repr = match ty.sty {
             ty::TyBool => Repr::Primitive { size: 1 },
 
-            ty::TyInt(IntTy::I8)  | ty::TyUint(UintTy::U8)  => Repr::Primitive { size: 1 },
+            ty::TyInt(IntTy::I8) | ty::TyUint(UintTy::U8) => Repr::Primitive { size: 1 },
             ty::TyInt(IntTy::I16) | ty::TyUint(UintTy::U16) => Repr::Primitive { size: 2 },
             ty::TyInt(IntTy::I32) | ty::TyUint(UintTy::U32) => Repr::Primitive { size: 4 },
             ty::TyInt(IntTy::I64) | ty::TyUint(UintTy::U64) => Repr::Primitive { size: 8 },
@@ -1029,7 +1046,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 let field_size = self.type_size(ty);
                 let offest = size;
                 size += field_size;
-                fields.push(FieldRepr { offset: offest, size: field_size });
+                fields.push(FieldRepr {
+                    offset: offest,
+                    size: field_size,
+                });
             }
 
             if size > max_variant_size {
@@ -1039,11 +1059,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         }
 
         let discr_size = match variants.len() as u64 {
-            n if n <= 1       => 0,
-            n if n <= 1 << 8  => 1,
+            n if n <= 1 => 0,
+            n if n <= 1 << 8 => 1,
             n if n <= 1 << 16 => 2,
             n if n <= 1 << 32 => 4,
-            _                 => 8,
+            _ => 8,
         };
         Repr::Aggregate {
             discr_size: discr_size,
@@ -1055,18 +1075,18 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
     pub fn read_primval(&mut self, ptr: Pointer, ty: ty::Ty<'tcx>) -> EvalResult<PrimVal> {
         use syntax::ast::{IntTy, UintTy};
         let val = match ty.sty {
-            ty::TyBool              => PrimVal::Bool(try!(self.memory.read_bool(ptr))),
-            ty::TyInt(IntTy::I8)    => PrimVal::I8(try!(self.memory.read_int(ptr, 1)) as i8),
-            ty::TyInt(IntTy::I16)   => PrimVal::I16(try!(self.memory.read_int(ptr, 2)) as i16),
-            ty::TyInt(IntTy::I32)   => PrimVal::I32(try!(self.memory.read_int(ptr, 4)) as i32),
-            ty::TyInt(IntTy::I64)   => PrimVal::I64(try!(self.memory.read_int(ptr, 8)) as i64),
-            ty::TyUint(UintTy::U8)  => PrimVal::U8(try!(self.memory.read_uint(ptr, 1)) as u8),
+            ty::TyBool => PrimVal::Bool(try!(self.memory.read_bool(ptr))),
+            ty::TyInt(IntTy::I8) => PrimVal::I8(try!(self.memory.read_int(ptr, 1)) as i8),
+            ty::TyInt(IntTy::I16) => PrimVal::I16(try!(self.memory.read_int(ptr, 2)) as i16),
+            ty::TyInt(IntTy::I32) => PrimVal::I32(try!(self.memory.read_int(ptr, 4)) as i32),
+            ty::TyInt(IntTy::I64) => PrimVal::I64(try!(self.memory.read_int(ptr, 8)) as i64),
+            ty::TyUint(UintTy::U8) => PrimVal::U8(try!(self.memory.read_uint(ptr, 1)) as u8),
             ty::TyUint(UintTy::U16) => PrimVal::U16(try!(self.memory.read_uint(ptr, 2)) as u16),
             ty::TyUint(UintTy::U32) => PrimVal::U32(try!(self.memory.read_uint(ptr, 4)) as u32),
             ty::TyUint(UintTy::U64) => PrimVal::U64(try!(self.memory.read_uint(ptr, 8)) as u64),
 
             // TODO(tsion): Pick the PrimVal dynamically.
-            ty::TyInt(IntTy::Is)   => PrimVal::I64(try!(self.memory.read_isize(ptr))),
+            ty::TyInt(IntTy::Is) => PrimVal::I64(try!(self.memory.read_isize(ptr))),
             ty::TyUint(UintTy::Us) => PrimVal::U64(try!(self.memory.read_usize(ptr))),
 
             ty::TyRef(_, ty::TypeAndMut { ty, .. }) |
@@ -1081,7 +1101,8 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                         Err(e) => return Err(e),
                     }
                 } else {
-                    panic!("unimplemented: primitive read of fat pointer type: {:?}", ty);
+                    panic!("unimplemented: primitive read of fat pointer type: {:?}",
+                           ty);
                 }
             }
 
@@ -1144,9 +1165,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         let vtable = selection.map(|predicate| {
             fulfill_cx.register_predicate_obligation(&infcx, predicate);
         });
-        let vtable = infer::drain_fulfillment_cx_or_panic(
-            DUMMY_SP, &infcx, &mut fulfill_cx, &vtable
-        );
+        let vtable = infer::drain_fulfillment_cx_or_panic(DUMMY_SP,
+                                                          &infcx,
+                                                          &mut fulfill_cx,
+                                                          &vtable);
 
         vtable
     }
