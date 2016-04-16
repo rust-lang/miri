@@ -47,7 +47,7 @@ fn match_ref_mut() -> i8 {
         let mut opt = Some(&mut t);
         match opt {
             Some(&mut (ref mut x, ref mut y)) => *x += *y,
-            None => {},
+            None => {}
         }
     }
     t.0

@@ -90,14 +90,13 @@ struct Lvalue {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum LvalueExtra {
     None,
-    Length(u64),
-    // Vtable(memory::AllocId),
+    Length(u64), // Vtable(memory::AllocId),
 }
 
 #[derive(Clone)]
 enum CachedMir<'mir, 'tcx: 'mir> {
     Ref(&'mir mir::Mir<'tcx>),
-    Owned(Rc<mir::Mir<'tcx>>)
+    Owned(Rc<mir::Mir<'tcx>>),
 }
 
 /// Represents the action to be taken in the main loop as a result of executing a terminator.
@@ -113,9 +112,10 @@ enum TerminatorTarget {
 }
 
 impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
-    fn new(tcx: &'a TyCtxt<'tcx>, mir_map: &'a MirMap<'tcx>, repr_arena: &'arena TypedArena<Repr>)
-        -> Self
-    {
+    fn new(tcx: &'a TyCtxt<'tcx>,
+           mir_map: &'a MirMap<'tcx>,
+           repr_arena: &'arena TypedArena<Repr>)
+           -> Self {
         Interpreter {
             tcx: tcx,
             mir_map: mir_map,
@@ -139,21 +139,32 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 struct Instance<'tcx>(DefId, &'tcx Substs<'tcx>);
                 impl<'tcx> fmt::Display for Instance<'tcx> {
                     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                        ppaux::parameterized(f, self.1, self.0, ppaux::Ns::Value, &[],
-                            |tcx| tcx.lookup_item_type(self.0).generics)
+                        ppaux::parameterized(f,
+                                             self.1,
+                                             self.0,
+                                             ppaux::Ns::Value,
+                                             &[],
+                                             |tcx| tcx.lookup_item_type(self.0).generics)
                     }
                 }
-                err.span_note(span, &format!("inside call to {}", Instance(def_id, substs)));
+                err.span_note(span,
+                              &format!("inside call to {}", Instance(def_id, substs)));
             }
             err.emit();
         }
         r
     }
 
-    fn log<F>(&self, extra_indent: usize, f: F) where F: FnOnce() {
+    fn log<F>(&self, extra_indent: usize, f: F)
+        where F: FnOnce()
+    {
         let indent = self.stack.len() + extra_indent;
-        if !TRACE_EXECUTION { return; }
-        for _ in 0..indent { print!("    "); }
+        if !TRACE_EXECUTION {
+            return;
+        }
+        for _ in 0..indent {
+            print!("    ");
+        }
         f();
         println!("");
     }
@@ -193,19 +204,23 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         Ok(())
     }
 
-    fn push_stack_frame(&mut self, mir: CachedMir<'a, 'tcx>, substs: &'tcx Substs<'tcx>,
-        return_ptr: Option<Pointer>)
-    {
+    fn push_stack_frame(&mut self,
+                        mir: CachedMir<'a, 'tcx>,
+                        substs: &'tcx Substs<'tcx>,
+                        return_ptr: Option<Pointer>) {
         self.substs_stack.push(substs);
 
         let arg_tys = mir.arg_decls.iter().map(|a| a.ty);
         let var_tys = mir.var_decls.iter().map(|v| v.ty);
         let temp_tys = mir.temp_decls.iter().map(|t| t.ty);
 
-        let locals: Vec<Pointer> = arg_tys.chain(var_tys).chain(temp_tys).map(|ty| {
-            let size = self.type_size(ty);
-            self.memory.allocate(size)
-        }).collect();
+        let locals: Vec<Pointer> = arg_tys.chain(var_tys)
+                                          .chain(temp_tys)
+                                          .map(|ty| {
+                                              let size = self.type_size(ty);
+                                              self.memory.allocate(size)
+                                          })
+                                          .collect();
 
         let num_args = mir.arg_decls.len();
         let num_vars = mir.var_decls.len();
@@ -226,8 +241,9 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         self.substs_stack.pop();
     }
 
-    fn eval_terminator(&mut self, terminator: &mir::Terminator<'tcx>)
-            -> EvalResult<TerminatorTarget> {
+    fn eval_terminator(&mut self,
+                       terminator: &mir::Terminator<'tcx>)
+                       -> EvalResult<TerminatorTarget> {
         use rustc::mir::repr::TerminatorKind::*;
         let target = match terminator.kind {
             Return => TerminatorTarget::Return,
@@ -237,7 +253,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
             If { ref cond, targets: (then_target, else_target) } => {
                 let cond_ptr = try!(self.eval_operand(cond));
                 let cond_val = try!(self.memory.read_bool(cond_ptr));
-                TerminatorTarget::Block(if cond_val { then_target } else { else_target })
+                TerminatorTarget::Block(if cond_val {
+                    then_target
+                } else {
+                    else_target
+                })
             }
 
             SwitchInt { ref discr, ref values, ref targets, .. } => {
@@ -269,8 +289,9 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 };
                 let discr_val = try!(self.memory.read_uint(adt_ptr, discr_size));
 
-                let matching = adt_def.variants.iter()
-                    .position(|v| discr_val == v.disr_val.to_u64_unchecked());
+                let matching = adt_def.variants
+                                      .iter()
+                                      .position(|v| discr_val == v.disr_val.to_u64_unchecked());
 
                 match matching {
                     Some(i) => TerminatorTarget::Block(targets[i]),
@@ -295,22 +316,25 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                                 match fn_ty.sig.0.output {
                                     ty::FnConverging(ty) => {
                                         let size = self.type_size(ty);
-                                        try!(self.call_intrinsic(&name, substs, args,
-                                            return_ptr.unwrap(), size))
+                                        try!(self.call_intrinsic(&name,
+                                                                 substs,
+                                                                 args,
+                                                                 return_ptr.unwrap(),
+                                                                 size))
                                     }
                                     ty::FnDiverging => unimplemented!(),
                                 }
                             }
 
-                            Abi::C =>
-                                try!(self.call_c_abi(def_id, args, return_ptr.unwrap())),
+                            Abi::C => try!(self.call_c_abi(def_id, args, return_ptr.unwrap())),
 
                             Abi::Rust | Abi::RustCall => {
                                 // TODO(tsion): Adjust the first argument when calling a Fn or
                                 // FnMut closure via FnOnce::call_once.
 
                                 // Only trait methods can have a Self parameter.
-                                let (resolved_def_id, resolved_substs) = if substs.self_ty().is_some() {
+                                let (resolved_def_id, resolved_substs) = if substs.self_ty()
+                                                                                  .is_some() {
                                     self.trait_method(def_id, substs)
                                 } else {
                                     (def_id, substs)
@@ -338,7 +362,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                                                 arg_srcs.push((src, ty));
                                             }
                                         }
-                                        ty => panic!("expected tuple as last argument in function with 'rust-call' ABI, got {:?}", ty),
+                                        ty => {
+                                            panic!("expected tuple as last argument in function \
+                                                    with 'rust-call' ABI, got {:?}",
+                                                   ty)
+                                        }
                                     }
                                 }
 
@@ -417,17 +445,16 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         Ok(())
     }
 
-    fn call_intrinsic(
-        &mut self,
-        name: &str,
-        substs: &'tcx Substs<'tcx>,
-        args: &[mir::Operand<'tcx>],
-        dest: Pointer,
-        dest_size: usize
-    ) -> EvalResult<TerminatorTarget> {
+    fn call_intrinsic(&mut self,
+                      name: &str,
+                      substs: &'tcx Substs<'tcx>,
+                      args: &[mir::Operand<'tcx>],
+                      dest: Pointer,
+                      dest_size: usize)
+                      -> EvalResult<TerminatorTarget> {
         let args_res: EvalResult<Vec<Pointer>> = args.iter()
-            .map(|arg| self.eval_operand(arg))
-            .collect();
+                                                     .map(|arg| self.eval_operand(arg))
+                                                     .collect();
         let args = try!(args_res);
 
         match name {
@@ -537,12 +564,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         Ok(TerminatorTarget::Call)
     }
 
-    fn call_c_abi(
-        &mut self,
-        def_id: DefId,
-        args: &[mir::Operand<'tcx>],
-        dest: Pointer
-    ) -> EvalResult<TerminatorTarget> {
+    fn call_c_abi(&mut self,
+                  def_id: DefId,
+                  args: &[mir::Operand<'tcx>],
+                  dest: Pointer)
+                  -> EvalResult<TerminatorTarget> {
         let name = self.tcx.item_name(def_id);
         let attrs = self.tcx.get_attrs(def_id);
         let link_name = match attr::first_attr_value_str_by_name(&attrs, "link_name") {
@@ -551,8 +577,8 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         };
 
         let args_res: EvalResult<Vec<Pointer>> = args.iter()
-            .map(|arg| self.eval_operand(arg))
-            .collect();
+                                                     .map(|arg| self.eval_operand(arg))
+                                                     .collect();
         let args = try!(args_res);
 
         match &link_name[..] {
@@ -578,14 +604,13 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         Ok(TerminatorTarget::Call)
     }
 
-    fn assign_to_aggregate(
-        &mut self,
-        dest: Pointer,
-        dest_repr: &Repr,
-        variant: usize,
-        discr: Option<u64>,
-        operands: &[mir::Operand<'tcx>],
-    ) -> EvalResult<()> {
+    fn assign_to_aggregate(&mut self,
+                           dest: Pointer,
+                           dest_repr: &Repr,
+                           variant: usize,
+                           discr: Option<u64>,
+                           operands: &[mir::Operand<'tcx>])
+                           -> EvalResult<()> {
         match *dest_repr {
             Repr::Aggregate { discr_size, ref variants, .. } => {
                 if discr_size > 0 {
@@ -604,9 +629,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         Ok(())
     }
 
-    fn eval_assignment(&mut self, lvalue: &mir::Lvalue<'tcx>, rvalue: &mir::Rvalue<'tcx>)
-        -> EvalResult<()>
-    {
+    fn eval_assignment(&mut self,
+                       lvalue: &mir::Lvalue<'tcx>,
+                       rvalue: &mir::Rvalue<'tcx>)
+                       -> EvalResult<()> {
         let dest = try!(self.eval_lvalue(lvalue)).to_ptr();
         let dest_ty = self.lvalue_ty(lvalue);
         let dest_repr = self.lvalue_repr(lvalue);
@@ -641,25 +667,28 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
             Aggregate(ref kind, ref operands) => {
                 use rustc::mir::repr::AggregateKind::*;
                 match *kind {
-                    Tuple | Closure(..) =>
-                        try!(self.assign_to_aggregate(dest, &dest_repr, 0, None, operands)),
+                    Tuple | Closure(..) => {
+                        try!(self.assign_to_aggregate(dest, &dest_repr, 0, None, operands))
+                    }
 
                     Adt(adt_def, variant, _) => {
                         let discr = Some(adt_def.variants[variant].disr_val.to_u64_unchecked());
                         try!(self.assign_to_aggregate(dest, &dest_repr, variant, discr, operands));
                     }
 
-                    Vec => if let Repr::Array { elem_size, length } = *dest_repr {
-                        assert_eq!(length, operands.len());
-                        for (i, operand) in operands.iter().enumerate() {
-                            let src = try!(self.eval_operand(operand));
-                            let src_ty = self.operand_ty(operand);
-                            let elem_dest = dest.offset((i * elem_size) as isize);
-                            try!(self.move_(src, elem_dest, src_ty));
+                    Vec => {
+                        if let Repr::Array { elem_size, length } = *dest_repr {
+                            assert_eq!(length, operands.len());
+                            for (i, operand) in operands.iter().enumerate() {
+                                let src = try!(self.eval_operand(operand));
+                                let src_ty = self.operand_ty(operand);
+                                let elem_dest = dest.offset((i * elem_size) as isize);
+                                try!(self.move_(src, elem_dest, src_ty));
+                            }
+                        } else {
+                            panic!("expected Repr::Array target");
                         }
-                    } else {
-                        panic!("expected Repr::Array target");
-                    },
+                    }
                 }
             }
 
@@ -680,11 +709,13 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 let ty = self.lvalue_ty(lvalue);
                 let len = match ty.sty {
                     ty::TyArray(_, n) => n as u64,
-                    ty::TySlice(_) => if let LvalueExtra::Length(n) = src.extra {
-                        n
-                    } else {
-                        panic!("Rvalue::Len of a slice given non-slice pointer: {:?}", src);
-                    },
+                    ty::TySlice(_) => {
+                        if let LvalueExtra::Length(n) = src.extra {
+                            n
+                        } else {
+                            panic!("Rvalue::Len of a slice given non-slice pointer: {:?}", src);
+                        }
+                    }
                     _ => panic!("Rvalue::Len expected array or slice, got {:?}", ty),
                 };
                 try!(self.memory.write_usize(dest, len));
@@ -694,7 +725,7 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 let lv = try!(self.eval_lvalue(lvalue));
                 try!(self.memory.write_ptr(dest, lv.ptr));
                 match lv.extra {
-                    LvalueExtra::None => {},
+                    LvalueExtra::None => {}
                     LvalueExtra::Length(len) => {
                         let len_ptr = dest.offset(self.memory.pointer_size as isize);
                         try!(self.memory.write_usize(len_ptr, len));
@@ -750,20 +781,18 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         self.eval_operand_and_repr(op).map(|(p, _)| p)
     }
 
-    fn eval_operand_and_repr(&mut self, op: &mir::Operand<'tcx>)
-        -> EvalResult<(Pointer, &'arena Repr)>
-    {
+    fn eval_operand_and_repr(&mut self,
+                             op: &mir::Operand<'tcx>)
+                             -> EvalResult<(Pointer, &'arena Repr)> {
         use rustc::mir::repr::Operand::*;
         match *op {
-            Consume(ref lvalue) =>
-                Ok((try!(self.eval_lvalue(lvalue)).to_ptr(), self.lvalue_repr(lvalue))),
+            Consume(ref lvalue) => {
+                Ok((try!(self.eval_lvalue(lvalue)).to_ptr(), self.lvalue_repr(lvalue)))
+            }
             Constant(mir::Constant { ref literal, ty, .. }) => {
                 use rustc::mir::repr::Literal::*;
                 match *literal {
-                    Value { ref value } => Ok((
-                        try!(self.const_to_ptr(value)),
-                        self.type_repr(ty),
-                    )),
+                    Value { ref value } => Ok((try!(self.const_to_ptr(value)), self.type_repr(ty))),
                     Item { .. } => unimplemented!(),
                 }
             }
@@ -776,8 +805,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         match self.mir().lvalue_ty(self.tcx, lvalue) {
             LvalueTy::Ty { ty } => self.type_repr(ty),
             LvalueTy::Downcast { adt_def, substs, variant_index } => {
-                let field_tys = adt_def.variants[variant_index].fields.iter()
-                    .map(|f| f.ty(self.tcx, substs));
+                let field_tys = adt_def.variants[variant_index]
+                                    .fields
+                                    .iter()
+                                    .map(|f| f.ty(self.tcx, substs));
                 self.repr_arena.alloc(self.make_aggregate_repr(iter::once(field_tys)))
             }
         }
@@ -786,8 +817,11 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
     fn eval_lvalue(&mut self, lvalue: &mir::Lvalue<'tcx>) -> EvalResult<Lvalue> {
         use rustc::mir::repr::Lvalue::*;
         let ptr = match *lvalue {
-            ReturnPointer => self.frame().return_ptr
-                .expect("ReturnPointer used in a function with no return value"),
+            ReturnPointer => {
+                self.frame()
+                    .return_ptr
+                    .expect("ReturnPointer used in a function with no return value")
+            }
             Arg(i) => self.frame().locals[i as usize],
             Var(i) => self.frame().locals[self.frame().var_offset + i as usize],
             Temp(i) => self.frame().locals[self.frame().temp_offset + i as usize],
@@ -800,18 +834,24 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 let base_ty = self.lvalue_ty(&proj.base);
                 use rustc::mir::repr::ProjectionElem::*;
                 match proj.elem {
-                    Field(field, _) => match *base_repr {
-                        Repr::Aggregate { discr_size: 0, ref variants, .. } => {
-                            let fields = &variants[0];
-                            base_ptr.offset(fields[field.index()].offset as isize)
+                    Field(field, _) => {
+                        match *base_repr {
+                            Repr::Aggregate { discr_size: 0, ref variants, .. } => {
+                                let fields = &variants[0];
+                                base_ptr.offset(fields[field.index()].offset as isize)
+                            }
+                            _ => panic!("field access on non-product type: {:?}", base_repr),
                         }
-                        _ => panic!("field access on non-product type: {:?}", base_repr),
-                    },
+                    }
 
-                    Downcast(..) => match *base_repr {
-                        Repr::Aggregate { discr_size, .. } => base_ptr.offset(discr_size as isize),
-                        _ => panic!("variant downcast on non-aggregate type: {:?}", base_repr),
-                    },
+                    Downcast(..) => {
+                        match *base_repr {
+                            Repr::Aggregate { discr_size, .. } => {
+                                base_ptr.offset(discr_size as isize)
+                            }
+                            _ => panic!("variant downcast on non-aggregate type: {:?}", base_repr),
+                        }
+                    }
 
                     Deref => {
                         let pointee_ty = pointee_type(base_ty).expect("Deref of non-pointer");
@@ -825,7 +865,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                             ty::TyTrait(_) => unimplemented!(),
                             _ => LvalueExtra::None,
                         };
-                        return Ok(Lvalue { ptr: ptr, extra: extra });
+                        return Ok(Lvalue {
+                            ptr: ptr,
+                            extra: extra,
+                        });
                     }
 
                     Index(ref operand) => {
@@ -844,7 +887,10 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
             }
         };
 
-        Ok(Lvalue { ptr: ptr, extra: LvalueExtra::None })
+        Ok(Lvalue {
+            ptr: ptr,
+            extra: LvalueExtra::None,
+        })
     }
 
     // TODO(tsion): Try making const_to_primval instead.
@@ -880,13 +926,13 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 try!(self.memory.write_bool(ptr, b));
                 Ok(ptr)
             }
-            Char(_c)          => unimplemented!(),
-            Struct(_node_id)  => unimplemented!(),
-            Tuple(_node_id)   => unimplemented!(),
+            Char(_c) => unimplemented!(),
+            Struct(_node_id) => unimplemented!(),
+            Tuple(_node_id) => unimplemented!(),
             Function(_def_id) => unimplemented!(),
-            Array(_, _)       => unimplemented!(),
-            Repeat(_, _)      => unimplemented!(),
-            Dummy             => unimplemented!(),
+            Array(_, _) => unimplemented!(),
+            Repeat(_, _) => unimplemented!(),
+            Dummy => unimplemented!(),
         }
     }
 
@@ -935,28 +981,30 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         let repr = match ty.sty {
             ty::TyBool => Repr::Primitive { size: 1 },
 
-            ty::TyInt(IntTy::I8)  | ty::TyUint(UintTy::U8)  => Repr::Primitive { size: 1 },
+            ty::TyInt(IntTy::I8) | ty::TyUint(UintTy::U8) => Repr::Primitive { size: 1 },
             ty::TyInt(IntTy::I16) | ty::TyUint(UintTy::U16) => Repr::Primitive { size: 2 },
             ty::TyInt(IntTy::I32) | ty::TyUint(UintTy::U32) => Repr::Primitive { size: 4 },
             ty::TyInt(IntTy::I64) | ty::TyUint(UintTy::U64) => Repr::Primitive { size: 8 },
 
-            ty::TyInt(IntTy::Is) | ty::TyUint(UintTy::Us) =>
-                Repr::Primitive { size: self.memory.pointer_size },
+            ty::TyInt(IntTy::Is) | ty::TyUint(UintTy::Us) => {
+                Repr::Primitive { size: self.memory.pointer_size }
+            }
 
-            ty::TyTuple(ref fields) =>
-                self.make_aggregate_repr(iter::once(fields.iter().cloned())),
+            ty::TyTuple(ref fields) => self.make_aggregate_repr(iter::once(fields.iter().cloned())),
 
             ty::TyEnum(adt_def, substs) | ty::TyStruct(adt_def, substs) => {
-                let variants = adt_def.variants.iter().map(|v| {
-                    v.fields.iter().map(|f| f.ty(self.tcx, substs))
-                });
+                let variants = adt_def.variants
+                                      .iter()
+                                      .map(|v| v.fields.iter().map(|f| f.ty(self.tcx, substs)));
                 self.make_aggregate_repr(variants)
             }
 
-            ty::TyArray(elem_ty, length) => Repr::Array {
-                elem_size: self.type_size(elem_ty),
-                length: length,
-            },
+            ty::TyArray(elem_ty, length) => {
+                Repr::Array {
+                    elem_size: self.type_size(elem_ty),
+                    length: length,
+                }
+            }
 
             ty::TyRef(_, ty::TypeAndMut { ty, .. }) |
             ty::TyRawPtr(ty::TypeAndMut { ty, .. }) |
@@ -970,8 +1018,9 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
 
             ty::TyFnPtr(..) => Repr::Primitive { size: self.memory.pointer_size },
 
-            ty::TyClosure(_, ref closure_substs) =>
-                self.make_aggregate_repr(iter::once(closure_substs.upvar_tys.iter().cloned())),
+            ty::TyClosure(_, ref closure_substs) => {
+                self.make_aggregate_repr(iter::once(closure_substs.upvar_tys.iter().cloned()))
+            }
 
             ref t => panic!("can't convert type to repr: {:?}", t),
         };
@@ -982,7 +1031,8 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
     }
 
     fn make_aggregate_repr<V>(&self, variant_fields: V) -> Repr
-        where V: IntoIterator, V::Item: IntoIterator<Item = ty::Ty<'tcx>>
+        where V: IntoIterator,
+              V::Item: IntoIterator<Item = ty::Ty<'tcx>>
     {
         let mut variants = Vec::new();
         let mut max_variant_size = 0;
@@ -995,19 +1045,24 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 let field_size = self.type_size(ty);
                 let offest = size;
                 size += field_size;
-                fields.push(FieldRepr { offset: offest, size: field_size });
+                fields.push(FieldRepr {
+                    offset: offest,
+                    size: field_size,
+                });
             }
 
-            if size > max_variant_size { max_variant_size = size; }
+            if size > max_variant_size {
+                max_variant_size = size;
+            }
             variants.push(fields);
         }
 
         let discr_size = match variants.len() as u64 {
-            n if n <= 1       => 0,
-            n if n <= 1 << 8  => 1,
+            n if n <= 1 => 0,
+            n if n <= 1 << 8 => 1,
             n if n <= 1 << 16 => 2,
             n if n <= 1 << 32 => 4,
-            _                 => 8,
+            _ => 8,
         };
         Repr::Aggregate {
             discr_size: discr_size,
@@ -1019,18 +1074,18 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
     pub fn read_primval(&mut self, ptr: Pointer, ty: ty::Ty<'tcx>) -> EvalResult<PrimVal> {
         use syntax::ast::{IntTy, UintTy};
         let val = match ty.sty {
-            ty::TyBool              => PrimVal::Bool(try!(self.memory.read_bool(ptr))),
-            ty::TyInt(IntTy::I8)    => PrimVal::I8(try!(self.memory.read_int(ptr, 1)) as i8),
-            ty::TyInt(IntTy::I16)   => PrimVal::I16(try!(self.memory.read_int(ptr, 2)) as i16),
-            ty::TyInt(IntTy::I32)   => PrimVal::I32(try!(self.memory.read_int(ptr, 4)) as i32),
-            ty::TyInt(IntTy::I64)   => PrimVal::I64(try!(self.memory.read_int(ptr, 8)) as i64),
-            ty::TyUint(UintTy::U8)  => PrimVal::U8(try!(self.memory.read_uint(ptr, 1)) as u8),
+            ty::TyBool => PrimVal::Bool(try!(self.memory.read_bool(ptr))),
+            ty::TyInt(IntTy::I8) => PrimVal::I8(try!(self.memory.read_int(ptr, 1)) as i8),
+            ty::TyInt(IntTy::I16) => PrimVal::I16(try!(self.memory.read_int(ptr, 2)) as i16),
+            ty::TyInt(IntTy::I32) => PrimVal::I32(try!(self.memory.read_int(ptr, 4)) as i32),
+            ty::TyInt(IntTy::I64) => PrimVal::I64(try!(self.memory.read_int(ptr, 8)) as i64),
+            ty::TyUint(UintTy::U8) => PrimVal::U8(try!(self.memory.read_uint(ptr, 1)) as u8),
             ty::TyUint(UintTy::U16) => PrimVal::U16(try!(self.memory.read_uint(ptr, 2)) as u16),
             ty::TyUint(UintTy::U32) => PrimVal::U32(try!(self.memory.read_uint(ptr, 4)) as u32),
             ty::TyUint(UintTy::U64) => PrimVal::U64(try!(self.memory.read_uint(ptr, 8)) as u64),
 
             // TODO(tsion): Pick the PrimVal dynamically.
-            ty::TyInt(IntTy::Is)   => PrimVal::I64(try!(self.memory.read_isize(ptr))),
+            ty::TyInt(IntTy::Is) => PrimVal::I64(try!(self.memory.read_isize(ptr))),
             ty::TyUint(UintTy::Us) => PrimVal::U64(try!(self.memory.read_usize(ptr))),
 
             ty::TyRef(_, ty::TypeAndMut { ty, .. }) |
@@ -1045,7 +1100,8 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                         Err(e) => return Err(e),
                     }
                 } else {
-                    panic!("unimplemented: primitive read of fat pointer type: {:?}", ty);
+                    panic!("unimplemented: primitive read of fat pointer type: {:?}",
+                           ty);
                 }
             }
 
@@ -1097,10 +1153,9 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         let infcx = infer::normalizing_infer_ctxt(self.tcx, &self.tcx.tables, ProjectionMode::Any);
         let mut selcx = traits::SelectionContext::new(&infcx);
 
-        let obligation = traits::Obligation::new(
-            traits::ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID),
-            trait_ref.to_poly_trait_predicate(),
-        );
+        let obligation = traits::Obligation::new(traits::ObligationCause::misc(DUMMY_SP,
+                                                                               ast::DUMMY_NODE_ID),
+                                                 trait_ref.to_poly_trait_predicate());
         let selection = selcx.select(&obligation).unwrap().unwrap();
 
         // Currently, we use a fulfillment context to completely resolve all nested obligations.
@@ -1109,17 +1164,19 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
         let vtable = selection.map(|predicate| {
             fulfill_cx.register_predicate_obligation(&infcx, predicate);
         });
-        let vtable = infer::drain_fulfillment_cx_or_panic(
-            DUMMY_SP, &infcx, &mut fulfill_cx, &vtable
-        );
+        let vtable = infer::drain_fulfillment_cx_or_panic(DUMMY_SP,
+                                                          &infcx,
+                                                          &mut fulfill_cx,
+                                                          &vtable);
 
         vtable
     }
 
     /// Trait method, which has to be resolved to an impl method.
-    pub fn trait_method(&self, def_id: DefId, substs: &'tcx Substs<'tcx>)
-        -> (DefId, &'tcx Substs<'tcx>)
-    {
+    pub fn trait_method(&self,
+                        def_id: DefId,
+                        substs: &'tcx Substs<'tcx>)
+                        -> (DefId, &'tcx Substs<'tcx>) {
         let method_item = self.tcx.impl_or_trait_item(def_id);
         let trait_id = method_item.container().id();
         let trait_ref = ty::Binder(substs.to_trait_ref(self.tcx, trait_id));
@@ -1136,8 +1193,9 @@ impl<'a, 'tcx: 'a, 'arena> Interpreter<'a, 'tcx, 'arena> {
                 (mth.method.def_id, mth.substs)
             }
 
-            traits::VtableClosure(vtable_closure) =>
-                (vtable_closure.closure_def_id, vtable_closure.substs.func_substs),
+            traits::VtableClosure(vtable_closure) => {
+                (vtable_closure.closure_def_id, vtable_closure.substs.func_substs)
+            }
 
             traits::VtableFnPointer(_fn_ty) => {
                 let _trait_closure_kind = self.tcx.lang_items.fn_trait_kind(trait_id).unwrap();
@@ -1170,9 +1228,7 @@ fn pointee_type<'tcx>(ptr_ty: ty::Ty<'tcx>) -> Option<ty::Ty<'tcx>> {
     match ptr_ty.sty {
         ty::TyRef(_, ty::TypeAndMut { ty, .. }) |
         ty::TyRawPtr(ty::TypeAndMut { ty, .. }) |
-        ty::TyBox(ty) => {
-            Some(ty)
-        }
+        ty::TyBox(ty) => Some(ty),
         _ => None,
     }
 }
@@ -1202,12 +1258,11 @@ pub struct ImplMethod<'tcx> {
 }
 
 /// Locates the applicable definition of a method, given its name.
-pub fn get_impl_method<'tcx>(
-    tcx: &TyCtxt<'tcx>,
-    impl_def_id: DefId,
-    substs: &'tcx Substs<'tcx>,
-    name: ast::Name,
-) -> ImplMethod<'tcx> {
+pub fn get_impl_method<'tcx>(tcx: &TyCtxt<'tcx>,
+                             impl_def_id: DefId,
+                             substs: &'tcx Substs<'tcx>,
+                             name: ast::Name)
+                             -> ImplMethod<'tcx> {
     assert!(!substs.types.needs_infer());
 
     let trait_def_id = tcx.trait_id_of_impl(impl_def_id).unwrap();

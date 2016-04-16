@@ -9,7 +9,8 @@
 
 // From rustc.
 extern crate arena;
-#[macro_use] extern crate rustc;
+#[macro_use]
+extern crate rustc;
 extern crate rustc_data_structures;
 extern crate rustc_mir;
 extern crate syntax;

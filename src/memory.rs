@@ -6,15 +6,15 @@ use std::{fmt, iter, mem, ptr};
 use error::{EvalError, EvalResult};
 use primval::PrimVal;
 
-////////////////////////////////////////////////////////////////////////////////
-// Value representations
-////////////////////////////////////////////////////////////////////////////////
+/// /////////////////////////////////////////////////////////////////////////////
+/// Value representations
+/// /////////////////////////////////////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Repr {
     /// Representation for a non-aggregate type such as a boolean, integer, character or pointer.
     Primitive {
-        size: usize
+        size: usize,
     },
 
     /// The representation for aggregate types including structs, enums, and tuples.
@@ -54,9 +54,9 @@ impl Repr {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Allocations and pointers
-////////////////////////////////////////////////////////////////////////////////
+/// /////////////////////////////////////////////////////////////////////////////
+/// Allocations and pointers
+/// /////////////////////////////////////////////////////////////////////////////
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct AllocId(u64);
@@ -86,9 +86,9 @@ impl Pointer {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Top-level interpreter memory
-////////////////////////////////////////////////////////////////////////////////
+/// /////////////////////////////////////////////////////////////////////////////
+/// Top-level interpreter memory
+/// /////////////////////////////////////////////////////////////////////////////
 
 pub struct Memory {
     alloc_map: HashMap<AllocId, Allocation>,
@@ -163,9 +163,9 @@ impl Memory {
         Ok(())
     }
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Allocation accessors
-    ////////////////////////////////////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////////////////////////////////
+    /// Allocation accessors
+    /// /////////////////////////////////////////////////////////////////////////////
 
     pub fn get(&self, id: AllocId) -> EvalResult<&Allocation> {
         self.alloc_map.get(&id).ok_or(EvalError::DanglingPointerDeref)
@@ -216,7 +216,9 @@ impl Memory {
                 let relocation_width = (self.pointer_size - 1) * 3;
                 for (i, target_id) in relocations {
                     print!("{:1$}", "", (i - pos) * 3);
-                    print!("└{0:─^1$}┘ ", format!("({})", target_id), relocation_width);
+                    print!("└{0:─^1$}┘ ",
+                           format!("({})", target_id),
+                           relocation_width);
                     pos = i + self.pointer_size;
                 }
                 println!("");
@@ -224,9 +226,9 @@ impl Memory {
         }
     }
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Byte accessors
-    ////////////////////////////////////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////////////////////////////////
+    /// Byte accessors
+    /// /////////////////////////////////////////////////////////////////////////////
 
     fn get_bytes_unchecked(&self, ptr: Pointer, size: usize) -> EvalResult<&[u8]> {
         let alloc = try!(self.get(ptr.alloc_id));
@@ -258,9 +260,9 @@ impl Memory {
         self.get_bytes_unchecked_mut(ptr, size)
     }
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Reading and writing
-    ////////////////////////////////////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////////////////////////////////
+    /// Reading and writing
+    /// /////////////////////////////////////////////////////////////////////////////
 
     pub fn copy(&mut self, src: Pointer, dest: Pointer, size: usize) -> EvalResult<()> {
         try!(self.check_relocation_edges(src, size));
@@ -297,7 +299,9 @@ impl Memory {
 
     pub fn write_repeat(&mut self, ptr: Pointer, val: u8, count: usize) -> EvalResult<()> {
         let bytes = try!(self.get_bytes_mut(ptr, count));
-        for b in bytes { *b = val; }
+        for b in bytes {
+            *b = val;
+        }
         Ok(())
     }
 
@@ -309,10 +313,16 @@ impl Memory {
         let size = self.pointer_size;
         try!(self.check_defined(ptr, size));
         let offset = try!(self.get_bytes_unchecked(ptr, size))
-            .read_uint::<NativeEndian>(size).unwrap() as usize;
+                         .read_uint::<NativeEndian>(size)
+                         .unwrap() as usize;
         let alloc = try!(self.get(ptr.alloc_id));
         match alloc.relocations.get(&ptr.offset) {
-            Some(&alloc_id) => Ok(Pointer { alloc_id: alloc_id, offset: offset }),
+            Some(&alloc_id) => {
+                Ok(Pointer {
+                    alloc_id: alloc_id,
+                    offset: offset,
+                })
+            }
             None => Err(EvalError::ReadBytesAsPointer),
         }
     }
@@ -331,14 +341,14 @@ impl Memory {
         let pointer_size = self.pointer_size;
         match val {
             PrimVal::Bool(b) => self.write_bool(ptr, b),
-            PrimVal::I8(n)   => self.write_int(ptr, n as i64, 1),
-            PrimVal::I16(n)  => self.write_int(ptr, n as i64, 2),
-            PrimVal::I32(n)  => self.write_int(ptr, n as i64, 4),
-            PrimVal::I64(n)  => self.write_int(ptr, n as i64, 8),
-            PrimVal::U8(n)   => self.write_uint(ptr, n as u64, 1),
-            PrimVal::U16(n)  => self.write_uint(ptr, n as u64, 2),
-            PrimVal::U32(n)  => self.write_uint(ptr, n as u64, 4),
-            PrimVal::U64(n)  => self.write_uint(ptr, n as u64, 8),
+            PrimVal::I8(n) => self.write_int(ptr, n as i64, 1),
+            PrimVal::I16(n) => self.write_int(ptr, n as i64, 2),
+            PrimVal::I32(n) => self.write_int(ptr, n as i64, 4),
+            PrimVal::I64(n) => self.write_int(ptr, n as i64, 8),
+            PrimVal::U8(n) => self.write_uint(ptr, n as u64, 1),
+            PrimVal::U16(n) => self.write_uint(ptr, n as u64, 2),
+            PrimVal::U32(n) => self.write_uint(ptr, n as u64, 4),
+            PrimVal::U64(n) => self.write_uint(ptr, n as u64, 8),
             PrimVal::IntegerPtr(n) => self.write_uint(ptr, n as u64, pointer_size),
             PrimVal::AbstractPtr(_p) => unimplemented!(),
         }
@@ -391,13 +401,14 @@ impl Memory {
         self.write_uint(ptr, n, size)
     }
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Relocations
-    ////////////////////////////////////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////////////////////////////////
+    /// Relocations
+    /// /////////////////////////////////////////////////////////////////////////////
 
-    fn relocations(&self, ptr: Pointer, size: usize)
-        -> EvalResult<btree_map::Range<usize, AllocId>>
-    {
+    fn relocations(&self,
+                   ptr: Pointer,
+                   size: usize)
+                   -> EvalResult<btree_map::Range<usize, AllocId>> {
         let start = ptr.offset.saturating_sub(self.pointer_size - 1);
         let end = start + size;
         Ok(try!(self.get(ptr.alloc_id)).relocations.range(Included(&start), Excluded(&end)))
@@ -406,7 +417,9 @@ impl Memory {
     fn clear_relocations(&mut self, ptr: Pointer, size: usize) -> EvalResult<()> {
         // Find all relocations overlapping the given range.
         let keys: Vec<_> = try!(self.relocations(ptr, size)).map(|(&k, _)| k).collect();
-        if keys.len() == 0 { return Ok(()); }
+        if keys.len() == 0 {
+            return Ok(());
+        }
 
         // Find the start and end of the given range and its outermost relocations.
         let start = ptr.offset;
@@ -418,11 +431,17 @@ impl Memory {
 
         // Mark parts of the outermost relocations as undefined if they partially fall outside the
         // given range.
-        if first < start { alloc.undef_mask.set_range(first, start, false); }
-        if last > end { alloc.undef_mask.set_range(end, last, false); }
+        if first < start {
+            alloc.undef_mask.set_range(first, start, false);
+        }
+        if last > end {
+            alloc.undef_mask.set_range(end, last, false);
+        }
 
         // Forget all the relocations.
-        for k in keys { alloc.relocations.remove(&k); }
+        for k in keys {
+            alloc.relocations.remove(&k);
+        }
 
         Ok(())
     }
@@ -447,9 +466,9 @@ impl Memory {
         Ok(())
     }
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Undefined bytes
-    ////////////////////////////////////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////////////////////////////////
+    /// Undefined bytes
+    /// /////////////////////////////////////////////////////////////////////////////
 
     // FIXME(tsino): This is a very naive, slow version.
     fn copy_undef_mask(&mut self, src: Pointer, dest: Pointer, size: usize) -> EvalResult<()> {
@@ -473,18 +492,20 @@ impl Memory {
         Ok(())
     }
 
-    pub fn mark_definedness(&mut self, ptr: Pointer, size: usize, new_state: bool)
-        -> EvalResult<()>
-    {
+    pub fn mark_definedness(&mut self,
+                            ptr: Pointer,
+                            size: usize,
+                            new_state: bool)
+                            -> EvalResult<()> {
         let mut alloc = try!(self.get_mut(ptr.alloc_id));
         alloc.undef_mask.set_range(ptr.offset, ptr.offset + size, new_state);
         Ok(())
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Undefined byte tracking
-////////////////////////////////////////////////////////////////////////////////
+/// /////////////////////////////////////////////////////////////////////////////
+/// Undefined byte tracking
+/// /////////////////////////////////////////////////////////////////////////////
 
 type Block = u64;
 const BLOCK_SIZE: usize = 64;
@@ -507,21 +528,29 @@ impl UndefMask {
 
     /// Check whether the range `start..end` (end-exclusive) is entirely defined.
     fn is_range_defined(&self, start: usize, end: usize) -> bool {
-        if end > self.len { return false; }
+        if end > self.len {
+            return false;
+        }
         for i in start..end {
-            if !self.get(i) { return false; }
+            if !self.get(i) {
+                return false;
+            }
         }
         true
     }
 
     fn set_range(&mut self, start: usize, end: usize, new_state: bool) {
         let len = self.len;
-        if end > len { self.grow(end - len, new_state); }
+        if end > len {
+            self.grow(end - len, new_state);
+        }
         self.set_range_inbounds(start, end, new_state);
     }
 
     fn set_range_inbounds(&mut self, start: usize, end: usize, new_state: bool) {
-        for i in start..end { self.set(i, new_state); }
+        for i in start..end {
+            self.set(i, new_state);
+        }
     }
 
     fn get(&self, i: usize) -> bool {

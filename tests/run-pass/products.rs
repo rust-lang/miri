@@ -17,7 +17,10 @@ fn tuple_5() -> (i16, i16, i16, i16, i16) {
     (1, 2, 3, 4, 5)
 }
 
-struct Pair { x: i8, y: i8 }
+struct Pair {
+    x: i8,
+    y: i8,
+}
 
 #[miri_run]
 fn pair() -> Pair {
