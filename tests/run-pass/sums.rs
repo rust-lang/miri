@@ -2,14 +2,19 @@
 #![feature(custom_attribute)]
 #![allow(dead_code, unused_attributes)]
 
-enum Unit { Unit }
+enum Unit {
+    Unit,
+}
 
 #[miri_run]
 fn return_unit() -> Unit {
     Unit::Unit
 }
 
-enum MyBool { False, True }
+enum MyBool {
+    False,
+    True,
+}
 
 #[miri_run]
 fn return_true() -> MyBool {

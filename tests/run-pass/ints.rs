@@ -26,7 +26,7 @@ fn indirect_add() -> i64 {
 
 #[miri_run]
 fn arith() -> i32 {
-    3*3 + 4*4
+    3 * 3 + 4 * 4
 }
 
 #[miri_run]

@@ -37,7 +37,9 @@ impl Error for EvalError {
         }
     }
 
-    fn cause(&self) -> Option<&Error> { None }
+    fn cause(&self) -> Option<&Error> {
+        None
+    }
 }
 
 impl fmt::Display for EvalError {

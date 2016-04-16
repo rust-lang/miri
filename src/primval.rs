@@ -65,8 +65,9 @@ pub fn binary_op(bin_op: mir::BinOp, left: PrimVal, right: PrimVal) -> EvalResul
 
         (IntegerPtr(l), IntegerPtr(r)) => int_binops!(IntegerPtr, l, r),
 
-        (AbstractPtr(_), IntegerPtr(_)) | (IntegerPtr(_), AbstractPtr(_)) =>
-            return unrelated_ptr_ops(bin_op),
+        (AbstractPtr(_), IntegerPtr(_)) | (IntegerPtr(_), AbstractPtr(_)) => {
+            return unrelated_ptr_ops(bin_op)
+        }
 
         (AbstractPtr(l_ptr), AbstractPtr(r_ptr)) => {
             if l_ptr.alloc_id != r_ptr.alloc_id {

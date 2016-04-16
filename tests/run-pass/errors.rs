@@ -22,7 +22,11 @@ fn pointers_to_different_allocations_are_unorderable() -> bool {
 #[miri_run]
 fn invalid_bool() -> u8 {
     let b = unsafe { std::mem::transmute::<u8, bool>(2) };
-    if b { 1 } else { 2 }
+    if b {
+        1
+    } else {
+        2
+    }
 }
 
 #[miri_run]
