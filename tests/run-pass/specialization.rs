@@ -7,7 +7,7 @@ trait IsUnit {
 }
 
 impl<T> IsUnit for T {
-    fn is_unit() -> bool {
+    default fn is_unit() -> bool {
         false
     }
 }
