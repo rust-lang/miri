@@ -90,8 +90,7 @@ struct Lvalue {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum LvalueExtra {
     None,
-    Length(u64),
-    // Vtable(memory::AllocId),
+    Length(u64), // Vtable(memory::AllocId),
 }
 
 #[derive(Clone)]
