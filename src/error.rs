@@ -52,6 +52,11 @@ pub enum EvalError<'tcx> {
     ReallocatedFrozenMemory,
     DeallocatedFrozenMemory,
     Layout(layout::LayoutError<'tcx>),
+    Abort,
+    Panic {
+        file: String,
+        line: u32,
+    },
 }
 
 pub type EvalResult<'tcx, T> = Result<T, EvalError<'tcx>>;
@@ -122,6 +127,10 @@ impl<'tcx> Error for EvalError<'tcx> {
                 "rustc layout computation failed",
             EvalError::UnterminatedCString(_) =>
                 "attempted to get length of a null terminated string, but no null found before end of allocation",
+            EvalError::Abort =>
+                "`abort` intrinsic reached",
+            EvalError::Panic { .. } =>
+                "panic!",
         }
     }
 
@@ -154,6 +163,8 @@ impl<'tcx> fmt::Display for EvalError<'tcx> {
                 write!(f, "expected primitive type, got {}", ty),
             EvalError::Layout(ref err) =>
                 write!(f, "rustc layout computation failed: {:?}", err),
+            EvalError::Panic { ref file, line } =>
+                write!(f, "panicked at {}:{}", file, line),
             _ => write!(f, "{}", self.description()),
         }
     }

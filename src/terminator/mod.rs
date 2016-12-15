@@ -15,6 +15,8 @@ use memory::Pointer;
 use value::PrimVal;
 use value::Value;
 
+use std::str::from_utf8;
+
 mod intrinsic;
 
 impl<'a, 'tcx> EvalContext<'a, 'tcx> {
@@ -200,14 +202,37 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             Abi::RustIntrinsic => {
                 let ty = fn_ty.sig.0.output();
                 let layout = self.type_layout(ty)?;
-                let (ret, target) = destination.unwrap();
+                let (ret, target) = match destination {
+                    Some(dest) => dest,
+                    None => {
+                        assert_eq!(&self.tcx.item_name(def_id).as_str()[..], "abort");
+                        return Err(EvalError::Abort);
+                    }
+                };
                 self.call_intrinsic(def_id, substs, arg_operands, ret, ty, layout, target)?;
                 Ok(())
             }
 
             Abi::C => {
                 let ty = fn_ty.sig.0.output();
-                let (ret, target) = destination.unwrap();
+                let (ret, target) = match destination {
+                    Some(dest) => dest,
+                    None => {
+                        assert_eq!(&self.tcx.item_name(def_id).as_str()[..], "panic_impl");
+                        let args_res: EvalResult<Vec<Value>> = arg_operands.iter()
+                            .map(|arg| self.eval_operand(arg)?.ok_or(EvalError::ReadUndefBytes))
+                            .collect();
+                        let args = args_res?;
+                        // FIXME: process panic text
+                        let file_slice = args[1].expect_slice(&self.memory)?;
+                        let file = from_utf8(self.memory.read_bytes(file_slice.0, file_slice.1)?)
+                            .expect("panic message not utf8")
+                            .to_owned();
+                        let u32 = self.tcx.types.u32;
+                        let line = self.value_to_primval(args[2], u32)?.to_u64() as u32;
+                        return Err(EvalError::Panic { file: file, line: line });
+                    }
+                };
                 self.call_c_abi(def_id, arg_operands, ret, ty)?;
                 self.goto_block(target);
                 Ok(())
@@ -358,6 +383,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         let args = args_res?;
 
         let usize = self.tcx.types.usize;
+        let i32 = self.tcx.types.i32;
 
         match &link_name[..] {
             "__rust_allocate" => {
@@ -403,6 +429,18 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 self.write_primval(dest, PrimVal::Bytes(result as u64), dest_ty)?;
             }
 
+            "memrchr" => {
+                let ptr = args[0].read_ptr(&self.memory)?;
+                let val = self.value_to_primval(args[1], usize)?.to_u64() as u8;
+                let num = self.value_to_primval(args[2], usize)?.to_u64();
+                if let Some(idx) = self.memory.read_bytes(ptr, num)?.iter().rev().position(|&c| c == val) {
+                    let new_ptr = ptr.offset(num - idx as u64 - 1);
+                    self.write_value(Value::ByVal(PrimVal::from_ptr(new_ptr)), dest, dest_ty)?;
+                } else {
+                    self.write_value(Value::ByVal(PrimVal::new(0)), dest, dest_ty)?;
+                }
+            }
+
             "memchr" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
                 let val = self.value_to_primval(args[1], usize)?.to_u64()? as u8;
@@ -415,6 +453,27 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 }
             }
 
+            "write" => {
+                // int filedes
+                let filedes = self.value_to_primval(args[0], usize)?.to_u64();
+                // const void* buffer
+                let buffer = args[1].read_ptr(&self.memory)?;
+                // size_t size
+                let size = self.value_to_primval(args[0], usize)?.to_u64();
+
+                {
+                    let data = self.memory.read_bytes(buffer, size)?;
+                    info!("write to `{:x}`: {:?}", filedes, data);
+                    if filedes == 1 {
+                        for &d in data {
+                            print!("{}", d as char);
+                        }
+                    }
+                }
+
+                self.write_primval(dest, PrimVal::new(size as u64), dest_ty)?;
+            }
+
             "getenv" => {
                 {
                     let name_ptr = args[0].read_ptr(&self.memory)?;
@@ -422,6 +481,31 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     info!("ignored env var request for `{:?}`", ::std::str::from_utf8(name));
                 }
                 self.write_value(Value::ByVal(PrimVal::Bytes(0)), dest, dest_ty)?;
+            }
+            "pthread_key_create" => {
+                // pthread_key_t* key
+                let key = args[0].read_ptr(&self.memory)?;
+                let pthread_key_t = self.tcx.types.i32;
+                self.next_pthread_key += 1;
+                let new_key = self.next_pthread_key;
+                self.write_primval(Lvalue::from_ptr(key), PrimVal::new(new_key as u64), pthread_key_t)?;
+                self.write_primval(dest, PrimVal::new(0), dest_ty)?;
+            }
+
+            "pthread_setspecific" => {
+                let key = self.value_to_primval(args[0], i32)?.to_u64();
+                let val = args[1].read_ptr(&self.memory)?;
+                assert_eq!(key as i32 as u64, key);
+                self.pthread.insert(key as i32, val);
+                // FIXME: only keys that were created should exist
+                self.write_primval(dest, PrimVal::new(0), dest_ty)?;
+            }
+
+            "pthread_getspecific" => {
+                let key = self.value_to_primval(args[0], i32)?.to_u64();
+                assert_eq!(key as i32 as u64, key);
+                let val = self.pthread.get(&(key as i32)).map(|&p| p).unwrap_or(Pointer::from_int(0));
+                self.write_primval(dest, PrimVal::from_ptr(val), dest_ty)?;
             }
 
             // unix panic code inside libstd will read the return value of this function

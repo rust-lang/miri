@@ -43,6 +43,10 @@ pub struct EvalContext<'a, 'tcx: 'a> {
     /// This prevents infinite loops and huge computations from freezing up const eval.
     /// Remove once halting problem is solved.
     pub(super) steps_remaining: u64,
+
+    // FIXME: also add destructors
+    pub(super) pthread: HashMap<i32, Pointer>,
+    pub(super) next_pthread_key: i32,
 }
 
 /// A stack frame.
@@ -137,6 +141,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             stack: Vec::new(),
             stack_limit: limits.stack_limit,
             steps_remaining: limits.step_limit,
+            pthread: HashMap::new(),
+            next_pthread_key: 0,
         }
     }
 
