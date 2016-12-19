@@ -220,7 +220,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     None => {
                         assert_eq!(&self.tcx.item_name(def_id).as_str()[..], "panic_impl");
                         let args_res: EvalResult<Vec<Value>> = arg_operands.iter()
-                            .map(|arg| self.eval_operand(arg)?.ok_or(EvalError::ReadUndefBytes))
+                            .map(|arg| self.eval_operand(arg))
                             .collect();
                         let args = args_res?;
                         // FIXME: process panic text
@@ -229,7 +229,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                             .expect("panic message not utf8")
                             .to_owned();
                         let u32 = self.tcx.types.u32;
-                        let line = self.value_to_primval(args[2], u32)?.to_u64() as u32;
+                        let line = self.value_to_primval(args[2], u32)?.to_u64()? as u32;
                         return Err(EvalError::Panic { file: file, line: line });
                     }
                 };
@@ -431,13 +431,13 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             "memrchr" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let val = self.value_to_primval(args[1], usize)?.to_u64() as u8;
-                let num = self.value_to_primval(args[2], usize)?.to_u64();
+                let val = self.value_to_primval(args[1], usize)?.to_u64()? as u8;
+                let num = self.value_to_primval(args[2], usize)?.to_u64()?;
                 if let Some(idx) = self.memory.read_bytes(ptr, num)?.iter().rev().position(|&c| c == val) {
                     let new_ptr = ptr.offset(num - idx as u64 - 1);
-                    self.write_value(Value::ByVal(PrimVal::from_ptr(new_ptr)), dest, dest_ty)?;
+                    self.write_value(Value::ByVal(PrimVal::Ptr(new_ptr)), dest, dest_ty)?;
                 } else {
-                    self.write_value(Value::ByVal(PrimVal::new(0)), dest, dest_ty)?;
+                    self.write_value(Value::ByVal(PrimVal::from_u64(0)), dest, dest_ty)?;
                 }
             }
 
@@ -455,11 +455,11 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             "write" => {
                 // int filedes
-                let filedes = self.value_to_primval(args[0], usize)?.to_u64();
+                let filedes = self.value_to_primval(args[0], usize)?.to_u64()?;
                 // const void* buffer
                 let buffer = args[1].read_ptr(&self.memory)?;
                 // size_t size
-                let size = self.value_to_primval(args[0], usize)?.to_u64();
+                let size = self.value_to_primval(args[0], usize)?.to_u64()?;
 
                 {
                     let data = self.memory.read_bytes(buffer, size)?;
@@ -471,7 +471,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     }
                 }
 
-                self.write_primval(dest, PrimVal::new(size as u64), dest_ty)?;
+                self.write_primval(dest, PrimVal::from_u64(size), dest_ty)?;
             }
 
             "getenv" => {
@@ -488,24 +488,24 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let pthread_key_t = self.tcx.types.i32;
                 self.next_pthread_key += 1;
                 let new_key = self.next_pthread_key;
-                self.write_primval(Lvalue::from_ptr(key), PrimVal::new(new_key as u64), pthread_key_t)?;
-                self.write_primval(dest, PrimVal::new(0), dest_ty)?;
+                self.write_primval(Lvalue::from_ptr(key), PrimVal::from_u64(new_key as u64), pthread_key_t)?;
+                self.write_primval(dest, PrimVal::from_u64(0), dest_ty)?;
             }
 
             "pthread_setspecific" => {
-                let key = self.value_to_primval(args[0], i32)?.to_u64();
+                let key = self.value_to_primval(args[0], i32)?.to_u64()?;
                 let val = args[1].read_ptr(&self.memory)?;
                 assert_eq!(key as i32 as u64, key);
                 self.pthread.insert(key as i32, val);
                 // FIXME: only keys that were created should exist
-                self.write_primval(dest, PrimVal::new(0), dest_ty)?;
+                self.write_primval(dest, PrimVal::from_u64(0), dest_ty)?;
             }
 
             "pthread_getspecific" => {
-                let key = self.value_to_primval(args[0], i32)?.to_u64();
+                let key = self.value_to_primval(args[0], i32)?.to_u64()?;
                 assert_eq!(key as i32 as u64, key);
                 let val = self.pthread.get(&(key as i32)).map(|&p| p).unwrap_or(Pointer::from_int(0));
-                self.write_primval(dest, PrimVal::from_ptr(val), dest_ty)?;
+                self.write_primval(dest, PrimVal::Ptr(val), dest_ty)?;
             }
 
             // unix panic code inside libstd will read the return value of this function

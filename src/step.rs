@@ -175,7 +175,7 @@ impl<'a, 'b, 'tcx> ConstantExtractor<'a, 'b, 'tcx> {
         self.try(|this| {
             if this.weak_linkage(def_id) {
                 let data = match this.ecx.type_size(ty)?.expect("statics/consts can't be unsized") {
-                    0...8 => Value::ByVal(PrimVal::new(0)),
+                    0...8 => Value::ByVal(PrimVal::from_u64(0)),
                     n => {
                         let ptr = this.ecx.memory.allocate(n, 1)?;
                         this.ecx.memory.write_repeat(ptr, 0, n)?;
@@ -183,7 +183,7 @@ impl<'a, 'b, 'tcx> ConstantExtractor<'a, 'b, 'tcx> {
                     },
                 };
                 this.ecx.globals.insert(cid, Global {
-                    data: Some(data),
+                    value: data,
                     mutable: !immutable,
                     ty: ty,
                 });
