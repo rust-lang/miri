@@ -103,7 +103,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let dest = self.force_allocation(dest)?;
                         let discr_dest = (dest.to_ptr()).offset(discr_offset);
 
-                        self.memory.write_uint(discr_dest, variant_index as u64, discr_size)?;
+                        self.memory.write_uint(discr_dest, variant_index as u128, discr_size)?;
                     }
 
                     Layout::RawNullablePointer { nndiscr, .. } => {
@@ -175,7 +175,7 @@ impl<'a, 'b, 'tcx> ConstantExtractor<'a, 'b, 'tcx> {
         self.try(|this| {
             if this.weak_linkage(def_id) {
                 let data = match this.ecx.type_size(ty)?.expect("statics/consts can't be unsized") {
-                    0...8 => Value::ByVal(PrimVal::from_u64(0)),
+                    0...8 => Value::ByVal(PrimVal::from_u128(0)),
                     n => {
                         let ptr = this.ecx.memory.allocate(n, 1)?;
                         this.ecx.memory.write_repeat(ptr, 0, n)?;

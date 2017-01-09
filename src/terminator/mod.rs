@@ -73,7 +73,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let adt_ty = self.lvalue_ty(discr);
                 let discr_val = self.read_discriminant_value(adt_ptr, adt_ty)?;
                 let matching = adt_def.variants.iter()
-                    .position(|v| discr_val == v.disr_val.to_u64_unchecked());
+                    .position(|v| discr_val == v.disr_val.to_u128_unchecked());
 
                 match matching {
                     Some(i) => self.goto_block(targets[i]),
@@ -143,10 +143,10 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                             let span = terminator.source_info.span;
                             let len = self.eval_operand_to_primval(len)
                                 .expect("can't eval len")
-                                .to_u64()?;
+                                .to_u128()? as u64;
                             let index = self.eval_operand_to_primval(index)
                                 .expect("can't eval index")
-                                .to_u64()?;
+                                .to_u128()? as u64;
                             Err(EvalError::ArrayIndexOutOfBounds(span, len, index))
                         },
                         mir::AssertMessage::Math(ref err) =>
@@ -229,7 +229,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                             .expect("panic message not utf8")
                             .to_owned();
                         let u32 = self.tcx.types.u32;
-                        let line = self.value_to_primval(args[2], u32)?.to_u64()? as u32;
+                        let line = self.value_to_primval(args[2], u32)?.to_u128()? as u32;
                         return Err(EvalError::Panic { file: file, line: line });
                     }
                 };
@@ -261,7 +261,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let (lvalue, target) = destination.expect("tuple struct constructors can't diverge");
                         let dest_ty = self.tcx.item_type(adt_def.did);
                         let dest_layout = self.type_layout(dest_ty)?;
-                        let disr = v.disr_val.to_u64_unchecked();
+                        let disr = v.disr_val.to_u128_unchecked();
                         match *dest_layout {
                             Layout::Univariant { ref variant, .. } => {
                                 assert_eq!(disr, 0);
@@ -327,7 +327,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         }
     }
 
-    fn read_discriminant_value(&self, adt_ptr: Pointer, adt_ty: Ty<'tcx>) -> EvalResult<'tcx, u64> {
+    fn read_discriminant_value(&self, adt_ptr: Pointer, adt_ty: Ty<'tcx>) -> EvalResult<'tcx, u128> {
         use rustc::ty::layout::Layout::*;
         let adt_layout = self.type_layout(adt_ty)?;
         trace!("read_discriminant_value {:?}", adt_layout);
@@ -340,13 +340,13 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             CEnum { discr, signed: true, .. } => {
                 let discr_size = discr.size().bytes();
-                self.memory.read_int(adt_ptr, discr_size)? as u64
+                self.memory.read_int(adt_ptr, discr_size)? as u128
             }
 
             RawNullablePointer { nndiscr, value } => {
                 let discr_size = value.size(&self.tcx.data_layout).bytes();
                 trace!("rawnullablepointer with size {}", discr_size);
-                self.read_nonnull_discriminant_value(adt_ptr, nndiscr, discr_size)?
+                self.read_nonnull_discriminant_value(adt_ptr, nndiscr as u128, discr_size)?
             }
 
             StructWrappedNullablePointer { nndiscr, ref discrfield, .. } => {
@@ -355,7 +355,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 trace!("struct wrapped nullable pointer type: {}", ty);
                 // only the pointer part of a fat pointer is used for this space optimization
                 let discr_size = self.type_size(ty)?.expect("bad StructWrappedNullablePointer discrfield");
-                self.read_nonnull_discriminant_value(nonnull, nndiscr, discr_size)?
+                self.read_nonnull_discriminant_value(nonnull, nndiscr as u128, discr_size)?
             }
 
             // The discriminant_value intrinsic returns 0 for non-sum types.
@@ -366,7 +366,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         Ok(discr_val)
     }
 
-    fn read_nonnull_discriminant_value(&self, ptr: Pointer, nndiscr: u64, discr_size: u64) -> EvalResult<'tcx, u64> {
+    fn read_nonnull_discriminant_value(&self, ptr: Pointer, nndiscr: u128, discr_size: u64) -> EvalResult<'tcx, u128> {
         let not_null = match self.memory.read_uint(ptr, discr_size) {
             Ok(0) => false,
             Ok(_) | Err(EvalError::ReadPointerAsBytes) => true,
@@ -399,8 +399,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
         match &link_name[..] {
             "__rust_allocate" => {
-                let size = self.value_to_primval(args[0], usize)?.to_u64()?;
-                let align = self.value_to_primval(args[1], usize)?.to_u64()?;
+                let size = self.value_to_primval(args[0], usize)?.to_u128()? as u64;
+                let align = self.value_to_primval(args[1], usize)?.to_u128()? as u64;
                 let ptr = self.memory.allocate(size, align)?;
                 self.write_primval(dest, PrimVal::Ptr(ptr), dest_ty)?;
             }
@@ -408,15 +408,15 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             "__rust_deallocate" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
                 // FIXME: insert sanity check for size and align?
-                let _old_size = self.value_to_primval(args[1], usize)?.to_u64()?;
-                let _align = self.value_to_primval(args[2], usize)?.to_u64()?;
+                let _old_size = self.value_to_primval(args[1], usize)?.to_u128()?;
+                let _align = self.value_to_primval(args[2], usize)?.to_u128()?;
                 self.memory.deallocate(ptr)?;
             },
 
             "__rust_reallocate" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let size = self.value_to_primval(args[2], usize)?.to_u64()?;
-                let align = self.value_to_primval(args[3], usize)?.to_u64()?;
+                let size = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
+                let align = self.value_to_primval(args[3], usize)?.to_u128()? as u64;
                 let new_ptr = self.memory.reallocate(ptr, size, align)?;
                 self.write_primval(dest, PrimVal::Ptr(new_ptr), dest_ty)?;
             }
@@ -424,7 +424,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             "memcmp" => {
                 let left = args[0].read_ptr(&self.memory)?;
                 let right = args[1].read_ptr(&self.memory)?;
-                let n = self.value_to_primval(args[2], usize)?.to_u64()?;
+                let n = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
 
                 let result = {
                     let left_bytes = self.memory.read_bytes(left, n)?;
@@ -432,31 +432,31 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
                     use std::cmp::Ordering::*;
                     match left_bytes.cmp(right_bytes) {
-                        Less => -1,
+                        Less => -1i8,
                         Equal => 0,
                         Greater => 1,
                     }
                 };
 
-                self.write_primval(dest, PrimVal::Bytes(result as u64), dest_ty)?;
+                self.write_primval(dest, PrimVal::Bytes(result as u128), dest_ty)?;
             }
 
             "memrchr" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let val = self.value_to_primval(args[1], usize)?.to_u64()? as u8;
-                let num = self.value_to_primval(args[2], usize)?.to_u64()?;
+                let val = self.value_to_primval(args[1], usize)?.to_u128()? as u8;
+                let num = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
                 if let Some(idx) = self.memory.read_bytes(ptr, num)?.iter().rev().position(|&c| c == val) {
                     let new_ptr = ptr.offset(num - idx as u64 - 1);
                     self.write_value(Value::ByVal(PrimVal::Ptr(new_ptr)), dest, dest_ty)?;
                 } else {
-                    self.write_value(Value::ByVal(PrimVal::from_u64(0)), dest, dest_ty)?;
+                    self.write_value(Value::ByVal(PrimVal::from_u128(0)), dest, dest_ty)?;
                 }
             }
 
             "memchr" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let val = self.value_to_primval(args[1], usize)?.to_u64()? as u8;
-                let num = self.value_to_primval(args[2], usize)?.to_u64()?;
+                let val = self.value_to_primval(args[1], usize)?.to_u128()? as u8;
+                let num = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
                 if let Some(idx) = self.memory.read_bytes(ptr, num)?.iter().position(|&c| c == val) {
                     let new_ptr = ptr.offset(idx as u64);
                     self.write_value(Value::ByVal(PrimVal::Ptr(new_ptr)), dest, dest_ty)?;
@@ -467,11 +467,11 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             "write" => {
                 // int filedes
-                let filedes = self.value_to_primval(args[0], usize)?.to_u64()?;
+                let filedes = self.value_to_primval(args[0], usize)?.to_u128()?;
                 // const void* buffer
                 let buffer = args[1].read_ptr(&self.memory)?;
                 // size_t size
-                let size = self.value_to_primval(args[0], usize)?.to_u64()?;
+                let size = self.value_to_primval(args[0], usize)?.to_u128()? as u64;
 
                 {
                     let data = self.memory.read_bytes(buffer, size)?;
@@ -483,7 +483,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     }
                 }
 
-                self.write_primval(dest, PrimVal::from_u64(size), dest_ty)?;
+                self.write_primval(dest, PrimVal::from_u128(size as u128), dest_ty)?;
             }
 
             "getenv" => {
@@ -500,22 +500,22 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let pthread_key_t = self.tcx.types.i32;
                 self.next_pthread_key += 1;
                 let new_key = self.next_pthread_key;
-                self.write_primval(Lvalue::from_ptr(key), PrimVal::from_u64(new_key as u64), pthread_key_t)?;
-                self.write_primval(dest, PrimVal::from_u64(0), dest_ty)?;
+                self.write_primval(Lvalue::from_ptr(key), PrimVal::from_u128(new_key as u128), pthread_key_t)?;
+                self.write_primval(dest, PrimVal::from_u128(0), dest_ty)?;
             }
 
             "pthread_setspecific" => {
-                let key = self.value_to_primval(args[0], i32)?.to_u64()?;
+                let key = self.value_to_primval(args[0], i32)?.to_u128()?;
                 let val = args[1].read_ptr(&self.memory)?;
-                assert_eq!(key as i32 as u64, key);
+                assert_eq!(key as i32 as u128, key);
                 self.pthread.insert(key as i32, val);
                 // FIXME: only keys that were created should exist
-                self.write_primval(dest, PrimVal::from_u64(0), dest_ty)?;
+                self.write_primval(dest, PrimVal::from_u128(0), dest_ty)?;
             }
 
             "pthread_getspecific" => {
-                let key = self.value_to_primval(args[0], i32)?.to_u64()?;
-                assert_eq!(key as i32 as u64, key);
+                let key = self.value_to_primval(args[0], i32)?.to_u128()?;
+                assert_eq!(key as i32 as u128, key);
                 let val = self.pthread.get(&(key as i32)).map(|&p| p).unwrap_or(Pointer::from_int(0));
                 self.write_primval(dest, PrimVal::Ptr(val), dest_ty)?;
             }
@@ -725,7 +725,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let ptr = prim_ptr.to_ptr()?;
                         let extra = match self.tcx.struct_tail(contents_ty).sty {
                             ty::TyDynamic(..) => LvalueExtra::Vtable(extra.to_ptr()?),
-                            ty::TyStr | ty::TySlice(_) => LvalueExtra::Length(extra.to_u64()?),
+                            ty::TyStr | ty::TySlice(_) => LvalueExtra::Length(extra.to_u128()? as u64),
                             _ => bug!("invalid fat pointer type: {}", ty),
                         };
                         self.drop(
@@ -765,8 +765,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         adt_def.struct_variant().fields.iter().zip(&variant.offsets)
                     },
                     Layout::General { ref variants, .. } => {
-                        let discr_val = self.read_discriminant_value(adt_ptr, ty)?;
-                        match adt_def.variants.iter().position(|v| discr_val == v.disr_val.to_u64_unchecked()) {
+                        let discr_val = self.read_discriminant_value(adt_ptr, ty)? as u128;
+                        match adt_def.variants.iter().position(|v| discr_val == v.disr_val.to_u128_unchecked()) {
                             // start at offset 1, to skip over the discriminant
                             Some(i) => adt_def.variants[i].fields.iter().zip(&variants[i].offsets[1..]),
                             None => return Err(EvalError::InvalidDiscriminant),
@@ -774,8 +774,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     },
                     Layout::StructWrappedNullablePointer { nndiscr, ref nonnull, .. } => {
                         let discr = self.read_discriminant_value(adt_ptr, ty)?;
-                        if discr == nndiscr {
-                            assert_eq!(discr as usize as u64, discr);
+                        if discr == nndiscr as u128 {
+                            assert_eq!(discr as usize as u128, discr);
                             adt_def.variants[discr as usize].fields.iter().zip(&nonnull.offsets)
                         } else {
                             // FIXME: the zst variant might contain zst types that impl Drop
@@ -784,8 +784,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     },
                     Layout::RawNullablePointer { nndiscr, .. } => {
                         let discr = self.read_discriminant_value(adt_ptr, ty)?;
-                        if discr == nndiscr {
-                            assert_eq!(discr as usize as u64, discr);
+                        if discr == nndiscr as u128 {
+                            assert_eq!(discr as usize as u128, discr);
                             assert_eq!(adt_def.variants[discr as usize].fields.len(), 1);
                             let field_ty = &adt_def.variants[discr as usize].fields[0];
                             let field_ty = monomorphize_field_ty(self.tcx, field_ty, substs);
