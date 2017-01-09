@@ -163,8 +163,29 @@ impl<'tcx> PrimVal {
         self.to_bytes()
     }
 
+    pub fn to_u64(self) -> EvalResult<'tcx, u64> {
+        self.to_bytes().map(|b| {
+            assert_eq!(b as u64 as u128, b);
+            b as u64
+        })
+    }
+
+    pub fn to_i32(self) -> EvalResult<'tcx, i32> {
+        self.to_bytes().map(|b| {
+            assert_eq!(b as i32 as u128, b);
+            b as i32
+        })
+    }
+
     pub fn to_i128(self) -> EvalResult<'tcx, i128> {
         self.to_bytes().map(|b| b as i128)
+    }
+
+    pub fn to_i64(self) -> EvalResult<'tcx, i64> {
+        self.to_bytes().map(|b| {
+            assert_eq!(b as i64 as u128, b);
+            b as i64
+        })
     }
 
     pub fn to_f32(self) -> EvalResult<'tcx, f32> {

@@ -156,7 +156,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let elem_align = self.type_align(elem_ty)?;
                 let src = arg_vals[0].read_ptr(&self.memory)?;
                 let dest = arg_vals[1].read_ptr(&self.memory)?;
-                let count = self.value_to_primval(arg_vals[2], usize)?.to_u128()? as u64;
+                let count = self.value_to_primval(arg_vals[2], usize)?.to_u64()?;
                 self.memory.copy(src, dest, count * elem_size, elem_align)?;
             }
 
@@ -189,7 +189,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         ptr: ptr.to_ptr()?,
                         extra: match self.tcx.struct_tail(ty).sty {
                             ty::TyDynamic(..) => LvalueExtra::Vtable(extra.to_ptr()?),
-                            ty::TyStr | ty::TySlice(_) => LvalueExtra::Length(extra.to_u128()? as u64),
+                            ty::TyStr | ty::TySlice(_) => LvalueExtra::Length(extra.to_u64()?),
                             _ => bug!("invalid fat pointer type: {}", ptr_ty),
                         },
                     },

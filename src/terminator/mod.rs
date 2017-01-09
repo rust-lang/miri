@@ -143,10 +143,10 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                             let span = terminator.source_info.span;
                             let len = self.eval_operand_to_primval(len)
                                 .expect("can't eval len")
-                                .to_u128()? as u64;
+                                .to_u64()?;
                             let index = self.eval_operand_to_primval(index)
                                 .expect("can't eval index")
-                                .to_u128()? as u64;
+                                .to_u64()?;
                             Err(EvalError::ArrayIndexOutOfBounds(span, len, index))
                         },
                         mir::AssertMessage::Math(ref err) =>
@@ -399,8 +399,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
         match &link_name[..] {
             "__rust_allocate" => {
-                let size = self.value_to_primval(args[0], usize)?.to_u128()? as u64;
-                let align = self.value_to_primval(args[1], usize)?.to_u128()? as u64;
+                let size = self.value_to_primval(args[0], usize)?.to_u64()?;
+                let align = self.value_to_primval(args[1], usize)?.to_u64()?;
                 let ptr = self.memory.allocate(size, align)?;
                 self.write_primval(dest, PrimVal::Ptr(ptr), dest_ty)?;
             }
@@ -408,15 +408,15 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             "__rust_deallocate" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
                 // FIXME: insert sanity check for size and align?
-                let _old_size = self.value_to_primval(args[1], usize)?.to_u128()?;
-                let _align = self.value_to_primval(args[2], usize)?.to_u128()?;
+                let _old_size = self.value_to_primval(args[1], usize)?.to_u64()?;
+                let _align = self.value_to_primval(args[2], usize)?.to_u64()?;
                 self.memory.deallocate(ptr)?;
             },
 
             "__rust_reallocate" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let size = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
-                let align = self.value_to_primval(args[3], usize)?.to_u128()? as u64;
+                let size = self.value_to_primval(args[2], usize)?.to_u64()?;
+                let align = self.value_to_primval(args[3], usize)?.to_u64()?;
                 let new_ptr = self.memory.reallocate(ptr, size, align)?;
                 self.write_primval(dest, PrimVal::Ptr(new_ptr), dest_ty)?;
             }
@@ -424,7 +424,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             "memcmp" => {
                 let left = args[0].read_ptr(&self.memory)?;
                 let right = args[1].read_ptr(&self.memory)?;
-                let n = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
+                let n = self.value_to_primval(args[2], usize)?.to_u64()?;
 
                 let result = {
                     let left_bytes = self.memory.read_bytes(left, n)?;
@@ -443,8 +443,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             "memrchr" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let val = self.value_to_primval(args[1], usize)?.to_u128()? as u8;
-                let num = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
+                let val = self.value_to_primval(args[1], usize)?.to_u64()? as u8;
+                let num = self.value_to_primval(args[2], usize)?.to_u64()?;
                 if let Some(idx) = self.memory.read_bytes(ptr, num)?.iter().rev().position(|&c| c == val) {
                     let new_ptr = ptr.offset(num - idx as u64 - 1);
                     self.write_value(Value::ByVal(PrimVal::Ptr(new_ptr)), dest, dest_ty)?;
@@ -455,8 +455,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             "memchr" => {
                 let ptr = args[0].read_ptr(&self.memory)?;
-                let val = self.value_to_primval(args[1], usize)?.to_u128()? as u8;
-                let num = self.value_to_primval(args[2], usize)?.to_u128()? as u64;
+                let val = self.value_to_primval(args[1], usize)?.to_u64()? as u8;
+                let num = self.value_to_primval(args[2], usize)?.to_u64()?;
                 if let Some(idx) = self.memory.read_bytes(ptr, num)?.iter().position(|&c| c == val) {
                     let new_ptr = ptr.offset(idx as u64);
                     self.write_value(Value::ByVal(PrimVal::Ptr(new_ptr)), dest, dest_ty)?;
@@ -467,11 +467,11 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
             "write" => {
                 // int filedes
-                let filedes = self.value_to_primval(args[0], usize)?.to_u128()?;
+                let filedes = self.value_to_primval(args[0], usize)?.to_u64()?;
                 // const void* buffer
                 let buffer = args[1].read_ptr(&self.memory)?;
                 // size_t size
-                let size = self.value_to_primval(args[0], usize)?.to_u128()? as u64;
+                let size = self.value_to_primval(args[0], usize)?.to_u64()?;
 
                 {
                     let data = self.memory.read_bytes(buffer, size)?;
@@ -505,18 +505,16 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             }
 
             "pthread_setspecific" => {
-                let key = self.value_to_primval(args[0], i32)?.to_u128()?;
+                let key = self.value_to_primval(args[0], i32)?.to_i32()?;
                 let val = args[1].read_ptr(&self.memory)?;
-                assert_eq!(key as i32 as u128, key);
-                self.pthread.insert(key as i32, val);
+                self.pthread.insert(key, val);
                 // FIXME: only keys that were created should exist
                 self.write_primval(dest, PrimVal::from_u128(0), dest_ty)?;
             }
 
             "pthread_getspecific" => {
-                let key = self.value_to_primval(args[0], i32)?.to_u128()?;
-                assert_eq!(key as i32 as u128, key);
-                let val = self.pthread.get(&(key as i32)).map(|&p| p).unwrap_or(Pointer::from_int(0));
+                let key = self.value_to_primval(args[0], i32)?.to_i32()?;
+                let val = self.pthread.get(&key).map(|&p| p).unwrap_or(Pointer::from_int(0));
                 self.write_primval(dest, PrimVal::Ptr(val), dest_ty)?;
             }
 
@@ -725,7 +723,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let ptr = prim_ptr.to_ptr()?;
                         let extra = match self.tcx.struct_tail(contents_ty).sty {
                             ty::TyDynamic(..) => LvalueExtra::Vtable(extra.to_ptr()?),
-                            ty::TyStr | ty::TySlice(_) => LvalueExtra::Length(extra.to_u128()? as u64),
+                            ty::TyStr | ty::TySlice(_) => LvalueExtra::Length(extra.to_u64()?),
                             _ => bug!("invalid fat pointer type: {}", ty),
                         };
                         self.drop(
