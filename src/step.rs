@@ -15,6 +15,8 @@ use error::{EvalResult, EvalError};
 use eval_context::{EvalContext, StackPopCleanup, MirRef};
 use lvalue::{Global, GlobalId, Lvalue};
 use syntax::codemap::Span;
+use syntax::attr;
+use value::{Value, PrimVal};
 
 impl<'a, 'tcx> EvalContext<'a, 'tcx> {
     pub fn inc_step_counter_and_check_limit(&mut self, n: u64) -> EvalResult<'tcx, ()> {
@@ -101,7 +103,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let dest = self.force_allocation(dest)?;
                         let discr_dest = (dest.to_ptr()).offset(discr_offset);
 
-                        self.memory.write_uint(discr_dest, variant_index as u64, discr_size)?;
+                        self.memory.write_uint(discr_dest, variant_index as u128, discr_size)?;
                     }
 
                     Layout::RawNullablePointer { nndiscr, .. } => {
@@ -152,6 +154,13 @@ struct ConstantExtractor<'a, 'b: 'a, 'tcx: 'b> {
 }
 
 impl<'a, 'b, 'tcx> ConstantExtractor<'a, 'b, 'tcx> {
+    fn weak_linkage(&self, def_id: DefId) -> bool {
+        let attributes = self.ecx.tcx.get_attrs(def_id);
+        let attr = attr::first_attr_value_str_by_name(&attributes, "linkage");
+        trace!("linkage: {:?}", attr);
+        attr.map_or(false, |name| &*name.as_str() == "weak" || &*name.as_str() == "extern_weak")
+    }
+
     fn global_item(&mut self, def_id: DefId, substs: &'tcx subst::Substs<'tcx>, span: Span, immutable: bool) {
         let cid = GlobalId {
             def_id: def_id,
@@ -161,15 +170,34 @@ impl<'a, 'b, 'tcx> ConstantExtractor<'a, 'b, 'tcx> {
         if self.ecx.globals.contains_key(&cid) {
             return;
         }
+        let ty = self.ecx.tcx.item_type(def_id);
+        let immutable = immutable && !ty.type_contents(self.ecx.tcx).interior_unsafe();
         self.try(|this| {
-            let mir = this.ecx.load_mir(def_id)?;
-            this.ecx.globals.insert(cid, Global::uninitialized(mir.return_ty));
-            let cleanup = if immutable && !mir.return_ty.type_contents(this.ecx.tcx).interior_unsafe() {
-                StackPopCleanup::Freeze
+            if this.weak_linkage(def_id) {
+                let data = match this.ecx.type_size(ty)?.expect("statics/consts can't be unsized") {
+                    0...8 => Value::ByVal(PrimVal::from_u128(0)),
+                    n => {
+                        let ptr = this.ecx.memory.allocate(n, 1)?;
+                        this.ecx.memory.write_repeat(ptr, 0, n)?;
+                        Value::ByRef(ptr)
+                    },
+                };
+                this.ecx.globals.insert(cid, Global {
+                    value: data,
+                    mutable: !immutable,
+                    ty: ty,
+                });
+                Ok(())
             } else {
-                StackPopCleanup::None
-            };
-            this.ecx.push_stack_frame(def_id, span, mir, substs, Lvalue::Global(cid), cleanup, Vec::new())
+                this.ecx.globals.insert(cid, Global::uninitialized(ty));
+                let cleanup = if immutable {
+                    StackPopCleanup::Freeze
+                } else {
+                    StackPopCleanup::None
+                };
+                let mir = this.ecx.load_mir(def_id)?;
+                this.ecx.push_stack_frame(def_id, span, mir, substs, Lvalue::Global(cid), cleanup, Vec::new())
+            }
         });
     }
     fn try<F: FnOnce(&mut Self) -> EvalResult<'tcx, ()>>(&mut self, f: F) {
