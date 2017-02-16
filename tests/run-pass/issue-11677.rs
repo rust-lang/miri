@@ -13,8 +13,6 @@
 
 // this code used to cause an ICE
 
-use std::marker;
-
 trait X<T> {
     fn dummy(&self) -> T { panic!() }
 }
