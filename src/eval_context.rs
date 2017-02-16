@@ -1233,7 +1233,13 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             ty::TyRef(_, ref tam) |
             ty::TyRawPtr(ref tam) if self.type_is_sized(tam.ty) => PrimValKind::Ptr,
 
-            ty::TyAdt(ref def, _) if def.is_box() => PrimValKind::Ptr,
+            ty::TyAdt(ref def, _) if def.is_box() => {
+                if self.type_is_sized(ty.boxed_ty()) {
+                    PrimValKind::Ptr
+                } else {
+                    return Err(EvalError::TypeNotPrimitive(ty));
+                }
+            },
 
             ty::TyAdt(ref def, substs) => {
                 use rustc::ty::layout::Layout::*;
