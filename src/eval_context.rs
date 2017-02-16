@@ -1156,21 +1156,25 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         Ok(())
     }
 
+    fn ptr_ty_to_value_kind(&self, ty: Ty<'tcx>) -> ValueKind {
+        if self.type_is_sized(ty) {
+            ValueKind::Val(PrimValKind::Ptr)
+        } else {
+            let extra = match self.tcx.struct_tail(ty).sty {
+                ty::TyStr | ty::TySlice(_) => PrimValKind::from_uint_size(self.memory.pointer_size()),
+                ty::TyDynamic(..) => PrimValKind::Ptr,
+                _ => bug!("{:?} is not an unsized type", ty),
+            };
+            ValueKind::ValPair(PrimValKind::Ptr, extra)
+        }
+    }
+
     // keep this function in sync with `try_read_value`
     pub fn ty_to_value_kind(&self, ty: Ty<'tcx>) -> ValueKind {
         match ty.sty {
             ty::TyRef(_, ref tam) |
-            ty::TyRawPtr(ref tam) => if self.type_is_sized(tam.ty) {
-                ValueKind::Val(PrimValKind::Ptr)
-            } else {
-                let extra = match self.tcx.struct_tail(tam.ty).sty {
-                    ty::TyStr | ty::TySlice(_) => PrimValKind::from_uint_size(self.memory.pointer_size()),
-                    ty::TyDynamic(..) => PrimValKind::Ptr,
-                    _ => bug!("{:?} is not an unsized type", tam.ty),
-                };
-                ValueKind::ValPair(PrimValKind::Ptr, extra)
-            },
-            ty::TyAdt(ref def, _) if def.is_box() => ValueKind::Val(PrimValKind::Ptr),
+            ty::TyRawPtr(ref tam) => self.ptr_ty_to_value_kind(tam.ty),
+            ty::TyAdt(ref def, _) if def.is_box() => self.ptr_ty_to_value_kind(ty.boxed_ty()),
             ty::TyAdt(..) => {
                 match self.get_field_count(ty) {
                     Ok(1) => {
