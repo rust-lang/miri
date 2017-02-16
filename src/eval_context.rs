@@ -11,13 +11,14 @@ use rustc::ty::layout::{self, Layout, Size};
 use rustc::ty::subst::{self, Subst, Substs};
 use rustc::ty::{self, Ty, TyCtxt, TypeFoldable, Binder};
 use rustc_data_structures::indexed_vec::Idx;
+use rustc_const_math::ConstInt;
 use syntax::codemap::{self, DUMMY_SP};
 
 use error::{EvalError, EvalResult};
 use lvalue::{Global, GlobalId, Lvalue, LvalueExtra};
 use memory::{Memory, Pointer};
 use operator;
-use value::{PrimVal, PrimValKind, Value};
+use value::{PrimVal, PrimValKind, Value, ValueKind};
 
 pub type MirRef<'tcx> = Ref<'tcx, mir::Mir<'tcx>>;
 
@@ -406,18 +407,43 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             // zst assigning is a nop
             return Ok(());
         }
-        if self.ty_to_primval_kind(dest_ty).is_ok() {
-            let mut iter = operands.into_iter();
-            assert_eq!(iter.len(), 1);
-            let (value, value_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
-            return self.write_value(value, dest, value_ty);
+        match self.ty_to_value_kind(dest_ty) {
+            ValueKind::Ref => {
+                trace!("assign fields ref");
+                for (field_index, operand) in operands.into_iter().enumerate() {
+                    let (value, value_ty) = operand.into_val_ty_pair(self)?;
+                    let field_dest = self.lvalue_field(dest, field_index, dest_ty, value_ty)?;
+                    self.write_value(value, field_dest, value_ty)?;
+                }
+                Ok(())
+            },
+            ValueKind::Val(_) => {
+                trace!("assign fields val");
+                let mut iter = operands.into_iter();
+                assert_eq!(iter.len(), 1);
+                let (value, value_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
+                self.write_value(value, dest, value_ty)
+            },
+            ValueKind::ValPair(_, _) => {
+                trace!("assign fields pair");
+                let mut iter = operands.into_iter();
+                let (a, a_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
+                match self.ty_to_value_kind(a_ty) {
+                    ValueKind::Ref => bug!("ty_to_value_kind broken: field of ValPair is Ref"),
+                    ValueKind::Val(_) => {
+                        let (b, b_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
+                        assert!(iter.is_empty());
+                        let a = self.value_to_primval(a, a_ty)?;
+                        let b = self.value_to_primval(b, b_ty)?;
+                        self.write_value(Value::ByValPair(a, b), dest, dest_ty)
+                    },
+                    ValueKind::ValPair(_, _) => {
+                        assert!(iter.is_empty());
+                        self.write_value(a, dest, dest_ty)
+                    }
+                }
+            }
         }
-        for (field_index, operand) in operands.into_iter().enumerate() {
-            let (value, value_ty) = operand.into_val_ty_pair(self)?;
-            let field_dest = self.lvalue_field(dest, field_index, dest_ty, value_ty)?;
-            self.write_value(value, field_dest, value_ty)?;
-        }
-        Ok(())
     }
 
     /// Evaluate an assignment statement.
@@ -776,14 +802,34 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         match ty.sty {
             ty::TyAdt(adt_def, _) if adt_def.is_box() => self.get_fat_field(ty.boxed_ty(), field_index),
             ty::TyAdt(adt_def, substs) => {
-                Ok(adt_def.struct_variant().fields[field_index].ty(self.tcx, substs))
+                use rustc::ty::layout::Layout::*;
+                let variant = match *self.type_layout(ty)? {
+                    General { .. } => bug!("get_field_ty on enum"),
+                    StructWrappedNullablePointer { nndiscr, .. } |
+                    RawNullablePointer { nndiscr, .. } => {
+                        let variants = adt_def.variants.iter();
+                        let discrs = adt_def.discriminants(self.tcx).map(ConstInt::to_u128_unchecked);
+                        let (variant, _) = variants.zip(discrs).find(|&(_, discr)| discr == nndiscr as u128).unwrap();
+                        variant
+                    },
+                    // single variant enums are the same as structs. use `.variants[0]` instead of `struct_variant`
+                    Univariant { .. } |
+                    UntaggedUnion { .. } |
+                    Vector { .. } => &adt_def.variants[0],
+                    Array { .. } => bug!("{:?} cannot have Array layout", ty),
+                    _ => bug!("get_field_ty on non-product type: {:?}", ty),
+                };
+                Ok(variant.fields[field_index].ty(self.tcx, substs))
             }
 
             ty::TyTuple(fields, _) => Ok(fields[field_index]),
 
             ty::TyRef(_, ref tam) |
             ty::TyRawPtr(ref tam) => self.get_fat_field(tam.ty, field_index),
-            _ => Err(EvalError::Unimplemented(format!("can't handle type: {:?}, {:?}", ty, ty.sty))),
+            ty::TyArray(inner, _) => Ok(inner),
+            ty::TyClosure(did, substs) => Ok(substs.upvar_tys(did, self.tcx).nth(field_index).unwrap()),
+            _ => bug!("can't handle type: {:?}, {:?}", ty, ty.sty),
+            //_ => Err(EvalError::Unimplemented(format!("can't handle type: {:?}, {:?}", ty, ty.sty))),
         }
     }
 
@@ -802,6 +848,25 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             StructWrappedNullablePointer { ref nonnull, .. } => {
                 Ok(nonnull.offsets[field_index])
             }
+            Array{ .. } => {
+                let field = field_index as u64;
+                let elem_size = match ty.sty {
+                    ty::TyArray(elem_ty, n) => {
+                        assert!(field < n as u64);
+                        self.type_size(elem_ty)?.expect("array elements are sized") as u64
+                    },
+                    _ => bug!("lvalue_field: got Array layout but non-array type {:?}", ty),
+                };
+                Ok(Size::from_bytes(field * elem_size))
+            }
+            Vector { element, count } => {
+                let field = field_index as u64;
+                assert!(field < count);
+                let elem_size = element.size(&self.tcx.data_layout).bytes();
+                Ok(Size::from_bytes(field * elem_size))
+            }
+            RawNullablePointer { .. } |
+            UntaggedUnion { .. } => Ok(Size::from_bytes(0)),
             _ => {
                 let msg = format!("can't handle type: {:?}, with layout: {:?}", ty, layout);
                 Err(EvalError::Unimplemented(msg))
@@ -817,6 +882,13 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             Univariant { ref variant, .. } => Ok(variant.offsets.len()),
             FatPointer { .. } => Ok(2),
             StructWrappedNullablePointer { ref nonnull, .. } => Ok(nonnull.offsets.len()),
+            Array { .. } => match ty.sty {
+                ty::TyArray(_, n) => Ok(n),
+                _ => bug!("array layout expected array type, but got {:?}", ty.sty),
+            },
+            Vector { count, .. } => Ok(count as usize),
+            RawNullablePointer { .. } |
+            UntaggedUnion { .. } => Ok(1),
             _ => {
                 let msg = format!("can't handle type: {:?}, with layout: {:?}", ty, layout);
                 Err(EvalError::Unimplemented(msg))
@@ -1084,6 +1156,42 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         Ok(())
     }
 
+    // keep this function in sync with `try_read_value`
+    pub fn ty_to_value_kind(&self, ty: Ty<'tcx>) -> ValueKind {
+        match ty.sty {
+            ty::TyRef(_, ref tam) |
+            ty::TyRawPtr(ref tam) => if self.type_is_sized(tam.ty) {
+                ValueKind::Val(PrimValKind::Ptr)
+            } else {
+                let extra = match self.tcx.struct_tail(tam.ty).sty {
+                    ty::TyStr | ty::TySlice(_) => PrimValKind::from_uint_size(self.memory.pointer_size()),
+                    ty::TyDynamic(..) => PrimValKind::Ptr,
+                    _ => bug!("{:?} is not an unsized type", tam.ty),
+                };
+                ValueKind::ValPair(PrimValKind::Ptr, extra)
+            },
+            ty::TyAdt(ref def, _) if def.is_box() => ValueKind::Val(PrimValKind::Ptr),
+            ty::TyAdt(..) => {
+                match self.get_field_count(ty) {
+                    Ok(1) => {
+                        let field_ty = self.get_field_ty(ty, 0).expect("has one field");
+                        self.ty_to_value_kind(field_ty)
+                    },
+                    Ok(2) => {
+                        let a = self.get_field_ty(ty, 0).expect("has at least one field");
+                        let b = self.get_field_ty(ty, 1).expect("has two fields");
+                        match (self.ty_to_primval_kind(a), self.ty_to_primval_kind(b)) {
+                            (Ok(a), Ok(b)) => ValueKind::ValPair(a, b),
+                            _ => ValueKind::Ref,
+                        }
+                    },
+                    _ => ValueKind::Ref,
+                }
+            },
+            // everything else is either a single value primval or must be ByRef
+            _ => self.ty_to_primval_kind(ty).map(ValueKind::Val).unwrap_or(ValueKind::Ref),
+        }
+    }
     pub fn ty_to_primval_kind(&self, ty: Ty<'tcx>) -> EvalResult<'tcx, PrimValKind> {
         use syntax::ast::FloatTy;
 
@@ -1208,6 +1316,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         }
     }
 
+    // keep this function in sync with `ty_to_primval_kind`
     fn try_read_value(&mut self, ptr: Pointer, ty: Ty<'tcx>) -> EvalResult<'tcx, Option<Value>> {
         use syntax::ast::FloatTy;
 
@@ -1254,24 +1363,53 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             ty::TyRef(_, ref tam) |
             ty::TyRawPtr(ref tam) => return self.read_ptr(ptr, tam.ty).map(Some),
 
-            ty::TyAdt(def, _) => {
+            ty::TyAdt(def, substs) => {
                 if def.is_box() {
                     return self.read_ptr(ptr, ty.boxed_ty()).map(Some);
                 }
                 use rustc::ty::layout::Layout::*;
-                if let CEnum { discr, signed, .. } = *self.type_layout(ty)? {
-                    let size = discr.size().bytes();
-                    if signed {
-                        PrimVal::from_i128(self.memory.read_int(ptr, size)?)
-                    } else {
-                        PrimVal::from_u128(self.memory.read_uint(ptr, size)?)
+                match *self.type_layout(ty)? {
+                    CEnum { discr, signed, .. } => {
+                        let size = discr.size().bytes();
+                        if signed {
+                            PrimVal::from_i128(self.memory.read_int(ptr, size)?)
+                        } else {
+                            PrimVal::from_u128(self.memory.read_uint(ptr, size)?)
+                        }
+                    },
+                    RawNullablePointer { value, ..} => {
+                        use rustc::ty::layout::Primitive::*;
+                        match value {
+                            // TODO(solson): Does signedness matter here? What should the sign be?
+                            Int(int) => PrimVal::from_u128(self.memory.read_uint(ptr, int.size().bytes())?),
+                            F32 => PrimVal::from_f32(self.memory.read_f32(ptr)?),
+                            F64 => PrimVal::from_f64(self.memory.read_f64(ptr)?),
+                            Pointer => self.memory.read_ptr(ptr).map(PrimVal::Ptr)?,
+                        }
+                    },
+                    Univariant { .. } => {
+                        // enums with just one variant are no different, but `.struct_variant()` doesn't work for enums
+                        let variant = &def.variants[0];
+                        // FIXME: also allow structs with only a single non zst field
+                        if variant.fields.len() == 1 {
+                            let ty = variant.fields[0].ty(self.tcx, substs);
+                            return self.try_read_value(ptr, ty);
+                        } else {
+                            debug_assert!(self.ty_to_primval_kind(ty).is_err());
+                            return Ok(None);
+                        }
                     }
-                } else {
-                    return Ok(None);
+                    _ => {
+                        debug_assert!(self.ty_to_primval_kind(ty).is_err());
+                        return Ok(None);
+                    },
                 }
             },
 
-            _ => return Ok(None),
+            _ => {
+                debug_assert!(self.ty_to_primval_kind(ty).is_err());
+                return Ok(None);
+            },
         };
 
         Ok(Some(Value::ByVal(val)))
@@ -1494,11 +1632,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     self.set_local(frame, local, None, value)?;
                 },
                 Value::ByValPair(a, b) => {
-                    let prim = match value {
-                        Value::ByRef(_) => bug!("can't set ValPair field to ByRef"),
-                        Value::ByVal(val) => val,
-                        Value::ByValPair(_, _) => bug!("can't set ValPair field to ValPair"),
-                    };
+                    let prim = self.value_to_primval(value, ty)?;
                     match field {
                         0 => self.set_local(frame, local, None, Value::ByValPair(prim, b))?,
                         1 => self.set_local(frame, local, None, Value::ByValPair(a, prim))?,

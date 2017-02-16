@@ -8,7 +8,7 @@ use rustc_data_structures::indexed_vec::Idx;
 use error::EvalResult;
 use eval_context::{EvalContext};
 use memory::Pointer;
-use value::{PrimVal, Value};
+use value::{PrimVal, Value, ValueKind};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Lvalue<'tcx> {
@@ -219,11 +219,18 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     (ptr, LvalueExtra::None)
                 },
                 Value::ByVal(PrimVal::Undef) => {
-                    // FIXME: allocate in fewer cases
-                    if self.ty_to_primval_kind(base_ty).is_ok() {
-                        return Ok(base);
-                    } else {
-                        (self.force_allocation(base)?.to_ptr(), LvalueExtra::None)
+                    match self.ty_to_value_kind(base_ty) {
+                        ValueKind::Ref => (self.force_allocation(base)?.to_ptr(), LvalueExtra::None),
+                        ValueKind::Val(_) => return Ok(base),
+                        ValueKind::ValPair(_, _) => {
+                            self.set_local(frame, local, None, Value::ByValPair(PrimVal::Undef, PrimVal::Undef))?;
+                            assert!(field_index < 2);
+                            return Ok(Lvalue::Local {
+                                frame,
+                                local,
+                                field: Some((field_index, field_ty)),
+                            });
+                        }
                     }
                 },
                 Value::ByVal(_) => {

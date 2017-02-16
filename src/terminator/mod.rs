@@ -551,7 +551,20 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                                 args.push((undef, field_ty));
                             }
                         },
-                        _ => bug!("rust-call ABI tuple argument was {:?}, but {:?} were expected", last, fields),
+                        val @ Value::ByVal(_) => {
+                            assert_eq!(fields.len(), 1);
+                            args.push((val, fields[0]));
+                        }
+                        val @ Value::ByValPair(_, _) if fields.len() == 1 => {
+                            // first argument is a fat pointer
+                            args.push((val, fields[0]));
+                        }
+                        Value::ByValPair(a, b) => {
+                            // two arguments
+                            assert_eq!(fields.len(), 2);
+                            args.push((Value::ByVal(a), fields[0]));
+                            args.push((Value::ByVal(b), fields[1]));
+                        }
                     }
                 }
                 ty => bug!("expected tuple as last argument in function with 'rust-call' ABI, got {:?}", ty),

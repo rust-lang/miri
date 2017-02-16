@@ -73,6 +73,16 @@ pub enum PrimValKind {
     FnPtr,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ValueKind {
+    // Needs to be represented by Value::ByRef
+    Ref,
+    // Can be represented by Value::ByVal
+    Val(PrimValKind),
+    // Can be represented by Value::ByValPair
+    ValPair(PrimValKind, PrimValKind),
+}
+
 impl<'a, 'tcx: 'a> Value {
     pub(super) fn read_ptr(&self, mem: &Memory<'a, 'tcx>) -> EvalResult<'tcx, Pointer> {
         use self::Value::*;

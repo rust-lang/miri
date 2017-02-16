@@ -4,6 +4,7 @@
     i128_type,
     pub_restricted,
     rustc_private,
+    exact_size_is_empty,
 )]
 
 // From rustc.
