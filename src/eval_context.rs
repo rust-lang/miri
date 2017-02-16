@@ -764,7 +764,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let variant = &adt_def.variants[nndiscr as usize];
                 let index = discrfield[1];
                 let field = &variant.fields[index as usize];
-                (self.get_field_offset(ty, index as usize)?, field.ty(self.tcx, substs))
+                (self.get_field_offset(ty, index as usize)?, self.field_ty(field, substs))
             }
             _ => bug!("non-enum for StructWrappedNullablePointer: {}", ty),
         };
@@ -819,7 +819,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     Array { .. } => bug!("{:?} cannot have Array layout", ty),
                     _ => bug!("get_field_ty on non-product type: {:?}", ty),
                 };
-                Ok(variant.fields[field_index].ty(self.tcx, substs))
+                Ok(self.field_ty(&variant.fields[field_index], substs))
             }
 
             ty::TyTuple(fields, _) => Ok(fields[field_index]),
@@ -1264,7 +1264,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let variant = &def.variants[0];
                         // FIXME: also allow structs with only a single non zst field
                         if variant.fields.len() == 1 {
-                            return self.ty_to_primval_kind(variant.fields[0].ty(self.tcx, substs));
+                            return self.ty_to_primval_kind(self.field_ty(&variant.fields[0], substs));
                         } else {
                             return Err(EvalError::TypeNotPrimitive(ty));
                         }
@@ -1392,7 +1392,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let variant = &def.variants[0];
                         // FIXME: also allow structs with only a single non zst field
                         if variant.fields.len() == 1 {
-                            let ty = variant.fields[0].ty(self.tcx, substs);
+                            let ty = self.field_ty(&variant.fields[0], substs);
                             return self.try_read_value(ptr, ty);
                         } else {
                             debug_assert!(self.ty_to_primval_kind(ty).is_err());
@@ -1513,8 +1513,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let dest = self.force_allocation(dest)?.to_ptr();
                 let iter = src_fields.zip(dst_fields).enumerate();
                 for (i, (src_f, dst_f)) in iter {
-                    let src_fty = monomorphize_field_ty(self.tcx, src_f, substs_a);
-                    let dst_fty = monomorphize_field_ty(self.tcx, dst_f, substs_b);
+                    let src_fty = self.field_ty(src_f, substs_a);
+                    let dst_fty = self.field_ty(dst_f, substs_b);
                     if self.type_size(dst_fty)? == Some(0) {
                         continue;
                     }
@@ -1645,6 +1645,15 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         }
         Ok(())
     }
+
+    /// Returns the normalized type of a struct field
+    pub fn field_ty(
+        &self,
+        f: &ty::FieldDef,
+        param_substs: &Substs<'tcx>,
+    ) -> ty::Ty<'tcx> {
+        monomorphize_field_ty(self.tcx, f, param_substs)
+    }
 }
 
 pub fn eval_main<'a, 'tcx: 'a>(
@@ -1765,7 +1774,7 @@ impl IntegerExt for layout::Integer {
 }
 
 
-pub fn monomorphize_field_ty<'a, 'tcx:'a >(tcx: TyCtxt<'a, 'tcx, 'tcx>, f: &ty::FieldDef, substs: &'tcx Substs<'tcx>) -> Ty<'tcx> {
+pub fn monomorphize_field_ty<'a, 'tcx: 'a>(tcx: TyCtxt<'a, 'tcx, 'tcx>, f: &ty::FieldDef, substs: &Substs<'tcx>) -> Ty<'tcx> {
     let substituted = f.ty(tcx, substs);
     tcx.normalize_associated_type(&substituted)
 }
