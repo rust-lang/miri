@@ -8,7 +8,7 @@ use rustc_data_structures::indexed_vec::Idx;
 use error::EvalResult;
 use eval_context::{EvalContext};
 use memory::Pointer;
-use value::{PrimVal, Value};
+use value::{PrimVal, Value, ValueKind};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Lvalue<'tcx> {
@@ -126,7 +126,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 assert_eq!(extra, LvalueExtra::None);
                 Value::ByRef(ptr)
             }
-            Lvalue::Local { frame, local, field } => self.stack[frame].get_local(local, field.map(|(i, _)| i)),
+            Lvalue::Local { frame, local, field } => self.get_local(frame, local, field.map(|(i, _)| i)),
             Lvalue::Global(cid) => self.globals.get(&cid).expect("global not cached").value,
         }
     }
@@ -213,17 +213,24 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
         let (base_ptr, base_extra) = match base {
             Lvalue::Ptr { ptr, extra } => (ptr, extra),
-            Lvalue::Local { frame, local, field } => match self.stack[frame].get_local(local, field.map(|(i, _)| i)) {
+            Lvalue::Local { frame, local, field } => match self.get_local(frame, local, field.map(|(i, _)| i)) {
                 Value::ByRef(ptr) => {
                     assert!(field.is_none(), "local can't be ByRef and have a field offset");
                     (ptr, LvalueExtra::None)
                 },
                 Value::ByVal(PrimVal::Undef) => {
-                    // FIXME: allocate in fewer cases
-                    if self.ty_to_primval_kind(base_ty).is_ok() {
-                        return Ok(base);
-                    } else {
-                        (self.force_allocation(base)?.to_ptr(), LvalueExtra::None)
+                    match self.ty_to_value_kind(base_ty) {
+                        ValueKind::Ref => (self.force_allocation(base)?.to_ptr(), LvalueExtra::None),
+                        ValueKind::Val(_) => return Ok(base),
+                        ValueKind::ValPair(_, _) => {
+                            self.set_local(frame, local, None, Value::ByValPair(PrimVal::Undef, PrimVal::Undef))?;
+                            assert!(field_index < 2);
+                            return Ok(Lvalue::Local {
+                                frame,
+                                local,
+                                field: Some((field_index, field_ty)),
+                            });
+                        }
                     }
                 },
                 Value::ByVal(_) => {

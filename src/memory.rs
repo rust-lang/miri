@@ -494,7 +494,7 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
         let mut allocs_seen = HashSet::new();
 
         while let Some(id) = allocs_to_print.pop_front() {
-            if id == ZST_ALLOC_ID || id == NEVER_ALLOC_ID { continue; }
+            if id == NEVER_ALLOC_ID || id == ZST_ALLOC_ID { continue; }
             let mut msg = format!("Alloc {:<5} ", format!("{}:", id));
             let prefix_len = msg.len();
             let mut relocations = vec![];
@@ -564,7 +564,7 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
                     write!(msg, "{:1$}", "", ((i - pos) * 3) as usize).unwrap();
                     let target = match target_id {
                         ZST_ALLOC_ID => String::from("zst"),
-                        NEVER_ALLOC_ID => String::from("int ptr"),
+                        NEVER_ALLOC_ID => bug!("memory as relocation, but is only a casted integer"),
                         _ => format!("({})", target_id),
                     };
                     // this `as usize` is fine, since we can't print more chars than `usize::MAX`
@@ -778,7 +778,9 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
 
     pub fn write_ptr(&mut self, dest: Pointer, ptr: Pointer) -> EvalResult<'tcx> {
         self.write_usize(dest, ptr.offset as u64)?;
-        self.get_mut(dest.alloc_id)?.relocations.insert(dest.offset, ptr.alloc_id);
+        if ptr.alloc_id != NEVER_ALLOC_ID {
+            self.get_mut(dest.alloc_id)?.relocations.insert(dest.offset, ptr.alloc_id);
+        }
         Ok(())
     }
 

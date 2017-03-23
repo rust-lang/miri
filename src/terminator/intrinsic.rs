@@ -291,7 +291,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     Ok(zero_val)
                 };
                 match dest {
-                    Lvalue::Local { frame, local, field } => self.modify_local(frame, local, field.map(|(i, _)| i), init)?,
+                    Lvalue::Local { frame, local, field } => self.modify_local(frame, local, field, init)?,
                     Lvalue::Ptr { ptr, extra: LvalueExtra::None } => self.memory.write_repeat(ptr, 0, size)?,
                     Lvalue::Ptr { .. } => bug!("init intrinsic tried to write to fat ptr target"),
                     Lvalue::Global(cid) => self.modify_global(cid, init)?,
@@ -439,7 +439,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     }
                 };
                 match dest {
-                    Lvalue::Local { frame, local, field } => self.modify_local(frame, local, field.map(|(i, _)| i), uninit)?,
+                    Lvalue::Local { frame, local, field } => self.modify_local(frame, local, field, uninit)?,
                     Lvalue::Ptr { ptr, extra: LvalueExtra::None } =>
                         self.memory.mark_definedness(ptr, size, false)?,
                     Lvalue::Ptr { .. } => bug!("uninit intrinsic tried to write to fat ptr target"),
@@ -503,7 +503,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     // Recurse to get the size of the dynamically sized field (must be
                     // the last field).
                     let last_field = def.struct_variant().fields.last().unwrap();
-                    let field_ty = self.field_ty(substs, last_field);
+                    let field_ty = self.field_ty(last_field, substs);
                     let (unsized_size, unsized_align) = self.size_and_align_of_dst(field_ty, value)?;
 
                     // FIXME (#26403, #27023): We should be adding padding
@@ -551,14 +551,6 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 _ => bug!("size_of_val::<{:?}>", ty),
             }
         }
-    }
-    /// Returns the normalized type of a struct field
-    fn field_ty(
-        &self,
-        param_substs: &Substs<'tcx>,
-        f: &ty::FieldDef,
-    ) -> ty::Ty<'tcx> {
-        self.tcx.normalize_associated_type(&f.ty(self.tcx, param_substs))
     }
 }
 

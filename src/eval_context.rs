@@ -11,13 +11,14 @@ use rustc::ty::layout::{self, Layout, Size};
 use rustc::ty::subst::{self, Subst, Substs};
 use rustc::ty::{self, Ty, TyCtxt, TypeFoldable, Binder};
 use rustc_data_structures::indexed_vec::Idx;
+use rustc_const_math::ConstInt;
 use syntax::codemap::{self, DUMMY_SP};
 
 use error::{EvalError, EvalResult};
 use lvalue::{Global, GlobalId, Lvalue, LvalueExtra};
 use memory::{Memory, Pointer};
 use operator;
-use value::{PrimVal, PrimValKind, Value};
+use value::{PrimVal, PrimValKind, Value, ValueKind};
 
 pub type MirRef<'tcx> = Ref<'tcx, mir::Mir<'tcx>>;
 
@@ -406,18 +407,43 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             // zst assigning is a nop
             return Ok(());
         }
-        if self.ty_to_primval_kind(dest_ty).is_ok() {
-            let mut iter = operands.into_iter();
-            assert_eq!(iter.len(), 1);
-            let (value, value_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
-            return self.write_value(value, dest, value_ty);
+        match self.ty_to_value_kind(dest_ty) {
+            ValueKind::Ref => {
+                trace!("assign fields ref");
+                for (field_index, operand) in operands.into_iter().enumerate() {
+                    let (value, value_ty) = operand.into_val_ty_pair(self)?;
+                    let field_dest = self.lvalue_field(dest, field_index, dest_ty, value_ty)?;
+                    self.write_value(value, field_dest, value_ty)?;
+                }
+                Ok(())
+            },
+            ValueKind::Val(_) => {
+                trace!("assign fields val");
+                let mut iter = operands.into_iter();
+                assert_eq!(iter.len(), 1);
+                let (value, value_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
+                self.write_value(value, dest, value_ty)
+            },
+            ValueKind::ValPair(_, _) => {
+                trace!("assign fields pair");
+                let mut iter = operands.into_iter();
+                let (a, a_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
+                match self.ty_to_value_kind(a_ty) {
+                    ValueKind::Ref => bug!("ty_to_value_kind broken: field of ValPair is Ref"),
+                    ValueKind::Val(_) => {
+                        let (b, b_ty) = iter.next().unwrap().into_val_ty_pair(self)?;
+                        assert!(iter.is_empty());
+                        let a = self.value_to_primval(a, a_ty)?;
+                        let b = self.value_to_primval(b, b_ty)?;
+                        self.write_value(Value::ByValPair(a, b), dest, dest_ty)
+                    },
+                    ValueKind::ValPair(_, _) => {
+                        assert!(iter.is_empty());
+                        self.write_value(a, dest, dest_ty)
+                    }
+                }
+            }
         }
-        for (field_index, operand) in operands.into_iter().enumerate() {
-            let (value, value_ty) = operand.into_val_ty_pair(self)?;
-            let field_dest = self.lvalue_field(dest, field_index, dest_ty, value_ty)?;
-            self.write_value(value, field_dest, value_ty)?;
-        }
-        Ok(())
     }
 
     /// Evaluate an assignment statement.
@@ -738,7 +764,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let variant = &adt_def.variants[nndiscr as usize];
                 let index = discrfield[1];
                 let field = &variant.fields[index as usize];
-                (self.get_field_offset(ty, index as usize)?, field.ty(self.tcx, substs))
+                (self.get_field_offset(ty, index as usize)?, self.field_ty(field, substs))
             }
             _ => bug!("non-enum for StructWrappedNullablePointer: {}", ty),
         };
@@ -776,14 +802,34 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         match ty.sty {
             ty::TyAdt(adt_def, _) if adt_def.is_box() => self.get_fat_field(ty.boxed_ty(), field_index),
             ty::TyAdt(adt_def, substs) => {
-                Ok(adt_def.struct_variant().fields[field_index].ty(self.tcx, substs))
+                use rustc::ty::layout::Layout::*;
+                let variant = match *self.type_layout(ty)? {
+                    General { .. } => bug!("get_field_ty on enum"),
+                    StructWrappedNullablePointer { nndiscr, .. } |
+                    RawNullablePointer { nndiscr, .. } => {
+                        let variants = adt_def.variants.iter();
+                        let discrs = adt_def.discriminants(self.tcx).map(ConstInt::to_u128_unchecked);
+                        let (variant, _) = variants.zip(discrs).find(|&(_, discr)| discr == nndiscr as u128).unwrap();
+                        variant
+                    },
+                    // single variant enums are the same as structs. use `.variants[0]` instead of `struct_variant`
+                    Univariant { .. } |
+                    UntaggedUnion { .. } |
+                    Vector { .. } => &adt_def.variants[0],
+                    Array { .. } => bug!("{:?} cannot have Array layout", ty),
+                    _ => bug!("get_field_ty on non-product type: {:?}", ty),
+                };
+                Ok(self.field_ty(&variant.fields[field_index], substs))
             }
 
             ty::TyTuple(fields, _) => Ok(fields[field_index]),
 
             ty::TyRef(_, ref tam) |
             ty::TyRawPtr(ref tam) => self.get_fat_field(tam.ty, field_index),
-            _ => Err(EvalError::Unimplemented(format!("can't handle type: {:?}, {:?}", ty, ty.sty))),
+            ty::TyArray(inner, _) => Ok(inner),
+            ty::TyClosure(did, substs) => Ok(substs.upvar_tys(did, self.tcx).nth(field_index).unwrap()),
+            _ => bug!("can't handle type: {:?}, {:?}", ty, ty.sty),
+            //_ => Err(EvalError::Unimplemented(format!("can't handle type: {:?}, {:?}", ty, ty.sty))),
         }
     }
 
@@ -802,6 +848,25 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             StructWrappedNullablePointer { ref nonnull, .. } => {
                 Ok(nonnull.offsets[field_index])
             }
+            Array{ .. } => {
+                let field = field_index as u64;
+                let elem_size = match ty.sty {
+                    ty::TyArray(elem_ty, n) => {
+                        assert!(field < n as u64);
+                        self.type_size(elem_ty)?.expect("array elements are sized") as u64
+                    },
+                    _ => bug!("lvalue_field: got Array layout but non-array type {:?}", ty),
+                };
+                Ok(Size::from_bytes(field * elem_size))
+            }
+            Vector { element, count } => {
+                let field = field_index as u64;
+                assert!(field < count);
+                let elem_size = element.size(&self.tcx.data_layout).bytes();
+                Ok(Size::from_bytes(field * elem_size))
+            }
+            RawNullablePointer { .. } |
+            UntaggedUnion { .. } => Ok(Size::from_bytes(0)),
             _ => {
                 let msg = format!("can't handle type: {:?}, with layout: {:?}", ty, layout);
                 Err(EvalError::Unimplemented(msg))
@@ -817,6 +882,13 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             Univariant { ref variant, .. } => Ok(variant.offsets.len()),
             FatPointer { .. } => Ok(2),
             StructWrappedNullablePointer { ref nonnull, .. } => Ok(nonnull.offsets.len()),
+            Array { .. } => match ty.sty {
+                ty::TyArray(_, n) => Ok(n),
+                _ => bug!("array layout expected array type, but got {:?}", ty.sty),
+            },
+            Vector { count, .. } => Ok(count as usize),
+            RawNullablePointer { .. } |
+            UntaggedUnion { .. } => Ok(1),
             _ => {
                 let msg = format!("can't handle type: {:?}, with layout: {:?}", ty, layout);
                 Err(EvalError::Unimplemented(msg))
@@ -977,7 +1049,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     *this.globals.get_mut(&cid).expect("already checked") = Global {
                         value: val,
                         ..dest
-                    }
+                    };
+                    Ok(())
                 };
                 self.write_value_possibly_by_val(src_val, write_dest, dest.value, dest_ty)
             },
@@ -988,10 +1061,10 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             }
 
             Lvalue::Local { frame, local, field } => {
-                let dest = self.stack[frame].get_local(local, field.map(|(i, _)| i));
+                let dest = self.get_local(frame, local, field.map(|(i, _)| i));
                 self.write_value_possibly_by_val(
                     src_val,
-                    |this, val| this.stack[frame].set_local(local, field.map(|(i, _)| i), val),
+                    |this, val| this.set_local(frame, local, field, val),
                     dest,
                     dest_ty,
                 )
@@ -1000,7 +1073,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
     }
 
     // The cases here can be a bit subtle. Read carefully!
-    fn write_value_possibly_by_val<F: FnOnce(&mut Self, Value)>(
+    fn write_value_possibly_by_val<F: FnOnce(&mut Self, Value) -> EvalResult<'tcx>>(
         &mut self,
         src_val: Value,
         write_dest: F,
@@ -1030,17 +1103,17 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             // source and write that into the destination without making an allocation, so
             // we do so here.
             if let Ok(Some(src_val)) = self.try_read_value(src_ptr, dest_ty) {
-                write_dest(self, src_val);
+                write_dest(self, src_val)?;
             } else {
                 let dest_ptr = self.alloc_ptr(dest_ty)?;
                 self.copy(src_ptr, dest_ptr, dest_ty)?;
-                write_dest(self, Value::ByRef(dest_ptr));
+                write_dest(self, Value::ByRef(dest_ptr))?;
             }
 
         } else {
             // Finally, we have the simple case where neither source nor destination are
             // `ByRef`. We may simply copy the source value over the the destintion.
-            write_dest(self, src_val);
+            write_dest(self, src_val)?;
         }
         Ok(())
     }
@@ -1083,6 +1156,46 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         Ok(())
     }
 
+    fn ptr_ty_to_value_kind(&self, ty: Ty<'tcx>) -> ValueKind {
+        if self.type_is_sized(ty) {
+            ValueKind::Val(PrimValKind::Ptr)
+        } else {
+            let extra = match self.tcx.struct_tail(ty).sty {
+                ty::TyStr | ty::TySlice(_) => PrimValKind::from_uint_size(self.memory.pointer_size()),
+                ty::TyDynamic(..) => PrimValKind::Ptr,
+                _ => bug!("{:?} is not an unsized type", ty),
+            };
+            ValueKind::ValPair(PrimValKind::Ptr, extra)
+        }
+    }
+
+    // keep this function in sync with `try_read_value`
+    pub fn ty_to_value_kind(&self, ty: Ty<'tcx>) -> ValueKind {
+        match ty.sty {
+            ty::TyRef(_, ref tam) |
+            ty::TyRawPtr(ref tam) => self.ptr_ty_to_value_kind(tam.ty),
+            ty::TyAdt(ref def, _) if def.is_box() => self.ptr_ty_to_value_kind(ty.boxed_ty()),
+            ty::TyAdt(..) => {
+                match self.get_field_count(ty) {
+                    Ok(1) => {
+                        let field_ty = self.get_field_ty(ty, 0).expect("has one field");
+                        self.ty_to_value_kind(field_ty)
+                    },
+                    Ok(2) => {
+                        let a = self.get_field_ty(ty, 0).expect("has at least one field");
+                        let b = self.get_field_ty(ty, 1).expect("has two fields");
+                        match (self.ty_to_primval_kind(a), self.ty_to_primval_kind(b)) {
+                            (Ok(a), Ok(b)) => ValueKind::ValPair(a, b),
+                            _ => ValueKind::Ref,
+                        }
+                    },
+                    _ => ValueKind::Ref,
+                }
+            },
+            // everything else is either a single value primval or must be ByRef
+            _ => self.ty_to_primval_kind(ty).map(ValueKind::Val).unwrap_or(ValueKind::Ref),
+        }
+    }
     pub fn ty_to_primval_kind(&self, ty: Ty<'tcx>) -> EvalResult<'tcx, PrimValKind> {
         use syntax::ast::FloatTy;
 
@@ -1124,7 +1237,13 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             ty::TyRef(_, ref tam) |
             ty::TyRawPtr(ref tam) if self.type_is_sized(tam.ty) => PrimValKind::Ptr,
 
-            ty::TyAdt(ref def, _) if def.is_box() => PrimValKind::Ptr,
+            ty::TyAdt(ref def, _) if def.is_box() => {
+                if self.type_is_sized(ty.boxed_ty()) {
+                    PrimValKind::Ptr
+                } else {
+                    return Err(EvalError::TypeNotPrimitive(ty));
+                }
+            },
 
             ty::TyAdt(ref def, substs) => {
                 use rustc::ty::layout::Layout::*;
@@ -1155,7 +1274,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         let variant = &def.variants[0];
                         // FIXME: also allow structs with only a single non zst field
                         if variant.fields.len() == 1 {
-                            return self.ty_to_primval_kind(variant.fields[0].ty(self.tcx, substs));
+                            return self.ty_to_primval_kind(self.field_ty(&variant.fields[0], substs));
                         } else {
                             return Err(EvalError::TypeNotPrimitive(ty));
                         }
@@ -1207,6 +1326,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         }
     }
 
+    // keep this function in sync with `ty_to_primval_kind`
     fn try_read_value(&mut self, ptr: Pointer, ty: Ty<'tcx>) -> EvalResult<'tcx, Option<Value>> {
         use syntax::ast::FloatTy;
 
@@ -1253,24 +1373,53 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             ty::TyRef(_, ref tam) |
             ty::TyRawPtr(ref tam) => return self.read_ptr(ptr, tam.ty).map(Some),
 
-            ty::TyAdt(def, _) => {
+            ty::TyAdt(def, substs) => {
                 if def.is_box() {
                     return self.read_ptr(ptr, ty.boxed_ty()).map(Some);
                 }
                 use rustc::ty::layout::Layout::*;
-                if let CEnum { discr, signed, .. } = *self.type_layout(ty)? {
-                    let size = discr.size().bytes();
-                    if signed {
-                        PrimVal::from_i128(self.memory.read_int(ptr, size)?)
-                    } else {
-                        PrimVal::from_u128(self.memory.read_uint(ptr, size)?)
+                match *self.type_layout(ty)? {
+                    CEnum { discr, signed, .. } => {
+                        let size = discr.size().bytes();
+                        if signed {
+                            PrimVal::from_i128(self.memory.read_int(ptr, size)?)
+                        } else {
+                            PrimVal::from_u128(self.memory.read_uint(ptr, size)?)
+                        }
+                    },
+                    RawNullablePointer { value, ..} => {
+                        use rustc::ty::layout::Primitive::*;
+                        match value {
+                            // TODO(solson): Does signedness matter here? What should the sign be?
+                            Int(int) => PrimVal::from_u128(self.memory.read_uint(ptr, int.size().bytes())?),
+                            F32 => PrimVal::from_f32(self.memory.read_f32(ptr)?),
+                            F64 => PrimVal::from_f64(self.memory.read_f64(ptr)?),
+                            Pointer => self.memory.read_ptr(ptr).map(PrimVal::Ptr)?,
+                        }
+                    },
+                    Univariant { .. } => {
+                        // enums with just one variant are no different, but `.struct_variant()` doesn't work for enums
+                        let variant = &def.variants[0];
+                        // FIXME: also allow structs with only a single non zst field
+                        if variant.fields.len() == 1 {
+                            let ty = self.field_ty(&variant.fields[0], substs);
+                            return self.try_read_value(ptr, ty);
+                        } else {
+                            debug_assert!(self.ty_to_primval_kind(ty).is_err());
+                            return Ok(None);
+                        }
                     }
-                } else {
-                    return Ok(None);
+                    _ => {
+                        debug_assert!(self.ty_to_primval_kind(ty).is_err());
+                        return Ok(None);
+                    },
                 }
             },
 
-            _ => return Ok(None),
+            _ => {
+                debug_assert!(self.ty_to_primval_kind(ty).is_err());
+                return Ok(None);
+            },
         };
 
         Ok(Some(Value::ByVal(val)))
@@ -1374,8 +1523,8 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let dest = self.force_allocation(dest)?.to_ptr();
                 let iter = src_fields.zip(dst_fields).enumerate();
                 for (i, (src_f, dst_f)) in iter {
-                    let src_fty = monomorphize_field_ty(self.tcx, src_f, substs_a);
-                    let dst_fty = monomorphize_field_ty(self.tcx, dst_f, substs_b);
+                    let src_fty = self.field_ty(src_f, substs_a);
+                    let dst_fty = self.field_ty(dst_f, substs_b);
                     if self.type_size(dst_fty)? == Some(0) {
                         continue;
                     }
@@ -1408,7 +1557,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             }
             write!(msg, ":").unwrap();
 
-            match self.stack[frame].get_local(local, field.map(|(i, _)| i)) {
+            match self.get_local(frame, local, field.map(|(i, _)| i)) {
                 Value::ByRef(ptr) => {
                     allocs.push(ptr.alloc_id);
                 }
@@ -1446,27 +1595,25 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
         &mut self,
         frame: usize,
         local: mir::Local,
-        field: Option<usize>,
+        field: Option<(usize, Ty<'tcx>)>,
         f: F,
     ) -> EvalResult<'tcx>
         where F: FnOnce(&mut Self, Value) -> EvalResult<'tcx, Value>,
     {
-        let val = self.stack[frame].get_local(local, field);
+        let val = self.get_local(frame, local, field.map(|(i, _)| i));
         let new_val = f(self, val)?;
-        self.stack[frame].set_local(local, field, new_val);
+        self.set_local(frame, local, field, new_val)?;
         // FIXME(solson): Run this when setting to Undef? (See previous version of this code.)
         // if let Value::ByRef(ptr) = self.stack[frame].get_local(local) {
         //     self.memory.deallocate(ptr)?;
         // }
         Ok(())
     }
-}
 
-impl<'tcx> Frame<'tcx> {
-    pub fn get_local(&self, local: mir::Local, field: Option<usize>) -> Value {
+    pub fn get_local(&self, frame: usize, local: mir::Local, field: Option<usize>) -> Value {
         // Subtract 1 because we don't store a value for the ReturnPointer, the local with index 0.
         if let Some(field) = field {
-            match self.locals[local.index() - 1] {
+            match self.stack[frame].locals[local.index() - 1] {
                 Value::ByRef(_) => bug!("can't have lvalue fields for ByRef"),
                 val @ Value::ByVal(_) => {
                     assert_eq!(field, 0);
@@ -1481,35 +1628,41 @@ impl<'tcx> Frame<'tcx> {
                 },
             }
         } else {
-            self.locals[local.index() - 1]
+            self.stack[frame].locals[local.index() - 1]
         }
     }
 
-    fn set_local(&mut self, local: mir::Local, field: Option<usize>, value: Value) {
+    pub(crate) fn set_local(&mut self, frame: usize, local: mir::Local, field: Option<(usize, Ty<'tcx>)>, value: Value) -> EvalResult<'tcx> {
         // Subtract 1 because we don't store a value for the ReturnPointer, the local with index 0.
-        if let Some(field) = field {
-            match self.locals[local.index() - 1] {
+        if let Some((field, ty)) = field {
+            match self.stack[frame].locals[local.index() - 1] {
                 Value::ByRef(_) => bug!("can't have lvalue fields for ByRef"),
                 Value::ByVal(_) => {
                     assert_eq!(field, 0);
-                    self.set_local(local, None, value);
+                    self.set_local(frame, local, None, value)?;
                 },
                 Value::ByValPair(a, b) => {
-                    let prim = match value {
-                        Value::ByRef(_) => bug!("can't set ValPair field to ByRef"),
-                        Value::ByVal(val) => val,
-                        Value::ByValPair(_, _) => bug!("can't set ValPair field to ValPair"),
-                    };
+                    let prim = self.value_to_primval(value, ty)?;
                     match field {
-                        0 => self.set_local(local, None, Value::ByValPair(prim, b)),
-                        1 => self.set_local(local, None, Value::ByValPair(a, prim)),
+                        0 => self.set_local(frame, local, None, Value::ByValPair(prim, b))?,
+                        1 => self.set_local(frame, local, None, Value::ByValPair(a, prim))?,
                         _ => bug!("ByValPair has only two fields, tried to access {}", field),
                     }
                 },
             }
         } else {
-            self.locals[local.index() - 1] = value;
+            self.stack[frame].locals[local.index() - 1] = value;
         }
+        Ok(())
+    }
+
+    /// Returns the normalized type of a struct field
+    pub fn field_ty(
+        &self,
+        f: &ty::FieldDef,
+        param_substs: &Substs<'tcx>,
+    ) -> ty::Ty<'tcx> {
+        monomorphize_field_ty(self.tcx, f, param_substs)
     }
 }
 
@@ -1631,7 +1784,7 @@ impl IntegerExt for layout::Integer {
 }
 
 
-pub fn monomorphize_field_ty<'a, 'tcx:'a >(tcx: TyCtxt<'a, 'tcx, 'tcx>, f: &ty::FieldDef, substs: &'tcx Substs<'tcx>) -> Ty<'tcx> {
+pub fn monomorphize_field_ty<'a, 'tcx: 'a>(tcx: TyCtxt<'a, 'tcx, 'tcx>, f: &ty::FieldDef, substs: &Substs<'tcx>) -> Ty<'tcx> {
     let substituted = f.ty(tcx, substs);
     tcx.normalize_associated_type(&substituted)
 }

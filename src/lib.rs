@@ -1,6 +1,7 @@
 #![feature(
     i128_type,
     rustc_private,
+    exact_size_is_empty,
 )]
 
 // From rustc.
