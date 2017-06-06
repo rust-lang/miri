@@ -383,8 +383,23 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
             }
 
             "transmute" => {
+                // We force the argument to be ByRef in order to avoid alignment errors
+                // that might otherwise arise.
+                let (ptr, needs_deallocate) = match arg_vals[0] {
+                    Value::ByRef(ptr) => (ptr, false),
+                    val => {
+                        let src_ty = substs.type_at(0);
+                        let ptr = self.alloc_ptr(src_ty)?;
+                        self.write_value_to_ptr(val, ptr, src_ty)?;
+                        (ptr, true)
+                    }
+                };
+
                 let dest_ty = substs.type_at(1);
-                self.write_value(arg_vals[0], dest, dest_ty)?;
+                self.write_value(Value::ByRef(ptr), dest, dest_ty)?;
+                if needs_deallocate {
+                    self.memory.deallocate(ptr)?;
+                }
             }
 
             "uninit" => {
