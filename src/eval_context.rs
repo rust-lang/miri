@@ -531,7 +531,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                     Univariant { ref variant, .. } => {
                         if variant.packed {
                             let ptr = self.force_allocation(dest)?.to_ptr_and_extra().0.to_ptr()?;
-                            self.memory.mark_packed(ptr, variant.stride().bytes());
+                            self.memory.mark_packed(ptr, variant.stride().bytes())?;
                         }
                         self.assign_fields(dest, dest_ty, operands)?;
                     }
@@ -549,7 +549,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                             let discr_size = discr.size().bytes();
                             if variants[variant].packed {
                                 let ptr = self.force_allocation(dest)?.to_ptr_and_extra().0.to_ptr()?;
-                                self.memory.mark_packed(ptr, variants[variant].stride().bytes());
+                                self.memory.mark_packed(ptr, variants[variant].stride().bytes())?;
                             }
 
                             self.assign_discr_and_fields(
@@ -591,7 +591,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                         if let mir::AggregateKind::Adt(_, variant, _, _) = **kind {
                             if nonnull.packed {
                                 let ptr = self.force_allocation(dest)?.to_ptr_and_extra().0.to_ptr()?;
-                                self.memory.mark_packed(ptr, nonnull.stride().bytes());
+                                self.memory.mark_packed(ptr, nonnull.stride().bytes())?;
                             }
                             if nndiscr == variant as u64 {
                                 self.assign_fields(dest, dest_ty, operands)?;

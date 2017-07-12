@@ -1,12 +1,71 @@
 use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian, BigEndian};
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet, VecDeque, BTreeSet};
-use std::{fmt, iter, ptr, mem, io};
+use std::{fmt, iter, ptr, mem, io, ops};
 
 use rustc::ty;
 use rustc::ty::layout::{self, TargetDataLayout};
 
 use error::{EvalError, EvalResult};
 use value::{PrimVal, self, Pointer};
+
+////////////////////////////////////////////////////////////////////////////////
+// Handling ranges in memory
+////////////////////////////////////////////////////////////////////////////////
+
+mod range {
+    use super::*;
+
+    // The derived `Ord` impl sorts first by the first field, then, if the fields are the same
+    // by the second field.
+    // This is exactly what we need for our purposes, since a range query on a BTReeSet/BTreeMap will give us all
+    // `MemoryRange`s whose `start` is <= than the one we're looking for, but not > the end of the range we're checking.
+    // At the same time the `end` is irrelevant for the sorting and range searching, but used for the check.
+    // This kind of search breaks, if `end < start`, so don't do that!
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
+    pub struct MemoryRange {
+        start: u64,
+        end: u64,
+    }
+
+    impl MemoryRange {
+        pub fn new(offset: u64, len: u64) -> MemoryRange {
+            assert!(len > 0);
+            MemoryRange {
+                start: offset,
+                end: offset + len,
+            }
+        }
+
+        pub fn range(offset: u64, len: u64) -> ops::Range<MemoryRange> {
+            assert!(len > 0);
+            // We select all elements that are within
+            // the range given by the offset into the allocation and the length.
+            // This is sound if "self.contains() || self.overlaps() == true" implies that self is in-range.
+            let left = MemoryRange {
+                start: 0,
+                end: offset,
+            };
+            let right = MemoryRange {
+                start: offset + len + 1,
+                end: 0,
+            };
+            left..right
+        }
+
+        pub fn contains(&self, offset: u64, len: u64) -> bool {
+            assert!(len > 0);
+            self.start <= offset && (offset + len) <= self.end
+        }
+
+        #[allow(dead_code)]
+        pub fn overlaps(&self, offset: u64, len: u64) -> bool {
+            assert!(len > 0);
+            //let non_overlap = (offset + len) <= self.start || self.end <= offset;
+            (offset + len) > self.start && self.end > offset
+        }
+    }
+}
+use self::range::*;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Allocations and pointers
@@ -37,6 +96,20 @@ pub struct Allocation {
     /// Use the `mark_static_initalized` method of `Memory` to ensure that an error occurs, if the memory of this
     /// allocation is modified or deallocated in the future.
     pub static_kind: StaticKind,
+
+    /// Information about which memory is subject to packed accesses right now.
+    ///
+    /// We mark memory as "packed" or "unaligned" for a single statement, and clear the marking
+    /// afterwards. In the case where no packed structs are present, it's just a single emptyness
+    /// check of a set instead of heavily influencing all memory access code as other solutions
+    /// would. This is simpler than the alternative of passing a "packed" parameter to every
+    /// load/store method.
+    ///
+    /// One disadvantage of this solution is the fact that you can cast a pointer to a packed
+    /// struct to a pointer to a normal struct and if you access a field of both in the same MIR
+    /// statement, the normal struct access will succeed even though it shouldn't. But even with
+    /// mir optimizations, that situation is hard/impossible to produce.
+    packed: BTreeSet<MemoryRange>,
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -83,6 +156,10 @@ impl MemoryPointer {
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Top-level interpreter memory
+////////////////////////////////////////////////////////////////////////////////
+
 pub type TlsKey = usize;
 
 #[derive(Copy, Clone, Debug)]
@@ -90,10 +167,6 @@ pub struct TlsEntry<'tcx> {
     data: Pointer, // Will eventually become a map from thread IDs to `Pointer`s, if we ever support more than one thread.
     dtor: Option<ty::Instance<'tcx>>,
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// Top-level interpreter memory
-////////////////////////////////////////////////////////////////////////////////
 
 pub struct Memory<'a, 'tcx> {
     /// Actual memory allocations (arbitrary bytes, may contain pointers into other allocations).
@@ -124,20 +197,6 @@ pub struct Memory<'a, 'tcx> {
     /// Target machine data layout to emulate.
     pub layout: &'a TargetDataLayout,
 
-    /// List of memory regions containing packed structures.
-    ///
-    /// We mark memory as "packed" or "unaligned" for a single statement, and clear the marking
-    /// afterwards. In the case where no packed structs are present, it's just a single emptyness
-    /// check of a set instead of heavily influencing all memory access code as other solutions
-    /// would. This is simpler than the alternative of passing a "packed" parameter to every
-    /// load/store method.
-    ///
-    /// One disadvantage of this solution is the fact that you can cast a pointer to a packed
-    /// struct to a pointer to a normal struct and if you access a field of both in the same MIR
-    /// statement, the normal struct access will succeed even though it shouldn't. But even with
-    /// mir optimizations, that situation is hard/impossible to produce.
-    packed: BTreeSet<Entry>,
-
     /// A cache for basic byte allocations keyed by their contents. This is used to deduplicate
     /// allocations for string and bytestring literals.
     literal_alloc_cache: HashMap<Vec<u8>, AllocId>,
@@ -159,7 +218,6 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
             layout,
             memory_size: max_memory,
             memory_usage: 0,
-            packed: BTreeSet::new(),
             static_alloc: HashSet::new(),
             literal_alloc_cache: HashMap::new(),
             thread_local: BTreeMap::new(),
@@ -214,6 +272,7 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
             undef_mask: UndefMask::new(size),
             align,
             static_kind: StaticKind::NotStatic,
+            packed: BTreeSet::new(),
         };
         let id = self.next_id;
         self.next_id.0 += 1;
@@ -283,23 +342,13 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
             PrimVal::Ptr(ptr) => {
                 let alloc = self.get(ptr.alloc_id)?;
                 // check whether the memory was marked as packed
-                // we select all elements that have the correct alloc_id and are within
-                // the range given by the offset into the allocation and the length
-                let start = Entry {
-                    alloc_id: ptr.alloc_id,
-                    packed_start: 0,
-                    packed_end: ptr.offset + len,
-                };
-                let end = Entry {
-                    alloc_id: ptr.alloc_id,
-                    packed_start: ptr.offset + len,
-                    packed_end: 0,
-                };
-                for &Entry { packed_start, packed_end, .. } in self.packed.range(start..end) {
-                    // if the region we are checking is covered by a region in `packed`
-                    // ignore the actual alignment
-                    if packed_start <= ptr.offset && (ptr.offset + len) <= packed_end {
-                        return Ok(());
+                if len > 0 {
+                    for range in alloc.packed.range(MemoryRange::range(ptr.offset, len)) {
+                        // if the region we are checking is covered by a region in `packed`
+                        // ignore the actual alignment
+                        if range.contains(ptr.offset, len) {
+                            return Ok(());
+                        }
                     }
                 }
                 if alloc.align < align {
@@ -338,16 +387,16 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
         Ok(())
     }
 
-    pub(crate) fn mark_packed(&mut self, ptr: MemoryPointer, len: u64) {
-        self.packed.insert(Entry {
-            alloc_id: ptr.alloc_id,
-            packed_start: ptr.offset,
-            packed_end: ptr.offset + len,
-        });
+    pub(crate) fn mark_packed(&mut self, ptr: MemoryPointer, len: u64) -> EvalResult<'tcx> {
+        let alloc = self.get_mut(ptr.alloc_id)?;
+        alloc.packed.insert(MemoryRange::new(ptr.offset, len));
+        Ok(())
     }
 
     pub(crate) fn clear_packed(&mut self) {
-        self.packed.clear();
+        for alloc in self.alloc_map.values_mut() {
+            alloc.packed.clear();
+        }
     }
 
     pub(crate) fn create_tls_key(&mut self, dtor: Option<ty::Instance<'tcx>>) -> TlsKey {
@@ -424,20 +473,6 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
         }
         return Ok(None);
     }
-}
-
-// The derived `Ord` impl sorts first by the first field, then, if the fields are the same
-// by the second field, and if those are the same, too, then by the third field.
-// This is exactly what we need for our purposes, since a range within an allocation
-// will give us all `Entry`s that have that `AllocId`, and whose `packed_start` is <= than
-// the one we're looking for, but not > the end of the range we're checking.
-// At the same time the `packed_end` is irrelevant for the sorting and range searching, but used for the check.
-// This kind of search breaks, if `packed_end < packed_start`, so don't do that!
-#[derive(Eq, PartialEq, Ord, PartialOrd)]
-struct Entry {
-    alloc_id: AllocId,
-    packed_start: u64,
-    packed_end: u64,
 }
 
 /// Allocation accessors

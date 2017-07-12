@@ -397,7 +397,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
                 let dest_ty = substs.type_at(1);
                 let size = self.type_size(dest_ty)?.expect("transmute() type must be sized");
                 let ptr = self.force_allocation(dest)?.to_ptr()?;
-                self.memory.mark_packed(ptr, size);
+                self.memory.mark_packed(ptr, size)?;
                 self.write_value_to_ptr(arg_vals[0], ptr.into(), src_ty)?;
             }
 

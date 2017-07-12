@@ -327,7 +327,7 @@ impl<'a, 'tcx> EvalContext<'a, 'tcx> {
 
         if packed {
             let size = self.type_size(field_ty)?.expect("packed struct must be sized");
-            self.memory.mark_packed(ptr.to_ptr()?, size);
+            self.memory.mark_packed(ptr.to_ptr()?, size)?;
         }
 
         let extra = if self.type_is_sized(field_ty) {
