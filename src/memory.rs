@@ -29,6 +29,7 @@ mod range {
 
     impl MemoryRange {
         pub fn new(offset: u64, len: u64) -> MemoryRange {
+            assert!(len > 0);
             MemoryRange {
                 start: offset,
                 end: offset + len,
@@ -36,21 +37,31 @@ mod range {
         }
 
         pub fn range(offset: u64, len: u64) -> ops::Range<MemoryRange> {
-            // we select all elements that are within
-            // the range given by the offset into the allocation and the length
-            let start = MemoryRange {
+            assert!(len > 0);
+            // We select all elements that are within
+            // the range given by the offset into the allocation and the length.
+            // This is sound if "self.contains() || self.overlaps() == true" implies that self is in-range.
+            let left = MemoryRange {
                 start: 0,
-                end: offset + len,
+                end: offset,
             };
-            let end = MemoryRange {
-                start: offset + len,
+            let right = MemoryRange {
+                start: offset + len + 1,
                 end: 0,
             };
-            start..end
+            left..right
         }
 
-        pub fn overlaps(&self, offset: u64, len: u64) -> bool {
+        pub fn contains(&self, offset: u64, len: u64) -> bool {
+            assert!(len > 0);
             self.start <= offset && (offset + len) <= self.end
+        }
+
+        #[allow(dead_code)]
+        pub fn overlaps(&self, offset: u64, len: u64) -> bool {
+            assert!(len > 0);
+            //let non_overlap = (offset + len) <= self.start || self.end <= offset;
+            (offset + len) > self.start && self.end > offset
         }
     }
 }
@@ -331,11 +342,13 @@ impl<'a, 'tcx> Memory<'a, 'tcx> {
             PrimVal::Ptr(ptr) => {
                 let alloc = self.get(ptr.alloc_id)?;
                 // check whether the memory was marked as packed
-                for range in alloc.packed.range(MemoryRange::range(ptr.offset, len)) {
-                    // if the region we are checking is covered by a region in `packed`
-                    // ignore the actual alignment
-                    if range.overlaps(ptr.offset, len) {
-                        return Ok(());
+                if len > 0 {
+                    for range in alloc.packed.range(MemoryRange::range(ptr.offset, len)) {
+                        // if the region we are checking is covered by a region in `packed`
+                        // ignore the actual alignment
+                        if range.contains(ptr.offset, len) {
+                            return Ok(());
+                        }
                     }
                 }
                 if alloc.align < align {
