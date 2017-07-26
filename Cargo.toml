@@ -1,0 +1,3 @@
+[workspace]
+members = ["src/librustc_mir"]
+exclude = ["xargo", "cargo-miri-test"]
