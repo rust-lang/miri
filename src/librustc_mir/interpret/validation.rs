@@ -91,7 +91,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 // HACK: When &x is used while x is already borrowed read-only, AddValidation still
                 // emits suspension.  This code is legit, so just ignore the error *and*
                 // do NOT register a suspension.
-                // TODO: Integrate AddValidation better with borrowck so that we can/ not emit
+                // FIXME: Integrate AddValidation better with borrowck so that we can/ not emit
                 // these wrong validation statements.  This is all pretty fragile right now.
                 return Ok(());
             }
@@ -131,7 +131,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         subst: &ty::subst::Substs<'tcx>,
         mode: ValidationMode,
     ) -> EvalResult<'tcx> {
-        // TODO: Maybe take visibility/privacy into account.
+        // FIXME: Maybe take visibility/privacy into account.
         for (idx, field) in variant.fields.iter().enumerate() {
             let field_ty = field.ty(self.tcx, subst);
             let field_lvalue = self.lvalue_field(query.lval, idx, query.ty, field_ty)?;
@@ -159,7 +159,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             // Releasing an uninitalized variable is a NOP.  This is needed because
             // we have to release the return value of a function; due to destination-passing-style
             // the callee may directly write there.
-            // TODO: Ideally we would know whether the destination is already initialized, and only
+            // FIXME: Ideally we would know whether the destination is already initialized, and only
             // release if it is.
             res @ Err(EvalError{ kind: EvalErrorKind::ReadUndefBytes, ..}) => {
                 if let ValidationMode::Release = mode {
@@ -190,7 +190,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
         // HACK: For now, bail out if we hit a dead local during recovery (can happen because sometimes we have
         // StorageDead before EndRegion due to https://github.com/rust-lang/rust/issues/43481).
-        // TODO: We should rather fix the MIR.
+        // FIXME: We should rather fix the MIR.
         match query.lval {
             Lvalue::Local { frame, local } => {
                 let res = self.stack[frame].get_local(local);
@@ -216,7 +216,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
         // Decide whether this type *owns* the memory it covers (like integers), or whether it
         // just assembles pieces (that each own their memory) together to a larger whole.
-        // TODO: Currently, we don't acquire locks for padding and discriminants. We should.
+        // FIXME: Currently, we don't acquire locks for padding and discriminants. We should.
         let is_owning = match query.ty.sty {
             TyInt(_) | TyUint(_) | TyRawPtr(_) |
             TyBool | TyFloat(_) | TyChar | TyStr |
@@ -264,12 +264,12 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
         match query.ty.sty {
             TyInt(_) | TyUint(_) | TyRawPtr(_) => {
-                // TODO: Make sure these are not undef.
+                // FIXME: Make sure these are not undef.
                 // We could do a bounds-check and other sanity checks on the lvalue, but it would be a bug in miri for this to ever fail.
                 Ok(())
             }
             TyBool | TyFloat(_) | TyChar | TyStr => {
-                // TODO: Check if these are valid bool/float/codepoint/UTF-8, respectively (and in particular, not undef).
+                // FIXME: Check if these are valid bool/float/codepoint/UTF-8, respectively (and in particular, not undef).
                 Ok(())
             }
             TyNever => {
@@ -300,7 +300,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             TyFnPtr(_sig) => {
                 let ptr = self.read_lvalue(query.lval)?.into_ptr(&self.memory)?.to_ptr()?;
                 self.memory.get_fn(ptr)?;
-                // TODO: Check if the signature matches (should be the same check as what terminator/mod.rs already does on call?).
+                // FIXME: Check if the signature matches (should be the same check as what terminator/mod.rs already does on call?).
                 Ok(())
             }
             TyFnDef(..) => {
@@ -335,7 +335,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     _ => bug!("acquire_valid of a TyDynamic given non-trait-object lvalue: {:?}", query.lval),
                 };
                 self.read_size_and_align_from_vtable(vtable)?;
-                // TODO: Check that the vtable contains all the function pointers we expect it to have.
+                // FIXME: Check that the vtable contains all the function pointers we expect it to have.
                 // Trait objects cannot have any operations performed
                 // on them directly.  We cannot, in general, even acquire any locks as the trait object *could*
                 // contain an UnsafeCell.  If we call functions to get access to data, we will validate
@@ -350,7 +350,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
                 match adt.adt_kind() {
                     AdtKind::Enum => {
-                        // TODO: Can we get the discriminant without forcing an allocation?
+                        // FIXME: Can we get the discriminant without forcing an allocation?
                         let ptr = self.force_allocation(query.lval)?.to_ptr()?;
                         let discr = self.read_discriminant_value(ptr, query.ty)?;
 
@@ -383,7 +383,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     }
                     AdtKind::Union => {
                         // No guarantees are provided for union types.
-                        // TODO: Make sure that all access to union fields is unsafe; otherwise, we may have some checking to do (but what exactly?)
+                        // FIXME: Make sure that all access to union fields is unsafe; otherwise, we may have some checking to do (but what exactly?)
                         Ok(())
                     }
                 }
@@ -400,7 +400,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     let field_lvalue = self.lvalue_field(query.lval, idx, query.ty, field_ty)?;
                     self.validate(ValidationQuery { lval: field_lvalue, ty: field_ty, ..query }, mode)?;
                 }
-                // TODO: Check if the signature matches (should be the same check as what terminator/mod.rs already does on call?).
+                // FIXME: Check if the signature matches (should be the same check as what terminator/mod.rs already does on call?).
                 // Is there other things we can/should check?  Like vtable pointers?
                 Ok(())
             }

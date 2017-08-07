@@ -105,7 +105,7 @@ impl<'a, 'tcx: 'a> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, Evaluator> {
         // FIXME: replace loop by some structure that works with stepping
         while let Some((instance, ptr, key)) = dtor {
             trace!("Running TLS dtor {:?} on {:?}", instance, ptr);
-            // TODO: Potentially, this has to support all the other possible instances?
+            // FIXME: Potentially, this has to support all the other possible instances?
             // See eval_fn_call in interpret/terminator/mod.rs
             let mir = self.load_mir(instance.def)?;
             self.push_stack_frame(

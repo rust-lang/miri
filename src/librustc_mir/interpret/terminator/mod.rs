@@ -152,7 +152,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             return match (&ty.sty, &real_ty.sty) {
                 // Permit changing the pointer type of raw pointers and references as well as
                 // mutability of raw pointers.
-                // TODO: Should not be allowed when fat pointers are involved.
+                // FIXME: Should not be allowed when fat pointers are involved.
                 (&TypeVariants::TyRawPtr(_), &TypeVariants::TyRawPtr(_)) => true,
                 (&TypeVariants::TyRef(_, _), &TypeVariants::TyRef(_, _)) =>
                     ty.is_mutable_pointer() == real_ty.is_mutable_pointer(),
@@ -401,7 +401,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 let instance = self.memory.get_fn(fn_ptr.to_ptr()?)?;
                 let mut arg_operands = arg_operands.to_vec();
                 let ty = self.operand_ty(&arg_operands[0]);
-                let ty = self.get_field_ty(ty, 0)?.ty; // TODO: packed flag is ignored
+                let ty = self.get_field_ty(ty, 0)?.ty; // FIXME: packed flag is ignored
                 match arg_operands[0] {
                     mir::Operand::Consume(ref mut lval) => *lval = lval.clone().field(mir::Field::new(0), ty),
                     _ => bug!("virtual call first arg cannot be a constant"),

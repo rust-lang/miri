@@ -383,7 +383,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         // in a local, and the local could be deallocated (from StorageDead) before the function returns.
         // However, we should check *something*.  For now, we make sure that there is no conflicting write
         // lock by another frame.  We *have* to permit deallocation if we hold a read lock.
-        // TODO: Figure out the exact rules here.
+        // FIXME: Figure out the exact rules here.
         alloc.check_locks(Some(self.cur_frame), 0, alloc.bytes.len() as u64, AccessKind::Read)
             .map_err(|lock| EvalErrorKind::DeallocatedLockedMemory { ptr, lock })?;
 
@@ -528,7 +528,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             alloc.locks.remove(&range);
         }
 
-        // TODO: Test that we actually released a write lock for the entire covered region.
+        // FIXME: Test that we actually released a write lock for the entire covered region.
 
         Ok(())
     }

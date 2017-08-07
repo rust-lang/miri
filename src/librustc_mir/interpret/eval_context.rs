@@ -410,7 +410,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     }
 
     fn type_layout_with_substs(&self, ty: Ty<'tcx>, substs: &'tcx Substs<'tcx>) -> EvalResult<'tcx, &'tcx Layout> {
-        // TODO(solson): Is this inefficient? Needs investigation.
+        // FIXME(solson): Is this inefficient? Needs investigation.
         let ty = self.monomorphize(ty, substs);
 
         ty.layout(self.tcx, ty::ParamEnv::empty(Reveal::All)).map_err(|layout| EvalErrorKind::Layout(layout).into())
@@ -482,7 +482,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         self.memory.locks_lifetime_ended(None);
         let frame = self.stack.pop().expect("tried to pop a stack frame, but there were none");
         if !self.stack.is_empty() {
-            // TODO: IS this the correct time to start considering these accesses as originating from the returned-to stack frame?
+            // FIXME: IS this the correct time to start considering these accesses as originating from the returned-to stack frame?
             let cur_frame = self.cur_frame();
             self.memory.set_cur_frame(cur_frame);
         }
@@ -698,7 +698,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                                     assert_eq!(self.type_size(operand_ty)?, Some(0));
                                 }
                                 let (offset, TyAndPacked { ty, packed: _}) = self.nonnull_offset_and_ty(dest_ty, nndiscr, discrfield_source)?;
-                                // TODO: The packed flag is ignored
+                                // FIXME: The packed flag is ignored
 
                                 // FIXME(solson)
                                 let dest = self.force_allocation(dest)?.to_ptr()?;
@@ -1377,7 +1377,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     RawNullablePointer { value, .. } => {
                         use rustc::ty::layout::Primitive::*;
                         match value {
-                            // TODO(solson): Does signedness matter here? What should the sign be?
+                            // FIXME(solson): Does signedness matter here? What should the sign be?
                             Int(int) => PrimValKind::from_uint_size(int.size().bytes()),
                             F32 => PrimValKind::F32,
                             F64 => PrimValKind::F64,
@@ -1595,7 +1595,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     return self.unsize_into_ptr(src, src_ty, dest, dest_ty, src_ty.boxed_ty(), dest_ty.boxed_ty());
                 }
                 if self.ty_to_primval_kind(src_ty).is_ok() {
-                    // TODO: We ignore the packed flag here
+                    // FIXME: We ignore the packed flag here
                     let sty = self.get_field_ty(src_ty, 0)?.ty;
                     let dty = self.get_field_ty(dest_ty, 0)?.ty;
                     return self.unsize_into(src, sty, dest, dty);
@@ -1613,7 +1613,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 //let dst = adt::MaybeSizedValue::sized(dst);
                 let src_ptr = match src {
                     Value::ByRef { ptr, aligned: true } => ptr,
-                    // TODO: Is it possible for unaligned pointers to occur here?
+                    // FIXME: Is it possible for unaligned pointers to occur here?
                     _ => bug!("expected aligned pointer, got {:?}", src),
                 };
 
@@ -1818,7 +1818,7 @@ impl<'tcx> Frame<'tcx> {
     }
 }
 
-// TODO(solson): Upstream these methods into rustc::ty::layout.
+// FIXME(solson): Upstream these methods into rustc::ty::layout.
 
 pub(super) trait IntegerExt {
     fn size(self) -> Size;

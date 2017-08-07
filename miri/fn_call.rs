@@ -126,7 +126,7 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
             }
 
             "syscall" => {
-                // TODO: read `syscall` ids like `sysconf` ids and
+                // FIXME: read `syscall` ids like `sysconf` ids and
                 // figure out some way to actually process some of them
                 //
                 // libc::syscall(NR_GETRANDOM, buf.as_mut_ptr(), buf.len(), GRND_NONBLOCK)
@@ -156,7 +156,7 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
                 let f_instance = self.memory.get_fn(f)?;
                 self.write_null(dest, dest_ty)?;
 
-                // Now we make a function call.  TODO: Consider making this re-usable?  EvalContext::step does sth. similar for the TLS dtors,
+                // Now we make a function call.  FIXME: Consider making this re-usable?  EvalContext::step does sth. similar for the TLS dtors,
                 // and of course eval_main.
                 let mir = self.load_mir(f_instance.def)?;
                 self.push_stack_frame(
@@ -371,7 +371,7 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
                 if key_size.bits() < 128 && key >= (1u128 << key_size.bits() as u128) {
                     return err!(OutOfTls);
                 }
-                // TODO: Does this need checking for alignment?
+                // FIXME: Does this need checking for alignment?
                 self.memory.write_uint(key_ptr.to_ptr()?, key, key_size.bytes())?;
 
                 // Return success (0)
@@ -476,7 +476,7 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
 
         if sig.abi == Abi::C {
             // An external C function
-            // TODO: That functions actually has a similar preamble to what follows here.  May make sense to
+            // FIXME: That functions actually has a similar preamble to what follows here.  May make sense to
             // unify these two mechanisms for "hooking into missing functions".
             self.call_c_abi(instance.def_id(), arg_operands, dest, dest_ty, dest_block)?;
             return Ok(());
