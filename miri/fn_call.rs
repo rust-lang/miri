@@ -162,15 +162,23 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
             }
 
             "__rust_maybe_catch_panic" => {
-                // fn __rust_maybe_catch_panic(f: fn(*mut u8), data: *mut u8, data_ptr: *mut usize, vtable_ptr: *mut usize) -> u32
-                // We abort on panic, so not much is going on here, but we still have to call the closure
+                // fn __rust_maybe_catch_panic(
+                //     f: fn(*mut u8),
+                //     data: *mut u8,
+                //     data_ptr: *mut usize,
+                //     vtable_ptr: *mut usize,
+                // ) -> u32
+                // We abort on panic, so not much is going on here,
+                // but we still have to call the closure
                 let u8_ptr_ty = self.tcx.mk_mut_ptr(self.tcx.types.u8);
                 let f = args[0].into_ptr(&mut self.memory)?.to_ptr()?;
                 let data = args[1].into_ptr(&mut self.memory)?;
                 let f_instance = self.memory.get_fn(f)?;
                 self.write_null(dest, dest_ty)?;
 
-                // Now we make a function call.  FIXME: Consider making this re-usable?  EvalContext::step does sth. similar for the TLS dtors,
+                // Now we make a function call.
+                // FIXME: Consider making this re-usable?
+                // EvalContext::step does sth. similar for the TLS dtors,
                 // and of course eval_main.
                 let mir = self.load_mir(f_instance.def)?;
                 self.push_stack_frame(
@@ -404,7 +412,8 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
             "pthread_key_create" => {
                 let key_ptr = args[0].into_ptr(&mut self.memory)?;
 
-                // Extract the function type out of the signature (that seems easier than constructing it ourselves...)
+                // Extract the function type out of the signature
+                // (that seems easier than constructing it ourselves...)
                 let dtor = match args[1].into_ptr(&mut self.memory)?.into_inner_primval() {
                     PrimVal::Ptr(dtor_ptr) => Some(self.memory.get_fn(dtor_ptr)?),
                     PrimVal::Bytes(0) => None,
@@ -412,9 +421,16 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
                     PrimVal::Undef => return err!(ReadUndefBytes),
                 };
 
-                // Figure out how large a pthread TLS key actually is. This is libc::pthread_key_t.
-                let key_type = self.operand_ty(&arg_operands[0]).builtin_deref(true, ty::LvaluePreference::NoPreference)
-                                   .ok_or(EvalErrorKind::AbiViolation("Wrong signature used for pthread_key_create: First argument must be a raw pointer.".to_owned()))?.ty;
+                // Figure out how large a pthread TLS key actually is.
+                //This is libc::pthread_key_t.
+                let key_type = self.operand_ty(&arg_operands[0])
+                    .builtin_deref(true, ty::LvaluePreference::NoPreference)
+                    .ok_or(EvalErrorKind::AbiViolation(
+                        "Wrong signature used for pthread_key_create: \
+                        First argument must be a raw pointer."
+                            .to_owned(),
+                    ))?
+                    .ty;
                 let key_size = {
                     let layout = self.type_layout(key_type)?;
                     layout.size(&self.tcx.data_layout)
@@ -436,20 +452,23 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
                 self.write_null(dest, dest_ty)?;
             }
             "pthread_key_delete" => {
-                // The conversion into TlsKey here is a little fishy, but should work as long as usize >= libc::pthread_key_t
+                // The conversion into TlsKey here is a little fishy,
+                // but should work as long as usize >= libc::pthread_key_t
                 let key = self.value_to_primval(args[0], usize)?.to_u64()? as TlsKey;
                 self.memory.delete_tls_key(key)?;
                 // Return success (0)
                 self.write_null(dest, dest_ty)?;
             }
             "pthread_getspecific" => {
-                // The conversion into TlsKey here is a little fishy, but should work as long as usize >= libc::pthread_key_t
+                // The conversion into TlsKey here is a little fishy,
+                // but should work as long as usize >= libc::pthread_key_t
                 let key = self.value_to_primval(args[0], usize)?.to_u64()? as TlsKey;
                 let ptr = self.memory.load_tls(key)?;
                 self.write_ptr(dest, ptr, dest_ty)?;
             }
             "pthread_setspecific" => {
-                // The conversion into TlsKey here is a little fishy, but should work as long as usize >= libc::pthread_key_t
+                // The conversion into TlsKey here is a little fishy,
+                // but should work as long as usize >= libc::pthread_key_t
                 let key = self.value_to_primval(args[0], usize)?.to_u64()? as TlsKey;
                 let new_ptr = args[1].into_ptr(&mut self.memory)?;
                 self.memory.store_tls(key, new_ptr)?;
@@ -523,7 +542,8 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
         sig: ty::FnSig<'tcx>,
         path: String,
     ) -> EvalResult<'tcx> {
-        // In some cases in non-MIR libstd-mode, not having a destination is legit.  Handle these early.
+        // In some cases in non-MIR libstd-mode, not having a destination is legit.
+        // Handle these early.
         match &path[..] {
             "std::panicking::rust_panic_with_hook" |
             "std::rt::begin_panic_fmt" => return err!(Panic),
@@ -537,8 +557,8 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
 
         if sig.abi == Abi::C {
             // An external C function
-            // FIXME: That functions actually has a similar preamble to what follows here.  May make sense to
-            // unify these two mechanisms for "hooking into missing functions".
+            // FIXME: That functions actually has a similar preamble to what follows here.
+            // May make sense to unify these two mechanisms for "hooking into missing functions".
             self.call_c_abi(
                 instance.def_id(),
                 arg_operands,
@@ -626,11 +646,14 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
                 self.write_primval(dest, PrimVal::Ptr(new_ptr), dest_ty)?;
             }
 
-            // A Rust function is missing, which means we are running with MIR missing for libstd (or other dependencies).
-            // Still, we can make many things mostly work by "emulating" or ignoring some functions.
+            // A Rust function is missing, which means we are running with MIR missing
+            // for libstd (or other dependencies).
+            // Still, we can make many things mostly work
+            // by "emulating" or ignoring some functions.
             "std::io::_print" => {
                 trace!(
-                    "Ignoring output.  To run programs that print, make sure you have a libstd with full MIR."
+                    "Ignoring output. \
+                     To run programs that print, make sure you have a libstd with full MIR."
                 );
             }
             "std::thread::Builder::new" => {

@@ -39,10 +39,11 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
         pointee_ty: Ty<'tcx>,
         offset: i64,
     ) -> EvalResult<'tcx, Pointer> {
-        // This function raises an error if the offset moves the pointer outside of its allocation.  We consider
-        // ZSTs their own huge allocation that doesn't overlap with anything (and nothing moves in there because the size is 0).
-        // We also consider the NULL pointer its own separate allocation, and all the remaining integers pointers their own
-        // allocation.
+        // This function raises an error if the offset moves the pointer outside of its allocation.
+        // We consider ZSTs their own huge allocation that doesn't overlap with anything
+        // (and nothing moves in there because the size is 0).
+        // We also consider the NULL pointer its own separate allocation,
+        // and all the remaining integers pointers their own allocation.
 
         if ptr.is_null()? {
             // NULL pointers must only be offset by 0
@@ -62,7 +63,9 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
             if let PrimVal::Ptr(ptr) = ptr.into_inner_primval() {
                 self.memory.check_bounds(ptr, false)?;
             } else if ptr.is_null()? {
-                // We moved *to* a NULL pointer.  That seems wrong, LLVM considers the NULL pointer its own small allocation.  Reject this, for now.
+                // We moved *to* a NULL pointer.
+                // That seems wrong, LLVM considers the NULL pointer its own small allocation.
+                // Reject this, for now.
                 return err!(InvalidNullPointerUsage);
             }
             Ok(ptr)

@@ -117,7 +117,8 @@ fn main() {
             }
         }
     } else {
-        // this arm is executed when cargo-miri runs `cargo rustc` with the `RUSTC` env var set to itself
+        // this arm is executed when cargo-miri runs
+        // `cargo rustc` with the `RUSTC` env var set to itself
 
         let home = option_env!("RUSTUP_HOME").or(option_env!("MULTIRUST_HOME"));
         let toolchain = option_env!("RUSTUP_TOOLCHAIN").or(option_env!("MULTIRUST_TOOLCHAIN"));
@@ -135,11 +136,14 @@ fn main() {
                         .and_then(|out| String::from_utf8(out.stdout).ok())
                         .map(|s| s.trim().to_owned())
                 })
-                .expect("need to specify RUST_SYSROOT env var during miri compilation, or use rustup or multirust")
+                .expect(
+                    "need to specify RUST_SYSROOT env var during \
+                         miri compilation, or use rustup or multirust",
+                )
         };
 
-        // this conditional check for the --sysroot flag is there so users can call `cargo-miri` directly
-        // without having to pass --sysroot or anything
+        // this conditional check for the --sysroot flag is there so users can call `cargo-miri`
+        // directly without having to pass --sysroot or anything
         let mut args: Vec<String> = if std::env::args().any(|s| s == "--sysroot") {
             std::env::args().skip(1).collect()
         } else {
@@ -150,8 +154,8 @@ fn main() {
                 .collect()
         };
 
-        // this check ensures that dependencies are built but not interpreted and the final crate is
-        // interpreted but not built
+        // this check ensures that dependencies are built but not interpreted and the final crate
+        // is interpreted but not built
         let miri_enabled = std::env::args().any(|s| s == "-Zno-trans");
 
         let mut command = if miri_enabled {

@@ -152,7 +152,9 @@ pub type TlsKey = usize;
 
 #[derive(Copy, Clone, Debug)]
 pub struct TlsEntry<'tcx> {
-    data: Pointer, // Will eventually become a map from thread IDs to `Pointer`s, if we ever support more than one thread.
+    // Will eventually become a map from thread IDs to `Pointer`s,
+    // if we ever support more than one thread.
+    data: Pointer,
     dtor: Option<ty::Instance<'tcx>>,
 }
 

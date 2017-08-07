@@ -145,7 +145,8 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
 
         Ok(match bin_op {
             Sub =>
-                // The only way this can overflow is by underflowing, so signdeness of the right operands does not matter
+                // The only way this can overflow is by underflowing,
+                // so signdeness of the right operands does not matter
                 map_to_primval(left.overflowing_signed_offset(-right, self)),
             Add if signed =>
                 map_to_primval(left.overflowing_signed_offset(right, self)),
@@ -167,7 +168,12 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator> 
             }
 
             _ => {
-                let msg = format!("unimplemented binary op on pointer {:?}: {:?}, {:?} ({})", bin_op, left, right, if signed { "signed" } else { "unsigned" });
+                let msg = format!(
+                    "unimplemented binary op on pointer {:?}: {:?}, {:?} ({})",
+                    bin_op,
+                    left, right,
+                    if signed { "signed" } else { "unsigned" },
+                );
                 return err!(Unimplemented(msg));
             }
         })
