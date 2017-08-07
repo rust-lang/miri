@@ -11,14 +11,8 @@ use rustc::ty;
 use rustc::ty::layout::Layout;
 use rustc::ty::subst::Substs;
 
-use super::{
-    EvalResult,
-    EvalContext, StackPopCleanup, TyAndPacked,
-    Global, GlobalId, Lvalue,
-    Value, PrimVal,
-    HasMemory,
-    Machine,
-};
+use super::{EvalResult, EvalContext, StackPopCleanup, TyAndPacked, Global, GlobalId, Lvalue,
+            Value, PrimVal, HasMemory, Machine};
 
 use syntax::codemap::Span;
 use syntax::ast::Mutability;
@@ -53,7 +47,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 ecx: self,
                 mir,
                 new_constants: &mut new,
-            }.visit_statement(block, stmt, mir::Location { block, statement_index: stmt_id });
+            }.visit_statement(
+                block,
+                stmt,
+                mir::Location {
+                    block,
+                    statement_index: stmt_id,
+                },
+            );
             // if ConstantExtractor added new frames, we don't execute anything here
             // but await the next call to step
             if new? == 0 {
@@ -70,7 +71,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             ecx: self,
             mir,
             new_constants: &mut new,
-        }.visit_terminator(block, terminator, mir::Location { block, statement_index: stmt_id });
+        }.visit_terminator(
+            block,
+            terminator,
+            mir::Location {
+                block,
+                statement_index: stmt_id,
+            },
+        );
         // if ConstantExtractor added new frames, we don't execute anything here
         // but await the next call to step
         if new? == 0 {
@@ -86,7 +94,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         match stmt.kind {
             Assign(ref lvalue, ref rvalue) => self.eval_rvalue_into_lvalue(rvalue, lvalue)?,
 
-            SetDiscriminant { ref lvalue, variant_index } => {
+            SetDiscriminant {
+                ref lvalue,
+                variant_index,
+            } => {
                 let dest = self.eval_lvalue(lvalue)?;
                 let dest_ty = self.lvalue_ty(lvalue);
                 let dest_layout = self.type_layout(dest_ty)?;
@@ -95,7 +106,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     Layout::General { discr, .. } => {
                         let discr_size = discr.size().bytes();
                         let dest_ptr = self.force_allocation(dest)?.to_ptr()?;
-                        self.memory.write_uint(dest_ptr, variant_index as u128, discr_size)?
+                        self.memory.write_uint(
+                            dest_ptr,
+                            variant_index as u128,
+                            discr_size,
+                        )?
                     }
 
                     Layout::RawNullablePointer { nndiscr, .. } => {
@@ -104,31 +119,57 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                         }
                     }
 
-                    Layout::StructWrappedNullablePointer { nndiscr, ref discrfield_source, .. } => {
+                    Layout::StructWrappedNullablePointer {
+                        nndiscr,
+                        ref discrfield_source,
+                        ..
+                    } => {
                         if variant_index as u64 != nndiscr {
-                            let (offset, TyAndPacked { ty, packed }) = self.nonnull_offset_and_ty(dest_ty, nndiscr, discrfield_source)?;
-                            let nonnull = self.force_allocation(dest)?.to_ptr()?.offset(offset.bytes(), &self)?;
+                            let (offset, TyAndPacked { ty, packed }) = self.nonnull_offset_and_ty(
+                                dest_ty,
+                                nndiscr,
+                                discrfield_source,
+                            )?;
+                            let nonnull = self.force_allocation(dest)?.to_ptr()?.offset(
+                                offset.bytes(),
+                                &self,
+                            )?;
                             trace!("struct wrapped nullable pointer type: {}", ty);
                             // only the pointer part of a fat pointer is used for this space optimization
-                            let discr_size = self.type_size(ty)?.expect("bad StructWrappedNullablePointer discrfield");
-                            self.write_maybe_aligned_mut(!packed, |ectx| ectx.memory.write_uint(nonnull, 0, discr_size))?;
+                            let discr_size = self.type_size(ty)?.expect(
+                                "bad StructWrappedNullablePointer discrfield",
+                            );
+                            self.write_maybe_aligned_mut(!packed, |ectx| {
+                                ectx.memory.write_uint(nonnull, 0, discr_size)
+                            })?;
                         }
-                    },
+                    }
 
-                    _ => bug!("SetDiscriminant on {} represented as {:#?}", dest_ty, dest_layout),
+                    _ => {
+                        bug!(
+                            "SetDiscriminant on {} represented as {:#?}",
+                            dest_ty,
+                            dest_layout
+                        )
+                    }
                 }
             }
 
             // Mark locals as dead or alive.
-            StorageLive(ref lvalue) | StorageDead(ref lvalue)=> {
-                let (frame, local) = match self.eval_lvalue(lvalue)? {
-                    Lvalue::Local{ frame, local } if self.cur_frame() == frame => (frame, local),
-                    _ => return err!(Unimplemented("Storage annotations must refer to locals of the topmost stack frame.".to_owned())) // FIXME maybe this should get its own error type
-                };
+            StorageLive(ref lvalue) |
+            StorageDead(ref lvalue) => {
+                let (frame, local) =
+                    match self.eval_lvalue(lvalue)? {
+                        Lvalue::Local { frame, local } if self.cur_frame() == frame => (
+                            frame,
+                            local,
+                        ),
+                        _ => return err!(Unimplemented("Storage annotations must refer to locals of the topmost stack frame.".to_owned())), // FIXME maybe this should get its own error type
+                    };
                 let old_val = match stmt.kind {
                     StorageLive(_) => self.stack[frame].storage_live(local)?,
-                    StorageDead(_) =>  self.stack[frame].storage_dead(local)?,
-                    _ => bug!("We already checked that we are a storage stmt")
+                    StorageDead(_) => self.stack[frame].storage_dead(local)?,
+                    _ => bug!("We already checked that we are a storage stmt"),
                 };
                 self.deallocate_local(old_val)?;
             }
@@ -172,22 +213,36 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         mutability: Mutability,
     ) -> EvalResult<'tcx, bool> {
         let instance = self.resolve_associated_const(def_id, substs);
-        let cid = GlobalId { instance, promoted: None };
+        let cid = GlobalId {
+            instance,
+            promoted: None,
+        };
         if self.globals.contains_key(&cid) {
             return Ok(false);
         }
         if self.tcx.has_attr(def_id, "linkage") {
             // FIXME: check that it's `#[linkage = "extern_weak"]`
             trace!("Initializing an extern global with NULL");
-            self.globals.insert(cid, Global::initialized(self.tcx.type_of(def_id), Value::ByVal(PrimVal::Bytes(0)), mutability));
+            self.globals.insert(
+                cid,
+                Global::initialized(
+                    self.tcx.type_of(def_id),
+                    Value::ByVal(PrimVal::Bytes(0)),
+                    mutability,
+                ),
+            );
             return Ok(false);
         }
         let mir = self.load_mir(instance.def)?;
-        self.globals.insert(cid, Global::uninitialized(mir.return_ty));
+        self.globals.insert(
+            cid,
+            Global::uninitialized(mir.return_ty),
+        );
         let internally_mutable = !mir.return_ty.is_freeze(
-                self.tcx,
-                ty::ParamEnv::empty(Reveal::All),
-                span);
+            self.tcx,
+            ty::ParamEnv::empty(Reveal::All),
+            span,
+        );
         let mutability = if mutability == Mutability::Mutable || internally_mutable {
             Mutability::Mutable
         } else {
@@ -230,7 +285,7 @@ impl<'a, 'b, 'tcx, M: Machine<'tcx>> ConstantExtractor<'a, 'b, 'tcx, M> {
             // everything ok + a new stackframe
             Ok(true) => *self.new_constants = Ok(n + 1),
             // constant correctly evaluated, but no new stackframe
-            Ok(false) => {},
+            Ok(false) => {}
             // constant eval errored
             Err(err) => *self.new_constants = Err(err),
         }
@@ -244,8 +299,15 @@ impl<'a, 'b, 'tcx, M: Machine<'tcx>> Visitor<'tcx> for ConstantExtractor<'a, 'b,
             // already computed by rustc
             mir::Literal::Value { .. } => {}
             mir::Literal::Item { def_id, substs } => {
-                self.try(|this| this.ecx.global_item(def_id, substs, constant.span, Mutability::Immutable));
-            },
+                self.try(|this| {
+                    this.ecx.global_item(
+                        def_id,
+                        substs,
+                        constant.span,
+                        Mutability::Immutable,
+                    )
+                });
+            }
             mir::Literal::Promoted { index } => {
                 let cid = GlobalId {
                     instance: self.instance,
@@ -259,11 +321,12 @@ impl<'a, 'b, 'tcx, M: Machine<'tcx>> Visitor<'tcx> for ConstantExtractor<'a, 'b,
                     let ty = this.ecx.monomorphize(mir.return_ty, this.instance.substs);
                     this.ecx.globals.insert(cid, Global::uninitialized(ty));
                     trace!("pushing stack frame for {:?}", index);
-                    this.ecx.push_stack_frame(this.instance,
-                                              constant.span,
-                                              mir,
-                                              Lvalue::Global(cid),
-                                              StackPopCleanup::MarkStatic(Mutability::Immutable),
+                    this.ecx.push_stack_frame(
+                        this.instance,
+                        constant.span,
+                        mir,
+                        Lvalue::Global(cid),
+                        StackPopCleanup::MarkStatic(Mutability::Immutable),
                     )?;
                     Ok(true)
                 });
@@ -275,7 +338,7 @@ impl<'a, 'b, 'tcx, M: Machine<'tcx>> Visitor<'tcx> for ConstantExtractor<'a, 'b,
         &mut self,
         lvalue: &mir::Lvalue<'tcx>,
         context: LvalueContext<'tcx>,
-        location: mir::Location
+        location: mir::Location,
     ) {
         self.super_lvalue(lvalue, context, location);
         if let mir::Lvalue::Static(ref static_) = *lvalue {
@@ -285,7 +348,18 @@ impl<'a, 'b, 'tcx, M: Machine<'tcx>> Visitor<'tcx> for ConstantExtractor<'a, 'b,
             if let Some(node_item) = self.ecx.tcx.hir.get_if_local(def_id) {
                 if let hir::map::Node::NodeItem(&hir::Item { ref node, .. }) = node_item {
                     if let hir::ItemStatic(_, m, _) = *node {
-                        self.try(|this| this.ecx.global_item(def_id, substs, span, if m == hir::MutMutable { Mutability::Mutable } else { Mutability::Immutable }));
+                        self.try(|this| {
+                            this.ecx.global_item(
+                                def_id,
+                                substs,
+                                span,
+                                if m == hir::MutMutable {
+                                    Mutability::Mutable
+                                } else {
+                                    Mutability::Immutable
+                                },
+                            )
+                        });
                         return;
                     } else {
                         bug!("static def id doesn't point to static");
@@ -296,7 +370,18 @@ impl<'a, 'b, 'tcx, M: Machine<'tcx>> Visitor<'tcx> for ConstantExtractor<'a, 'b,
             } else {
                 let def = self.ecx.tcx.describe_def(def_id).expect("static not found");
                 if let hir::def::Def::Static(_, mutable) = def {
-                    self.try(|this| this.ecx.global_item(def_id, substs, span, if mutable { Mutability::Mutable } else { Mutability::Immutable }));
+                    self.try(|this| {
+                        this.ecx.global_item(
+                            def_id,
+                            substs,
+                            span,
+                            if mutable {
+                                Mutability::Mutable
+                            } else {
+                                Mutability::Immutable
+                            },
+                        )
+                    });
                 } else {
                     bug!("static found but isn't a static: {:?}", def);
                 }
