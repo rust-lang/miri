@@ -61,7 +61,7 @@ pub enum EvalErrorKind<'tcx> {
     DerefFunctionPointer,
     ExecuteMemory,
     ArrayIndexOutOfBounds(Span, u64, u64),
-    Math(Span, ConstMathErr),
+    Math(Option<Span>, ConstMathErr),
     Intrinsic(String),
     OverflowingMath,
     InvalidChar(u128),
@@ -287,7 +287,7 @@ impl<'tcx> fmt::Display for EvalError<'tcx> {
                 write!(f, "tried to reallocate memory from {} to {}", old, new),
             DeallocatedWrongMemoryKind(ref old, ref new) =>
                 write!(f, "tried to deallocate {} memory but gave {} as the kind", old, new),
-            Math(span, ref err) =>
+            Math(Some(span), ref err) =>
                 write!(f, "{:?} at {:?}", err, span),
             Intrinsic(ref err) =>
                 write!(f, "{}", err),

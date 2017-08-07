@@ -124,7 +124,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                             err!(ArrayIndexOutOfBounds(span, len, index))
                         },
                         mir::AssertMessage::Math(ref err) =>
-                            err!(Math(terminator.source_info.span, err.clone())),
+                            err!(Math(Some(terminator.source_info.span), err.clone())),
                     }
                 }
             },

@@ -1,5 +1,7 @@
 use rustc::mir;
 use rustc::ty::Ty;
+use rustc_const_math::ConstFloat;
+use syntax::ast;
 
 use super::{
     EvalResult,
@@ -114,23 +116,32 @@ macro_rules! int_shift {
 }
 
 macro_rules! float_arithmetic {
-    ($from_bytes:ident, $to_bytes:ident, $float_op:tt, $l:expr, $r:expr) => ({
-        let l = $from_bytes($l);
-        let r = $from_bytes($r);
-        let bytes = $to_bytes(l $float_op r);
-        PrimVal::Bytes(bytes)
+    ($ty:expr, $float_op:tt, $l:expr, $r:expr) => ({
+        let l = ConstFloat {
+            bits: $l,
+            ty: $ty,
+        };
+        let r = ConstFloat {
+            bits: $r,
+            ty: $ty,
+        };
+        let result = l $float_op r;
+        match result {
+            Ok(val) => PrimVal::Bytes(val.bits),
+            Err(e) => return err!(Math(None, e)),
+        }
     })
 }
 
 macro_rules! f32_arithmetic {
     ($float_op:tt, $l:expr, $r:expr) => (
-        float_arithmetic!(bytes_to_f32, f32_to_bytes, $float_op, $l, $r)
+        float_arithmetic!(ast::FloatTy::F32, $float_op, $l, $r)
     )
 }
 
 macro_rules! f64_arithmetic {
     ($float_op:tt, $l:expr, $r:expr) => (
-        float_arithmetic!(bytes_to_f64, f64_to_bytes, $float_op, $l, $r)
+        float_arithmetic!(ast::FloatTy::F64, $float_op, $l, $r)
     )
 }
 
