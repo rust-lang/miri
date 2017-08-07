@@ -165,7 +165,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         Ok(())
     }
 
-    /// Decides whether it is okay to call the method with signature `real_sig` using signature `sig`.
+    /// Decides whether it is okay to call the method with signature
+    /// `real_sig` using signature `sig`.
     /// FIXME: This should take into account the platform-dependent ABI description.
     fn check_sig_compat(
         &mut self,
@@ -208,7 +209,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         // We need to allow what comes up when a non-capturing closure is cast to a fn().
         match (sig.abi, real_sig.abi) {
             (Abi::Rust, Abi::RustCall) // check the ABIs.  This makes the test here non-symmetric.
-                if check_ty_compat(sig.output(), real_sig.output()) && real_sig.inputs_and_output.len() == 3 => {
+                if check_ty_compat(sig.output(), real_sig.output()) &&
+                   real_sig.inputs_and_output.len() == 3 => {
                 // First argument of real_sig must be a ZST
                 let fst_ty = real_sig.inputs_and_output[0];
                 let layout = self.type_layout(fst_ty)?;
@@ -218,7 +220,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     let snd_ty = real_sig.inputs_and_output[1];
                     match snd_ty.sty {
                         TypeVariants::TyTuple(tys, _) if sig.inputs().len() == tys.len() =>
-                            if sig.inputs().iter().zip(tys).all(|(ty, real_ty)| check_ty_compat(ty, real_ty)) {
+                            if sig.inputs()
+                                  .iter()
+                                  .zip(tys)
+                                  .all(|(ty, real_ty)| check_ty_compat(ty, real_ty)) {
                                 return Ok(true)
                             },
                         _ => {}
@@ -311,7 +316,6 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 }
 
                 // Pass the arguments
-                let mut arg_locals = self.frame().mir.args_iter();
                 trace!("ABI: {:?}", sig.abi);
                 trace!(
                     "arg_locals: {:?}",
@@ -319,76 +323,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 );
                 trace!("arg_operands: {:?}", arg_operands);
                 match sig.abi {
-                    Abi::RustCall => {
-                        assert_eq!(args.len(), 2);
-
-                        {
-                            // write first argument
-                            let first_local = arg_locals.next().unwrap();
-                            let dest = self.eval_lvalue(&mir::Lvalue::Local(first_local))?;
-                            let (arg_val, arg_ty) = args.remove(0);
-                            self.write_value(arg_val, dest, arg_ty)?;
-                        }
-
-                        // unpack and write all other args
-                        let (arg_val, arg_ty) = args.remove(0);
-                        let layout = self.type_layout(arg_ty)?;
-                        if let (&ty::TyTuple(fields, _),
-                                &Layout::Univariant { ref variant, .. }) = (&arg_ty.sty, layout)
-                        {
-                            trace!("fields: {:?}", fields);
-                            if self.frame().mir.args_iter().count() == fields.len() + 1 {
-                                let offsets = variant.offsets.iter().map(|s| s.bytes());
-                                match arg_val {
-                                    Value::ByRef { ptr, aligned } => {
-                                        assert!(
-                                            aligned,
-                                            "Unaligned ByRef-values cannot occur as function arguments"
-                                        );
-                                        for ((offset, ty), arg_local) in
-                                            offsets.zip(fields).zip(arg_locals)
-                                        {
-                                            let arg = Value::ByRef {
-                                                ptr: ptr.offset(offset, &self)?,
-                                                aligned: true,
-                                            };
-                                            let dest =
-                                                self.eval_lvalue(&mir::Lvalue::Local(arg_local))?;
-                                            trace!(
-                                                "writing arg {:?} to {:?} (type: {})",
-                                                arg,
-                                                dest,
-                                                ty
-                                            );
-                                            self.write_value(arg, dest, ty)?;
-                                        }
-                                    }
-                                    Value::ByVal(PrimVal::Undef) => {}
-                                    other => {
-                                        assert_eq!(fields.len(), 1);
-                                        let dest = self.eval_lvalue(&mir::Lvalue::Local(
-                                            arg_locals.next().unwrap(),
-                                        ))?;
-                                        self.write_value(other, dest, fields[0])?;
-                                    }
-                                }
-                            } else {
-                                trace!("manual impl of rust-call ABI");
-                                // called a manual impl of a rust-call function
-                                let dest = self.eval_lvalue(
-                                    &mir::Lvalue::Local(arg_locals.next().unwrap()),
-                                )?;
-                                self.write_value(arg_val, dest, arg_ty)?;
-                            }
-                        } else {
-                            bug!(
-                                "rust-call ABI tuple argument was {:?}, {:?}",
-                                arg_ty,
-                                layout
-                            );
-                        }
-                    }
+                    Abi::RustCall => self.write_rustcall_args(args)?,
                     _ => {
+                        let arg_locals = self.frame().mir.args_iter();
                         for (arg_local, (arg_val, arg_ty)) in arg_locals.zip(args) {
                             let dest = self.eval_lvalue(&mir::Lvalue::Local(arg_local))?;
                             self.write_value(arg_val, dest, arg_ty)?;
@@ -460,6 +397,70 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 self.eval_fn_call(instance, destination, &arg_operands, span, sig)
             }
         }
+    }
+
+    fn write_rustcall_args(&mut self, mut args: Vec<(Value, Ty<'tcx>)>) -> EvalResult<'tcx> {
+        assert_eq!(args.len(), 2);
+
+        let mut arg_locals = self.frame().mir.args_iter();
+        {
+            // write first argument
+            let first_local = arg_locals.next().unwrap();
+            let dest = self.eval_lvalue(&mir::Lvalue::Local(first_local))?;
+            let (arg_val, arg_ty) = args.remove(0);
+            self.write_value(arg_val, dest, arg_ty)?;
+        }
+
+        // unpack and write all other args
+        let (arg_val, arg_ty) = args.remove(0);
+        let layout = self.type_layout(arg_ty)?;
+        if let (&ty::TyTuple(fields, _), &Layout::Univariant { ref variant, .. }) =
+            (&arg_ty.sty, layout)
+        {
+            trace!("fields: {:?}", fields);
+            if self.frame().mir.args_iter().count() == fields.len() + 1 {
+                let offsets = variant.offsets.iter().map(|s| s.bytes());
+                match arg_val {
+                    Value::ByRef { ptr, aligned } => {
+                        assert!(
+                            aligned,
+                            "Unaligned ByRef-values cannot occur as function arguments"
+                        );
+                        for ((offset, ty), arg_local) in offsets.zip(fields).zip(arg_locals) {
+                            let arg = Value::ByRef {
+                                ptr: ptr.offset(offset, &self)?,
+                                aligned: true,
+                            };
+                            let dest = self.eval_lvalue(&mir::Lvalue::Local(arg_local))?;
+                            trace!("writing arg {:?} to {:?} (type: {})", arg, dest, ty);
+                            self.write_value(arg, dest, ty)?;
+                        }
+                    }
+                    Value::ByVal(PrimVal::Undef) => {}
+                    other => {
+                        assert_eq!(fields.len(), 1);
+                        let dest = self.eval_lvalue(
+                            &mir::Lvalue::Local(arg_locals.next().unwrap()),
+                        )?;
+                        self.write_value(other, dest, fields[0])?;
+                    }
+                }
+            } else {
+                trace!("manual impl of rust-call ABI");
+                // called a manual impl of a rust-call function
+                let dest = self.eval_lvalue(
+                    &mir::Lvalue::Local(arg_locals.next().unwrap()),
+                )?;
+                self.write_value(arg_val, dest, arg_ty)?;
+            }
+        } else {
+            bug!(
+                "rust-call ABI tuple argument was {:?}, {:?}",
+                arg_ty,
+                layout
+            );
+        }
+        Ok(())
     }
 
     pub fn read_discriminant_value(

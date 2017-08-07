@@ -135,7 +135,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                                 &self,
                             )?;
                             trace!("struct wrapped nullable pointer type: {}", ty);
-                            // only the pointer part of a fat pointer is used for this space optimization
+                            // only the pointer part of a fat pointer
+                            // is used for this space optimization
                             let discr_size = self.type_size(ty)?.expect(
                                 "bad StructWrappedNullablePointer discrfield",
                             );
@@ -158,14 +159,17 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             // Mark locals as dead or alive.
             StorageLive(ref lvalue) |
             StorageDead(ref lvalue) => {
-                let (frame, local) =
-                    match self.eval_lvalue(lvalue)? {
-                        Lvalue::Local { frame, local } if self.cur_frame() == frame => (
-                            frame,
-                            local,
-                        ),
-                        _ => return err!(Unimplemented("Storage annotations must refer to locals of the topmost stack frame.".to_owned())), // FIXME maybe this should get its own error type
-                    };
+                let (frame, local) = match self.eval_lvalue(lvalue)? {
+                    Lvalue::Local { frame, local } if self.cur_frame() == frame => (frame, local),
+                    // FIXME maybe this should get its own error type
+                    _ => {
+                        return err!(Unimplemented(
+                            "Storage annotations must refer to locals \
+                                                        of the topmost stack frame."
+                                .to_owned(),
+                        ))
+                    }
+                };
                 let old_val = match stmt.kind {
                     StorageLive(_) => self.stack[frame].storage_live(local)?,
                     StorageDead(_) => self.stack[frame].storage_dead(local)?,

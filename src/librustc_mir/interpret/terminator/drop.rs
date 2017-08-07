@@ -14,9 +14,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         span: Span,
     ) -> EvalResult<'tcx> {
         trace!("drop_lvalue: {:#?}", lval);
-        // We take the address of the object.  This may well be unaligned, which is fine for us here.
-        // However, unaligned accesses will probably make the actual drop implementation fail -- a problem shared
-        // by rustc.
+        // We take the address of the object.
+        // This may well be unaligned, which is fine for us here.
+        // However, unaligned accesses will probably make the actual drop implementation fail
+        // -- a problem shared by rustc.
         let val = match self.force_allocation(lval)? {
             Lvalue::Ptr {
                 ptr,

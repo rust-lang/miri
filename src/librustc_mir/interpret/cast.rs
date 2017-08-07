@@ -78,7 +78,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             TyChar if v as u8 as u128 == v => Ok(PrimVal::Bytes(v)),
             TyChar => err!(InvalidChar(v)),
 
-            // No alignment check needed for raw pointers.  But we have to truncate to target ptr size.
+            // No alignment check needed for raw pointers.
+            // But we have to truncate to target ptr size.
             TyRawPtr(_) => Ok(PrimVal::Bytes(self.memory.truncate_to_ptr(v).0 as u128)),
 
             _ => err!(Unimplemented(format!("int to {:?} cast", ty))),
@@ -103,7 +104,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     fn cast_from_ptr(&self, ptr: MemoryPointer, ty: Ty<'tcx>) -> EvalResult<'tcx, PrimVal> {
         use rustc::ty::TypeVariants::*;
         match ty.sty {
-            // Casting to a reference or fn pointer is not permitted by rustc, no need to support it here.
+            // Casting to a reference or fn pointer is not permitted by rustc,
+            // no need to support it here.
             TyRawPtr(_) |
             TyInt(IntTy::Is) |
             TyUint(UintTy::Us) => Ok(PrimVal::Ptr(ptr)),

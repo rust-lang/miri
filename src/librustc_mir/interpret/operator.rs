@@ -148,7 +148,6 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
         let left_kind = self.ty_to_primval_kind(left_ty)?;
         let right_kind = self.ty_to_primval_kind(right_ty)?;
-        //trace!("Running binary op {:?}: {:?} ({:?}), {:?} ({:?})", bin_op, left, left_kind, right, right_kind);
 
         // I: Handle operations that support pointers
         if !left_kind.is_float() && !right_kind.is_float() {

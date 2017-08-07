@@ -76,7 +76,8 @@ pub struct Frame<'tcx> {
     /// `None` represents a local that is currently dead, while a live local
     /// can either directly contain `PrimVal` or refer to some part of an `Allocation`.
     ///
-    /// Before being initialized, arguments are `Value::ByVal(PrimVal::Undef)` and other locals are `None`.
+    /// Before being initialized, arguments are `Value::ByVal(PrimVal::Undef)`
+    /// and other locals are `None`.
     pub locals: Vec<Option<Value>>,
 
     ////////////////////////////////////////////////////////////////////////////////
@@ -468,8 +469,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             set
         }
 
-        // Subtract 1 because `local_decls` includes the ReturnMemoryPointer, but we don't store a local
-        // `Value` for that.
+        // Subtract 1 because `local_decls` includes the ReturnMemoryPointer,
+        // but we don't store a local `Value` for that.
         let annotated_locals = collect_storage_annotations(mir);
         let num_locals = mir.local_decls.len() - 1;
         let mut locals = vec![None; num_locals];
@@ -508,7 +509,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             "tried to pop a stack frame, but there were none",
         );
         if !self.stack.is_empty() {
-            // FIXME: IS this the correct time to start considering these accesses as originating from the returned-to stack frame?
+            // FIXME: IS this the correct time to start considering
+            // these accesses as originating from the returned-to stack frame?
             let cur_frame = self.cur_frame();
             self.memory.set_cur_frame(cur_frame);
         }
@@ -519,7 +521,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                         "global should have been cached (static)",
                     );
                     match global_value.value {
-                    // FIXME: to_ptr()? might be too extreme here, static zsts might reach this under certain conditions
+                    // FIXME: to_ptr()? might be too extreme here,
+                    // static zsts might reach this under certain conditions
                     Value::ByRef { ptr, aligned: _aligned } =>
                         // Alignment does not matter for this call
                         self.memory.mark_static_initalized(ptr.to_ptr()?.alloc_id, mutable)?,
@@ -651,10 +654,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     dest_ty,
                 )?
                 {
-                    // There was an overflow in an unchecked binop.  Right now, we consider this an error and bail out.
-                    // The rationale is that the reason rustc emits unchecked binops in release mode (vs. the checked binops
-                    // it emits in debug mode) is performance, but it doesn't cost us any performance in miri.
-                    // If, however, the compiler ever starts transforming unchecked intrinsics into unchecked binops,
+                    // There was an overflow in an unchecked binop.
+                    // Right now, we consider this an error and bail out.
+                    // The rationale is that the reason rustc emits
+                    // unchecked binops in release mode (vs. the checked binops
+                    // it emits in debug mode) is performance,
+                    // but it doesn't cost us any performance in miri.
+                    // If, however, the compiler ever starts transforming
+                    // unchecked intrinsics into unchecked binops,
                     // we have to go back to just ignoring the overflow here.
                     return err!(OverflowingMath);
                 }
@@ -851,8 +858,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
             Ref(_, _, ref lvalue) => {
                 let src = self.eval_lvalue(lvalue)?;
-                // We ignore the alignment of the lvalue here -- special handling for packed structs ends
-                // at the `&` operator.
+                // We ignore the alignment of the lvalue here
+                // special handling for packed structs ends at the `&` operator.
                 let (ptr, extra, _aligned) = self.force_allocation(src)?.to_ptr_extra_aligned();
 
                 let val = match extra {
@@ -1153,7 +1160,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     }
 
     fn get_field_offset(&self, ty: Ty<'tcx>, field_index: usize) -> EvalResult<'tcx, Size> {
-        // Also see lvalue_field in lvalue.rs, which handles more cases but needs an actual value at the given type
+        // Also see lvalue_field in lvalue.rs,
+        // which handles more cases but needs an actual value at the given type
         let layout = self.type_layout(ty)?;
 
         use rustc::ty::layout::Layout::*;
@@ -1379,8 +1387,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         dest_ty: Ty<'tcx>,
     ) -> EvalResult<'tcx> {
         //trace!("Writing {:?} to {:?} at type {:?}", src_val, dest, dest_ty);
-        // Note that it is really important that the type here is the right one, and matches the type things are read at.
-        // In case `src_val` is a `ByValPair`, we don't do any magic here to handle padding properly, which is only
+        // Note that it is really important that the type here is the right one,
+        // and matches the type things are read at.
+        // In case `src_val` is a `ByValPair`,
+        // we don't do any magic here to handle padding properly, which is only
         // correct if we never look at this data with the wrong type.
 
         match dest {
@@ -1610,7 +1620,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
                     // represent single field structs as their single field
                     Univariant { .. } => {
-                        // enums with just one variant are no different, but `.struct_variant()` doesn't work for enums
+                        // enums with just one variant are no different,
+                        // but `.struct_variant()` doesn't work for enums
                         let variant = &def.variants[0];
                         // FIXME: also allow structs with only a single non zst field
                         if variant.fields.len() == 1 {
@@ -1698,9 +1709,12 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 };
                 // if we transmute a ptr to an isize, reading it back into a primval shouldn't panic
                 // Due to read_ptr ignoring the sign, we need to jump around some hoops
+                use super::EvalErrorKind::ReadPointerAsBytes;
                 match self.memory.read_int(ptr.to_ptr()?, size) {
-                    Err(EvalError { kind: EvalErrorKind::ReadPointerAsBytes, .. }) if size == self.memory.pointer_size() =>
-                        // Reading as an int failed because we are seeing ptr bytes *and* we are actually reading at ptr size.
+                    Err(EvalError { kind: ReadPointerAsBytes, .. })
+                    if size == self.memory.pointer_size() =>
+                        // Reading as an int failed because we are seeing ptr bytes
+                        // *and* we are actually reading at ptr size.
                         // Let's try again, reading a ptr this time.
                         self.memory.read_ptr(ptr.to_ptr()?)?.into_inner_primval(),
                     other => PrimVal::from_i128(other?),
@@ -2070,7 +2084,8 @@ impl<'tcx> Frame<'tcx> {
         trace!("{:?} is now live", local);
 
         let old = self.locals[local.index() - 1];
-        self.locals[local.index() - 1] = Some(Value::ByVal(PrimVal::Undef)); // StorageLive *always* kills the value that's currently stored
+        // StorageLive *always* kills the value that's currently stored
+        self.locals[local.index() - 1] = Some(Value::ByVal(PrimVal::Undef));
         return Ok(old);
     }
 

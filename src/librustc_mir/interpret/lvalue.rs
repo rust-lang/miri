@@ -90,7 +90,8 @@ impl<'tcx> Lvalue<'tcx> {
 
     pub fn to_ptr(self) -> EvalResult<'tcx, MemoryPointer> {
         let (ptr, extra, _aligned) = self.to_ptr_extra_aligned();
-        // At this point, we forget about the alignment information -- the lvalue has been turned into a reference,
+        // At this point, we forget about the alignment information
+        // -- the lvalue has been turned into a reference,
         // and no matter where it came from, it now must be aligned.
         assert_eq!(extra, LvalueExtra::None);
         ptr.to_ptr()
@@ -146,7 +147,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     ) -> EvalResult<'tcx, Option<Value>> {
         use rustc::mir::Lvalue::*;
         match *lvalue {
-            // Might allow this in the future, right now there's no way to do this from Rust code anyway
+            // Might allow this in the future,
+            // right now there's no way to do this from Rust code anyway
             Local(mir::RETURN_POINTER) => err!(ReadFromReturnPointer),
             // Directly reading a local will always succeed
             Local(local) => self.frame().get_local(local).map(Some),
@@ -449,7 +451,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         outer_ty: Ty<'tcx>,
         n: u64,
     ) -> EvalResult<'tcx, Lvalue<'tcx>> {
-        // Taking the outer type here may seem odd; it's needed because for array types, the outer type gives away the length.
+        // Taking the outer type here may seem odd;
+        // it's needed because for array types, the outer type gives away the length.
         let base = self.force_allocation(base)?;
         let (base_ptr, _, aligned) = base.to_ptr_extra_aligned();
 

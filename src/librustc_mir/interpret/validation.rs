@@ -46,8 +46,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         }
 
         // HACK: Determine if this method is whitelisted and hence we do not perform any validation.
-        // We currently insta-UB on anything passing around uninitialized memory, so we have to whitelist
-        // the places that are allowed to do that.
+        // We currently insta-UB on anything passing around uninitialized memory, so we have to
+        // whitelist the places that are allowed to do that.
         // The second group is stuff libstd does that is forbidden even under relaxed validation.
         {
             // The regexp we use for filtering
@@ -89,8 +89,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             ValidationOp::Release => ValidationMode::Release,
             ValidationOp::Suspend(_) => ValidationMode::Release,
         };
+        use super::EvalErrorKind::InvalidMemoryLockRelease;
+        use self::LockInfo::ReadLock;
         match self.validate(query.clone(), mode) {
-            Err(EvalError { kind: EvalErrorKind::InvalidMemoryLockRelease { lock: LockInfo::ReadLock(_), .. }, .. }) => {
+            Err(EvalError { kind: InvalidMemoryLockRelease { lock: ReadLock(_), .. }, .. }) => {
                 // HACK: When &x is used while x is already borrowed read-only, AddValidation still
                 // emits suspension.  This code is legit, so just ignore the error *and*
                 // do NOT register a suspension.
@@ -184,7 +186,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         )
     }
 
-    /// Validate the lvalue at the given type. If `acquire` is false, just do a release of all write locks
+    /// Validate the lvalue at the given type.
+    /// If `acquire` is false, just do a release of all write locks
     #[inline]
     fn validate(&mut self, query: ValidationQuery<'tcx>, mode: ValidationMode) -> EvalResult<'tcx> {
         match self.try_validate(query, mode) {
@@ -223,7 +226,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             }
         }
 
-        // HACK: For now, bail out if we hit a dead local during recovery (can happen because sometimes we have
+        // HACK: For now, bail out if we hit a dead local during recovery
+        // (can happen because sometimes we have
         // StorageDead before EndRegion due to https://github.com/rust-lang/rust/issues/43481).
         // FIXME: We should rather fix the MIR.
         match query.lval {
@@ -315,11 +319,13 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         match query.ty.sty {
             TyInt(_) | TyUint(_) | TyRawPtr(_) => {
                 // FIXME: Make sure these are not undef.
-                // We could do a bounds-check and other sanity checks on the lvalue, but it would be a bug in miri for this to ever fail.
+                // We could do a bounds-check and other sanity checks on the lvalue,
+                // but it would be a bug in miri for this to ever fail.
                 Ok(())
             }
             TyBool | TyFloat(_) | TyChar | TyStr => {
-                // FIXME: Check if these are valid bool/float/codepoint/UTF-8, respectively (and in particular, not undef).
+                // FIXME: Check if these are valid bool/float/codepoint/UTF-8,
+                // respectively (and in particular, not undef).
                 Ok(())
             }
             TyNever => err!(ValidationFailure(format!("The empty type is never valid."))),
@@ -333,13 +339,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 if mutbl == MutImmutable {
                     query.mutbl = MutImmutable;
                 }
-                // Inner lifetimes *outlive* outer ones, so only if we have no lifetime restriction yet,
+                // Inner lifetimes *outlive* outer ones,
+                // so only if we have no lifetime restriction yet,
                 // we record the region of this borrow to the context.
                 if query.re == None {
                     match *region {
                         ReScope(ce) => query.re = Some(ce),
-                        // It is possible for us to encounter erased lifetimes here because the lifetimes in
-                        // this functions' Subst will be erased.
+                        // It is possible for us to encounter erased lifetimes here
+                        // because the lifetimes in this functions' Subst will be erased.
                         _ => {}
                     }
                 }
@@ -354,7 +361,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     .into_ptr(&self.memory)?
                     .to_ptr()?;
                 self.memory.get_fn(ptr)?;
-                // FIXME: Check if the signature matches (should be the same check as what terminator/mod.rs already does on call?).
+                // FIXME: Check if the signature matches
+                // (should be the same check as what terminator/mod.rs already does on call?).
                 Ok(())
             }
             TyFnDef(..) => {
@@ -413,18 +421,22 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     }
                 };
                 self.read_size_and_align_from_vtable(vtable)?;
-                // FIXME: Check that the vtable contains all the function pointers we expect it to have.
+                // FIXME: Check that the vtable contains all
+                // the function pointers we expect it to have.
                 // Trait objects cannot have any operations performed
-                // on them directly.  We cannot, in general, even acquire any locks as the trait object *could*
-                // contain an UnsafeCell.  If we call functions to get access to data, we will validate
-                // their return values.  So, it doesn't seem like there's anything else to do.
+                // on them directly.
+                // We cannot, in general, even acquire any locks as the trait object *could*
+                // contain an UnsafeCell.
+                // If we call functions to get access to data, we will validate
+                // their return values. So, it doesn't seem like there's anything else to do.
                 Ok(())
             }
             TyAdt(adt, subst) => {
                 if Some(adt.did) == self.tcx.lang_items.unsafe_cell_type() &&
                     query.mutbl == MutImmutable
                 {
-                    // No locks for shared unsafe cells.  Also no other validation, the only field is private anyway.
+                    // No locks for shared unsafe cells.
+                    // Also no other validation, the only field is private anyway.
                     return Ok(());
                 }
 
@@ -464,7 +476,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                                 mode,
                             )
                         } else {
-                            // No fields, nothing left to check.  Downcasting may fail, e.g. in case of a CEnum.
+                            // No fields, nothing left to check.
+                            // Downcasting may fail, e.g. in case of a CEnum.
                             Ok(())
                         }
                     }
@@ -473,7 +486,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     }
                     AdtKind::Union => {
                         // No guarantees are provided for union types.
-                        // FIXME: Make sure that all access to union fields is unsafe; otherwise, we may have some checking to do (but what exactly?)
+                        // FIXME: Make sure that all access to union fields is unsafe;
+                        // otherwise, we may have some checking to do (but what exactly?)
                         Ok(())
                     }
                 }
@@ -504,7 +518,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                         mode,
                     )?;
                 }
-                // FIXME: Check if the signature matches (should be the same check as what terminator/mod.rs already does on call?).
+                // FIXME: Check if the signature matches
+                // (should be the same check as what terminator/mod.rs already does on call?).
                 // Is there other things we can/should check?  Like vtable pointers?
                 Ok(())
             }

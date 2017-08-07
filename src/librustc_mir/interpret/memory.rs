@@ -19,9 +19,11 @@ mod range {
 
     // The derived `Ord` impl sorts first by the first field, then, if the fields are the same,
     // by the second field.
-    // This is exactly what we need for our purposes, since a range query on a BTReeSet/BTreeMap will give us all
-    // `MemoryRange`s whose `start` is <= than the one we're looking for, but not > the end of the range we're checking.
-    // At the same time the `end` is irrelevant for the sorting and range searching, but used for the check.
+    // This is exactly what we need for our purposes, since a range query on a BTReeSet/BTreeMap
+    // will give us all `MemoryRange`s whose `start` is <= than the one we're looking for,
+    // but not > the end of the range we're checking.
+    // At the same time the `end` is irrelevant for the sorting and range searching,
+    // but used for the check.
     // This kind of search breaks, if `end < start`, so don't do that!
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
     pub struct MemoryRange {
@@ -42,7 +44,8 @@ mod range {
             assert!(len > 0);
             // We select all elements that are within
             // the range given by the offset into the allocation and the length.
-            // This is sound if "self.contains() || self.overlaps() == true" implies that self is in-range.
+            // This is sound if "self.contains() || self.overlaps() == true"
+            // implies that self is in-range.
             let left = MemoryRange {
                 start: 0,
                 end: offset,
@@ -78,7 +81,9 @@ pub enum AccessKind {
 #[derive(Clone, Debug)]
 pub enum LockInfo {
     WriteLock(DynamicLifetime),
-    ReadLock(Vec<DynamicLifetime>), // This should never be empty -- that would be a read lock held and nobody there to release it...
+    /// This should never be empty.
+    /// That would be a read lock held and nobody there to release it...
+    ReadLock(Vec<DynamicLifetime>),
 }
 use self::LockInfo::*;
 
@@ -86,8 +91,10 @@ impl LockInfo {
     fn access_permitted(&self, frame: Option<usize>, access: AccessKind) -> bool {
         use self::AccessKind::*;
         match (self, access) {
-            (&ReadLock(_), Read) => true, // Read access to read-locked region is okay, no matter who's holding the read lock.
-            (&WriteLock(ref lft), _) if Some(lft.frame) == frame => true, // All access is okay when we hold the write lock.
+            // Read access to read-locked region is okay, no matter who's holding the read lock.
+            (&ReadLock(_), Read) => true,
+            // All access is okay when we hold the write lock.
+            (&WriteLock(ref lft), _) if Some(lft.frame) == frame => true,
             _ => false, // Nothing else is okay.
         }
     }
@@ -120,8 +127,8 @@ pub struct Allocation<M> {
     pub align: u64,
     /// Whether the allocation may be modified.
     pub mutable: Mutability,
-    /// Use the `mark_static_initalized` method of `Memory` to ensure that an error occurs, if the memory of this
-    /// allocation is modified or deallocated in the future.
+    /// Use the `mark_static_initalized` method of `Memory` to ensure that an error occurs,
+    /// if the memory of this allocation is modified or deallocated in the future.
     /// Helps guarantee that stack allocations aren't deallocated via `rust_deallocate`
     pub kind: Kind<M>,
     /// Memory regions that are locked by some function
@@ -267,7 +274,8 @@ pub struct Memory<'a, 'tcx, M: Machine<'tcx>> {
     /// allocations for string and bytestring literals.
     literal_alloc_cache: HashMap<Vec<u8>, AllocId>,
 
-    /// To avoid having to pass flags to every single memory access, we have some global state saying whether
+    /// To avoid having to pass flags to every single memory access,
+    /// we have some global state saying whether
     /// alignment checking is currently enforced for read and/or write accesses.
     reads_are_aligned: Cell<bool>,
     writes_are_aligned: Cell<bool>,
@@ -421,9 +429,12 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             None => return err!(DoubleFree),
         };
 
-        // It is okay for us to still holds locks on deallocation -- for example, we could store data we own
-        // in a local, and the local could be deallocated (from StorageDead) before the function returns.
-        // However, we should check *something*.  For now, we make sure that there is no conflicting write
+        // It is okay for us to still holds locks on deallocation
+        // for example, we could store data we own
+        // in a local, and the local could be deallocated (from StorageDead)
+        // before the function returns.
+        // However, we should check *something*.
+        // For now, we make sure that there is no conflicting write
         // lock by another frame.  We *have* to permit deallocation if we hold a read lock.
         // FIXME: Figure out the exact rules here.
         alloc
@@ -557,7 +568,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             len,
             region
         );
-        self.check_bounds(ptr.offset(len, self.layout)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(len, self.layout)?, true)?;
         let alloc = self.get_mut_unchecked(ptr.alloc_id)?;
 
         // Check if this conflicts with other locks
@@ -623,7 +635,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                     remove_list.push(*range);
                 }
                 ReadLock(_) => {
-                    // Abort here and bubble the error outwards so that we do not even register a suspension.
+                    // Abort here and bubble the error outwards
+                    // so that we do not even register a suspension.
                     return err!(InvalidMemoryLockRelease {
                         ptr,
                         len,
@@ -656,8 +669,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                 return false;
             }
             match ending_region {
-                None => true, // When a function ends, we end *all* its locks. It's okay for a function to still have lifetime-related locks
-                // when it returns, that can happen e.g. with NLL when a lifetime can, but does not have to, extend beyond the
+                None => true,
+                // When a function ends, we end *all* its locks.
+                // It's okay for a function to still have lifetime-related locks
+                // when it returns, that can happen e.g. with NLL when a lifetime can,
+                // but does not have to, extend beyond the
                 // end of a function.  Same for a function still having recoveries.
                 Some(ending_region) => lifetime.region == Some(ending_region),
             }
@@ -774,7 +790,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                 }
                 (Some(_), Some(_)) => {
                     bug!(
-                        "miri invariant broken: an allocation id exists that points to both a function and a memory location"
+                        "miri invariant broken: an allocation id exists \
+                          that points to both a function and a memory location"
                     )
                 }
             };
@@ -853,7 +870,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         size: u64,
         align: u64,
     ) -> EvalResult<'tcx, &[u8]> {
-        // Zero-sized accesses can use dangling pointers, but they still have to be aligned and non-NULL
+        // Zero-sized accesses can use dangling pointers,
+        // but they still have to be aligned and non-NULL
         if self.reads_are_aligned.get() {
             self.check_align(ptr.into(), align)?;
         }
@@ -861,7 +879,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             return Ok(&[]);
         }
         self.check_locks(ptr, size, AccessKind::Read)?;
-        self.check_bounds(ptr.offset(size, self)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(size, self)?, true)?;
         let alloc = self.get(ptr.alloc_id)?;
         assert_eq!(ptr.offset as usize as u64, ptr.offset);
         assert_eq!(size as usize as u64, size);
@@ -875,7 +894,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         size: u64,
         align: u64,
     ) -> EvalResult<'tcx, &mut [u8]> {
-        // Zero-sized accesses can use dangling pointers, but they still have to be aligned and non-NULL
+        // Zero-sized accesses can use dangling pointers,
+        // but they still have to be aligned and non-NULL
         if self.writes_are_aligned.get() {
             self.check_align(ptr.into(), align)?;
         }
@@ -883,7 +903,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             return Ok(&mut []);
         }
         self.check_locks(ptr, size, AccessKind::Write)?;
-        self.check_bounds(ptr.offset(size, self.layout)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(size, self.layout)?, true)?;
         let alloc = self.get_mut(ptr.alloc_id)?;
         assert_eq!(ptr.offset as usize as u64, ptr.offset);
         assert_eq!(size as usize as u64, size);
@@ -967,7 +988,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                     Kind::UninitializedStatic => {},
                     Kind::Machine(m) => M::mark_static_initialized(m)?,
                     Kind::Static => {
-                        trace!("mark_static_initalized: skipping already initialized static referred to by static currently being initialized");
+                        trace!("mark_static_initalized: skipping already initialized\
+                                static referred to by static currently being initialized");
                         return Ok(());
                     },
                 }
@@ -1102,7 +1124,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
     pub fn read_ptr(&self, ptr: MemoryPointer) -> EvalResult<'tcx, Pointer> {
         let size = self.pointer_size();
-        self.check_relocation_edges(ptr, size)?; // Make sure we don't read part of a pointer as a pointer
+        // Make sure we don't read part of a pointer as a pointer
+        self.check_relocation_edges(ptr, size)?;
         let endianess = self.endianess();
         let bytes = self.get_bytes_unchecked(ptr, size, size)?;
         // Undef check happens *after* we established that the alignment is correct.

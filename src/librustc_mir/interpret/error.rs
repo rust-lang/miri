@@ -142,7 +142,8 @@ impl<'tcx> Error for EvalError<'tcx> {
             }
             ReadBytesAsPointer => "a memory access tried to interpret some bytes as a pointer",
             InvalidPointerMath => {
-                "attempted to do invalid arithmetic on pointers that would leak base addresses, e.g. comparing pointers into different allocations"
+                "attempted to do invalid arithmetic on pointers that would leak base addresses, \
+                e.g. comparing pointers into different allocations"
             }
             ReadUndefBytes => "attempted to read undefined bytes",
             DeadLocal => "tried to access a dead local variable",
@@ -184,11 +185,13 @@ impl<'tcx> Error for EvalError<'tcx> {
             }
             Layout(_) => "rustc layout computation failed",
             UnterminatedCString(_) => {
-                "attempted to get length of a null terminated string, but no null found before end of allocation"
+                "attempted to get length of a null terminated string, \
+                but no null found before end of allocation"
             }
             HeapAllocZeroBytes => "tried to re-, de- or allocate zero bytes on the heap",
             HeapAllocNonPowerOfTwoAlignment(_) => {
-                "tried to re-, de-, or allocate heap memory with alignment that is not a power of two"
+                "tried to re-, de-, or allocate heap memory with \
+                alignment that is not a power of two"
             }
             Unreachable => "entered unreachable code",
             Panic => "the evaluated program panicked",
@@ -270,7 +273,8 @@ impl<'tcx> fmt::Display for EvalError<'tcx> {
             } => {
                 write!(
                     f,
-                    "frame {} tried to release memory write lock at {:?}, size {}, but cannot release lock {:?}",
+                    "frame {} tried to release memory write lock at {:?}, \
+                    size {}, but cannot release lock {:?}",
                     frame,
                     ptr,
                     len,
@@ -331,7 +335,8 @@ impl<'tcx> fmt::Display for EvalError<'tcx> {
             } => {
                 write!(
                     f,
-                    "tried to allocate {} more bytes, but only {} bytes are free of the {} byte memory",
+                    "tried to allocate {} more bytes, but only {} \
+                    bytes are free of the {} byte memory",
                     allocation_size,
                     memory_size - memory_usage,
                     memory_size
