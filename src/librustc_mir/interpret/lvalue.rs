@@ -4,13 +4,7 @@ use rustc::ty::{self, Ty};
 use rustc_data_structures::indexed_vec::Idx;
 use syntax::ast::Mutability;
 
-use super::{
-    EvalResult,
-    EvalContext,
-    MemoryPointer,
-    PrimVal, Value, Pointer,
-    Machine,
-};
+use super::{EvalResult, EvalContext, MemoryPointer, PrimVal, Value, Pointer, Machine};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Lvalue<'tcx> {
@@ -27,10 +21,7 @@ pub enum Lvalue<'tcx> {
 
     /// An lvalue referring to a value on the stack. Represented by a stack frame index paired with
     /// a Mir local index.
-    Local {
-        frame: usize,
-        local: mir::Local,
-    },
+    Local { frame: usize, local: mir::Local },
 
     /// An lvalue referring to a global
     Global(GlobalId<'tcx>),
@@ -74,7 +65,11 @@ impl<'tcx> Lvalue<'tcx> {
     }
 
     pub fn from_primval_ptr(ptr: Pointer) -> Self {
-        Lvalue::Ptr { ptr, extra: LvalueExtra::None, aligned: true }
+        Lvalue::Ptr {
+            ptr,
+            extra: LvalueExtra::None,
+            aligned: true,
+        }
     }
 
     pub fn from_ptr(ptr: MemoryPointer) -> Self {
@@ -83,7 +78,11 @@ impl<'tcx> Lvalue<'tcx> {
 
     pub(super) fn to_ptr_extra_aligned(self) -> (Pointer, LvalueExtra, bool) {
         match self {
-            Lvalue::Ptr { ptr, extra, aligned } => (ptr, extra, aligned),
+            Lvalue::Ptr {
+                ptr,
+                extra,
+                aligned,
+            } => (ptr, extra, aligned),
             _ => bug!("to_ptr_and_extra: expected Lvalue::Ptr, got {:?}", self),
 
         }
@@ -91,7 +90,8 @@ impl<'tcx> Lvalue<'tcx> {
 
     pub fn to_ptr(self) -> EvalResult<'tcx, MemoryPointer> {
         let (ptr, extra, _aligned) = self.to_ptr_extra_aligned();
-        // At this point, we forget about the alignment information -- the lvalue has been turned into a reference,
+        // At this point, we forget about the alignment information
+        // -- the lvalue has been turned into a reference,
         // and no matter where it came from, it now must be aligned.
         assert_eq!(extra, LvalueExtra::None);
         ptr.to_ptr()
@@ -104,7 +104,12 @@ impl<'tcx> Lvalue<'tcx> {
             ty::TySlice(elem) => {
                 match self {
                     Lvalue::Ptr { extra: LvalueExtra::Length(len), .. } => (elem, len),
-                    _ => bug!("elem_ty_and_len of a TySlice given non-slice lvalue: {:?}", self),
+                    _ => {
+                        bug!(
+                            "elem_ty_and_len of a TySlice given non-slice lvalue: {:?}",
+                            self
+                        )
+                    }
                 }
             }
 
@@ -136,24 +141,36 @@ impl<'tcx> Global<'tcx> {
 impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     /// Reads a value from the lvalue without going through the intermediate step of obtaining
     /// a `miri::Lvalue`
-    pub fn try_read_lvalue(&mut self, lvalue: &mir::Lvalue<'tcx>) -> EvalResult<'tcx, Option<Value>> {
+    pub fn try_read_lvalue(
+        &mut self,
+        lvalue: &mir::Lvalue<'tcx>,
+    ) -> EvalResult<'tcx, Option<Value>> {
         use rustc::mir::Lvalue::*;
         match *lvalue {
-            // Might allow this in the future, right now there's no way to do this from Rust code anyway
+            // Might allow this in the future,
+            // right now there's no way to do this from Rust code anyway
             Local(mir::RETURN_POINTER) => err!(ReadFromReturnPointer),
             // Directly reading a local will always succeed
             Local(local) => self.frame().get_local(local).map(Some),
             // Directly reading a static will always succeed
             Static(ref static_) => {
                 let instance = ty::Instance::mono(self.tcx, static_.def_id);
-                let cid = GlobalId { instance, promoted: None };
-                Ok(Some(self.globals.get(&cid).expect("global not cached").value))
-            },
+                let cid = GlobalId {
+                    instance,
+                    promoted: None,
+                };
+                Ok(Some(
+                    self.globals.get(&cid).expect("global not cached").value,
+                ))
+            }
             Projection(ref proj) => self.try_read_lvalue_projection(proj),
         }
     }
 
-    fn try_read_lvalue_projection(&mut self, proj: &mir::LvalueProjection<'tcx>) -> EvalResult<'tcx, Option<Value>> {
+    fn try_read_lvalue_projection(
+        &mut self,
+        proj: &mir::LvalueProjection<'tcx>,
+    ) -> EvalResult<'tcx, Option<Value>> {
         use rustc::mir::ProjectionElem::*;
         let base = match self.try_read_lvalue(&proj.base)? {
             Some(base) => base,
@@ -184,7 +201,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     }
 
     /// Returns a value and (in case of a ByRef) if we are supposed to use aligned accesses.
-    pub(super) fn eval_and_read_lvalue(&mut self, lvalue: &mir::Lvalue<'tcx>) -> EvalResult<'tcx, Value> {
+    pub(super) fn eval_and_read_lvalue(
+        &mut self,
+        lvalue: &mir::Lvalue<'tcx>,
+    ) -> EvalResult<'tcx, Value> {
         // Shortcut for things like accessing a fat pointer's field,
         // which would otherwise (in the `eval_lvalue` path) require moving a `ByValPair` to memory
         // and returning an `Lvalue::Ptr` to it
@@ -197,28 +217,37 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
     pub fn read_lvalue(&self, lvalue: Lvalue<'tcx>) -> EvalResult<'tcx, Value> {
         match lvalue {
-            Lvalue::Ptr { ptr, extra, aligned } => {
+            Lvalue::Ptr {
+                ptr,
+                extra,
+                aligned,
+            } => {
                 assert_eq!(extra, LvalueExtra::None);
                 Ok(Value::ByRef { ptr, aligned })
             }
-            Lvalue::Local { frame, local } => {
-                self.stack[frame].get_local(local)
-            }
-            Lvalue::Global(cid) => {
-                Ok(self.globals.get(&cid).expect("global not cached").value)
-            }
+            Lvalue::Local { frame, local } => self.stack[frame].get_local(local),
+            Lvalue::Global(cid) => Ok(self.globals.get(&cid).expect("global not cached").value),
         }
     }
 
-    pub fn eval_lvalue(&mut self, mir_lvalue: &mir::Lvalue<'tcx>) -> EvalResult<'tcx, Lvalue<'tcx>> {
+    pub fn eval_lvalue(
+        &mut self,
+        mir_lvalue: &mir::Lvalue<'tcx>,
+    ) -> EvalResult<'tcx, Lvalue<'tcx>> {
         use rustc::mir::Lvalue::*;
         let lvalue = match *mir_lvalue {
             Local(mir::RETURN_POINTER) => self.frame().return_lvalue,
-            Local(local) => Lvalue::Local { frame: self.cur_frame(), local },
+            Local(local) => Lvalue::Local {
+                frame: self.cur_frame(),
+                local,
+            },
 
             Static(ref static_) => {
                 let instance = ty::Instance::mono(self.tcx, static_.def_id);
-                Lvalue::Global(GlobalId { instance, promoted: None })
+                Lvalue::Global(GlobalId {
+                    instance,
+                    promoted: None,
+                })
             }
 
             Projection(ref proj) => {
@@ -245,15 +274,16 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         let base_layout = self.type_layout(base_ty)?;
         use rustc::ty::layout::Layout::*;
         let (offset, packed) = match *base_layout {
-            Univariant { ref variant, .. } => {
-                (variant.offsets[field_index], variant.packed)
-            },
+            Univariant { ref variant, .. } => (variant.offsets[field_index], variant.packed),
 
             General { ref variants, .. } => {
                 let (_, base_extra, _) = base.to_ptr_extra_aligned();
                 if let LvalueExtra::DowncastVariant(variant_idx) = base_extra {
                     // +1 for the discriminant, which is field 0
-                    (variants[variant_idx].offsets[field_index + 1], variants[variant_idx].packed)
+                    (
+                        variants[variant_idx].offsets[field_index + 1],
+                        variants[variant_idx].packed,
+                    )
                 } else {
                     bug!("field access on enum had no variant index");
                 }
@@ -284,8 +314,13 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                     ty::TyArray(elem_ty, n) => {
                         assert!(field < n as u64);
                         self.type_size(elem_ty)?.expect("array elements are sized") as u64
-                    },
-                    _ => bug!("lvalue_field: got Array layout but non-array type {:?}", base_ty),
+                    }
+                    _ => {
+                        bug!(
+                            "lvalue_field: got Array layout but non-array type {:?}",
+                            base_ty
+                        )
+                    }
                 };
                 (Size::from_bytes(field * elem_size), false)
             }
@@ -301,33 +336,60 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
         // Do not allocate in trivial cases
         let (base_ptr, base_extra, aligned) = match base {
-            Lvalue::Ptr { ptr, extra, aligned } => (ptr, extra, aligned),
-            Lvalue::Local { frame, local } => match self.stack[frame].get_local(local)? {
-                // in case the type has a single field, just return the value
-                Value::ByVal(_) if self.get_field_count(base_ty).map(|c| c == 1).unwrap_or(false) => {
-                    assert_eq!(offset.bytes(), 0, "ByVal can only have 1 non zst field with offset 0");
-                    return Ok(base);
-                },
-                Value::ByRef{..} |
-                Value::ByValPair(..) |
-                Value::ByVal(_) => self.force_allocation(base)?.to_ptr_extra_aligned(),
-            },
-            Lvalue::Global(cid) => match self.globals.get(&cid).expect("uncached global").value {
-                // in case the type has a single field, just return the value
-                Value::ByVal(_) if self.get_field_count(base_ty).map(|c| c == 1).unwrap_or(false) => {
-                    assert_eq!(offset.bytes(), 0, "ByVal can only have 1 non zst field with offset 0");
-                    return Ok(base);
-                },
-                Value::ByRef{..} |
-                Value::ByValPair(..) |
-                Value::ByVal(_) => self.force_allocation(base)?.to_ptr_extra_aligned(),
-            },
+            Lvalue::Ptr {
+                ptr,
+                extra,
+                aligned,
+            } => (ptr, extra, aligned),
+            Lvalue::Local { frame, local } => {
+                match self.stack[frame].get_local(local)? {
+                    // in case the type has a single field, just return the value
+                    Value::ByVal(_)
+                        if self.get_field_count(base_ty).map(|c| c == 1).unwrap_or(
+                            false,
+                        ) => {
+                        assert_eq!(
+                            offset.bytes(),
+                            0,
+                            "ByVal can only have 1 non zst field with offset 0"
+                        );
+                        return Ok(base);
+                    }
+                    Value::ByRef { .. } |
+                    Value::ByValPair(..) |
+                    Value::ByVal(_) => self.force_allocation(base)?.to_ptr_extra_aligned(),
+                }
+            }
+            Lvalue::Global(cid) => {
+                match self.globals.get(&cid).expect("uncached global").value {
+                    // in case the type has a single field, just return the value
+                    Value::ByVal(_)
+                        if self.get_field_count(base_ty).map(|c| c == 1).unwrap_or(
+                            false,
+                        ) => {
+                        assert_eq!(
+                            offset.bytes(),
+                            0,
+                            "ByVal can only have 1 non zst field with offset 0"
+                        );
+                        return Ok(base);
+                    }
+                    Value::ByRef { .. } |
+                    Value::ByValPair(..) |
+                    Value::ByVal(_) => self.force_allocation(base)?.to_ptr_extra_aligned(),
+                }
+            }
         };
 
         let offset = match base_extra {
             LvalueExtra::Vtable(tab) => {
-                let (_, align) = self.size_and_align_of_dst(base_ty, base_ptr.to_value_with_vtable(tab))?;
-                offset.abi_align(Align::from_bytes(align, align).unwrap()).bytes()
+                let (_, align) = self.size_and_align_of_dst(
+                    base_ty,
+                    base_ptr.to_value_with_vtable(tab),
+                )?;
+                offset
+                    .abi_align(Align::from_bytes(align, align).unwrap())
+                    .bytes()
             }
             _ => offset.bytes(),
         };
@@ -341,41 +403,75 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         } else {
             match base_extra {
                 LvalueExtra::None => bug!("expected fat pointer"),
-                LvalueExtra::DowncastVariant(..) =>
-                    bug!("Rust doesn't support unsized fields in enum variants"),
+                LvalueExtra::DowncastVariant(..) => {
+                    bug!("Rust doesn't support unsized fields in enum variants")
+                }
                 LvalueExtra::Vtable(_) |
-                LvalueExtra::Length(_) => {},
+                LvalueExtra::Length(_) => {}
             }
             base_extra
         };
 
-        Ok(Lvalue::Ptr { ptr, extra, aligned: aligned && !packed })
+        Ok(Lvalue::Ptr {
+            ptr,
+            extra,
+            aligned: aligned && !packed,
+        })
     }
 
     pub(super) fn val_to_lvalue(&self, val: Value, ty: Ty<'tcx>) -> EvalResult<'tcx, Lvalue<'tcx>> {
         Ok(match self.tcx.struct_tail(ty).sty {
             ty::TyDynamic(..) => {
                 let (ptr, vtable) = val.into_ptr_vtable_pair(&self.memory)?;
-                Lvalue::Ptr { ptr, extra: LvalueExtra::Vtable(vtable), aligned: true }
-            },
+                Lvalue::Ptr {
+                    ptr,
+                    extra: LvalueExtra::Vtable(vtable),
+                    aligned: true,
+                }
+            }
             ty::TyStr | ty::TySlice(_) => {
                 let (ptr, len) = val.into_slice(&self.memory)?;
-                Lvalue::Ptr { ptr, extra: LvalueExtra::Length(len), aligned: true }
+                Lvalue::Ptr {
+                    ptr,
+                    extra: LvalueExtra::Length(len),
+                    aligned: true,
+                }
+            }
+            _ => Lvalue::Ptr {
+                ptr: val.into_ptr(&self.memory)?,
+                extra: LvalueExtra::None,
+                aligned: true,
             },
-            _ => Lvalue::Ptr { ptr: val.into_ptr(&self.memory)?, extra: LvalueExtra::None, aligned: true },
         })
     }
 
-    pub(super) fn lvalue_index(&mut self, base: Lvalue<'tcx>, outer_ty: Ty<'tcx>, n: u64) -> EvalResult<'tcx, Lvalue<'tcx>> {
-        // Taking the outer type here may seem odd; it's needed because for array types, the outer type gives away the length.
+    pub(super) fn lvalue_index(
+        &mut self,
+        base: Lvalue<'tcx>,
+        outer_ty: Ty<'tcx>,
+        n: u64,
+    ) -> EvalResult<'tcx, Lvalue<'tcx>> {
+        // Taking the outer type here may seem odd;
+        // it's needed because for array types, the outer type gives away the length.
         let base = self.force_allocation(base)?;
         let (base_ptr, _, aligned) = base.to_ptr_extra_aligned();
 
         let (elem_ty, len) = base.elem_ty_and_len(outer_ty);
-        let elem_size = self.type_size(elem_ty)?.expect("slice element must be sized");
-        assert!(n < len, "Tried to access element {} of array/slice with length {}", n, len);
+        let elem_size = self.type_size(elem_ty)?.expect(
+            "slice element must be sized",
+        );
+        assert!(
+            n < len,
+            "Tried to access element {} of array/slice with length {}",
+            n,
+            len
+        );
         let ptr = base_ptr.offset(n * elem_size, self.memory.layout)?;
-        Ok(Lvalue::Ptr { ptr, extra: LvalueExtra::None, aligned })
+        Ok(Lvalue::Ptr {
+            ptr,
+            extra: LvalueExtra::None,
+            aligned,
+        })
     }
 
     pub(super) fn eval_lvalue_projection(
@@ -399,7 +495,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 use rustc::ty::layout::Layout::*;
                 let extra = match *base_layout {
                     General { .. } => LvalueExtra::DowncastVariant(variant),
-                    RawNullablePointer { .. } | StructWrappedNullablePointer { .. } => base_extra,
+                    RawNullablePointer { .. } |
+                    StructWrappedNullablePointer { .. } => base_extra,
                     _ => bug!("variant downcast on non-aggregate: {:?}", base_layout),
                 };
                 (base_ptr, extra, aligned)
@@ -428,13 +525,19 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 return self.lvalue_index(base, base_ty, n);
             }
 
-            ConstantIndex { offset, min_length, from_end } => {
+            ConstantIndex {
+                offset,
+                min_length,
+                from_end,
+            } => {
                 // FIXME(solson)
                 let base = self.force_allocation(base)?;
                 let (base_ptr, _, aligned) = base.to_ptr_extra_aligned();
 
                 let (elem_ty, n) = base.elem_ty_and_len(base_ty);
-                let elem_size = self.type_size(elem_ty)?.expect("sequence element must be sized");
+                let elem_size = self.type_size(elem_ty)?.expect(
+                    "sequence element must be sized",
+                );
                 assert!(n >= min_length as u64);
 
                 let index = if from_end {
@@ -453,7 +556,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
                 let (base_ptr, _, aligned) = base.to_ptr_extra_aligned();
 
                 let (elem_ty, n) = base.elem_ty_and_len(base_ty);
-                let elem_size = self.type_size(elem_ty)?.expect("slice element must be sized");
+                let elem_size = self.type_size(elem_ty)?.expect(
+                    "slice element must be sized",
+                );
                 assert!(u64::from(from) <= n - u64::from(to));
                 let ptr = base_ptr.offset(u64::from(from) * elem_size, &self)?;
                 let extra = LvalueExtra::Length(n - u64::from(to) - u64::from(from));
@@ -461,10 +566,17 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             }
         };
 
-        Ok(Lvalue::Ptr { ptr, extra, aligned })
+        Ok(Lvalue::Ptr {
+            ptr,
+            extra,
+            aligned,
+        })
     }
 
     pub(super) fn lvalue_ty(&self, lvalue: &mir::Lvalue<'tcx>) -> Ty<'tcx> {
-        self.monomorphize(lvalue.ty(self.mir(), self.tcx).to_ty(self.tcx), self.substs())
+        self.monomorphize(
+            lvalue.ty(self.mir(), self.tcx).to_ty(self.tcx),
+            self.substs(),
+        )
     }
 }

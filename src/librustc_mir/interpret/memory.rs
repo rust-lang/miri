@@ -8,12 +8,7 @@ use rustc::ty::layout::{self, TargetDataLayout, HasDataLayout};
 use syntax::ast::Mutability;
 use rustc::middle::region::CodeExtent;
 
-use super::{
-    EvalResult, EvalErrorKind,
-    PrimVal, Pointer,
-    EvalContext, DynamicLifetime,
-    Machine,
-};
+use super::{EvalResult, EvalErrorKind, PrimVal, Pointer, EvalContext, DynamicLifetime, Machine};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Locks
@@ -24,9 +19,11 @@ mod range {
 
     // The derived `Ord` impl sorts first by the first field, then, if the fields are the same,
     // by the second field.
-    // This is exactly what we need for our purposes, since a range query on a BTReeSet/BTreeMap will give us all
-    // `MemoryRange`s whose `start` is <= than the one we're looking for, but not > the end of the range we're checking.
-    // At the same time the `end` is irrelevant for the sorting and range searching, but used for the check.
+    // This is exactly what we need for our purposes, since a range query on a BTReeSet/BTreeMap
+    // will give us all `MemoryRange`s whose `start` is <= than the one we're looking for,
+    // but not > the end of the range we're checking.
+    // At the same time the `end` is irrelevant for the sorting and range searching,
+    // but used for the check.
     // This kind of search breaks, if `end < start`, so don't do that!
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
     pub struct MemoryRange {
@@ -47,7 +44,8 @@ mod range {
             assert!(len > 0);
             // We select all elements that are within
             // the range given by the offset into the allocation and the length.
-            // This is sound if "self.contains() || self.overlaps() == true" implies that self is in-range.
+            // This is sound if "self.contains() || self.overlaps() == true"
+            // implies that self is in-range.
             let left = MemoryRange {
                 start: 0,
                 end: offset,
@@ -83,7 +81,9 @@ pub enum AccessKind {
 #[derive(Clone, Debug)]
 pub enum LockInfo {
     WriteLock(DynamicLifetime),
-    ReadLock(Vec<DynamicLifetime>), // This should never be empty -- that would be a read lock held and nobody there to release it...
+    /// This should never be empty.
+    /// That would be a read lock held and nobody there to release it...
+    ReadLock(Vec<DynamicLifetime>),
 }
 use self::LockInfo::*;
 
@@ -91,8 +91,10 @@ impl LockInfo {
     fn access_permitted(&self, frame: Option<usize>, access: AccessKind) -> bool {
         use self::AccessKind::*;
         match (self, access) {
-            (&ReadLock(_), Read) => true, // Read access to read-locked region is okay, no matter who's holding the read lock.
-            (&WriteLock(ref lft), _) if Some(lft.frame) == frame => true, // All access is okay when we hold the write lock.
+            // Read access to read-locked region is okay, no matter who's holding the read lock.
+            (&ReadLock(_), Read) => true,
+            // All access is okay when we hold the write lock.
+            (&WriteLock(ref lft), _) if Some(lft.frame) == frame => true,
             _ => false, // Nothing else is okay.
         }
     }
@@ -125,8 +127,8 @@ pub struct Allocation<M> {
     pub align: u64,
     /// Whether the allocation may be modified.
     pub mutable: Mutability,
-    /// Use the `mark_static_initalized` method of `Memory` to ensure that an error occurs, if the memory of this
-    /// allocation is modified or deallocated in the future.
+    /// Use the `mark_static_initalized` method of `Memory` to ensure that an error occurs,
+    /// if the memory of this allocation is modified or deallocated in the future.
     /// Helps guarantee that stack allocations aren't deallocated via `rust_deallocate`
     pub kind: Kind<M>,
     /// Memory regions that are locked by some function
@@ -134,19 +136,35 @@ pub struct Allocation<M> {
 }
 
 impl<M> Allocation<M> {
-    fn iter_locks<'a>(&'a self, offset: u64, len: u64) -> impl Iterator<Item=(&'a MemoryRange, &'a LockInfo)> + 'a {
-        self.locks.range(MemoryRange::range(offset, len))
+    fn iter_locks<'a>(
+        &'a self,
+        offset: u64,
+        len: u64,
+    ) -> impl Iterator<Item = (&'a MemoryRange, &'a LockInfo)> + 'a {
+        self.locks.range(MemoryRange::range(offset, len)).filter(
+            move |&(range, _)| range.overlaps(offset, len),
+        )
+    }
+
+    fn iter_locks_mut<'a>(
+        &'a mut self,
+        offset: u64,
+        len: u64,
+    ) -> impl Iterator<Item = (&'a MemoryRange, &'a mut LockInfo)> + 'a {
+        self.locks
+            .range_mut(MemoryRange::range(offset, len))
             .filter(move |&(range, _)| range.overlaps(offset, len))
     }
 
-    fn iter_locks_mut<'a>(&'a mut self, offset: u64, len: u64) -> impl Iterator<Item=(&'a MemoryRange, &'a mut LockInfo)> + 'a {
-        self.locks.range_mut(MemoryRange::range(offset, len))
-            .filter(move |&(range, _)| range.overlaps(offset, len))
-    }
-
-    fn check_locks<'tcx>(&self, frame: Option<usize>, offset: u64, len: u64, access: AccessKind) -> Result<(), LockInfo> {
+    fn check_locks<'tcx>(
+        &self,
+        frame: Option<usize>,
+        offset: u64,
+        len: u64,
+        access: AccessKind,
+    ) -> Result<(), LockInfo> {
         if len == 0 {
-            return Ok(())
+            return Ok(());
         }
         for (_, lock) in self.iter_locks(offset, len) {
             // Check if the lock is in conflict with the access.
@@ -185,7 +203,10 @@ impl<'tcx> MemoryPointer {
     }
 
     pub(crate) fn wrapping_signed_offset<C: HasDataLayout>(self, i: i64, cx: C) -> Self {
-        MemoryPointer::new(self.alloc_id, cx.data_layout().wrapping_signed_offset(self.offset, i))
+        MemoryPointer::new(
+            self.alloc_id,
+            cx.data_layout().wrapping_signed_offset(self.offset, i),
+        )
     }
 
     pub fn overflowing_signed_offset<C: HasDataLayout>(self, i: i128, cx: C) -> (Self, bool) {
@@ -194,7 +215,10 @@ impl<'tcx> MemoryPointer {
     }
 
     pub(crate) fn signed_offset<C: HasDataLayout>(self, i: i64, cx: C) -> EvalResult<'tcx, Self> {
-        Ok(MemoryPointer::new(self.alloc_id, cx.data_layout().signed_offset(self.offset, i)?))
+        Ok(MemoryPointer::new(
+            self.alloc_id,
+            cx.data_layout().signed_offset(self.offset, i)?,
+        ))
     }
 
     pub fn overflowing_offset<C: HasDataLayout>(self, i: u64, cx: C) -> (Self, bool) {
@@ -203,7 +227,10 @@ impl<'tcx> MemoryPointer {
     }
 
     pub fn offset<C: HasDataLayout>(self, i: u64, cx: C) -> EvalResult<'tcx, Self> {
-        Ok(MemoryPointer::new(self.alloc_id, cx.data_layout().offset(self.offset, i)?))
+        Ok(MemoryPointer::new(
+            self.alloc_id,
+            cx.data_layout().offset(self.offset, i)?,
+        ))
     }
 }
 
@@ -247,7 +274,8 @@ pub struct Memory<'a, 'tcx, M: Machine<'tcx>> {
     /// allocations for string and bytestring literals.
     literal_alloc_cache: HashMap<Vec<u8>, AllocId>,
 
-    /// To avoid having to pass flags to every single memory access, we have some global state saying whether
+    /// To avoid having to pass flags to every single memory access,
+    /// we have some global state saying whether
     /// alignment checking is currently enforced for read and/or write accesses.
     reads_are_aligned: Cell<bool>,
     writes_are_aligned: Cell<bool>,
@@ -275,7 +303,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         }
     }
 
-    pub fn allocations(&self) -> ::std::collections::hash_map::Iter<AllocId, Allocation<M::MemoryKinds>> {
+    pub fn allocations(
+        &self,
+    ) -> ::std::collections::hash_map::Iter<AllocId, Allocation<M::MemoryKinds>> {
         self.alloc_map.iter()
     }
 
@@ -296,10 +326,20 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             return Ok(MemoryPointer::new(alloc_id, 0));
         }
 
-        let ptr = self.allocate(bytes.len() as u64, 1, Kind::UninitializedStatic)?;
+        let ptr = self.allocate(
+            bytes.len() as u64,
+            1,
+            Kind::UninitializedStatic,
+        )?;
         self.write_bytes(ptr.into(), bytes)?;
-        self.mark_static_initalized(ptr.alloc_id, Mutability::Immutable)?;
-        self.literal_alloc_cache.insert(bytes.to_vec(), ptr.alloc_id);
+        self.mark_static_initalized(
+            ptr.alloc_id,
+            Mutability::Immutable,
+        )?;
+        self.literal_alloc_cache.insert(
+            bytes.to_vec(),
+            ptr.alloc_id,
+        );
         Ok(ptr)
     }
 
@@ -352,13 +392,23 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         }
         if let Ok(alloc) = self.get(ptr.alloc_id) {
             if alloc.kind != kind {
-                return err!(ReallocatedWrongMemoryKind(format!("{:?}", alloc.kind), format!("{:?}", kind)));
+                return err!(ReallocatedWrongMemoryKind(
+                    format!("{:?}", alloc.kind),
+                    format!("{:?}", kind),
+                ));
             }
         }
 
         // For simplicities' sake, we implement reallocate as "alloc, copy, dealloc"
         let new_ptr = self.allocate(new_size, new_align, kind)?;
-        self.copy(ptr.into(), new_ptr.into(), min(old_size, new_size), min(old_align, new_align), /*nonoverlapping*/true)?;
+        self.copy(
+            ptr.into(),
+            new_ptr.into(),
+            min(old_size, new_size),
+            min(old_align, new_align),
+            /*nonoverlapping*/
+            true,
+        )?;
         self.deallocate(ptr, Some((old_size, old_align)), kind)?;
 
         Ok(new_ptr)
@@ -379,16 +429,28 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             None => return err!(DoubleFree),
         };
 
-        // It is okay for us to still holds locks on deallocation -- for example, we could store data we own
-        // in a local, and the local could be deallocated (from StorageDead) before the function returns.
-        // However, we should check *something*.  For now, we make sure that there is no conflicting write
+        // It is okay for us to still holds locks on deallocation
+        // for example, we could store data we own
+        // in a local, and the local could be deallocated (from StorageDead)
+        // before the function returns.
+        // However, we should check *something*.
+        // For now, we make sure that there is no conflicting write
         // lock by another frame.  We *have* to permit deallocation if we hold a read lock.
-        // TODO: Figure out the exact rules here.
-        alloc.check_locks(Some(self.cur_frame), 0, alloc.bytes.len() as u64, AccessKind::Read)
+        // FIXME: Figure out the exact rules here.
+        alloc
+            .check_locks(
+                Some(self.cur_frame),
+                0,
+                alloc.bytes.len() as u64,
+                AccessKind::Read,
+            )
             .map_err(|lock| EvalErrorKind::DeallocatedLockedMemory { ptr, lock })?;
 
         if alloc.kind != kind {
-            return err!(DeallocatedWrongMemoryKind(format!("{:?}", alloc.kind), format!("{:?}", kind)));
+            return err!(DeallocatedWrongMemoryKind(
+                format!("{:?}", alloc.kind),
+                format!("{:?}", kind),
+            ));
         }
         if let Some((size, align)) = size_and_align {
             if size != alloc.bytes.len() as u64 || align != alloc.align {
@@ -422,14 +484,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                     });
                 }
                 ptr.offset
-            },
+            }
             PrimVal::Bytes(bytes) => {
                 let v = ((bytes as u128) % (1 << self.pointer_size())) as u64;
                 if v == 0 {
                     return err!(InvalidNullPointerUsage);
                 }
                 v
-            },
+            }
             PrimVal::Undef => return err!(ReadUndefBytes),
         };
         if offset % align == 0 {
@@ -446,7 +508,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         let alloc = self.get(ptr.alloc_id)?;
         let allocation_size = alloc.bytes.len() as u64;
         if ptr.offset > allocation_size {
-            return err!(PointerOutOfBounds { ptr, access, allocation_size });
+            return err!(PointerOutOfBounds {
+                ptr,
+                access,
+                allocation_size,
+            });
         }
         Ok(())
     }
@@ -458,40 +524,85 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
 /// Locking
 impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
-    pub(crate) fn check_locks(&self, ptr: MemoryPointer, len: u64, access: AccessKind) -> EvalResult<'tcx> {
+    pub(crate) fn check_locks(
+        &self,
+        ptr: MemoryPointer,
+        len: u64,
+        access: AccessKind,
+    ) -> EvalResult<'tcx> {
         if len == 0 {
-            return Ok(())
+            return Ok(());
         }
         let alloc = self.get(ptr.alloc_id)?;
         let frame = self.cur_frame;
-        alloc.check_locks(Some(frame), ptr.offset, len, access)
-            .map_err(|lock| EvalErrorKind::MemoryLockViolation { ptr, len, frame, access, lock }.into())
+        alloc
+            .check_locks(Some(frame), ptr.offset, len, access)
+            .map_err(|lock| {
+                EvalErrorKind::MemoryLockViolation {
+                    ptr,
+                    len,
+                    frame,
+                    access,
+                    lock,
+                }.into()
+            })
     }
 
     /// Acquire the lock for the given lifetime
-    pub(crate) fn acquire_lock(&mut self, ptr: MemoryPointer, len: u64, region: Option<CodeExtent>, kind: AccessKind) -> EvalResult<'tcx> {
+    pub(crate) fn acquire_lock(
+        &mut self,
+        ptr: MemoryPointer,
+        len: u64,
+        region: Option<CodeExtent>,
+        kind: AccessKind,
+    ) -> EvalResult<'tcx> {
         use std::collections::btree_map::Entry::*;
 
         let frame = self.cur_frame;
         assert!(len > 0);
-        trace!("Frame {} acquiring {:?} lock at {:?}, size {} for region {:?}", frame, kind, ptr, len, region);
-        self.check_bounds(ptr.offset(len, self.layout)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        trace!(
+            "Frame {} acquiring {:?} lock at {:?}, size {} for region {:?}",
+            frame,
+            kind,
+            ptr,
+            len,
+            region
+        );
+        // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(len, self.layout)?, true)?;
         let alloc = self.get_mut_unchecked(ptr.alloc_id)?;
 
         // Check if this conflicts with other locks
-        alloc.check_locks(None, ptr.offset, len, kind)
-            .map_err(|lock| EvalErrorKind::MemoryAcquireConflict { ptr, len, kind, lock })?;
+        alloc.check_locks(None, ptr.offset, len, kind).map_err(
+            |lock| {
+                EvalErrorKind::MemoryAcquireConflict {
+                    ptr,
+                    len,
+                    kind,
+                    lock,
+                }
+            },
+        )?;
 
         let lifetime = DynamicLifetime { frame, region };
         match (alloc.locks.entry(MemoryRange::new(ptr.offset, len)), kind) {
-            (Vacant(entry), AccessKind::Read) => { entry.insert(ReadLock(vec![lifetime])); },
-            (Vacant(entry), AccessKind::Write) => { entry.insert(WriteLock(lifetime)); },
-            (Occupied(mut entry), AccessKind::Read) =>
+            (Vacant(entry), AccessKind::Read) => {
+                entry.insert(ReadLock(vec![lifetime]));
+            }
+            (Vacant(entry), AccessKind::Write) => {
+                entry.insert(WriteLock(lifetime));
+            }
+            (Occupied(mut entry), AccessKind::Read) => {
                 match *entry.get_mut() {
                     ReadLock(ref mut lifetimes) => lifetimes.push(lifetime),
-                    WriteLock(_) => bug!("We already checked that there is no conflicting write lock"),
-                },
-            (Occupied(_), AccessKind::Write) => bug!("We already checked that there is no conflicting lock"),
+                    WriteLock(_) => {
+                        bug!("We already checked that there is no conflicting write lock")
+                    }
+                }
+            }
+            (Occupied(_), AccessKind::Write) => {
+                bug!("We already checked that there is no conflicting lock")
+            }
         };
         Ok(())
     }
@@ -502,24 +613,37 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         let cur_frame = self.cur_frame;
         let alloc = self.get_mut_unchecked(ptr.alloc_id)?;
 
-        let mut remove_list : Vec<MemoryRange> = Vec::new();
+        let mut remove_list: Vec<MemoryRange> = Vec::new();
         for (range, lock) in alloc.iter_locks_mut(ptr.offset, len) {
             match *lock {
                 WriteLock(ref lft) => {
                     // Make sure we can release this lock
                     if lft.frame != cur_frame {
-                        return err!(InvalidMemoryLockRelease { ptr, len, frame: cur_frame, lock: lock.clone() });
+                        return err!(InvalidMemoryLockRelease {
+                            ptr,
+                            len,
+                            frame: cur_frame,
+                            lock: lock.clone(),
+                        });
                     }
                     if !range.contained_in(ptr.offset, len) {
-                        return err!(Unimplemented(format!("miri does not support releasing part of a write-locked region")));
+                        return err!(Unimplemented(format!(
+                            "miri does not support releasing part of a write-locked region"
+                        )));
                     }
                     // Release it later.  We cannot do this now.
                     remove_list.push(*range);
                 }
                 ReadLock(_) => {
-                    // Abort here and bubble the error outwards so that we do not even register a suspension.
-                    return err!(InvalidMemoryLockRelease { ptr, len, frame: cur_frame, lock: lock.clone() });
-                },
+                    // Abort here and bubble the error outwards
+                    // so that we do not even register a suspension.
+                    return err!(InvalidMemoryLockRelease {
+                        ptr,
+                        len,
+                        frame: cur_frame,
+                        lock: lock.clone(),
+                    });
+                }
             }
         }
 
@@ -528,29 +652,36 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             alloc.locks.remove(&range);
         }
 
-        // TODO: Test that we actually released a write lock for the entire covered region.
+        // FIXME: Test that we actually released a write lock for the entire covered region.
 
         Ok(())
     }
 
     pub(crate) fn locks_lifetime_ended(&mut self, ending_region: Option<CodeExtent>) {
         let cur_frame = self.cur_frame;
-        trace!("Releasing frame {} locks that expire at {:?}", cur_frame, ending_region);
-        let has_ended =  |lifetime: &DynamicLifetime| -> bool {
+        trace!(
+            "Releasing frame {} locks that expire at {:?}",
+            cur_frame,
+            ending_region
+        );
+        let has_ended = |lifetime: &DynamicLifetime| -> bool {
             if lifetime.frame != cur_frame {
                 return false;
             }
             match ending_region {
-                None => true, // When a function ends, we end *all* its locks. It's okay for a function to still have lifetime-related locks
-                              // when it returns, that can happen e.g. with NLL when a lifetime can, but does not have to, extend beyond the
-                              // end of a function.  Same for a function still having recoveries.
+                None => true,
+                // When a function ends, we end *all* its locks.
+                // It's okay for a function to still have lifetime-related locks
+                // when it returns, that can happen e.g. with NLL when a lifetime can,
+                // but does not have to, extend beyond the
+                // end of a function.  Same for a function still having recoveries.
                 Some(ending_region) => lifetime.region == Some(ending_region),
             }
         };
 
         for alloc in self.alloc_map.values_mut() {
             // Collect things for removal as we cannot remove while iterating
-            let mut remove_list : Vec<MemoryRange> = Vec::new();
+            let mut remove_list: Vec<MemoryRange> = Vec::new();
             for (range, lock) in alloc.locks.iter_mut() {
                 // Delete everything that ends now -- i.e., keep only all the other lifetimes.
                 match *lock {
@@ -564,7 +695,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                         if lfts.is_empty() {
                             remove_list.push(*range);
                         }
-                    },
+                    }
                 }
             }
             // Perform delayed removal
@@ -580,19 +711,26 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
     pub fn get(&self, id: AllocId) -> EvalResult<'tcx, &Allocation<M::MemoryKinds>> {
         match self.alloc_map.get(&id) {
             Some(alloc) => Ok(alloc),
-            None => match self.functions.get(&id) {
-                Some(_) => err!(DerefFunctionPointer),
-                None => err!(DanglingPointerDeref),
+            None => {
+                match self.functions.get(&id) {
+                    Some(_) => err!(DerefFunctionPointer),
+                    None => err!(DanglingPointerDeref),
+                }
             }
         }
     }
-    
-    fn get_mut_unchecked(&mut self, id: AllocId) -> EvalResult<'tcx, &mut Allocation<M::MemoryKinds>> {
+
+    fn get_mut_unchecked(
+        &mut self,
+        id: AllocId,
+    ) -> EvalResult<'tcx, &mut Allocation<M::MemoryKinds>> {
         match self.alloc_map.get_mut(&id) {
             Some(alloc) => Ok(alloc),
-            None => match self.functions.get(&id) {
-                Some(_) => err!(DerefFunctionPointer),
-                None => err!(DanglingPointerDeref),
+            None => {
+                match self.functions.get(&id) {
+                    Some(_) => err!(DerefFunctionPointer),
+                    None => err!(DanglingPointerDeref),
+                }
             }
         }
     }
@@ -613,9 +751,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         debug!("reading fn ptr: {}", ptr.alloc_id);
         match self.functions.get(&ptr.alloc_id) {
             Some(&fndef) => Ok(fndef),
-            None => match self.alloc_map.get(&ptr.alloc_id) {
-                Some(_) => err!(ExecuteMemory),
-                None => err!(InvalidFunctionPointer),
+            None => {
+                match self.alloc_map.get(&ptr.alloc_id) {
+                    Some(_) => err!(ExecuteMemory),
+                    None => err!(InvalidFunctionPointer),
+                }
             }
         }
     }
@@ -643,12 +783,17 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                 (None, Some(instance)) => {
                     trace!("{} {}", msg, instance);
                     continue;
-                },
+                }
                 (None, None) => {
                     trace!("{} (deallocated)", msg);
                     continue;
-                },
-                (Some(_), Some(_)) => bug!("miri invariant broken: an allocation id exists that points to both a function and a memory location"),
+                }
+                (Some(_), Some(_)) => {
+                    bug!(
+                        "miri invariant broken: an allocation id exists \
+                          that points to both a function and a memory location"
+                    )
+                }
             };
 
             for i in 0..(alloc.bytes.len() as u64) {
@@ -667,13 +812,21 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             }
 
             let immutable = match (alloc.kind, alloc.mutable) {
-                (Kind::UninitializedStatic, _) => " (static in the process of initialization)".to_owned(),
+                (Kind::UninitializedStatic, _) => {
+                    " (static in the process of initialization)".to_owned()
+                }
                 (Kind::Static, Mutability::Mutable) => " (static mut)".to_owned(),
                 (Kind::Static, Mutability::Immutable) => " (immutable)".to_owned(),
                 (Kind::Machine(m), _) => format!(" ({:?})", m),
                 (Kind::Stack, _) => " (stack)".to_owned(),
             };
-            trace!("{}({} bytes, alignment {}){}", msg, alloc.bytes.len(), alloc.align, immutable);
+            trace!(
+                "{}({} bytes, alignment {}){}",
+                msg,
+                alloc.bytes.len(),
+                alloc.align,
+                immutable
+            );
 
             if !relocations.is_empty() {
                 msg.clear();
@@ -697,12 +850,10 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         trace!("### LEAK REPORT ###");
         let leaks: Vec<_> = self.alloc_map
             .iter()
-            .filter_map(|(&key, val)| {
-                if val.kind != Kind::Static {
-                    Some(key)
-                } else {
-                    None
-                }
+            .filter_map(|(&key, val)| if val.kind != Kind::Static {
+                Some(key)
+            } else {
+                None
             })
             .collect();
         let n = leaks.len();
@@ -713,8 +864,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
 /// Byte accessors
 impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
-    fn get_bytes_unchecked(&self, ptr: MemoryPointer, size: u64, align: u64) -> EvalResult<'tcx, &[u8]> {
-        // Zero-sized accesses can use dangling pointers, but they still have to be aligned and non-NULL
+    fn get_bytes_unchecked(
+        &self,
+        ptr: MemoryPointer,
+        size: u64,
+        align: u64,
+    ) -> EvalResult<'tcx, &[u8]> {
+        // Zero-sized accesses can use dangling pointers,
+        // but they still have to be aligned and non-NULL
         if self.reads_are_aligned.get() {
             self.check_align(ptr.into(), align)?;
         }
@@ -722,7 +879,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             return Ok(&[]);
         }
         self.check_locks(ptr, size, AccessKind::Read)?;
-        self.check_bounds(ptr.offset(size, self)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(size, self)?, true)?;
         let alloc = self.get(ptr.alloc_id)?;
         assert_eq!(ptr.offset as usize as u64, ptr.offset);
         assert_eq!(size as usize as u64, size);
@@ -730,8 +888,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         Ok(&alloc.bytes[offset..offset + size as usize])
     }
 
-    fn get_bytes_unchecked_mut(&mut self, ptr: MemoryPointer, size: u64, align: u64) -> EvalResult<'tcx, &mut [u8]> {
-        // Zero-sized accesses can use dangling pointers, but they still have to be aligned and non-NULL
+    fn get_bytes_unchecked_mut(
+        &mut self,
+        ptr: MemoryPointer,
+        size: u64,
+        align: u64,
+    ) -> EvalResult<'tcx, &mut [u8]> {
+        // Zero-sized accesses can use dangling pointers,
+        // but they still have to be aligned and non-NULL
         if self.writes_are_aligned.get() {
             self.check_align(ptr.into(), align)?;
         }
@@ -739,7 +903,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             return Ok(&mut []);
         }
         self.check_locks(ptr, size, AccessKind::Write)?;
-        self.check_bounds(ptr.offset(size, self.layout)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(size, self.layout)?, true)?;
         let alloc = self.get_mut(ptr.alloc_id)?;
         assert_eq!(ptr.offset as usize as u64, ptr.offset);
         assert_eq!(size as usize as u64, size);
@@ -756,7 +921,12 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         self.get_bytes_unchecked(ptr, size, align)
     }
 
-    fn get_bytes_mut(&mut self, ptr: MemoryPointer, size: u64, align: u64) -> EvalResult<'tcx, &mut [u8]> {
+    fn get_bytes_mut(
+        &mut self,
+        ptr: MemoryPointer,
+        size: u64,
+        align: u64,
+    ) -> EvalResult<'tcx, &mut [u8]> {
         assert_ne!(size, 0);
         self.clear_relocations(ptr, size)?;
         self.mark_definedness(ptr.into(), size, true)?;
@@ -770,12 +940,19 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
     pub fn mark_static(&mut self, alloc_id: AllocId) {
         trace!("mark_static: {:?}", alloc_id);
         if !self.static_alloc.insert(alloc_id) {
-            bug!("tried to mark an allocation ({:?}) as static twice", alloc_id);
+            bug!(
+                "tried to mark an allocation ({:?}) as static twice",
+                alloc_id
+            );
         }
     }
 
     /// mark an allocation pointed to by a static as static and initialized
-    pub fn mark_inner_allocation(&mut self, alloc: AllocId, mutability: Mutability) -> EvalResult<'tcx> {
+    pub fn mark_inner_allocation(
+        &mut self,
+        alloc: AllocId,
+        mutability: Mutability,
+    ) -> EvalResult<'tcx> {
         // relocations into other statics are not "inner allocations"
         if !self.static_alloc.contains(&alloc) {
             self.mark_static_initalized(alloc, mutability)?;
@@ -784,12 +961,25 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
     }
 
     /// mark an allocation as static and initialized, either mutable or not
-    pub fn mark_static_initalized(&mut self, alloc_id: AllocId, mutability: Mutability) -> EvalResult<'tcx> {
-        trace!("mark_static_initalized {:?}, mutability: {:?}", alloc_id, mutability);
+    pub fn mark_static_initalized(
+        &mut self,
+        alloc_id: AllocId,
+        mutability: Mutability,
+    ) -> EvalResult<'tcx> {
+        trace!(
+            "mark_static_initalized {:?}, mutability: {:?}",
+            alloc_id,
+            mutability
+        );
         // do not use `self.get_mut(alloc_id)` here, because we might have already marked a
         // sub-element or have circular pointers (e.g. `Rc`-cycles)
         let relocations = match self.alloc_map.get_mut(&alloc_id) {
-            Some(&mut Allocation { ref mut relocations, ref mut kind, ref mut mutable, .. }) => {
+            Some(&mut Allocation {
+                     ref mut relocations,
+                     ref mut kind,
+                     ref mut mutable,
+                     ..
+                 }) => {
                 match *kind {
                     // const eval results can refer to "locals".
                     // E.g. `const Foo: &u32 = &1;` refers to the temp local that stores the `1`
@@ -798,7 +988,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                     Kind::UninitializedStatic => {},
                     Kind::Machine(m) => M::mark_static_initialized(m)?,
                     Kind::Static => {
-                        trace!("mark_static_initalized: skipping already initialized static referred to by static currently being initialized");
+                        trace!("mark_static_initalized: skipping already initialized\
+                                static referred to by static currently being initialized");
                         return Ok(());
                     },
                 }
@@ -807,7 +998,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                 // take out the relocations vector to free the borrow on self, so we can call
                 // mark recursively
                 mem::replace(relocations, Default::default())
-            },
+            }
             None if !self.functions.contains_key(&alloc_id) => return err!(DanglingPointerDeref),
             _ => return Ok(()),
         };
@@ -816,11 +1007,21 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             self.mark_inner_allocation(alloc, mutability)?;
         }
         // put back the relocations
-        self.alloc_map.get_mut(&alloc_id).expect("checked above").relocations = relocations;
+        self.alloc_map
+            .get_mut(&alloc_id)
+            .expect("checked above")
+            .relocations = relocations;
         Ok(())
     }
 
-    pub fn copy(&mut self, src: Pointer, dest: Pointer, size: u64, align: u64, nonoverlapping: bool) -> EvalResult<'tcx> {
+    pub fn copy(
+        &mut self,
+        src: Pointer,
+        dest: Pointer,
+        size: u64,
+        align: u64,
+        nonoverlapping: bool,
+    ) -> EvalResult<'tcx> {
         if size == 0 {
             // Empty accesses don't need to be valid pointers, but they should still be aligned
             if self.reads_are_aligned.get() {
@@ -846,8 +1047,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             if src.alloc_id == dest.alloc_id {
                 if nonoverlapping {
                     if (src.offset <= dest.offset && src.offset + size > dest.offset) ||
-                       (dest.offset <= src.offset && dest.offset + size > src.offset) {
-                        return err!(Intrinsic(format!("copy_nonoverlapping called on overlapping ranges")));
+                        (dest.offset <= src.offset && dest.offset + size > src.offset)
+                    {
+                        return err!(Intrinsic(
+                            format!("copy_nonoverlapping called on overlapping ranges"),
+                        ));
                     }
                 }
                 ptr::copy(src_bytes, dest_bytes, size as usize);
@@ -874,7 +1078,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
                 self.check_defined(ptr, (size + 1) as u64)?;
                 self.check_locks(ptr, (size + 1) as u64, AccessKind::Read)?;
                 Ok(&alloc.bytes[offset..offset + size])
-            },
+            }
             None => err!(UnterminatedCString(ptr)),
         }
     }
@@ -912,13 +1116,16 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             return Ok(());
         }
         let bytes = self.get_bytes_mut(ptr.to_ptr()?, count, 1)?;
-        for b in bytes { *b = val; }
+        for b in bytes {
+            *b = val;
+        }
         Ok(())
     }
 
     pub fn read_ptr(&self, ptr: MemoryPointer) -> EvalResult<'tcx, Pointer> {
         let size = self.pointer_size();
-        self.check_relocation_edges(ptr, size)?; // Make sure we don't read part of a pointer as a pointer
+        // Make sure we don't read part of a pointer as a pointer
+        self.check_relocation_edges(ptr, size)?;
         let endianess = self.endianess();
         let bytes = self.get_bytes_unchecked(ptr, size, size)?;
         // Undef check happens *after* we established that the alignment is correct.
@@ -938,16 +1145,14 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
     pub fn write_ptr(&mut self, dest: MemoryPointer, ptr: MemoryPointer) -> EvalResult<'tcx> {
         self.write_usize(dest, ptr.offset as u64)?;
-        self.get_mut(dest.alloc_id)?.relocations.insert(dest.offset, ptr.alloc_id);
+        self.get_mut(dest.alloc_id)?.relocations.insert(
+            dest.offset,
+            ptr.alloc_id,
+        );
         Ok(())
     }
 
-    pub fn write_primval(
-        &mut self,
-        dest: Pointer,
-        val: PrimVal,
-        size: u64,
-    ) -> EvalResult<'tcx> {
+    pub fn write_primval(&mut self, dest: Pointer, val: PrimVal, size: u64) -> EvalResult<'tcx> {
         match val {
             PrimVal::Ptr(ptr) => {
                 assert_eq!(size, self.pointer_size());
@@ -983,8 +1188,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
     pub fn write_bool(&mut self, ptr: MemoryPointer, b: bool) -> EvalResult<'tcx> {
         let align = self.layout.i1_align.abi();
-        self.get_bytes_mut(ptr, 1, align)
-            .map(|bytes| bytes[0] = b as u8)
+        self.get_bytes_mut(ptr, 1, align).map(
+            |bytes| bytes[0] = b as u8,
+        )
     }
 
     fn int_align(&self, size: u64) -> EvalResult<'tcx, u64> {
@@ -1000,7 +1206,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
     pub fn read_int(&self, ptr: MemoryPointer, size: u64) -> EvalResult<'tcx, i128> {
         let align = self.int_align(size)?;
-        self.get_bytes(ptr, size, align).map(|b| read_target_int(self.endianess(), b).unwrap())
+        self.get_bytes(ptr, size, align).map(|b| {
+            read_target_int(self.endianess(), b).unwrap()
+        })
     }
 
     pub fn write_int(&mut self, ptr: MemoryPointer, n: i128, size: u64) -> EvalResult<'tcx> {
@@ -1013,7 +1221,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
     pub fn read_uint(&self, ptr: MemoryPointer, size: u64) -> EvalResult<'tcx, u128> {
         let align = self.int_align(size)?;
-        self.get_bytes(ptr, size, align).map(|b| read_target_uint(self.endianess(), b).unwrap())
+        self.get_bytes(ptr, size, align).map(|b| {
+            read_target_uint(self.endianess(), b).unwrap()
+        })
     }
 
     pub fn write_uint(&mut self, ptr: MemoryPointer, n: u128, size: u64) -> EvalResult<'tcx> {
@@ -1059,21 +1269,29 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
     }
 
     pub fn read_f32(&self, ptr: MemoryPointer) -> EvalResult<'tcx, f32> {
-        self.get_bytes(ptr, 4, self.layout.f32_align.abi())
-            .map(|b| read_target_f32(self.endianess(), b).unwrap())
+        self.get_bytes(ptr, 4, self.layout.f32_align.abi()).map(
+            |b| {
+                read_target_f32(self.endianess(), b).unwrap()
+            },
+        )
     }
 
     pub fn read_f64(&self, ptr: MemoryPointer) -> EvalResult<'tcx, f64> {
-        self.get_bytes(ptr, 8, self.layout.f64_align.abi())
-            .map(|b| read_target_f64(self.endianess(), b).unwrap())
+        self.get_bytes(ptr, 8, self.layout.f64_align.abi()).map(
+            |b| {
+                read_target_f64(self.endianess(), b).unwrap()
+            },
+        )
     }
 }
 
 /// Relocations
 impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
-    fn relocations(&self, ptr: MemoryPointer, size: u64)
-        -> EvalResult<'tcx, btree_map::Range<u64, AllocId>>
-    {
+    fn relocations(
+        &self,
+        ptr: MemoryPointer,
+        size: u64,
+    ) -> EvalResult<'tcx, btree_map::Range<u64, AllocId>> {
         let start = ptr.offset.saturating_sub(self.pointer_size() - 1);
         let end = ptr.offset + size;
         Ok(self.get(ptr.alloc_id)?.relocations.range(start..end))
@@ -1082,7 +1300,9 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
     fn clear_relocations(&mut self, ptr: MemoryPointer, size: u64) -> EvalResult<'tcx> {
         // Find all relocations overlapping the given range.
         let keys: Vec<_> = self.relocations(ptr, size)?.map(|(&k, _)| k).collect();
-        if keys.is_empty() { return Ok(()); }
+        if keys.is_empty() {
+            return Ok(());
+        }
 
         // Find the start and end of the given range and its outermost relocations.
         let start = ptr.offset;
@@ -1094,11 +1314,17 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 
         // Mark parts of the outermost relocations as undefined if they partially fall outside the
         // given range.
-        if first < start { alloc.undef_mask.set_range(first, start, false); }
-        if last > end { alloc.undef_mask.set_range(end, last, false); }
+        if first < start {
+            alloc.undef_mask.set_range(first, start, false);
+        }
+        if last > end {
+            alloc.undef_mask.set_range(end, last, false);
+        }
 
         // Forget all the relocations.
-        for k in keys { alloc.relocations.remove(&k); }
+        for k in keys {
+            alloc.relocations.remove(&k);
+        }
 
         Ok(())
     }
@@ -1112,7 +1338,12 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         Ok(())
     }
 
-    fn copy_relocations(&mut self, src: MemoryPointer, dest: MemoryPointer, size: u64) -> EvalResult<'tcx> {
+    fn copy_relocations(
+        &mut self,
+        src: MemoryPointer,
+        dest: MemoryPointer,
+        size: u64,
+    ) -> EvalResult<'tcx> {
         let relocations: Vec<_> = self.relocations(src, size)?
             .map(|(&offset, &alloc_id)| {
                 // Update relocation offsets for the new positions in the destination allocation.
@@ -1127,7 +1358,12 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 /// Undefined bytes
 impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
     // FIXME(solson): This is a very naive, slow version.
-    fn copy_undef_mask(&mut self, src: MemoryPointer, dest: MemoryPointer, size: u64) -> EvalResult<'tcx> {
+    fn copy_undef_mask(
+        &mut self,
+        src: MemoryPointer,
+        dest: MemoryPointer,
+        size: u64,
+    ) -> EvalResult<'tcx> {
         // The bits have to be saved locally before writing to dest in case src and dest overlap.
         assert_eq!(size as usize as u64, size);
         let mut v = Vec::with_capacity(size as usize);
@@ -1136,14 +1372,22 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
             v.push(defined);
         }
         for (i, defined) in v.into_iter().enumerate() {
-            self.get_mut(dest.alloc_id)?.undef_mask.set(dest.offset + i as u64, defined);
+            self.get_mut(dest.alloc_id)?.undef_mask.set(
+                dest.offset +
+                    i as u64,
+                defined,
+            );
         }
         Ok(())
     }
 
     fn check_defined(&self, ptr: MemoryPointer, size: u64) -> EvalResult<'tcx> {
         let alloc = self.get(ptr.alloc_id)?;
-        if !alloc.undef_mask.is_range_defined(ptr.offset, ptr.offset + size) {
+        if !alloc.undef_mask.is_range_defined(
+            ptr.offset,
+            ptr.offset + size,
+        )
+        {
             return err!(ReadUndefBytes);
         }
         Ok(())
@@ -1153,14 +1397,18 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
         &mut self,
         ptr: Pointer,
         size: u64,
-        new_state: bool
+        new_state: bool,
     ) -> EvalResult<'tcx> {
         if size == 0 {
-            return Ok(())
+            return Ok(());
         }
         let ptr = ptr.to_ptr()?;
         let mut alloc = self.get_mut(ptr.alloc_id)?;
-        alloc.undef_mask.set_range(ptr.offset, ptr.offset + size, new_state);
+        alloc.undef_mask.set_range(
+            ptr.offset,
+            ptr.offset + size,
+            new_state,
+        );
         Ok(())
     }
 }
@@ -1169,14 +1417,22 @@ impl<'a, 'tcx, M: Machine<'tcx>> Memory<'a, 'tcx, M> {
 // Methods to access integers in the target endianess
 ////////////////////////////////////////////////////////////////////////////////
 
-fn write_target_uint(endianess: layout::Endian, mut target: &mut [u8], data: u128) -> Result<(), io::Error> {
+fn write_target_uint(
+    endianess: layout::Endian,
+    mut target: &mut [u8],
+    data: u128,
+) -> Result<(), io::Error> {
     let len = target.len();
     match endianess {
         layout::Endian::Little => target.write_uint128::<LittleEndian>(data, len),
         layout::Endian::Big => target.write_uint128::<BigEndian>(data, len),
     }
 }
-fn write_target_int(endianess: layout::Endian, mut target: &mut [u8], data: i128) -> Result<(), io::Error> {
+fn write_target_int(
+    endianess: layout::Endian,
+    mut target: &mut [u8],
+    data: i128,
+) -> Result<(), io::Error> {
     let len = target.len();
     match endianess {
         layout::Endian::Little => target.write_int128::<LittleEndian>(data, len),
@@ -1201,13 +1457,21 @@ fn read_target_int(endianess: layout::Endian, mut source: &[u8]) -> Result<i128,
 // Methods to access floats in the target endianess
 ////////////////////////////////////////////////////////////////////////////////
 
-fn write_target_f32(endianess: layout::Endian, mut target: &mut [u8], data: f32) -> Result<(), io::Error> {
+fn write_target_f32(
+    endianess: layout::Endian,
+    mut target: &mut [u8],
+    data: f32,
+) -> Result<(), io::Error> {
     match endianess {
         layout::Endian::Little => target.write_f32::<LittleEndian>(data),
         layout::Endian::Big => target.write_f32::<BigEndian>(data),
     }
 }
-fn write_target_f64(endianess: layout::Endian, mut target: &mut [u8], data: f64) -> Result<(), io::Error> {
+fn write_target_f64(
+    endianess: layout::Endian,
+    mut target: &mut [u8],
+    data: f64,
+) -> Result<(), io::Error> {
     match endianess {
         layout::Endian::Little => target.write_f64::<LittleEndian>(data),
         layout::Endian::Big => target.write_f64::<BigEndian>(data),
@@ -1252,21 +1516,29 @@ impl UndefMask {
 
     /// Check whether the range `start..end` (end-exclusive) is entirely defined.
     pub fn is_range_defined(&self, start: u64, end: u64) -> bool {
-        if end > self.len { return false; }
+        if end > self.len {
+            return false;
+        }
         for i in start..end {
-            if !self.get(i) { return false; }
+            if !self.get(i) {
+                return false;
+            }
         }
         true
     }
 
     fn set_range(&mut self, start: u64, end: u64, new_state: bool) {
         let len = self.len;
-        if end > len { self.grow(end - len, new_state); }
+        if end > len {
+            self.grow(end - len, new_state);
+        }
         self.set_range_inbounds(start, end, new_state);
     }
 
     fn set_range_inbounds(&mut self, start: u64, end: u64, new_state: bool) {
-        for i in start..end { self.set(i, new_state); }
+        for i in start..end {
+            self.set(i, new_state);
+        }
     }
 
     fn get(&self, i: u64) -> bool {
@@ -1288,7 +1560,9 @@ impl UndefMask {
         if amount > unused_trailing_bits {
             let additional_blocks = amount / BLOCK_SIZE + 1;
             assert_eq!(additional_blocks as usize as u64, additional_blocks);
-            self.blocks.extend(iter::repeat(0).take(additional_blocks as usize));
+            self.blocks.extend(
+                iter::repeat(0).take(additional_blocks as usize),
+            );
         }
         let start = self.len;
         self.len += amount;
@@ -1314,7 +1588,8 @@ pub trait HasMemory<'a, 'tcx, M: Machine<'tcx>> {
 
     // These are not supposed to be overriden.
     fn read_maybe_aligned<F, T>(&self, aligned: bool, f: F) -> EvalResult<'tcx, T>
-        where F: FnOnce(&Self) -> EvalResult<'tcx, T>
+    where
+        F: FnOnce(&Self) -> EvalResult<'tcx, T>,
     {
         let old = self.memory().reads_are_aligned.get();
         // Do alignment checking if *all* nested calls say it has to be aligned.
@@ -1325,7 +1600,8 @@ pub trait HasMemory<'a, 'tcx, M: Machine<'tcx>> {
     }
 
     fn read_maybe_aligned_mut<F, T>(&mut self, aligned: bool, f: F) -> EvalResult<'tcx, T>
-        where F: FnOnce(&mut Self) -> EvalResult<'tcx, T>
+    where
+        F: FnOnce(&mut Self) -> EvalResult<'tcx, T>,
     {
         let old = self.memory().reads_are_aligned.get();
         // Do alignment checking if *all* nested calls say it has to be aligned.
@@ -1336,7 +1612,8 @@ pub trait HasMemory<'a, 'tcx, M: Machine<'tcx>> {
     }
 
     fn write_maybe_aligned_mut<F, T>(&mut self, aligned: bool, f: F) -> EvalResult<'tcx, T>
-        where F: FnOnce(&mut Self) -> EvalResult<'tcx, T>
+    where
+        F: FnOnce(&mut Self) -> EvalResult<'tcx, T>,
     {
         let old = self.memory().writes_are_aligned.get();
         // Do alignment checking if *all* nested calls say it has to be aligned.
@@ -1375,7 +1652,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> HasMemory<'a, 'tcx, M> for EvalContext<'a, 'tcx
 // Pointer arithmetic
 ////////////////////////////////////////////////////////////////////////////////
 
-pub trait PointerArithmetic : layout::HasDataLayout {
+pub trait PointerArithmetic: layout::HasDataLayout {
     // These are not supposed to be overriden.
 
     //// Trunace the given value to the pointer size; also return whether there was an overflow
@@ -1405,20 +1682,12 @@ pub trait PointerArithmetic : layout::HasDataLayout {
 
     fn signed_offset<'tcx>(self, val: u64, i: i64) -> EvalResult<'tcx, u64> {
         let (res, over) = self.overflowing_signed_offset(val, i as i128);
-        if over {
-            err!(OverflowingMath)
-        } else {
-            Ok(res)
-        }
+        if over { err!(OverflowingMath) } else { Ok(res) }
     }
 
     fn offset<'tcx>(self, val: u64, i: u64) -> EvalResult<'tcx, u64> {
         let (res, over) = self.overflowing_offset(val, i);
-        if over {
-            err!(OverflowingMath)
-        } else {
-            Ok(res)
-        }
+        if over { err!(OverflowingMath) } else { Ok(res) }
     }
 
     fn wrapping_signed_offset(self, val: u64, i: i64) -> u64 {
@@ -1441,7 +1710,8 @@ impl<'a, 'tcx, M: Machine<'tcx>> layout::HasDataLayout for &'a EvalContext<'a, '
     }
 }
 
-impl<'c, 'b, 'a, 'tcx, M: Machine<'tcx>> layout::HasDataLayout for &'c &'b mut EvalContext<'a, 'tcx, M> {
+impl<'c, 'b, 'a, 'tcx, M: Machine<'tcx>> layout::HasDataLayout
+    for &'c &'b mut EvalContext<'a, 'tcx, M> {
     #[inline]
     fn data_layout(&self) -> &TargetDataLayout {
         self.memory().layout

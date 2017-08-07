@@ -1,20 +1,14 @@
 use rustc::ty::{self, Ty};
 use syntax::ast::{FloatTy, IntTy, UintTy};
 
-use super::{
-    PrimVal,
-    EvalContext,
-    EvalResult,
-    MemoryPointer, PointerArithmetic,
-    Machine,
-};
+use super::{PrimVal, EvalContext, EvalResult, MemoryPointer, PointerArithmetic, Machine};
 
 impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     pub(super) fn cast_primval(
         &self,
         val: PrimVal,
         src_ty: Ty<'tcx>,
-        dest_ty: Ty<'tcx>
+        dest_ty: Ty<'tcx>,
     ) -> EvalResult<'tcx, PrimVal> {
         let src_kind = self.ty_to_primval_kind(src_ty)?;
 
@@ -29,11 +23,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
 
                     I8 | I16 | I32 | I64 | I128 => {
                         self.cast_from_signed_int(val.to_i128()?, dest_ty)
-                    },
+                    }
 
                     Bool | Char | U8 | U16 | U32 | U64 | U128 | FnPtr | Ptr => {
                         self.cast_from_int(val.to_u128()?, dest_ty, false)
-                    },
+                    }
                 }
             }
         }
@@ -43,18 +37,22 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         self.cast_from_int(val as u128, ty, val < 0)
     }
 
-    fn cast_from_int(&self, v: u128, ty: ty::Ty<'tcx>, negative: bool) -> EvalResult<'tcx, PrimVal> {
+    fn cast_from_int(
+        &self,
+        v: u128,
+        ty: ty::Ty<'tcx>,
+        negative: bool,
+    ) -> EvalResult<'tcx, PrimVal> {
         use rustc::ty::TypeVariants::*;
         match ty.sty {
             // Casts to bool are not permitted by rustc, no need to handle them here.
-
-            TyInt(IntTy::I8)  => Ok(PrimVal::Bytes(v as i128 as i8  as u128)),
+            TyInt(IntTy::I8) => Ok(PrimVal::Bytes(v as i128 as i8 as u128)),
             TyInt(IntTy::I16) => Ok(PrimVal::Bytes(v as i128 as i16 as u128)),
             TyInt(IntTy::I32) => Ok(PrimVal::Bytes(v as i128 as i32 as u128)),
             TyInt(IntTy::I64) => Ok(PrimVal::Bytes(v as i128 as i64 as u128)),
             TyInt(IntTy::I128) => Ok(PrimVal::Bytes(v as u128)),
 
-            TyUint(UintTy::U8)  => Ok(PrimVal::Bytes(v as u8  as u128)),
+            TyUint(UintTy::U8) => Ok(PrimVal::Bytes(v as u8 as u128)),
             TyUint(UintTy::U16) => Ok(PrimVal::Bytes(v as u16 as u128)),
             TyUint(UintTy::U32) => Ok(PrimVal::Bytes(v as u32 as u128)),
             TyUint(UintTy::U64) => Ok(PrimVal::Bytes(v as u64 as u128)),
@@ -73,14 +71,15 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
             }
 
             TyFloat(FloatTy::F64) if negative => Ok(PrimVal::from_f64(v as i128 as f64)),
-            TyFloat(FloatTy::F64)             => Ok(PrimVal::from_f64(v as f64)),
+            TyFloat(FloatTy::F64) => Ok(PrimVal::from_f64(v as f64)),
             TyFloat(FloatTy::F32) if negative => Ok(PrimVal::from_f32(v as i128 as f32)),
-            TyFloat(FloatTy::F32)             => Ok(PrimVal::from_f32(v as f32)),
+            TyFloat(FloatTy::F32) => Ok(PrimVal::from_f32(v as f32)),
 
             TyChar if v as u8 as u128 == v => Ok(PrimVal::Bytes(v)),
             TyChar => err!(InvalidChar(v)),
 
-            // No alignment check needed for raw pointers.  But we have to truncate to target ptr size.
+            // No alignment check needed for raw pointers.
+            // But we have to truncate to target ptr size.
             TyRawPtr(_) => Ok(PrimVal::Bytes(self.memory.truncate_to_ptr(v).0 as u128)),
 
             _ => err!(Unimplemented(format!("int to {:?} cast", ty))),
@@ -92,7 +91,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         match ty.sty {
             // Casting negative floats to unsigned integers yields zero.
             TyUint(_) if val < 0.0 => self.cast_from_int(0, ty, false),
-            TyInt(_)  if val < 0.0 => self.cast_from_int(val as i128 as u128, ty, true),
+            TyInt(_) if val < 0.0 => self.cast_from_int(val as i128 as u128, ty, true),
 
             TyInt(_) | ty::TyUint(_) => self.cast_from_int(val as u128, ty, false),
 
@@ -105,9 +104,11 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     fn cast_from_ptr(&self, ptr: MemoryPointer, ty: Ty<'tcx>) -> EvalResult<'tcx, PrimVal> {
         use rustc::ty::TypeVariants::*;
         match ty.sty {
-            // Casting to a reference or fn pointer is not permitted by rustc, no need to support it here.
-            TyRawPtr(_) | TyInt(IntTy::Is) | TyUint(UintTy::Us) =>
-                Ok(PrimVal::Ptr(ptr)),
+            // Casting to a reference or fn pointer is not permitted by rustc,
+            // no need to support it here.
+            TyRawPtr(_) |
+            TyInt(IntTy::Is) |
+            TyUint(UintTy::Us) => Ok(PrimVal::Ptr(ptr)),
             TyInt(_) | TyUint(_) => err!(ReadPointerAsBytes),
             _ => err!(Unimplemented(format!("ptr to {:?} cast", ty))),
         }
