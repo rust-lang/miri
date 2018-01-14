@@ -349,7 +349,7 @@ impl<'tcx> Machine<'tcx> for Evaluator<'tcx> {
         mem: &mut Memory<'a, 'tcx, Self>,
         id: AllocId,
     ) {
-        mem.data.locks.insert(id, RangeMap::new());
+        mem.data.locks.insert(id.0, RangeMap::new());
     }
 
     fn free_lock<'a>(
@@ -358,7 +358,7 @@ impl<'tcx> Machine<'tcx> for Evaluator<'tcx> {
         len: u64,
     ) -> EvalResult<'tcx> {
         mem.data.locks
-            .remove(&id)
+            .remove(&id.0)
             .expect("allocation has no corresponding locks")
             .check(
                 Some(mem.cur_frame),
