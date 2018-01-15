@@ -5,9 +5,10 @@
     catch_expr,
 )]
 
-// From rustc.
 #[macro_use]
 extern crate log;
+
+// From rustc.
 #[macro_use]
 extern crate rustc;
 extern crate rustc_mir;
@@ -74,7 +75,14 @@ pub fn eval_main<'a, 'tcx: 'a>(
         }
 
         if let Some(start_id) = start_wrapper {
-            let start_instance = ty::Instance::mono(ecx.tcx, start_id);
+            let main_ret_ty = ecx.tcx.fn_sig(main_id).output();
+            let main_ret_ty = main_ret_ty.no_late_bound_regions().unwrap();
+            let start_instance = ty::Instance::resolve(
+                ecx.tcx,
+                ty::ParamEnv::empty(traits::Reveal::All),
+                start_id,
+                ecx.tcx.mk_substs(
+                    ::std::iter::once(ty::subst::Kind::from(main_ret_ty)))).unwrap();
             let start_mir = ecx.load_mir(start_instance.def)?;
 
             if start_mir.arg_count != 3 {
@@ -86,7 +94,7 @@ pub fn eval_main<'a, 'tcx: 'a>(
 
             // Return value
             let size = ecx.tcx.data_layout.pointer_size.bytes();
-            let align = ecx.tcx.data_layout.pointer_align.abi();
+            let align = ecx.tcx.data_layout.pointer_align;
             let ret_ptr = ecx.memory_mut().allocate(size, align, Some(MemoryKind::Stack))?;
             cleanup_ptr = Some(ret_ptr);
 
@@ -95,7 +103,7 @@ pub fn eval_main<'a, 'tcx: 'a>(
                 start_instance,
                 start_mir.span,
                 start_mir,
-                Place::from_ptr(ret_ptr),
+                Place::from_ptr(ret_ptr, align),
                 StackPopCleanup::None,
             )?;
 
@@ -104,7 +112,7 @@ pub fn eval_main<'a, 'tcx: 'a>(
             // First argument: pointer to main()
             let main_ptr = ecx.memory_mut().create_fn_alloc(main_instance);
             let dest = ecx.eval_place(&mir::Place::Local(args.next().unwrap()))?;
-            let main_ty = main_instance.def.def_ty(ecx.tcx);
+            let main_ty = main_instance.ty(ecx.tcx);
             let main_ptr_ty = ecx.tcx.mk_fn_ptr(main_ty.fn_sig(ecx.tcx));
             ecx.write_value(
                 ValTy {
@@ -125,8 +133,9 @@ pub fn eval_main<'a, 'tcx: 'a>(
             let ty = ecx.tcx.mk_imm_ptr(ecx.tcx.mk_imm_ptr(ecx.tcx.types.u8));
             let foo = ecx.memory.allocate_cached(b"foo\0");
             let ptr_size = ecx.memory.pointer_size();
-            let foo_ptr = ecx.memory.allocate(ptr_size * 1, ptr_size, None)?;
-            ecx.memory.write_primval(foo_ptr.into(), PrimVal::Ptr(foo.into()), ptr_size, false)?;
+            let ptr_align = ecx.tcx.data_layout.pointer_align;
+            let foo_ptr = ecx.memory.allocate(ptr_size, ptr_align, None)?;
+            ecx.memory.write_primval(foo_ptr, ptr_align, PrimVal::Ptr(foo.into()), ptr_size, false)?;
             ecx.memory.mark_static_initalized(foo_ptr.alloc_id, Mutability::Immutable)?;
             ecx.write_ptr(dest, foo_ptr.into(), ty)?;
 
@@ -201,7 +210,7 @@ pub struct MemoryData<'tcx> {
     ///
     /// Only mutable (static mut, heap, stack) allocations have an entry in this map.
     /// The entry is created when allocating the memory and deleted after deallocation.
-    locks: HashMap<u64, RangeMap<LockInfo<'tcx>>>,
+    locks: HashMap<AllocId, RangeMap<LockInfo<'tcx>>>,
 }
 
 impl<'tcx> Machine<'tcx> for Evaluator<'tcx> {
@@ -309,22 +318,20 @@ impl<'tcx> Machine<'tcx> for Evaluator<'tcx> {
         // FIXME: check that it's `#[linkage = "extern_weak"]`
         trace!("Initializing an extern global with NULL");
         let ptr_size = ecx.memory.pointer_size();
+        let ptr_align = ecx.tcx.data_layout.pointer_align;
         let ptr = ecx.memory.allocate(
             ptr_size,
-            ptr_size,
+            ptr_align,
             None,
         )?;
-        ecx.memory.write_ptr_sized_unsigned(ptr, PrimVal::Bytes(0))?;
+        ecx.memory.write_ptr_sized_unsigned(ptr, ptr_align, PrimVal::Bytes(0))?;
         ecx.memory.mark_static_initalized(ptr.alloc_id, mutability)?;
         ecx.tcx.interpret_interner.borrow_mut().cache(
             GlobalId {
                 instance,
                 promoted: None,
             },
-            PtrAndAlign {
-                ptr: ptr.into(),
-                aligned: true,
-            },
+            ptr.alloc_id,
         );
         Ok(())
     }
@@ -340,14 +347,14 @@ impl<'tcx> Machine<'tcx> for Evaluator<'tcx> {
 
     fn add_lock<'a>(
         mem: &mut Memory<'a, 'tcx, Self>,
-        id: u64,
+        id: AllocId,
     ) {
         mem.data.locks.insert(id, RangeMap::new());
     }
 
     fn free_lock<'a>(
         mem: &mut Memory<'a, 'tcx, Self>,
-        id: u64,
+        id: AllocId,
         len: u64,
     ) -> EvalResult<'tcx> {
         mem.data.locks
