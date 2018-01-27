@@ -393,6 +393,7 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator<'
             ty::TyFnPtr(_) |
             ty::TyNever |
             ty::TyFnDef(..) |
+            ty::TyGeneratorWitness(..) |
             ty::TyDynamic(..) |
             ty::TyForeign(..) => {
                 bug!("TyLayout::field_type({:?}): not applicable", layout)
@@ -558,6 +559,7 @@ impl<'a, 'tcx> EvalContextExt<'tcx> for EvalContext<'a, 'tcx, super::Evaluator<'
             TyAdt(adt, _) if adt.is_box() => true,
             TySlice(_) | TyAdt(_, _) | TyTuple(..) | TyClosure(..) | TyArray(..) |
             TyDynamic(..) | TyGenerator(..) | TyForeign(_) => false,
+            TyGeneratorWitness(..) => bug!("I'm not sure what to return here"),
             TyParam(_) | TyInfer(_) | TyProjection(_) | TyAnon(..) | TyError => {
                 bug!("I got an incomplete/unnormalized type for validation")
             }
