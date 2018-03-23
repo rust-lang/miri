@@ -271,11 +271,11 @@ impl<'mir, 'tcx: 'mir> Machine<'mir, 'tcx> for Evaluator<'tcx> {
         ecx: &mut EvalContext<'a, 'mir, 'tcx, Self>,
         cid: GlobalId<'tcx>,
     ) -> EvalResult<'tcx, AllocId> {
-        if let Some(alloc_id) = ecx.memory.datamut_statics.get(&cid) {
+        if let Some(alloc_id) = ecx.memory.data.mut_statics.get(&cid) {
             return Ok(alloc_id);
         }
         let mir = ecx.load_mir(cid.instance.def)?;
-        let layout = ecx.layout_of(mir.return_ty().subst(ecx.tcx, cid.instance.substs))?;
+        let layout = ecx.layout_of(mir.return_ty().subst(ecx.tcx.tcx, cid.instance.substs))?;
         let to_ptr = ecx.memory.allocate(
             layout.size.bytes(),
             layout.align,
