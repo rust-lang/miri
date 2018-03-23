@@ -21,6 +21,7 @@ extern crate lazy_static;
 
 use rustc::ty::{self, TyCtxt};
 use rustc::ty::layout::{TyLayout, LayoutOf};
+use rustc::ty::subst::Subst;
 use rustc::hir::def_id::DefId;
 use rustc::mir;
 
@@ -270,11 +271,11 @@ impl<'mir, 'tcx: 'mir> Machine<'mir, 'tcx> for Evaluator<'tcx> {
         ecx: &mut EvalContext<'a, 'mir, 'tcx, Self>,
         cid: GlobalId<'tcx>,
     ) -> EvalResult<'tcx, AllocId> {
-        if let Some(alloc_id) = ecx.memory.data.get(&cid) {
+        if let Some(alloc_id) = ecx.memory.datamut_statics.get(&cid) {
             return Ok(alloc_id);
         }
         let mir = ecx.load_mir(cid.instance.def)?;
-        let layout = ecx.layout_of(mir.return_ty().subst(tcx, cid.instance.substs))?;
+        let layout = ecx.layout_of(mir.return_ty().subst(ecx.tcx, cid.instance.substs))?;
         let to_ptr = ecx.memory.allocate(
             layout.size.bytes(),
             layout.align,
@@ -286,9 +287,9 @@ impl<'mir, 'tcx: 'mir> Machine<'mir, 'tcx> for Evaluator<'tcx> {
             .interpret_interner
             .get_cached(cid.instance.def_id())
             .expect("uncached static");
-        ecx.memory.copy(ptr, layout.align, to_ptr.into(), layout.align, layout.size.bytes(), true)?;
+        ecx.memory.copy(MemoryPointer::new(ptr, 0).into(), layout.align, to_ptr.into(), layout.align, layout.size.bytes(), true)?;
         ecx.memory.mark_static_initialized(to_ptr.alloc_id, ::syntax::ast::Mutability::Mutable)?;
-        assert!(ecx.memory.data.insert(cid, to_ptr.alloc_id).is_none());
+        assert!(ecx.memory.data.mut_statics.insert(cid, to_ptr.alloc_id).is_none());
         Ok(to_ptr.alloc_id)
     }
 
