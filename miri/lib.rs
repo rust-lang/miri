@@ -289,7 +289,7 @@ impl<'mir, 'tcx: 'mir> Machine<'mir, 'tcx> for Evaluator<'tcx> {
             .expect("uncached static");
         // TODO: do a recursive copy
         ecx.memory.copy(MemoryPointer::new(ptr, 0).into(), layout.align, to_ptr.into(), layout.align, layout.size.bytes(), true)?;
-        ecx.memory.mark_static_initialized(to_ptr.alloc_id, ::syntax::ast::Mutability::Mutable)?;
+        //ecx.memory.mark_static_initialized(to_ptr.alloc_id, ::syntax::ast::Mutability::Mutable)?;
         assert!(ecx.memory.data.mut_statics.insert(cid, to_ptr.alloc_id).is_none());
         Ok(to_ptr.alloc_id)
     }
