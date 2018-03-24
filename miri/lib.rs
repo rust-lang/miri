@@ -171,7 +171,7 @@ pub fn eval_main<'a, 'tcx: 'a>(
         Ok(()) => {
             let leaks = ecx.memory().leak_report();
             if leaks != 0 {
-                tcx.sess.err("the evaluated program leaked memory");
+                //tcx.sess.err("the evaluated program leaked memory");
             }
         }
         Err(mut e) => {
@@ -274,24 +274,56 @@ impl<'mir, 'tcx: 'mir> Machine<'mir, 'tcx> for Evaluator<'tcx> {
         if let Some(alloc_id) = ecx.memory.data.mut_statics.get(&cid) {
             return Ok(*alloc_id);
         }
-        let mir = ecx.load_mir(cid.instance.def)?;
-        let layout = ecx.layout_of(mir.return_ty().subst(ecx.tcx.tcx, cid.instance.substs))?;
-        let to_ptr = ecx.memory.allocate(
+
+        let tcx = ecx.tcx.tcx;
+        let param_env = ty::ParamEnv::reveal_all();
+
+        let mut mir = ecx.load_mir(cid.instance.def)?;
+        if let Some(index) = cid.promoted {
+            mir = &mir.promoted[index];
+        }
+        assert!(mir.arg_count == 0);
+
+        // we start out with the best span we have
+        // and try improving it down the road when more information is available
+        let layout = ecx.layout_of(mir.return_ty().subst(tcx, cid.instance.substs))?;
+        assert!(!layout.is_unsized());
+        let ptr = ecx.memory.allocate(
             layout.size.bytes(),
             layout.align,
             None,
         )?;
-        ecx.const_eval(cid)?;
-        let ptr = ecx
+
+        let internally_mutable = !layout.ty.is_freeze(tcx, param_env, mir.span);
+        let mutability = tcx.is_static(cid.instance.def_id());
+        if mutability != Some(::rustc::hir::Mutability::MutMutable) && !internally_mutable {
+            ecx.const_eval(cid)?;
+            return Ok(ecx
             .tcx
             .interpret_interner
             .get_cached(cid.instance.def_id())
-            .expect("uncached static");
-        // TODO: do a recursive copy
-        ecx.memory.copy(MemoryPointer::new(ptr, 0).into(), layout.align, to_ptr.into(), layout.align, layout.size.bytes(), true)?;
-        //ecx.memory.mark_static_initialized(to_ptr.alloc_id, ::syntax::ast::Mutability::Mutable)?;
-        assert!(ecx.memory.data.mut_statics.insert(cid, to_ptr.alloc_id).is_none());
-        Ok(to_ptr.alloc_id)
+            .expect("uncached static"));
+        }
+
+        //let cleanup = StackPopCleanup::MarkStatic(Mutability::Mutable);
+        let cleanup = StackPopCleanup::None;
+        let name = ty::tls::with(|tcx| tcx.item_path_str(cid.instance.def_id()));
+        let prom = cid.promoted.map_or(String::new(), |p| format!("::promoted[{:?}]", p));
+        trace!("const_eval: pushing stack frame for global: {}{}", name, prom);
+        let caller_stackframe = ecx.stack().len();
+        ecx.push_stack_frame(
+            cid.instance,
+            mir.span,
+            mir,
+            Place::from_ptr(ptr, layout.align),
+            cleanup,
+        )?;
+
+        while ecx.step()? && ecx.stack().len() > caller_stackframe {}
+
+        assert!(ecx.memory.data.mut_statics.insert(cid, ptr.alloc_id).is_none());
+
+        Ok(ptr.alloc_id)
     }
 
     fn box_alloc<'a>(
@@ -323,7 +355,10 @@ impl<'mir, 'tcx: 'mir> Machine<'mir, 'tcx> for Evaluator<'tcx> {
         let dest = ecx.eval_place(&mir::Place::Local(args.next().unwrap()))?;
         ecx.write_value(
             ValTy {
-                value: Value::ByVal(PrimVal::Bytes(layout.size.bytes().into())),
+                value: Value::ByVal(PrimVal::Bytes(match layout.size.bytes() {
+                    0 => 1,
+                    size => size,
+                }.into())),
                 ty: usize,
             },
             dest,
