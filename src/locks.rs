@@ -1,5 +1,6 @@
 use super::*;
 use rustc::middle::region;
+use rustc::ty::layout::Size;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Locks
@@ -69,27 +70,27 @@ impl<'tcx> LockInfo<'tcx> {
 pub trait MemoryExt<'tcx> {
     fn check_locks(
         &self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         access: AccessKind,
     ) -> EvalResult<'tcx>;
     fn acquire_lock(
         &mut self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         region: Option<region::Scope>,
         kind: AccessKind,
     ) -> EvalResult<'tcx>;
     fn suspend_write_lock(
         &mut self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         lock_path: &AbsPlace<'tcx>,
         suspend: Option<region::Scope>,
     ) -> EvalResult<'tcx>;
     fn recover_write_lock(
         &mut self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         lock_path: &AbsPlace<'tcx>,
         lock_region: Option<region::Scope>,
@@ -102,7 +103,7 @@ pub trait MemoryExt<'tcx> {
 impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evaluator<'tcx>> {
     fn check_locks(
         &self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         access: AccessKind,
     ) -> EvalResult<'tcx> {
@@ -116,7 +117,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
         };
         let frame = self.cur_frame;
         locks
-            .check(Some(frame), ptr.offset, len, access)
+            .check(Some(frame), ptr.offset.bytes(), len, access)
             .map_err(|lock| {
                 EvalErrorKind::MemoryLockViolation {
                     ptr,
@@ -131,7 +132,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
     /// Acquire the lock for the given lifetime
     fn acquire_lock(
         &mut self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         region: Option<region::Scope>,
         kind: AccessKind,
@@ -146,7 +147,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
             len,
             region
         );
-        self.check_bounds(ptr.offset(len, &*self)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
+        self.check_bounds(ptr.offset(Size::from_bytes(len), &*self)?, true)?; // if ptr.offset is in bounds, then so is ptr (because offset checks for overflow)
 
         let locks = match self.data.locks.get_mut(&ptr.alloc_id) {
             Some(locks) => locks,
@@ -157,7 +158,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
         // Iterate over our range and acquire the lock.  If the range is already split into pieces,
         // we have to manipulate all of them.
         let lifetime = DynamicLifetime { frame, region };
-        for lock in locks.iter_mut(ptr.offset, len) {
+        for lock in locks.iter_mut(ptr.offset.bytes(), len) {
             if !lock.access_permitted(None, kind) {
                 return err!(MemoryAcquireConflict {
                     ptr,
@@ -190,7 +191,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
     /// When suspending, the same cases are fine; we just register an additional suspension.
     fn suspend_write_lock(
         &mut self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         lock_path: &AbsPlace<'tcx>,
         suspend: Option<region::Scope>,
@@ -203,7 +204,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
             None => return Ok(()),
         };
 
-        'locks: for lock in locks.iter_mut(ptr.offset, len) {
+        'locks: for lock in locks.iter_mut(ptr.offset.bytes(), len) {
             let is_our_lock = match lock.active {
                 WriteLock(lft) =>
                     // Double-check that we are holding the lock.
@@ -263,7 +264,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
     /// Release a suspension from the write lock.  If this is the last suspension or if there is no suspension, acquire the lock.
     fn recover_write_lock(
         &mut self,
-        ptr: MemoryPointer,
+        ptr: Pointer,
         len: u64,
         lock_path: &AbsPlace<'tcx>,
         lock_region: Option<region::Scope>,
@@ -281,7 +282,7 @@ impl<'a, 'mir, 'tcx: 'mir + 'a> MemoryExt<'tcx> for Memory<'a, 'mir, 'tcx, Evalu
             None => return Ok(()),
         };
 
-        for lock in locks.iter_mut(ptr.offset, len) {
+        for lock in locks.iter_mut(ptr.offset.bytes(), len) {
             // Check if we have a suspension here
             let (got_the_lock, remove_suspension) = match lock.suspended.get_mut(&lock_id) {
                 None => {

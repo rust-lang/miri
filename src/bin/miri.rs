@@ -5,7 +5,7 @@ extern crate miri;
 extern crate rustc;
 extern crate rustc_driver;
 extern crate rustc_errors;
-extern crate rustc_trans_utils;
+extern crate rustc_codegen_utils;
 extern crate env_logger;
 extern crate log_settings;
 extern crate syntax;
@@ -18,7 +18,7 @@ use rustc_driver::driver::{CompileState, CompileController};
 use rustc::session::config::{self, Input, ErrorOutputType};
 use rustc::hir::{self, itemlikevisit};
 use rustc::ty::TyCtxt;
-use rustc_trans_utils::trans_crate::TransCrate;
+use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use syntax::ast;
 use std::path::PathBuf;
 
@@ -67,7 +67,7 @@ impl<'a> CompilerCalls<'a> for MiriCompilerCalls {
     }
     fn late_callback(
         &mut self,
-        trans: &TransCrate,
+        codegen_backend: &CodegenBackend,
         matches: &getopts::Matches,
         sess: &Session,
         cstore: &CrateStore,
@@ -75,7 +75,7 @@ impl<'a> CompilerCalls<'a> for MiriCompilerCalls {
         odir: &Option<PathBuf>,
         ofile: &Option<PathBuf>,
     ) -> Compilation {
-        self.default.late_callback(trans, matches, sess, cstore, input, odir, ofile)
+        self.default.late_callback(codegen_backend, matches, sess, cstore, input, odir, ofile)
     }
     fn build_controller(
         &mut self,
