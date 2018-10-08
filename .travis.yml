@@ -31,7 +31,6 @@ before_script:
 - cargo install xargo || echo "Skipping xargo install"
 
 script:
-- set -e
 - |
   # Test and install plain miri
   cargo build --release --all-features &&
