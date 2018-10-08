@@ -11,8 +11,6 @@ os:
 - osx
 
 before_script:
-# mac os weirdness (https://github.com/travis-ci/travis-ci/issues/6307)
-- rvm get stable
 # Compute the rust version we use. We do not use "language: rust" to have more control here.
 - |
   if [ "$TRAVIS_EVENT_TYPE" = cron ]; then
@@ -33,7 +31,6 @@ before_script:
 - cargo install xargo || echo "Skipping xargo install"
 
 script:
-- set -e
 - |
   # Test and install plain miri
   cargo build --release --all-features &&
