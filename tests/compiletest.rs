@@ -187,9 +187,7 @@ fn test() {
     // uses `libtest` which runs jobs in parallel.
 
     run_pass_miri(false);
-    // FIXME: Disabled for now, as the optimizer is pretty broken and crashes...
-    // See https://github.com/rust-lang/rust/issues/50411
-    //run_pass_miri(true);
+    run_pass_miri(true);
 
     compile_fail_miri();
 }
