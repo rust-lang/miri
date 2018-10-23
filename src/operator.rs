@@ -142,8 +142,8 @@ impl<'a, 'mir, 'tcx> EvalContextExt<'tcx> for super::MiriEvalContext<'a, 'mir, '
                     // allocations sit right next to each other.  The C/C++ standards are
                     // somewhat fuzzy about this case, so I think for now this check is
                     // "good enough".
-                    self.memory.check_bounds_ptr(left, false)?;
-                    self.memory.check_bounds_ptr(right, false)?;
+                    self.memory.get(left.alloc_id)?.check_bounds_ptr(left, false)?;
+                    self.memory.get(right.alloc_id)?.check_bounds_ptr(right, false)?;
                     // Two live in-bounds pointers, we can compare across allocations
                     left == right
                 }
@@ -295,9 +295,9 @@ impl<'a, 'mir, 'tcx> EvalContextExt<'tcx> for super::MiriEvalContext<'a, 'mir, '
         if let Scalar::Ptr(ptr) = ptr {
             // Both old and new pointer must be in-bounds.
             // (Of the same allocation, but that part is trivial with our representation.)
-            self.memory.check_bounds_ptr(ptr, false)?;
+            self.memory.get(ptr.alloc_id)?.check_bounds_ptr(ptr, false)?;
             let ptr = ptr.signed_offset(offset, self)?;
-            self.memory.check_bounds_ptr(ptr, false)?;
+            self.memory.get(ptr.alloc_id)?.check_bounds_ptr(ptr, false)?;
             Ok(Scalar::Ptr(ptr))
         } else {
             // An integer pointer. They can only be offset by 0, and we pretend there

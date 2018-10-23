@@ -423,7 +423,8 @@ impl<'a, 'mir, 'tcx> EvalContextExt<'tcx> for super::MiriEvalContext<'a, 'mir, '
                             // Do it in memory
                             let mplace = self.force_allocation(dest)?;
                             assert!(mplace.meta.is_none());
-                            self.memory.mark_definedness(mplace.ptr.to_ptr()?, dest.layout.size, false)?;
+                            let ptr = mplace.ptr.to_ptr()?;
+                            self.memory.get_mut(ptr.alloc_id)?.mark_definedness(ptr, dest.layout.size, false)?;
                         }
                     }
                 }

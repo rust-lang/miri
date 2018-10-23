@@ -5,7 +5,7 @@ use rustc::mir;
 
 use super::{
     MemoryAccess, RangeMap, EvalResult,
-    Pointer,
+    Pointer, AllocationExtra,
 };
 
 pub type Timestamp = u64;
@@ -187,8 +187,9 @@ impl State {
 }
 
 /// Higher-level operations
-impl<'tcx> Stacks {
-    pub fn memory_accessed(
+impl AllocationExtra<Borrow> for Stacks {
+    #[inline(always)]
+    fn memory_accessed<'tcx>(
         &self,
         ptr: Pointer<Borrow>,
         size: Size,
@@ -202,7 +203,10 @@ impl<'tcx> Stacks {
         }
         Ok(())
     }
+}
 
+/// Higher-level operations
+impl<'tcx> Stacks {
     pub fn memory_deallocated(
         &mut self,
         ptr: Pointer<Borrow>,
