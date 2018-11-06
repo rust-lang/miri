@@ -1,6 +1,3 @@
-// FIXME: Validation disabled due to https://github.com/rust-lang/rust/issues/54908
-// compile-flags: -Zmiri-disable-validation
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
