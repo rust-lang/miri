@@ -9,6 +9,7 @@ cache:
 os:
 - linux
 - osx
+- windows
 dist: xenial
 
 before_script:
@@ -27,7 +28,7 @@ before_script:
 - rustc --version
 
 script:
-- ./travis.sh
+- bash travis.sh
 
 notifications:
   email:
