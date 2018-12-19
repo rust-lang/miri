@@ -5,6 +5,9 @@ set -e
 if [ "$TRAVIS_OS_NAME" == osx ]; then
   export MIRI_SYSROOT_BASE=~/Library/Caches/miri.miri.miri/
   FOREIGN_TARGET=i686-apple-darwin
+elif [ "$TRAVIS_OS_NAME" == windows ]; then
+  export MIRI_SYSROOT_BASE=~/AppData/Local/miri/miri/cache/
+  FOREIGN_TARGET=i686-pc-windows-msvc
 else
   export MIRI_SYSROOT_BASE=~/.cache/miri/
   FOREIGN_TARGET=i686-unknown-linux-gnu
