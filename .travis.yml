@@ -1,4 +1,4 @@
-language: generic
+language: shell
 cache:
   # Cache the global cargo directory, but NOT the local `target` directory which
   # we cannot reuse anyway when the nightly changes (and it grows quite large
