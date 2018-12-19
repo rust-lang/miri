@@ -143,12 +143,24 @@ impl<'a, 'mir, 'tcx> EvalContextExt<'tcx> for super::MiriEvalContext<'a, 'mir, '
                     // somewhat fuzzy about this case, so I think for now this check is
                     // "good enough".
                     // Dead allocations in miri cannot overlap with live allocations, but
-                    // on read hardware this can easily happen. Thus for comparisons we require
+                    // on real hardware this can easily happen. Thus for comparisons we require
                     // both pointers to be live.
-                    self.memory().get(left.alloc_id)?.check_bounds_ptr(left)?;
-                    self.memory().get(right.alloc_id)?.check_bounds_ptr(right)?;
-                    // Two in-bounds pointers, we can compare across allocations
-                    left == right
+
+                    let check = |ptr: Pointer<Borrow>| match self.memory().get(ptr.alloc_id) {
+                        Ok(alloc) => alloc.check_bounds_ptr(ptr),
+                        // Function pointers just compare to false
+                        Err(EvalError { kind: EvalErrorKind::DerefFunctionPointer, .. }) => Ok(()),
+                        Err(err) => Err(err),
+                    };
+
+                    // Check bounds
+                    check(left)?;
+                    check(right)?;
+
+                    // The above is only done to emit errors in case of oob pointers.
+                    // We already know the pointers can't be equal
+                    // by their alloc ids not being equal.
+                    false
                 }
             }
             // Comparing ptr and integer
