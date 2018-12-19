@@ -1,4 +1,4 @@
-language: shell
+language: c
 cache:
   # Cache the global cargo directory, but NOT the local `target` directory which
   # we cannot reuse anyway when the nightly changes (and it grows quite large
@@ -23,13 +23,7 @@ before_script:
     RUST_TOOLCHAIN=$(cat rust-version)
   fi
 # install Rust
-- |
-  if [[ "$TRAVIS_OS_NAME" == windows ]]; then
-    curl -sSf -o rustup-init.exe https://win.rustup.rs/
-    ./rustup-init.exe -y --default-toolchain "$RUST_TOOLCHAIN"
-  else
-    curl https://build.travis-ci.org/files/rustup-init.sh -sSf | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN"
-  fi
+- curl https://build.travis-ci.org/files/rustup-init.sh -sSf | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN"
 - export PATH=$HOME/.cargo/bin:$PATH
 - rustc --version
 
