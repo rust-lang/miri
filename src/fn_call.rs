@@ -4,6 +4,8 @@ use rustc::hir::def_id::DefId;
 use rustc::mir;
 use syntax::attr;
 
+const EMULATED_PAGE_SIZE: u32 = 4096;
+
 use crate::*;
 
 impl<'a, 'mir, 'tcx> EvalContextExt<'a, 'mir, 'tcx> for crate::MiriEvalContext<'a, 'mir, 'tcx> {}
@@ -55,6 +57,7 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
 
     /// Emulate calling a foreign item, fail if the item is not supported.
     /// This function will handle `goto_block` if needed.
+    #[allow(clippy::cyclomatic_complexity)]
     fn emulate_foreign_item(
         &mut self,
         def_id: DefId,
@@ -394,12 +397,36 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                         io::stderr().write(buf_cont)
                     };
                     match res {
-                        Ok(n) => n as i64,
+                        Ok(n) => n as i32,
                         Err(_) => -1,
                     }
                 } else {
-                    eprintln!("Miri: Ignored output to FD {}", fd);
-                    n as i64 // pretend it all went well
+                    match this.machine.mem_fds.get(&fd) {
+                        // fd is not a valid file descriptor or is not open for writing.
+                        None => -1,
+                        Some(&alloc_id) => {
+                            {
+                                let alloc = this.memory_mut().get_mut(alloc_id)?;
+                                let alloc_size = alloc.bytes.len();
+                                // resize the file descriptor's memory
+                                // FIXME: should we step in PAGE_SIZE steps?
+                                // HACK: resize the allocation in-location.
+                                // We could create a method on `Allocation` that allows such
+                                // an operation, but noone other than file descriptors need it.
+                                alloc.bytes.resize(alloc_size + n as usize, 0);
+                                alloc.undef_mask.grow(Size::from_bytes(n), true);
+                            }
+                            this.memory_mut().copy(
+                                buf,
+                                Align::from_bytes(1).unwrap(),
+                                Pointer::from(alloc_id).with_default_tag().into(),
+                                Align::from_bytes(1).unwrap(),
+                                Size::from_bytes(n),
+                                true,
+                            )?;
+                            n as i32
+                        }
+                    }
                 }; // now result is the value we return back to the program
                 this.write_scalar(
                     Scalar::from_int(result, dest.layout.size),
@@ -424,7 +451,7 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 trace!("sysconf() called with name {}", name);
                 // cache the sysconf integers via miri's global cache
                 let paths = &[
-                    (&["libc", "_SC_PAGESIZE"], Scalar::from_int(4096, dest.layout.size)),
+                    (&["libc", "_SC_PAGESIZE"], Scalar::from_int(EMULATED_PAGE_SIZE, dest.layout.size)),
                     (&["libc", "_SC_GETPW_R_SIZE_MAX"], Scalar::from_int(-1, dest.layout.size)),
                     (&["libc", "_SC_NPROCESSORS_ONLN"], Scalar::from_int(1, dest.layout.size)),
                 ];
@@ -679,6 +706,43 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
             }
             "GetCommandLineW" => {
                 this.write_scalar(Scalar::Ptr(this.machine.cmd_line.unwrap()), dest)?;
+            }
+
+            "memfd_create" => {
+                // read the cstr name
+                let name_ptr = this.read_scalar(args[0])?.not_undef()?.to_ptr()?;
+                let _name = this.memory().get(name_ptr.alloc_id)?.read_c_str(tcx, name_ptr)?;
+                // FIXME: use the above name so calling `memfd_create` with the same name twice
+                // doesn't crate a new allocation
+
+                // create an empty initial allocation
+                let init = this.memory_mut().allocate(
+                    Size::ZERO,
+                    Align::from_bytes(EMULATED_PAGE_SIZE.into()).unwrap(),
+                    MiriMemoryKind::MemFd.into(),
+                ).alloc_id;
+                // get the next id
+                let id = this.machine.next_mem_fd;
+                this.machine.next_mem_fd = this.machine.next_mem_fd.checked_add(1).expect("ran out of file descriptors");
+                this.machine.mem_fds.insert(id, init);
+                this.write_scalar(Scalar::from_int(id, dest.layout.size), dest)?;
+            }
+
+            "close" => {
+                let fd = this.read_scalar(args[0])?.to_i32()?;
+                let return_code = match this.machine.mem_fds.remove(&fd) {
+                    Some(alloc_id) => {
+                        let sal = this.memory().get_size_and_align(alloc_id, InboundsCheck::Live)?;
+                        this.memory_mut().deallocate(
+                            Pointer::from(alloc_id).with_default_tag(),
+                            Some(sal),
+                            MiriMemoryKind::MemFd.into(),
+                        )?;
+                        0
+                    },
+                    None => -1,
+                };
+                this.write_scalar(Scalar::from_int(return_code, dest.layout.size), dest)?;
             }
 
             // We can't execute anything else

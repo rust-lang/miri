@@ -266,6 +266,8 @@ pub enum MiriMemoryKind {
     Env,
     /// mutable statics
     MutStatic,
+    /// in-memory file descriptors
+    MemFd,
 }
 
 impl Into<MemoryKind<MiriMemoryKind>> for MiriMemoryKind {
@@ -280,7 +282,7 @@ impl MayLeak for MiriMemoryKind {
     fn may_leak(self) -> bool {
         use self::MiriMemoryKind::*;
         match self {
-            Rust | C => false,
+            MemFd | Rust | C => false,
             Env | MutStatic => true,
         }
     }
@@ -290,6 +292,15 @@ pub struct Evaluator<'tcx> {
     /// Environment variables set by `setenv`
     /// Miri does not expose env vars from the host to the emulated program
     pub(crate) env_vars: HashMap<Vec<u8>, Pointer<Borrow>>,
+
+    /// In-memory file descriptors created by `memfd_create`
+    /// Miri does not expose memfd descriptors of the host, but emulates a new
+    /// set inside every evaluation
+    pub(crate) mem_fds: HashMap<i32, AllocId>,
+
+    /// Id of the next file descriptor, starts at 3 because 1 and 2 are taken for
+    /// stdout and stderr respectively
+    pub(crate) next_mem_fd: i32,
 
     /// Program arguments (`Option` because we can only initialize them after creating the ecx).
     /// These are *pointers* to argc/argv because macOS.
@@ -315,6 +326,8 @@ impl<'tcx> Evaluator<'tcx> {
     fn new(validate: bool) -> Self {
         Evaluator {
             env_vars: HashMap::default(),
+            mem_fds: HashMap::default(),
+            next_mem_fd: 3,
             argc: None,
             argv: None,
             cmd_line: None,
