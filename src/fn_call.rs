@@ -4,7 +4,7 @@ use rustc::hir::def_id::DefId;
 use rustc::mir;
 use syntax::attr;
 
-const EMULATED_PAGE_SIZE: u32 = 4096;
+pub const EMULATED_PAGE_SIZE: u32 = 4096;
 
 use crate::*;
 
@@ -552,14 +552,12 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
             "pthread_attr_getstack" => {
                 // second argument is where we are supposed to write the stack size
                 let ptr = this.deref_operand(args[1])?;
-                let stackaddr = Scalar::from_int(0x80000, args[1].layout.size); // just any address
-                this.write_scalar(stackaddr, ptr.into())?;
+                this.write_scalar(Scalar::from(this.machine.stack_addr), ptr.into())?;
                 // return 0
                 this.write_null(dest)?;
             }
             "pthread_get_stackaddr_np" => {
-                let stackaddr = Scalar::from_int(0x80000, dest.layout.size); // just any address
-                this.write_scalar(stackaddr, dest)?;
+                this.write_scalar(Scalar::from(this.machine.stack_addr), dest)?;
             }
 
             // Stub out calls for condvar, mutex and rwlock to just return 0
@@ -582,29 +580,33 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 // mapping is returned as the result of the call.
                 // We choose to always ignore the address in miri
                 let addr = this.read_scalar(args[0])?.not_undef()?;
-                let length = this.read_scalar(args[1])?.to_usize(&*this.tcx)?;
-                if length == 0 {
-                    return err!(MachineError("mmap length argument may not be zero".to_string()));
+                if addr == this.machine.stack_addr.into() {
+                    this.write_scalar(addr, dest)?;
+                } else {
+                    let length = this.read_scalar(args[1])?.to_usize(&*this.tcx)?;
+                    if length == 0 {
+                        return err!(MachineError("mmap length argument may not be zero".to_string()));
+                    }
+                    let prot = this.read_scalar(args[2])?.to_i32()?;
+                    let flags = this.read_scalar(args[3])?.to_i32()?;
+                    if flags != libc::MAP_SHARED {
+                        return err!(Unimplemented("mmap flag argument must be MAP_SHARED".to_string()));
+                    }
+                    let fd = this.read_scalar(args[4])?.to_i32()?;
+                    let offset = this.read_scalar(args[5])?.to_usize(&*this.tcx)?;
+                    if offset % u64::from(EMULATED_PAGE_SIZE) != 0 {
+                        return err!(MachineError("mmap offset argument must be multiple of PAGE_SIZE".to_string()));
+                    }
+                    let offset = Size::from_bytes(offset);
+                    let scalar = match this.machine.mem_fds.get(&fd) {
+                        None => Scalar::from_int(-1, dest.layout.size),
+                        Some(&alloc_id) => Pointer::new(alloc_id, offset).with_default_tag().into(),
+                    };
+                    // This is a horrible hack, but well...
+                    // the guard page mechanism calls mmap and
+                    // expects a particular return value, so we give it that value
+                    this.write_scalar(scalar, dest)?;
                 }
-                let prot = this.read_scalar(args[2])?.to_i32()?;
-                let flags = this.read_scalar(args[3])?.to_i32()?;
-                if flags != libc::MAP_SHARED {
-                    return err!(Unimplemented("mmap flag argument must be MAP_SHARED".to_string()));
-                }
-                let fd = this.read_scalar(args[4])?.to_i32()?;
-                let offset = this.read_scalar(args[5])?.to_usize(&*this.tcx)?;
-                if offset % u64::from(EMULATED_PAGE_SIZE) != 0 {
-                    return err!(MachineError("mmap offset argument must be multiple of PAGE_SIZE".to_string()));
-                }
-                let offset = Size::from_bytes(offset);
-                let scalar = match this.machine.mem_fds.get(&fd) {
-                    None => Scalar::from_int(-1, dest.layout.size),
-                    Some(&alloc_id) => Pointer::new(alloc_id, offset).with_default_tag().into(),
-                };
-                // This is a horrible hack, but well...
-                // the guard page mechanism calls mmap and
-                // expects a particular return value, so we give it that value
-                this.write_scalar(scalar, dest)?;
             }
 
             "mprotect" => {

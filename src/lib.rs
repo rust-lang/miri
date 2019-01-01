@@ -70,6 +70,13 @@ pub fn create_ecx<'a, 'mir: 'a, 'tcx: 'mir>(
         Evaluator::new(validate),
     );
 
+    let stack_addr = ecx.memory_mut().allocate(
+        Size::ZERO,
+        Align::from_bytes(fn_call::EMULATED_PAGE_SIZE.into()).unwrap(),
+        MiriMemoryKind::StackRoot.into(),
+    );
+    ecx.machine.stack_addr = stack_addr.with_default_tag();
+
     let main_instance = ty::Instance::mono(ecx.tcx.tcx, main_id);
     let main_mir = ecx.load_mir(main_instance.def)?;
 
@@ -268,6 +275,8 @@ pub enum MiriMemoryKind {
     MutStatic,
     /// in-memory file descriptors
     MemFd,
+    /// The stack allocation
+    StackRoot,
 }
 
 impl Into<MemoryKind<MiriMemoryKind>> for MiriMemoryKind {
@@ -283,7 +292,7 @@ impl MayLeak for MiriMemoryKind {
         use self::MiriMemoryKind::*;
         match self {
             MemFd | Rust | C => false,
-            Env | MutStatic => true,
+            StackRoot | Env | MutStatic => true,
         }
     }
 }
@@ -301,6 +310,10 @@ pub struct Evaluator<'tcx> {
     /// Id of the next file descriptor, starts at 3 because 1 and 2 are taken for
     /// stdout and stderr respectively
     pub(crate) next_mem_fd: i32,
+
+    /// The AllocId reserved for the stack. Trying to access the stack through this will abort,
+    /// but we need it for other code which needs to properly identify the stack
+    pub(crate) stack_addr: Pointer<Borrow>,
 
     /// Program arguments (`Option` because we can only initialize them after creating the ecx).
     /// These are *pointers* to argc/argv because macOS.
@@ -327,6 +340,8 @@ impl<'tcx> Evaluator<'tcx> {
         Evaluator {
             env_vars: HashMap::default(),
             mem_fds: HashMap::default(),
+            // start out with no stack root pointer by using a forever invalid AllocId
+            stack_addr: Pointer::new(AllocId(u64::max_value()), Size::ZERO).with_default_tag(),
             next_mem_fd: 3,
             argc: None,
             argv: None,
