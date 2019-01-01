@@ -381,6 +381,9 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 }
             }
 
+            // windows
+            "_write" |
+            // unix
             "write" => {
                 let fd = this.read_scalar(args[0])?.to_i32()?;
                 let buf = this.read_scalar(args[1])?.not_undef()?;
@@ -767,6 +770,7 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 this.write_scalar(Scalar::from_int(-1, dest.layout.size), dest)?;
             }
 
+            "close$NOCANCEL" |
             "close" => {
                 let fd = this.read_scalar(args[0])?.to_i32()?;
                 let return_code = match this.machine.mem_fds.remove(&fd) {
