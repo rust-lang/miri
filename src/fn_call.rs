@@ -405,7 +405,7 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                         // fd is not a valid file descriptor or is not open for writing.
                         None => -1,
                         Some(&alloc_id) => {
-                            {
+                            let start = {
                                 let alloc = this.memory_mut().get_mut(alloc_id)?;
                                 let alloc_size = alloc.bytes.len();
                                 // resize the file descriptor's memory
@@ -415,11 +415,12 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                                 // an operation, but noone other than file descriptors need it.
                                 alloc.bytes.resize(alloc_size + n as usize, 0);
                                 alloc.undef_mask.grow(Size::from_bytes(n), true);
-                            }
+                                Size::from_bytes(alloc_size as u64)
+                            };
                             this.memory_mut().copy(
                                 buf,
                                 Align::from_bytes(1).unwrap(),
-                                Pointer::from(alloc_id).with_default_tag().into(),
+                                Pointer::new(alloc_id, start).with_default_tag().into(),
                                 Align::from_bytes(1).unwrap(),
                                 Size::from_bytes(n),
                                 true,
@@ -568,11 +569,41 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 this.write_null(dest)?;
             }
 
+            // void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
             "mmap" => {
-                // This is a horrible hack, but well... the guard page mechanism calls mmap and expects a particular return value, so we give it that value
+                // If addr is NULL, then the kernel chooses the (page-aligned) address
+                // at which to create the mapping; this is the most portable method of
+                // creating a new mapping.  If addr is not NULL, then the kernel takes
+                // it as a hint about where to place the mapping; on Linux, the mapping
+                // will be created at a nearby page boundary.  The address of the new
+                // mapping is returned as the result of the call.
+                // We choose to always ignore the address in miri
                 let addr = this.read_scalar(args[0])?.not_undef()?;
-                this.write_scalar(addr, dest)?;
+                let length = this.read_scalar(args[1])?.to_usize(&*this.tcx)?;
+                if length == 0 {
+                    return err!(MachineError("mmap length argument may not be zero".to_string()));
+                }
+                let prot = this.read_scalar(args[2])?.to_i32()?;
+                let flags = this.read_scalar(args[3])?.to_i32()?;
+                if flags != libc::MAP_SHARED {
+                    return err!(Unimplemented("mmap flag argument must be MAP_SHARED".to_string()));
+                }
+                let fd = this.read_scalar(args[4])?.to_i32()?;
+                let offset = this.read_scalar(args[5])?.to_usize(&*this.tcx)?;
+                if offset % u64::from(EMULATED_PAGE_SIZE) != 0 {
+                    return err!(MachineError("mmap offset argument must be multiple of PAGE_SIZE".to_string()));
+                }
+                let offset = Size::from_bytes(offset);
+                let scalar = match this.machine.mem_fds.get(&fd) {
+                    None => Scalar::from_int(-1, dest.layout.size),
+                    Some(&alloc_id) => Pointer::new(alloc_id, offset).with_default_tag().into(),
+                };
+                // This is a horrible hack, but well...
+                // the guard page mechanism calls mmap and
+                // expects a particular return value, so we give it that value
+                this.write_scalar(scalar, dest)?;
             }
+
             "mprotect" => {
                 this.write_null(dest)?;
             }
@@ -726,6 +757,14 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 this.machine.next_mem_fd = this.machine.next_mem_fd.checked_add(1).expect("ran out of file descriptors");
                 this.machine.mem_fds.insert(id, init);
                 this.write_scalar(Scalar::from_int(id, dest.layout.size), dest)?;
+            }
+
+            // int munmap(void *addr, size_t length);
+            "munmap" => {
+                // FIXME(oli-obk): we can only support unmapping if we actually have multiple
+                // alloc ids that refer to the same underlying memory. This needs support in the
+                // miri engine.
+                this.write_scalar(Scalar::from_int(-1, dest.layout.size), dest)?;
             }
 
             "close" => {
