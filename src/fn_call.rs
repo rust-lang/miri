@@ -730,6 +730,7 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
         self.eval_context_mut().write_scalar(Scalar::from_int(0, dest.layout.size), dest)
     }
 
+    // FIXME: unify with emulate_foreign_item if we ever end up having overlap
     fn emulate_dlsym_item(
         &mut self,
         id: u32,
