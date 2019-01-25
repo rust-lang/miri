@@ -677,6 +677,13 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 this.write_scalar(Scalar::Ptr(this.machine.cmd_line.unwrap()), dest)?;
             }
 
+            "sched_getaffinity" => {
+                let _pid = this.read_scalar(args[0])?.to_i32()?;
+                let _cpusetsize = this.read_scalar(args[1])?.to_usize(this)?;
+                let _mask = this.read_scalar(args[2])?.to_ptr()?;
+                this.write_null(dest)?;
+            }
+
             // We can't execute anything else
             _ => {
                 return err!(Unimplemented(
