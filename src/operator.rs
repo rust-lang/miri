@@ -157,10 +157,12 @@ impl<'a, 'mir, 'tcx> EvalContextExt<'tcx> for super::MiriEvalContext<'a, 'mir, '
                 assert_eq!(size as u64, self.pointer_size().bytes());
                 let bits = bits as u64;
 
-                // Case I: Comparing with NULL
-                if bits == 0 {
-                    // Test if the ptr is in-bounds. Then it cannot be NULL.
-                    // Even dangling pointers cannot be NULL.
+                // Case I: Comparing with small integers
+                if bits <= 1 {
+                    // Test if the ptr is in-bounds. Then it cannot be a small integer.
+                    // Even dangling pointers cannot be small integers.
+                    // The only exception is wasm and some embedded devices, but that's a different
+                    // story: https://github.com/rust-lang/rust/issues/57897
                     if self.memory().check_bounds_ptr(ptr, InboundsCheck::MaybeDead).is_ok() {
                         return Ok(false);
                     }
