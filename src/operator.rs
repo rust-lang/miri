@@ -185,7 +185,7 @@ impl<'a, 'mir, 'tcx> EvalContextExt<'tcx> for super::MiriEvalContext<'a, 'mir, '
                 // without wrapping around the address space.
                 {
                     // Compute the highest address at which this allocation could live.
-                    // Substract one more, because it must be possible to add the size
+                    // Subtract one more, because it must be possible to add the size
                     // to the base address without overflowing -- IOW, the very last address
                     // of the address space is never dereferencable (but it can be in-bounds, i.e.,
                     // one-past-the-end).
