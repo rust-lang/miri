@@ -1,0 +1,9 @@
+[package]
+name = "tokio_test"
+version = "0.1.0"
+authors = ["Oliver Scherer <github35764891676564198441@oli-obk.de>"]
+edition = "2018"
+
+[dependencies]
+tokio = "0.1.14"
+futures = "0.1.25"
