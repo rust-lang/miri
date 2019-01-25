@@ -1,6 +1,6 @@
 use rustc::ty;
 use rustc::ty::layout::{Align, LayoutOf, Size};
-use rustc::hir::def_id::DefId;
+use rustc::hir::def_id::{DefId, DefIndex, CrateNum};
 use rustc::mir;
 use syntax::attr;
 
@@ -15,7 +15,23 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
         dest: Option<PlaceTy<'tcx, Borrow>>,
         ret: Option<mir::BasicBlock>,
     ) -> EvalResult<'tcx, Option<&'mir mir::Mir<'tcx>>> {
+
+        // HACK: normal evaluation never sees `ReservedForIncrCompCache`, so we use it
+        // to signify a dlsym loaded thing
+        if let ty::InstanceDef::Item(did) = instance.def {
+            if let CrateNum::ReservedForIncrCompCache = did.krate {
+                let id = did.index.as_raw_u32();
+                self.emulate_dlsym_item(
+                    id,
+                    args,
+                    dest.unwrap(),
+                    ret.unwrap(),
+                )?;
+                return Ok(None);
+            }
+        }
         let this = self.eval_context_mut();
+
         trace!("eval_fn_call: {:#?}, {:?}", instance, dest.map(|place| *place));
 
         // first run the common hooks also supported by CTFE
@@ -199,10 +215,23 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
                 let symbol_name = this.memory().get(symbol.alloc_id)?.read_c_str(tcx, symbol)?;
                 let err = format!("bad c unicode symbol: {:?}", symbol_name);
                 let symbol_name = ::std::str::from_utf8(symbol_name).unwrap_or(&err);
-                return err!(Unimplemented(format!(
-                    "miri does not support dynamically loading libraries (requested symbol: {})",
-                    symbol_name
-                )));
+                let id = match symbol_name {
+                    "epoll_create1" => 0,
+                    _ => return err!(Unimplemented(format!(
+                        "miri does not support dynamically loading symbol `{}`",
+                        symbol_name,
+                    ))),
+                };
+                let did = DefId {
+                    krate: CrateNum::ReservedForIncrCompCache,
+                    index: DefIndex::from_raw_u32(id),
+                };
+                let instance = ty::Instance {
+                    def: ty::InstanceDef::Item(did),
+                    substs: this.tcx.mk_substs([].iter()),
+                };
+                let ptr = this.memory_mut().create_fn_alloc(instance);
+                this.write_scalar(Scalar::from(ptr.with_default_tag()), dest)?;
             }
 
             "__rust_maybe_catch_panic" => {
@@ -699,5 +728,23 @@ pub trait EvalContextExt<'a, 'mir, 'tcx: 'a+'mir>: crate::MiriEvalContextExt<'a,
 
     fn write_null(&mut self, dest: PlaceTy<'tcx, Borrow>) -> EvalResult<'tcx> {
         self.eval_context_mut().write_scalar(Scalar::from_int(0, dest.layout.size), dest)
+    }
+
+    fn emulate_dlsym_item(
+        &mut self,
+        id: u32,
+        args: &[OpTy<'tcx, Borrow>],
+        dest: PlaceTy<'tcx, Borrow>,
+        ret: mir::BasicBlock,
+    ) -> EvalResult<'tcx> {
+        let this = self.eval_context_mut();
+        match id {
+            // epoll_create1
+            0 => {
+                this.write_null(dest)?;
+            },
+            _ => unreachable!(),
+        }
+        Ok(())
     }
 }
