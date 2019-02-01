@@ -2,16 +2,38 @@ extern crate getopts;
 extern crate miri;
 extern crate rustc;
 extern crate rustc_driver;
+extern crate rustc_interface;
 extern crate test;
 
 use self::miri::eval_main;
-use self::rustc_driver::{driver, Compilation};
 use rustc::hir::def_id::LOCAL_CRATE;
-use std::cell::RefCell;
-use std::rc::Rc;
+use rustc_interface::interface;
 use crate::test::Bencher;
 
-pub struct MiriCompilerCalls<'a>(Rc<RefCell<&'a mut Bencher>>);
+struct MiriCompilerCalls<'a> {
+    bencher: &'a mut Bencher,
+}
+
+impl rustc_driver::Callbacks for MiriCompilerCalls<'_> {
+    fn after_analysis(&mut self, compiler: &interface::Compiler<'_>) -> bool {
+        compiler.session().abort_if_errors();
+
+        compiler.global_ctxt().unwrap().peek_mut().enter(|tcx| {
+            let (entry_def_id, _) = tcx.entry_fn(LOCAL_CRATE).expect(
+                "no main or start function found",
+            );
+
+            self.bencher.iter(|| {
+                eval_main(tcx, entry_def_id, false);
+            });
+        });
+
+        compiler.session().abort_if_errors();
+
+        // Don't continue execution
+        false
+    }
+}
 
 fn find_sysroot() -> String {
     // Taken from https://github.com/Manishearth/rust-clippy/pull/911.
@@ -36,25 +58,5 @@ pub fn run(filename: &str, bencher: &mut Bencher) {
         "--sysroot".to_string(),
         find_sysroot(),
     ];
-    let bencher = RefCell::new(bencher);
-
-    let mut control = driver::CompileController::basic();
-
-    control.after_analysis.stop = Compilation::Stop;
-    control.after_analysis.callback = Box::new(move |state| {
-        state.session.abort_if_errors();
-
-        let tcx = state.tcx.unwrap();
-        let (entry_def_id, _) = tcx.entry_fn(LOCAL_CRATE).expect(
-            "no main or start function found",
-        );
-
-        bencher.borrow_mut().iter(|| {
-            eval_main(tcx, entry_def_id, false);
-        });
-
-        state.session.abort_if_errors();
-    });
-
-    rustc_driver::run_compiler(args, Box::new(control), None, None);
+    rustc_driver::run_compiler(args, &mut MiriCompilerCalls { bencher }, None, None);
 }
