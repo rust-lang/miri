@@ -80,4 +80,6 @@ fn main() {
     check_overalign_requests(Global);
     global_to_box();
     box_to_global();
+
+    println!("Done.");
 }
