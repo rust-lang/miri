@@ -1,7 +1,7 @@
 // compile-flags: -Zmiri-seed=0000000000000000
 
-use std::collections::{self, HashMap};
-use std::hash::{BuildHasherDefault, BuildHasher};
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 fn test_map<S: BuildHasher>(mut map: HashMap<i32, i32, S>) {
     map.insert(0, 0);
@@ -24,12 +24,5 @@ fn test_map<S: BuildHasher>(mut map: HashMap<i32, i32, S>) {
 }
 
 fn main() {
-    if cfg!(target_os = "macos") { // TODO: Implement random number generation on OS X.
-        // Until then, use a deterministic map.
-        let map : HashMap<i32, i32, BuildHasherDefault<collections::hash_map::DefaultHasher>> = HashMap::default();
-        test_map(map);
-    } else {
-        let map: HashMap<i32, i32> = HashMap::default();
-        test_map(map);
-    }
+    test_map(HashMap::new());
 }
