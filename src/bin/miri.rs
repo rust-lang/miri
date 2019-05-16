@@ -180,7 +180,7 @@ fn main() {
     debug!("miri arguments: {:?}", miri_args);
     let miri_config = miri::MiriConfig { validate, args: miri_args, seed };
     let result = rustc_driver::report_ices_to_stderr_if_any(move || {
-        rustc_driver::run_compiler(&rustc_args, &mut MiriCompilerCalls { miri_config }, None, None)
+        rustc_driver::run_compiler(&rustc_args, &[], &mut MiriCompilerCalls { miri_config }, None, None)
     }).and_then(|result| result);
     std::process::exit(result.is_err() as i32);
 }
