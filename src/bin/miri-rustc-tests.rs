@@ -142,7 +142,7 @@ fn main() {
         let buf = BufWriter::default();
         let output = buf.clone();
         let result = std::panic::catch_unwind(|| {
-            let _ = rustc_driver::run_compiler(&args, &mut MiriCompilerCalls { host_target }, None, Some(Box::new(buf)));
+            let _ = rustc_driver::run_compiler(&args, &[], &mut MiriCompilerCalls { host_target }, None, Some(Box::new(buf)));
         });
 
         match result {
