@@ -8,6 +8,7 @@ use syntax::symbol::sym;
 use rand::RngCore;
 
 use crate::*;
+use crate::sys::PlatformExt;
 
 impl<'mir, 'tcx> EvalContextExt<'mir, 'tcx> for crate::MiriEvalContext<'mir, 'tcx> {}
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx> {
@@ -937,9 +938,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
             // We can't execute anything else.
             _ => {
-                return err!(Unimplemented(
-                    format!("can't call foreign function: {}", link_name),
-                ));
+                this.eval_ffi(def_id, args, dest, ret, link_name)?;
             }
         }
 

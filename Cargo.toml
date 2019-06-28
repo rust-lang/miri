@@ -49,6 +49,9 @@ rustc-workspace-hack = "1.0.0"
 # Depend on num-traits with default features to avoid having to rebuild
 # between "cargo build" and "cargo intall".
 num-traits = "*"
+cfg-if = "0.1.9"
+libc = "0.2.58"
+libffi = "0.7.0"
 
 [build-dependencies]
 vergen = "3"

@@ -22,6 +22,7 @@ mod mono_hash_map;
 mod stacked_borrows;
 mod intptrcast;
 mod memory;
+mod sys;
 
 use std::collections::HashMap;
 use std::borrow::Cow;
