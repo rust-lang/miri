@@ -32,8 +32,8 @@ before_script:
   fi
 # Install Rust ("beta" toolchain is used to build rustup-toolchain-install-master and for its cargo)
 - curl https://build.travis-ci.org/files/rustup-init.sh -sSf | sh -s -- -y --default-toolchain beta
-- rustup default beta
 - export PATH=$HOME/.cargo/bin:$PATH
+- rustup default beta
 # Install "master" toolchain
 - cargo install rustup-toolchain-install-master || echo "rustup-toolchain-install-master already installed"
 - travis_retry rustup-toolchain-install-master -f -n master $RUSTC_HASH -c rust-src
