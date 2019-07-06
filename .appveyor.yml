@@ -50,6 +50,7 @@ after_test:
     # Don't cache "master" toolchain, it's a waste
     - rustup default beta
     - rustup toolchain uninstall master
+    - rustup toolchain uninstall stable
 
 notifications:
     - provider: Email
