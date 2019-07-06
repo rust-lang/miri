@@ -20,6 +20,7 @@ install:
     # Install Rust
     - curl -sSf -o rustup-init.exe https://win.rustup.rs/
     - rustup-init.exe -y --default-host %TARGET% --default-toolchain beta
+    - rustup default beta
     - set PATH=%USERPROFILE%\.cargo\bin;%PATH%
     # Install "master" toolchain
     - cargo install rustup-toolchain-install-master & exit 0
