@@ -239,6 +239,7 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'tcx> {
     }
 
     fn find_foreign_static(
+        _memory_extra: &MemoryExtra,
         tcx: TyCtxt<'tcx>,
         def_id: DefId,
     ) -> InterpResult<'tcx, Cow<'tcx, Allocation>> {
