@@ -135,6 +135,7 @@ fn main() {
     let mut rustc_args = vec![];
     let mut miri_args = vec![];
     let mut after_dashdash = false;
+    let mut env_blacklist = vec![];
     for arg in std::env::args() {
         if rustc_args.is_empty() {
             // Very first arg: for `rustc`.
@@ -174,7 +175,10 @@ fn main() {
                     bytes[..seed_raw.len()].copy_from_slice(&seed_raw);
                     seed = Some(u64::from_be_bytes(bytes));
 
-                },
+                }
+                arg if arg.starts_with("-Zmiri-env-exclude=") => {
+                    env_blacklist.push(arg.trim_start_matches("-Zmiri-env-exclude=").to_owned());
+                }
                 _ => {
                     rustc_args.push(arg);
                 }
@@ -200,7 +204,13 @@ fn main() {
 
     debug!("rustc arguments: {:?}", rustc_args);
     debug!("miri arguments: {:?}", miri_args);
-    let miri_config = miri::MiriConfig { validate, communicate, args: miri_args, seed };
+    let miri_config = miri::MiriConfig {
+        validate,
+        communicate,
+        args: miri_args,
+        seed,
+        env_blacklist
+    };
     let result = rustc_driver::report_ices_to_stderr_if_any(move || {
         rustc_driver::run_compiler(&rustc_args, &mut MiriCompilerCalls { miri_config }, None, None)
     }).and_then(|result| result);
