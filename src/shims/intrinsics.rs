@@ -223,6 +223,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 let discr_val = this.read_discriminant(place.into())?.0;
                 this.write_scalar(Scalar::from_uint(discr_val, dest.layout.size), dest)?;
             }
+            "is_const_eval" => {
+                this.write_scalar(Scalar::from_u8(1), dest)?;
+            }
 
             "sinf32" | "fabsf32" | "cosf32" | "sqrtf32" | "expf32" | "exp2f32" | "logf32" |
             "log10f32" | "log2f32" | "floorf32" | "ceilf32" | "truncf32" | "roundf32" => {
