@@ -27,7 +27,7 @@ install:
     - rustup uninstall beta
     - rustup update
     # Install "master" toolchain
-    - cargo install rustup-toolchain-install-master & exit 0
+    - cargo install rustup-toolchain-install-master -f
     - rustup-toolchain-install-master -f -n master %RUSTC_HASH% -c rust-src -c rustc-dev
     - rustup default master
     - rustc --version
