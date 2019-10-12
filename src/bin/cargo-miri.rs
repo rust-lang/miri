@@ -137,7 +137,11 @@ fn test_sysroot_consistency() {
         let stdout = String::from_utf8(out.stdout).expect("stdout is not valid UTF-8");
         let stderr = String::from_utf8(out.stderr).expect("stderr is not valid UTF-8");
         let stdout = stdout.trim();
-        assert!(out.status.success(), "Bad status code when getting sysroot info.\nstdout:\n{}\nstderr:\n{}", stdout, stderr);
+        assert!(
+            out.status.success(),
+            "Bad status code when getting sysroot info via {:?}.\nstdout:\n{}\nstderr:\n{}",
+            cmd, stdout, stderr,
+        );
         PathBuf::from(stdout).canonicalize()
             .unwrap_or_else(|_| panic!("Failed to canonicalize sysroot: {}", stdout))
     }
