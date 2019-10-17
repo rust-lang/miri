@@ -25,11 +25,11 @@ install:
     - rustup default stable
     - rustup uninstall beta
     - rustup component remove rust-docs & exit 0
-    - rustup update
     # Install "master" toolchain
     - rustup default nightly-2019-10-16
     - rustc --version
     - cargo --version
+    - rustup component add rustc-dev
 
 build_script:
     - set RUSTFLAGS=-C debug-assertions
