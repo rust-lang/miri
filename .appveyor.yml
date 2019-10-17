@@ -3,20 +3,19 @@ environment:
         PROJECT_NAME: miri
     matrix:
         - TARGET: x86_64-pc-windows-msvc
-        - TARGET: i686-pc-windows-msvc
 
 # branches to build
 branches:
   # whitelist
   only:
-    - auto
-    - try
+    - master
 
 cache:
     - '%USERPROFILE%\.cargo'
     - '%USERPROFILE%\.rustup'
 
 install:
+    - set RUSTUP_DIST_SERVER=https://dev-static.rust-lang.org
     # Compute the rust version we use
     - set /p RUSTC_HASH=<rust-version
     # Install Rust
@@ -28,9 +27,7 @@ install:
     - rustup component remove rust-docs & exit 0
     - rustup update
     # Install "master" toolchain
-    - cargo install rustup-toolchain-install-master & exit 0
-    - rustup-toolchain-install-master -f -n master %RUSTC_HASH% -c cargo -c rust-src
-    - rustup default master
+    - rustup default nightly-2019-10-16
     - rustc --version
     - cargo --version
 
