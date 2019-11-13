@@ -172,6 +172,11 @@ Several `-Z` flags are relevant for Miri:
   sets this flag per default.
 * `-Zmir-emit-retag` controls whether `Retag` statements are emitted. Miri
   enables this per default because it is needed for validation.
+* `-Zno-codegen` makes rustc skip generating LLVM IR for MIR (though it still
+  writes out empty object files). This is needed to prevent rustc from trying
+  to codegen certain panic-related intrinsics, which will not work with a
+  `libpanic_unwind` compiled in `cfg(miri)` mode. It also speeds up
+  building our custom libstd.
 
 Moreover, Miri recognizes some environment variables:
 
