@@ -318,7 +318,12 @@ path = "lib.rs"
     let target = get_arg_flag_value("--target");
     let print_sysroot = !ask_user && has_arg_flag("--print-sysroot"); // whether we just print the sysroot path
     let mut command = xargo();
-    command.arg("build").arg("-q");
+    // This may seen somewhat suprising - we are 'building' libstd
+    // by running (the equivalent of) `cargo check`. It turns out
+    // that `cargo check` has exactly the behavior that we want:
+    // it emits crate metadata (including MIR) without running any
+    // codegen.
+    command.arg("check").arg("-q");
     command.current_dir(&dir);
     command.env("RUSTFLAGS", miri::miri_default_args().join(" "));
     command.env("XARGO_HOME", dir.to_str().unwrap());
