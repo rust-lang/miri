@@ -324,7 +324,7 @@ path = "lib.rs"
     // that `cargo check` has exactly the behavior that we want:
     // it emits crate metadata (including MIR) without running any
     // codegen.
-    command.arg("check").arg("-v");
+    command.arg("check").arg("-q");
     command.current_dir(&dir);
     command.env("RUSTFLAGS", miri::miri_default_args().join(" "));
     command.env("XARGO_HOME", dir.to_str().unwrap());
