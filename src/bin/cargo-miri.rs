@@ -6,7 +6,7 @@ use std::path::{PathBuf, Path};
 use std::process::Command;
 use std::ops::Not;
 
-const XARGO_MIN_VERSION: (u32, u32, u32) = (0, 3, 17);
+const XARGO_MIN_VERSION: (u32, u32, u32) = (0, 3, 18);
 
 const CARGO_MIRI_HELP: &str = r#"Interprets bin crates and tests in Miri
 
@@ -266,7 +266,7 @@ fn setup(ask_user: bool) {
             show_error(format!("Your xargo is too old; please upgrade to the latest version"))
         }
         let mut cmd = cargo();
-        cmd.args(&["install", "xargo", "-f"]);
+        cmd.args(&["install", "-f", "--git", "https://github.com/Aaron1011/xargo", "--branch", "feature/cargo-mode"]);
         ask_to_run(cmd, ask_user, "install a recent enough xargo");
     }
 
@@ -294,6 +294,7 @@ fn setup(ask_user: bool) {
     // The interesting bit: Xargo.toml
     File::create(dir.join("Xargo.toml")).unwrap()
         .write_all(br#"
+cargo_mode = "check"
 [dependencies.std]
 default_features = false
 # We need the `panic_unwind` feature because we use the `unwind` panic strategy.
@@ -323,7 +324,7 @@ path = "lib.rs"
     // that `cargo check` has exactly the behavior that we want:
     // it emits crate metadata (including MIR) without running any
     // codegen.
-    command.arg("check").arg("-q");
+    command.arg("check").arg("-v");
     command.current_dir(&dir);
     command.env("RUSTFLAGS", miri::miri_default_args().join(" "));
     command.env("XARGO_HOME", dir.to_str().unwrap());
