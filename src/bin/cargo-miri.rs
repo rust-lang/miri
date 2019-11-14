@@ -514,11 +514,7 @@ fn inside_cargo_rustc() {
 
     let rustc_args = std::env::args().skip(2); // skip `cargo rustc`
 
-
-    eprintln!("cargo rustc env: {:?}", std::env::vars().collect::<Vec<_>>());
-
     let in_build_script = is_build_dep(std::env::args().skip(2));
-
 
     let mut args = if in_build_script {
         rustc_args.collect()
