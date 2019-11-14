@@ -80,7 +80,7 @@ fn get_arg_flag_value(name: &str) -> Option<String> {
     }
 }
 
-fn list_targets() -> impl Iterator<Item=cargo_metadata::Target> {
+fn list_targets() -> (impl Iterator<Item=cargo_metadata::Target>, String) {
     // We need to get the manifest, and then the metadata, to enumerate targets.
     let manifest_path = get_arg_flag_value("--manifest-path").map(|m|
         Path::new(&m).canonicalize().unwrap()
@@ -119,7 +119,7 @@ fn list_targets() -> impl Iterator<Item=cargo_metadata::Target> {
     let package = metadata.packages.remove(package_index);
 
     // Finally we got the list of targets to build
-    package.targets.into_iter()
+    (package.targets.into_iter(), metadata.workspace_root.to_string_lossy().to_string())
 }
 
 /// Returns the path to the `miri` binary
@@ -342,6 +342,7 @@ path = "lib.rs"
         show_error(format!("Failed to run xargo"));
     }
 
+
     // That should be it! But we need to figure out where xargo built stuff.
     // Unfortunately, it puts things into a different directory when the
     // architecture matches the host.
@@ -410,8 +411,10 @@ fn in_cargo_miri() {
         return;
     }
 
+    let (targets, root_dir) = list_targets();
+
     // Now run the command.
-    for target in list_targets() {
+    for target in targets {
         let mut args = std::env::args().skip(skip);
         let kind = target.kind.get(0).expect(
             "badly formatted cargo metadata: target::kind is an empty array",
@@ -420,7 +423,7 @@ fn in_cargo_miri() {
         // change to add additional arguments. `FLAGS` is set to identify
         // this target.  The user gets to control what gets actually passed to Miri.
         let mut cmd = cargo();
-        cmd.arg("rustc");
+        cmd.arg("check");
         match (subcommand, kind.as_str()) {
             (MiriCommand::Run, "bin") => {
                 // FIXME: we just run all the binaries here.
@@ -447,14 +450,24 @@ fn in_cargo_miri() {
             }
             cmd.arg(arg);
         }
+
+        let mut prefixed_args = String::new();
+        for arg in args {
+            prefixed_args += &arg.len().to_string();
+            prefixed_args.push(';');
+            prefixed_args += &arg;
+        }
+
+        cmd.env("MIRI_MAGIC_ARGS", prefixed_args);
+        cmd.env("MIRI_MAGIC_DIR", root_dir.clone());
         // Add `--` (to end the `cargo` flags), and then the user flags. We add markers around the
         // user flags to be able to identify them later.  "cargo rustc" adds more stuff after this,
         // so we have to mark both the beginning and the end.
-        cmd
+        /*cmd
             .arg("--")
             .arg("cargo-miri-marker-begin")
             .args(args)
-            .arg("cargo-miri-marker-end");
+            .arg("cargo-miri-marker-end");*/
         let path = std::env::current_exe().expect("current executable path invalid");
         cmd.env("RUSTC_WRAPPER", path);
         if verbose {
@@ -479,31 +492,71 @@ fn inside_cargo_rustc() {
 
     let rustc_args = std::env::args().skip(2); // skip `cargo rustc`
 
-    let mut args = if std::env::args().skip(2).find(|arg| arg == "build_script_build").is_some() {
-        rustc_args.collect()
+    let (mut args, is_build_script) = if std::env::args().skip(2).find(|arg| arg == "build_script_build").is_some() {
+        (rustc_args.collect(), true)
     } else {
         let mut args: Vec<String> = rustc_args
             .chain(Some("--sysroot".to_owned()))
             .chain(Some(sysroot))
             .collect();
         args.splice(0..0, miri::miri_default_args().iter().map(ToString::to_string));
-        args
+        (args, false)
     };
+
+
+    let is_test = args.contains(&"--test".to_string());
+    let mut is_bin = false;
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--crate-type" && args[i + 1] == "bin" {
+            is_bin = true;
+            break;
+        }
+    }
+
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok();
+    let expected_dir = std::env::var("MIRI_MAGIC_DIR").ok();
+
+    //eprintln!("Manifest: {:?}", manifest_dir);
+    //eprintln!("Magic dir: {:?}", expected_dir);
+
 
     // See if we can find the `cargo-miri` markers. Those only get added to the binary we want to
     // run. They also serve to mark the user-defined arguments, which we have to move all the way
     // to the end (they get added somewhere in the middle).
-    let needs_miri = if let Some(begin) = args.iter().position(|arg| arg == "cargo-miri-marker-begin") {
-        let end = args
+    //let needs_miri = if let Some(begin) = args.iter().position(|arg| arg == "cargo-miri-marker-begin") {
+    let needs_miri = if manifest_dir == expected_dir && (is_bin || is_test) && !is_build_script {
+        /*let end = args
             .iter()
             .position(|arg| arg == "cargo-miri-marker-end")
             .expect("cannot find end marker");
         // These mark the user arguments. We remove the first and last as they are the markers.
-        let mut user_args = args.drain(begin..=end);
-        assert_eq!(user_args.next().unwrap(), "cargo-miri-marker-begin");
-        assert_eq!(user_args.next_back().unwrap(), "cargo-miri-marker-end");
+        let mut user_args = args.drain(begin..=end);*/
+
+        let raw_args = std::env::var("MIRI_MAGIC_ARGS").expect("Misisng magic!");
+        let mut user_args = vec![];
+        let mut slice = raw_args.as_str();
+        //eprintln!("Raw args: {:?}", raw_args);
+        loop {
+            match slice.find(';') {
+                Some(pos) => {
+                    //eprintln!("Slice: {:?} Len str: (pos {}) {:?}", slice, pos, &slice[..(pos)]);
+                    let len: usize = slice[..(pos)].parse().unwrap();
+                    //eprintln!("Parsed len: {:?}", len);
+                    let arg = slice[(pos+1)..=(pos+len)].to_string();
+                    user_args.push(arg);
+                    slice = &slice[(pos+len+1)..];
+                },
+                None => break
+            }
+        }
+
+        //println!("User args: {:?}", user_args);
+
+        //assert_eq!(user_args.next().unwrap(), "cargo-miri-marker-begin");
+        //assert_eq!(user_args.next_back().unwrap(), "cargo-miri-marker-end");
         // Collect the rest and add it back at the end.
-        let mut user_args = user_args.collect::<Vec<String>>();
+        //let mut user_args = user_args.collect::<Vec<String>>();
         args.append(&mut user_args);
         // Run this in Miri.
         true
