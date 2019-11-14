@@ -476,12 +476,19 @@ fn in_cargo_miri() {
 fn inside_cargo_rustc() {
     let sysroot = std::env::var("MIRI_SYSROOT").expect("The wrapper should have set MIRI_SYSROOT");
 
+
     let rustc_args = std::env::args().skip(2); // skip `cargo rustc`
-    let mut args: Vec<String> = rustc_args
-        .chain(Some("--sysroot".to_owned()))
-        .chain(Some(sysroot))
-        .collect();
-    args.splice(0..0, miri::miri_default_args().iter().map(ToString::to_string));
+
+    let mut args = if std::env::args().skip(2).find(|arg| arg == "build_script_build").is_some() {
+        rustc_args.collect()
+    } else {
+        let mut args: Vec<String> = rustc_args
+            .chain(Some("--sysroot".to_owned()))
+            .chain(Some(sysroot))
+            .collect();
+        args.splice(0..0, miri::miri_default_args().iter().map(ToString::to_string));
+        args
+    };
 
     // See if we can find the `cargo-miri` markers. Those only get added to the binary we want to
     // run. They also serve to mark the user-defined arguments, which we have to move all the way
