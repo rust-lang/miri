@@ -33,20 +33,21 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         init_late_loggers();
         compiler.session().abort_if_errors();
 
-        compiler.global_ctxt().unwrap().peek_mut().enter(|tcx| {
-            let (entry_def_id, _) = tcx.entry_fn(LOCAL_CRATE).expect("no main function found!");
-            let mut config = self.miri_config.clone();
+        compiler.enter(|queries| {
+            queries.global_ctxt().unwrap().peek_mut().enter(|tcx| {
+                let (entry_def_id, _) = tcx.entry_fn(LOCAL_CRATE).expect("no main function found!");
+                let mut config = self.miri_config.clone();
 
-            // Add filename to `miri` arguments.
-            config.args.insert(0, compiler.input().filestem().to_string());
+                // Add filename to `miri` arguments.
+                config.args.insert(0, compiler.input().filestem().to_string());
 
-            if let Some(return_code) = miri::eval_main(tcx, entry_def_id, config) {
-                std::process::exit(i32::try_from(return_code).expect("Return value was too large!"));
-            }
+                if let Some(return_code) = miri::eval_main(tcx, entry_def_id, config) {
+                    std::process::exit(i32::try_from(return_code).expect("Return value was too large!"));
+                }
+            })
         });
 
         compiler.session().abort_if_errors();
-
         Compilation::Stop
     }
 }
