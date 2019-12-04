@@ -63,6 +63,29 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         })
     }
 
+    fn getenvironmentvariablew(
+        &mut self, 
+        name_op: OpTy<'tcx, Tag>,
+        lpbuffer_op: OpTy<'tcx, Tag>,
+    ) -> InterpResult<'tcx, u32> {
+        let this = self.eval_context_mut();
+
+        let name_ptr = this.read_scalar(name_op)?.not_undef()?;
+        let name = this.memory.read_wide_str(name_ptr)?;
+        let lpbuf_ptr = this.read_scalar(buffer_op)?.not_undef()?;
+        Ok(match this.machine.env_vars.map.get(name) {
+            Some(var_ptr) => {
+                let var = this.memory.read_wide_str(var_ptr);
+                // Write contents of env_var to lpBuffer
+                this.memory.write_bytes(lpbuf_ptr, var);
+                // `var` is a byte slice, but will be interpreted as unicode string.
+                // one unicode character equals 2 bytes. 
+                (var.len() >> 1) as u32
+            }
+            None => 0,
+        })
+    }
+
     fn setenv(
         &mut self,
         name_op: OpTy<'tcx, Tag>,
@@ -89,6 +112,35 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             Ok(0)
         } else {
             Ok(-1)
+        }
+    }
+
+    fn setenvironmentvariablew(
+        &mut self,
+        name_op: OpTy<'tcx, Tag>,
+        value_op: OpTy<'tcx, Tag>,
+    ) -> InterpResult<'tcx, i32> {
+        let this = self.eval_context_mut();
+
+        let name_ptr = this.read_scalar(name_op)?.not_undef()?;
+        let value_ptr = this.read_scalar(value_op)?.not_undef()?;
+        let value = this.memory.read_wide_str(value_ptr)?;
+        let mut new = None;
+        if !this.is_null(name_ptr)? {
+            let name = this.memory.read_wide_str(name_ptr)?;
+            if !name.is_empty() && !name.contains(&b'=') {
+                new = Some((name.to_owned(), value.to_owned()));
+            }
+        }
+        if let Some((name, value)) = new {
+            let var_ptr = alloc_env_var(&name, &value, &mut this.memory);
+            if let Some(var) = this.machine.env_vars.map.insert(name.to_owned(), var_ptr) {
+                this.memory
+                    .deallocate(var, None, MiriMemoryKind::Env.into())?;
+            }
+            Ok(1) // return non-zero if success
+        } else {
+            Ok(0) // return upon failure
         }
     }
 
