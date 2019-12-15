@@ -77,9 +77,9 @@ pub struct MemoryExtra {
 }
 
 impl MemoryExtra {
-    pub fn new(rng: StdRng, validate: bool) -> Self {
+    pub fn new(rng: StdRng, validate: bool, tracked_pointer_tag: Option<PtrId>) -> Self {
         MemoryExtra {
-            stacked_borrows: Default::default(),
+            stacked_borrows: Rc::new(RefCell::new(GlobalState::new(tracked_pointer_tag))),
             intptrcast: Default::default(),
             rng: RefCell::new(rng),
             validate,
@@ -140,8 +140,8 @@ pub type MiriEvalContext<'mir, 'tcx> = InterpCx<'mir, 'tcx, Evaluator<'tcx>>;
 
 /// A little trait that's useful to be inherited by extension traits.
 pub trait MiriEvalContextExt<'mir, 'tcx> {
-    fn eval_context_ref(&self) -> &MiriEvalContext<'mir, 'tcx>;
-    fn eval_context_mut(&mut self) -> &mut MiriEvalContext<'mir, 'tcx>;
+    fn eval_context_ref<'a>(&'a self) -> &'a MiriEvalContext<'mir, 'tcx>;
+    fn eval_context_mut<'a>(&'a mut self) -> &'a mut MiriEvalContext<'mir, 'tcx>;
 }
 impl<'mir, 'tcx> MiriEvalContextExt<'mir, 'tcx> for MiriEvalContext<'mir, 'tcx> {
     #[inline(always)]
@@ -182,14 +182,14 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'tcx> {
     }
 
     #[inline(always)]
-    fn find_fn(
+    fn find_mir_or_eval_fn(
         ecx: &mut InterpCx<'mir, 'tcx, Self>,
         instance: ty::Instance<'tcx>,
         args: &[OpTy<'tcx, Tag>],
         ret: Option<(PlaceTy<'tcx, Tag>, mir::BasicBlock)>,
         unwind: Option<mir::BasicBlock>,
     ) -> InterpResult<'tcx, Option<&'mir mir::Body<'tcx>>> {
-        ecx.find_fn(instance, args, ret, unwind)
+        ecx.find_mir_or_eval_fn(instance, args, ret, unwind)
     }
 
     #[inline(always)]

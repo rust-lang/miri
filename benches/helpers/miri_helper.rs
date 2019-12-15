@@ -28,9 +28,11 @@ impl rustc_driver::Callbacks for MiriCompilerCalls<'_> {
                 let config = miri::MiriConfig {
                     validate: true,
                     communicate: false,
+                    ignore_leaks: false,
                     excluded_env_vars: vec![],
                     args: vec![],
                     seed: None,
+                    tracked_pointer_tag: None,
                 };
                 eval_main(tcx, entry_def_id, config);
             });
