@@ -477,15 +477,30 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         self.eval_context_mut().memory.write_bytes(scalar, bytes.iter().copied().chain(iter::once(0u8)))?;
         Ok(true)
     }
+
+    fn alloc_os_str_as_c_str(
+        &mut self,
+        os_str : &OsStr
+    ) -> Pointer<Tag> {
+        let bytes = os_str_to_bytes(os_str).unwrap();
+        let size = bytes.len() as u64 + 1; // Make space for `0` terminator.
+
+        let this = self.eval_context_mut();
+
+        let arg_type = this.tcx.mk_array(this.tcx.types.u8, size);
+        let arg_place = this.allocate(this.layout_of(arg_type).unwrap(), MiriMemoryKind::Env.into());
+        self.write_os_str_to_c_string(os_str, arg_place.ptr, size).unwrap();
+        arg_place.ptr.assert_ptr()
+    }
 }
 
 #[cfg(target_os = "unix")]
-fn os_str_to_bytes<'tcx, 'a>(os_str: &'a OsStr) -> InterpResult<'tcx, &'a [u8]> {
+pub(crate) fn os_str_to_bytes<'tcx, 'a>(os_str: &'a OsStr) -> InterpResult<'tcx, &'a [u8]> {
     std::os::unix::ffi::OsStringExt::into_bytes(os_str)
 }
 
 #[cfg(target_os = "unix")]
-fn bytes_to_os_str<'tcx, 'a>(bytes: &'a[u8]) -> InterpResult<'tcx, &'a OsStr> {
+pub(crate) fn bytes_to_os_str<'tcx, 'a>(bytes: &'a[u8]) -> InterpResult<'tcx, &'a OsStr> {
     Ok(std::os::unix::ffi::OsStringExt::from_bytes(bytes))
 }
 
@@ -493,7 +508,7 @@ fn bytes_to_os_str<'tcx, 'a>(bytes: &'a[u8]) -> InterpResult<'tcx, &'a OsStr> {
 // intermediate transformation into strings. Which invalidates non-utf8 paths that are actually
 // valid.
 #[cfg(not(target_os = "unix"))]
-fn os_str_to_bytes<'tcx, 'a>(os_str: &'a OsStr) -> InterpResult<'tcx, &'a [u8]> {
+pub(crate) fn os_str_to_bytes<'tcx, 'a>(os_str: &'a OsStr) -> InterpResult<'tcx, &'a [u8]> {
     os_str
         .to_str()
         .map(|s| s.as_bytes())
@@ -501,7 +516,7 @@ fn os_str_to_bytes<'tcx, 'a>(os_str: &'a OsStr) -> InterpResult<'tcx, &'a [u8]> 
 }
 
 #[cfg(not(target_os = "unix"))]
-fn bytes_to_os_str<'tcx, 'a>(bytes: &'a[u8]) -> InterpResult<'tcx, &'a OsStr> {
+pub(crate) fn bytes_to_os_str<'tcx, 'a>(bytes: &'a[u8]) -> InterpResult<'tcx, &'a OsStr> {
     let s = std::str::from_utf8(bytes)
         .map_err(|_| err_unsup_format!("{:?} is not a valid utf-8 string", bytes))?;
     Ok(&OsStr::new(s))
