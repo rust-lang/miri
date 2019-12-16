@@ -54,8 +54,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let this = self.eval_context_mut();
 
         let name_ptr = this.read_scalar(name_op)?.not_undef()?;
-        let name = this.read_os_string_from_c_string(name_ptr)?;
-        Ok(match this.machine.env_vars.map.get(&name) {
+        let name = this.read_os_str_from_c_str(name_ptr)?;
+        Ok(match this.machine.env_vars.map.get(name) {
             // The offset is used to strip the "{name}=" part of the string.
             Some(var_ptr) => {
                 Scalar::from(var_ptr.offset(Size::from_bytes(name.len() as u64 + 1), this)?)
@@ -73,10 +73,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
         let name_ptr = this.read_scalar(name_op)?.not_undef()?;
         let value_ptr = this.read_scalar(value_op)?.not_undef()?;
-        let value = this.read_os_string_from_c_string(value_ptr)?;
+        let value = this.read_os_str_from_c_str(value_ptr)?;
         let mut new = None;
         if !this.is_null(name_ptr)? {
-            let name = this.read_os_string_from_c_string(name_ptr)?;
+            let name = this.read_os_str_from_c_str(name_ptr)?;
             if !name.is_empty() && !os_str_to_bytes(&name).unwrap().contains(&b'=') {
                 new = Some((name.to_owned(), value.to_owned()));
             }
@@ -99,7 +99,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let name_ptr = this.read_scalar(name_op)?.not_undef()?;
         let mut success = None;
         if !this.is_null(name_ptr)? {
-            let name = this.read_os_string_from_c_string(name_ptr)?.to_owned();
+            let name = this.read_os_str_from_c_str(name_ptr)?.to_owned();
             if !name.is_empty() && !os_str_to_bytes(&name).unwrap().contains(&b'=') {
                 success = Some(this.machine.env_vars.map.remove(&name));
             }

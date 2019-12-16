@@ -492,7 +492,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
         let arg_type = this.tcx.mk_array(this.tcx.types.u8, size);
         let arg_place = this.allocate(this.layout_of(arg_type).unwrap(), MiriMemoryKind::Env.into());
-        self.write_os_str_to_c_string(os_str, arg_place.ptr, size).unwrap();
+        self.write_os_str_to_c_str(os_str, arg_place.ptr, size).unwrap();
         arg_place.ptr.assert_ptr()
     }
 }
