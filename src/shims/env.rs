@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::{OsString, OsStr};
 use std::env;
 
 use crate::stacked_borrows::Tag;
 use crate::*;
-use crate::helpers::{ os_str_to_bytes, bytes_to_os_str};
+use crate::helpers::os_str_to_bytes;
 
 use rustc::ty::layout::Size;
 use rustc_mir::interpret::Pointer;
@@ -28,7 +28,7 @@ impl EnvVars {
             for (name, value) in env::vars() {
                 if !excluded_env_vars.contains(&name) {
                     let var_ptr =
-                        alloc_env_var_as_c_str(name.as_bytes(), value.as_bytes(), ecx);
+                        alloc_env_var_as_c_str(name.as_ref(), value.as_ref(), ecx);
                     ecx.machine.env_vars.map.insert(OsString::from(name), var_ptr);
                 }
             }
@@ -37,15 +37,15 @@ impl EnvVars {
 }
 
 fn alloc_env_var_as_c_str<'mir, 'tcx>(
-    name: &[u8],
-    value: &[u8],
+    name: &OsStr,
+    value: &OsStr,
     ecx: &mut InterpCx<'mir, 'tcx, Evaluator<'tcx>>
 ) -> Pointer<Tag> {
-    let mut bytes = name.to_vec();
-    bytes.push(b'=');
-    bytes.extend_from_slice(value);
-    bytes.push(0);
-    ecx.alloc_os_str_as_c_str(bytes_to_os_str(bytes.as_slice()).unwrap())
+    let mut name_osstring = name.to_os_string();
+    name_osstring.push("=");
+    name_osstring.push(value);
+    name_osstring.push("\u{0000}");
+    ecx.alloc_os_str_as_c_str(name_osstring.as_os_str(), MiriMemoryKind::Env.into())
 }
 
 impl<'mir, 'tcx> EvalContextExt<'mir, 'tcx> for crate::MiriEvalContext<'mir, 'tcx> {}
@@ -82,7 +82,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             }
         }
         if let Some((name, value)) = new {
-            let var_ptr = alloc_env_var_as_c_str(os_str_to_bytes(&name).unwrap(), os_str_to_bytes(&value).unwrap(), &mut this);
+            let var_ptr = alloc_env_var_as_c_str(name.as_os_str(), value.as_os_str(), &mut this);
             if let Some(var) = this.machine.env_vars.map.insert(name.to_owned(), var_ptr) {
                 this.memory
                     .deallocate(var, None, MiriMemoryKind::Env.into())?;

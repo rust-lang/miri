@@ -926,7 +926,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 // args[0] : LPCWSTR lpName (32-bit ptr to a const string of 16-bit Unicode chars)
                 // args[1] : LPCWSTR lpValue (32-bit ptr to a const string of 16-bit Unicode chars)
                 // Return nonzero if success, else return 0.
-                
+                throw_unsup_format!("can't call foreign function: {}", link_name);
             }
             "GetCommandLineW" => {
                 this.write_scalar(this.machine.cmd_line.expect("machine must be initialized"), dest)?;

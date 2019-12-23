@@ -483,7 +483,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
     fn alloc_os_str_as_c_str(
         &mut self,
-        os_str : &OsStr
+        os_str: &OsStr,
+        memkind: MemoryKind<MiriMemoryKind>
     ) -> Pointer<Tag> {
         let bytes = os_str_to_bytes(os_str).unwrap();
         let size = bytes.len() as u64 + 1; // Make space for `0` terminator.
@@ -491,7 +492,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let this = self.eval_context_mut();
 
         let arg_type = this.tcx.mk_array(this.tcx.types.u8, size);
-        let arg_place = this.allocate(this.layout_of(arg_type).unwrap(), MiriMemoryKind::Env.into());
+        let arg_place = this.allocate(this.layout_of(arg_type).unwrap(), memkind);
         self.write_os_str_to_c_str(os_str, arg_place.ptr, size).unwrap();
         arg_place.ptr.assert_ptr()
     }
