@@ -28,7 +28,7 @@ impl EnvVars {
             for (name, value) in env::vars() {
                 if !excluded_env_vars.contains(&name) {
                     let var_ptr =
-                        alloc_env_var_as_c_str(name.as_ref(), value.as_ref(), ecx);
+                        alloc_env_var_as_c_str(&name, &value, ecx);
                     ecx.machine.env_vars.map.insert(OsString::from(name), var_ptr);
                 }
             }
