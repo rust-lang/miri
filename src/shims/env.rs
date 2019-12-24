@@ -4,7 +4,6 @@ use std::env;
 
 use crate::stacked_borrows::Tag;
 use crate::*;
-use crate::helpers::os_str_to_bytes;
 
 use rustc::ty::layout::Size;
 use rustc_mir::interpret::Pointer;
@@ -28,7 +27,7 @@ impl EnvVars {
             for (name, value) in env::vars() {
                 if !excluded_env_vars.contains(&name) {
                     let var_ptr =
-                        alloc_env_var_as_c_str(&name, &value, ecx);
+                        alloc_env_var_as_c_str(name.as_ref(), value.as_ref(), ecx);
                     ecx.machine.env_vars.map.insert(OsString::from(name), var_ptr);
                 }
             }
@@ -44,7 +43,6 @@ fn alloc_env_var_as_c_str<'mir, 'tcx>(
     let mut name_osstring = name.to_os_string();
     name_osstring.push("=");
     name_osstring.push(value);
-    name_osstring.push("\u{0000}");
     ecx.alloc_os_str_as_c_str(name_osstring.as_os_str(), MiriMemoryKind::Env.into())
 }
 
@@ -77,7 +75,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let mut new = None;
         if !this.is_null(name_ptr)? {
             let name = this.read_os_str_from_c_str(name_ptr)?;
-            if !name.is_empty() && !os_str_to_bytes(&name).unwrap().contains(&b'=') {
+            if !name.is_empty() && !name.to_string_lossy().contains('=') {
                 new = Some((name.to_owned(), value.to_owned()));
             }
         }
@@ -100,7 +98,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let mut success = None;
         if !this.is_null(name_ptr)? {
             let name = this.read_os_str_from_c_str(name_ptr)?.to_owned();
-            if !name.is_empty() && !os_str_to_bytes(&name).unwrap().contains(&b'=') {
+            if !name.is_empty() && !name.to_string_lossy().contains('=') {
                 success = Some(this.machine.env_vars.map.remove(&name));
             }
         }
