@@ -487,8 +487,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         memkind: MemoryKind<MiriMemoryKind>
     ) -> Pointer<Tag> {
         let bytes = os_str_to_bytes(os_str).unwrap();
-        let null_terminator = if cfg!(target_os = "windows") { 2 } else { 1 };
-        let size = bytes.len() as u64 + null_terminator; // Make space for `0` terminator.
+        let size = bytes.len() as u64 + 1; // Make space for `0` terminator.
 
         let this = self.eval_context_mut();
 
