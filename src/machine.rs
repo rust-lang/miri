@@ -78,15 +78,22 @@ pub struct MemoryExtra {
 
     /// Whether to enforce the validity invariant.
     pub(crate) validate: bool,
+
+    environ: Scalar<Tag>,
 }
 
 impl MemoryExtra {
-    pub fn new(rng: StdRng, validate: bool, tracked_pointer_tag: Option<PtrId>) -> Self {
+    pub fn new(
+        rng: StdRng, validate: bool,
+        tracked_pointer_tag: Option<PtrId>,
+        environ: Scalar<Tag>
+    ) -> Self {
         MemoryExtra {
             stacked_borrows: Rc::new(RefCell::new(GlobalState::new(tracked_pointer_tag))),
             intptrcast: Default::default(),
             rng: RefCell::new(rng),
             validate,
+            environ,
         }
     }
 }
@@ -266,6 +273,7 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'tcx> {
     fn find_foreign_static(
         tcx: TyCtxt<'tcx>,
         def_id: DefId,
+        _memory_extra: &MemoryExtra,
     ) -> InterpResult<'tcx, Cow<'tcx, Allocation>> {
         let attrs = tcx.get_attrs(def_id);
         let link_name = match attr::first_attr_value_str_by_name(&attrs, sym::link_name) {
