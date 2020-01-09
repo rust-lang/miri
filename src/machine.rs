@@ -78,22 +78,21 @@ pub struct MemoryExtra {
 
     /// Whether to enforce the validity invariant.
     pub(crate) validate: bool,
-
-    environ: Scalar<Tag>,
+    /// Contains the `environ` static.
+    pub(crate) environ: Option<Allocation<Tag, AllocExtra>>,
 }
 
 impl MemoryExtra {
     pub fn new(
         rng: StdRng, validate: bool,
         tracked_pointer_tag: Option<PtrId>,
-        environ: Scalar<Tag>
     ) -> Self {
         MemoryExtra {
             stacked_borrows: Rc::new(RefCell::new(GlobalState::new(tracked_pointer_tag))),
             intptrcast: Default::default(),
             rng: RefCell::new(rng),
             validate,
-            environ,
+            environ: None,
         }
     }
 }

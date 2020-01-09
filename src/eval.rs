@@ -53,7 +53,6 @@ pub fn create_ecx<'mir, 'tcx: 'mir>(
             StdRng::seed_from_u64(config.seed.unwrap_or(0)),
             config.validate,
             config.tracked_pointer_tag,
-            Scalar::from_int(0, tcx.data_layout.pointer_size),
         ),
     );
     // Complete initialization.
