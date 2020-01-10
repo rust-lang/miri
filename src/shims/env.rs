@@ -44,7 +44,8 @@ impl EnvVars {
         }
         ecx.memory.mark_immutable(environ_place.ptr.assert_ptr().alloc_id).unwrap();
         // A pointer to that place corresponds to the `environ` static.
-        let environ_alloc = ecx.memory.get_raw(environ_place.ptr.assert_ptr().alloc_id).unwrap().clone();
+        let environ_ptr = ecx.force_ptr(environ_place.ptr).unwrap();
+        let environ_alloc = ecx.memory.get_raw(environ_ptr.alloc_id).unwrap().clone();
         ecx.memory.extra.environ = Some(environ_alloc);
     }
 }

@@ -272,8 +272,9 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'tcx> {
     fn find_foreign_static(
         tcx: TyCtxt<'tcx>,
         def_id: DefId,
-        _memory_extra: &MemoryExtra,
-    ) -> InterpResult<'tcx, Cow<'tcx, Allocation>> {
+        id: AllocId,
+        memory_extra: &MemoryExtra,
+    ) -> InterpResult<'tcx, Cow<'tcx, Allocation<Tag, AllocExtra>>> {
         let attrs = tcx.get_attrs(def_id);
         let link_name = match attr::first_attr_value_str_by_name(&attrs, sym::link_name) {
             Some(name) => name.as_str(),
@@ -285,11 +286,22 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'tcx> {
                 // This should be all-zero, pointer-sized.
                 let size = tcx.data_layout.pointer_size;
                 let data = vec![0; size.bytes() as usize];
-                Allocation::from_bytes(&data, tcx.data_layout.pointer_align.abi)
+                // We got tcx memory. Let the machine initialize its "extra" stuff.
+                let (alloc, tag) = Self::init_allocation_extra(
+                    memory_extra,
+                    id, // always use the ID we got as input, not the "hidden" one.
+                    Cow::Owned(Allocation::from_bytes(&data, tcx.data_layout.pointer_align.abi)),
+                    Self::STATIC_KIND.map(MemoryKind::Machine),
+                );
+                debug_assert_eq!(tag, Self::tag_static_base_pointer(memory_extra, id));
+                alloc
+            }
+            "environ" => {
+                Cow::Owned(memory_extra.environ.as_ref().cloned().unwrap())
             }
             _ => throw_unsup_format!("can't access foreign static: {}", link_name),
         };
-        Ok(Cow::Owned(alloc))
+        Ok(alloc)
     }
 
     #[inline(always)]
