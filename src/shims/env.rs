@@ -29,10 +29,12 @@ impl EnvVars {
                     let var_ptr =
                         alloc_env_var_as_c_str(name.as_ref(), value.as_ref(), ecx);
                     ecx.machine.env_vars.map.insert(OsString::from(name), var_ptr);
-                    vars.push(var_ptr);
+                    vars.push(var_ptr.into());
                 }
             }
         }
+        // add trailing null pointer
+        vars.push(Scalar::from_int(0, ecx.pointer_size()));
         // Make an array with all these pointers, in the Miri memory.
         let tcx = ecx.tcx;
         let environ_layout =
