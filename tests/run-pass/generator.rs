@@ -4,7 +4,7 @@ use std::ops::{GeneratorState::{self, *}, Generator};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::fmt::Debug;
-use std::mem::ManuallyDrop;
+use std::mem::forget;
 use std::ptr;
 
 fn basic() {
@@ -16,7 +16,7 @@ fn basic() {
         loop {
             let state = t.as_mut().resume(());
             // Test if the generator is valid (according to type invariants).
-            let _ = unsafe { ManuallyDrop::new(ptr::read(t.as_mut().get_unchecked_mut())) };
+            unsafe { forget(ptr::read(t.as_mut().get_unchecked_mut())) };
             match state {
                 GeneratorState::Yielded(y) => {
                     amt -= y;
@@ -117,7 +117,7 @@ fn smoke_resume_arg() {
         for (input, out) in inout {
             assert_eq!(gen.as_mut().resume(input), out);
             // Test if the generator is valid (according to type invariants).
-            let _ = unsafe { ManuallyDrop::new(ptr::read(gen.as_mut().get_unchecked_mut())) };
+            unsafe { forget(ptr::read(gen.as_mut().get_unchecked_mut())) };
         }
     }
 
