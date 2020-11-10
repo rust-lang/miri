@@ -112,6 +112,7 @@ fn init_late_loggers(tcx: TyCtxt<'_>) {
     }
 }
 
+// This code has been copied in https://github.com/rust-lang/rust/blob/master/src/librustdoc/lib.rs
 /// Returns the "default sysroot" that Miri will use if no `--sysroot` flag is set.
 /// Should be a compile-time constant.
 fn compile_time_sysroot() -> Option<String> {
