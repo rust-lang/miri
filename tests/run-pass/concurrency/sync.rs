@@ -1,5 +1,5 @@
 // ignore-windows: Concurrency on Windows is not supported yet.
-// compile-flags: -Zmiri-disable-isolation
+// compile-flags: -Zmiri-disable-isolation -Zmiri-max-yield-iterations=3
 
 use std::sync::mpsc::{channel, sync_channel};
 use std::sync::{Arc, Barrier, Condvar, Mutex, Once, RwLock};

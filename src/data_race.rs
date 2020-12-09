@@ -76,7 +76,7 @@ use rustc_target::abi::Size;
 use crate::{
     ImmTy, Immediate, InterpResult, MPlaceTy, MemPlaceMeta, MiriEvalContext, MiriEvalContextExt,
     OpTy, Pointer, RangeMap, ScalarMaybeUninit, Tag, ThreadId, VClock, VTimestamp,
-    VectorIdx, MemoryKind, MiriMemoryKind
+    VectorIdx, MemoryKind, MiriMemoryKind, ThreadsEvalContextExt
 };
 
 pub type AllocExtra = VClockAlloc;
@@ -445,13 +445,13 @@ impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for MiriEvalContext<'mir, 'tcx
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// Atomic variant of read_scalar_at_offset.
     fn read_scalar_at_offset_atomic(
-        &self,
+        &mut self,
         op: OpTy<'tcx, Tag>,
         offset: u64,
         layout: TyAndLayout<'tcx>,
         atomic: AtomicReadOp,
     ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
-        let this = self.eval_context_ref();
+        let this = self.eval_context_mut();
         let op_place = this.deref_operand(op)?;
         let offset = Size::from_bytes(offset);
 
@@ -482,7 +482,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
 
     /// Perform an atomic read operation at the memory location.
     fn read_scalar_atomic(
-        &self,
+        &mut self,
         place: MPlaceTy<'tcx, Tag>,
         atomic: AtomicReadOp,
     ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
@@ -582,15 +582,17 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// Update the data-race detector for an atomic read occurring at the
     /// associated memory-place and on the current thread.
     fn validate_atomic_load(
-        &self,
+        &mut self,
         place: MPlaceTy<'tcx, Tag>,
         atomic: AtomicReadOp,
     ) -> InterpResult<'tcx> {
-        let this = self.eval_context_ref();
+        let this = self.eval_context_mut();
         this.validate_atomic_op(
             place,
             atomic,
             "Atomic Load",
+            true,
+            false,
             move |memory, clocks, index, atomic| {
                 if atomic == AtomicReadOp::Relaxed {
                     memory.load_relaxed(&mut *clocks, index)
@@ -608,11 +610,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
         place: MPlaceTy<'tcx, Tag>,
         atomic: AtomicWriteOp,
     ) -> InterpResult<'tcx> {
-        let this = self.eval_context_ref();
+        let this = self.eval_context_mut();
         this.validate_atomic_op(
             place,
             atomic,
             "Atomic Store",
+            false,
+            true,
             move |memory, clocks, index, atomic| {
                 if atomic == AtomicWriteOp::Relaxed {
                     memory.store_relaxed(clocks, index)
@@ -633,8 +637,14 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
         use AtomicRwOp::*;
         let acquire = matches!(atomic, Acquire | AcqRel | SeqCst);
         let release = matches!(atomic, Release | AcqRel | SeqCst);
-        let this = self.eval_context_ref();
-        this.validate_atomic_op(place, atomic, "Atomic RMW", move |memory, clocks, index, _| {
+        let this = self.eval_context_mut();
+        this.validate_atomic_op(
+            place,
+            atomic,
+            "Atomic RMW",
+            true,
+            true,
+            move |memory, clocks, index, _| {
             if acquire {
                 memory.load_acquire(clocks, index)?;
             } else {
@@ -961,10 +971,12 @@ trait EvalContextPrivExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// FIXME: is this valid, or should get_raw_mut be used for
     /// atomic-stores/atomic-rmw?
     fn validate_atomic_op<A: Debug + Copy>(
-        &self,
+        &mut self,
         place: MPlaceTy<'tcx, Tag>,
         atomic: A,
         description: &str,
+        yield_watch: bool,
+        yield_wake: bool,
         mut op: impl FnMut(
             &mut MemoryCellClocks,
             &mut ThreadClockSet,
@@ -972,7 +984,19 @@ trait EvalContextPrivExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
             A,
         ) -> Result<(), DataRace>,
     ) -> InterpResult<'tcx> {
-        let this = self.eval_context_ref();
+        let this = self.eval_context_mut();
+
+        // Update yield metadata for yield based forward progress and live-lock detection.
+        let place_ptr = place.ptr.assert_ptr();
+        let size = place.layout.size;
+        if yield_watch {
+            let alloc_size = this.memory.get_raw(place_ptr.alloc_id)?.size;
+            this.thread_yield_atomic_watch(place_ptr.alloc_id, alloc_size, place_ptr.offset,size);
+        }
+        if yield_wake {
+            this.thread_yield_atomic_wake(place_ptr.alloc_id, place_ptr.offset,size);
+        }
+
         if let Some(data_race) = &this.memory.extra.data_race {
             if data_race.multi_threaded.get() {
                 // Load and log the atomic operation.

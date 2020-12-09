@@ -282,6 +282,16 @@ fn main() {
                     };
                     miri_config.tracked_alloc_id = Some(miri::AllocId(id));
                 }
+                arg if arg.starts_with("-Zmiri-max-yield-iterations=") => {
+                    let count: u32 = match arg.strip_prefix("-Zmiri-max-yield-iterations=").unwrap().parse() {
+                        Ok(id) => id,
+                        Err(err) => panic!(
+                            "-Zmiri-max-yield-iterations= requires a valid `u32` argument: {}",
+                            err
+                        ),
+                    };
+                    miri_config.max_yield_count = count;
+                }
                 _ => {
                     // Forward to rustc.
                     rustc_args.push(arg);

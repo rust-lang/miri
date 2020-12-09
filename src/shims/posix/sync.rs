@@ -81,7 +81,7 @@ fn mutex_set_kind<'mir, 'tcx: 'mir>(
 }
 
 fn mutex_get_id<'mir, 'tcx: 'mir>(
-    ecx: &MiriEvalContext<'mir, 'tcx>,
+    ecx: &mut MiriEvalContext<'mir, 'tcx>,
     mutex_op: OpTy<'tcx, Tag>,
 ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
     ecx.read_scalar_at_offset_atomic(
@@ -125,7 +125,7 @@ fn mutex_get_or_create_id<'mir, 'tcx: 'mir>(
 // bytes 4-7: rwlock id as u32 or 0 if id is not assigned yet.
 
 fn rwlock_get_id<'mir, 'tcx: 'mir>(
-    ecx: &MiriEvalContext<'mir, 'tcx>,
+    ecx: &mut MiriEvalContext<'mir, 'tcx>,
     rwlock_op: OpTy<'tcx, Tag>,
 ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
     ecx.read_scalar_at_offset_atomic(
@@ -192,7 +192,7 @@ fn condattr_set_clock_id<'mir, 'tcx: 'mir>(
 // bytes 8-11: the clock id constant as i32
 
 fn cond_get_id<'mir, 'tcx: 'mir>(
-    ecx: &MiriEvalContext<'mir, 'tcx>,
+    ecx: &mut MiriEvalContext<'mir, 'tcx>,
     cond_op: OpTy<'tcx, Tag>,
 ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
     ecx.read_scalar_at_offset_atomic(

@@ -1,3 +1,5 @@
+// compile-flags: -Zmiri-max-yield-iterations=3
+
 use std::sync::{Mutex, TryLockError};
 use std::sync::atomic;
 use std::hint;

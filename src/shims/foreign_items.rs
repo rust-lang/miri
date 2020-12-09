@@ -222,6 +222,12 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             "miri_resolve_frame" => {
                 this.handle_miri_resolve_frame(args, dest)?;
             }
+            // Performs a thread yield.
+            // Exists since a thread yield operation may not be available on a given platform.
+            "miri_yield_thread" => {
+                let &[] = check_arg_count(args)?;
+                this.yield_active_thread();
+            }
 
 
             // Standard C allocation

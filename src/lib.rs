@@ -4,6 +4,7 @@
 #![feature(never_type)]
 #![feature(or_patterns)]
 #![feature(try_blocks)]
+#![feature(hash_drain_filter)]
 
 #![warn(rust_2018_idioms)]
 #![allow(clippy::cast_lossless)]

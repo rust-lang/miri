@@ -50,6 +50,9 @@ pub struct MiriConfig {
     pub track_raw: bool,
     /// Determine if data race detection should be enabled
     pub data_race_detector: bool,
+    /// Maximum number of consecutive yield operations with no progress
+    /// to consider a thread live-locked. A value of zero never live-locks.
+    pub max_yield_count: u32,
 }
 
 impl Default for MiriConfig {
@@ -68,6 +71,7 @@ impl Default for MiriConfig {
             tracked_alloc_id: None,
             track_raw: false,
             data_race_detector: true,
+            max_yield_count: 1
         }
     }
 }
@@ -87,7 +91,7 @@ pub fn create_ecx<'mir, 'tcx: 'mir>(
         tcx,
         rustc_span::source_map::DUMMY_SP,
         param_env,
-        Evaluator::new(config.communicate, config.validate, layout_cx),
+        Evaluator::new(config.communicate, config.validate, config.max_yield_count, layout_cx),
         MemoryExtra::new(&config),
     );
     // Complete initialization.

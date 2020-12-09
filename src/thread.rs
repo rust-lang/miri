@@ -9,11 +9,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use log::trace;
 
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::def_id::DefId;
 use rustc_index::vec::{Idx, IndexVec};
+use rustc_target::abi::Size;
 
-use crate::sync::SynchronizationState;
+use crate::sync::{SynchronizationState, CondvarId};
 use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +88,15 @@ pub enum ThreadState {
     /// responsibility of the synchronization primitives to track threads that
     /// are blocked by them.
     BlockedOnSync,
+    /// The thread has yielded, but the full number of validation iterations
+    /// has not yet occurred.
+    /// Therefore this thread can be awoken if there are no enabled threads
+    /// available.
+    DelayOnYield,
+    /// The thread has fully yielded, signalling that it requires another thread
+    /// perform an action visible to it in order to make progress.
+    /// If all threads are in this state then live-lock is reported.
+    BlockedOnYield,
     /// The thread has terminated its execution. We do not delete terminated
     /// threads (FIXME: why?).
     Terminated,
@@ -104,9 +114,179 @@ enum ThreadJoinStatus {
     Joined,
 }
 
+/// Set of sync objects that can have properties queried.
+/// The futex is not included since it can only signal
+/// and awake values.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+enum SyncObject {
+    /// Can query lock state.
+    Mutex(MutexId),
+    /// Can query lock state.
+    RwLock(RwLockId),
+    /// Can query the if awaited.
+    Condvar(CondvarId),
+
+}
+
+enum YieldRecordState {
+
+    /// The thread has made progress and so the recording of
+    /// states has terminated.
+    /// A thread is considered to have made progress performs some
+    /// action that is visible to another thread.
+    /// Examples include a release-store, mutex-unlock,
+    /// thread-termination and release-fence.
+    MadeProgress,
+
+    /// The thread is currently recording the variable watch
+    /// state for the yield operation, this watch operation
+    /// can occur once of multiple times to validate the yield
+    /// is correct.
+    /// Multiple iterations can prevent reporting live-lock
+    /// in yield loops with finite iterations
+    Recording {
+        /// Map of global memory state to an record index.
+        /// If set to zero then this location is not watched,
+        /// a value of 1 means that it was watched on the first
+        /// iteration and a value of x>=2 means that the value
+        /// was watched on the 1,2,..,x iterations.
+        watch_atomic: FxHashMap<AllocId, RangeMap<u32>>,
+
+        /// Map of synchronization objects that can have properties
+        /// queried and are currently watched by this thread.
+        watch_sync: FxHashMap<SyncObject, u32>,
+        
+        /// The current iteration of the yield livelock loop
+        /// recording, should always be less than or equal
+        /// to the global live-lock loop counter.
+        record_iteration: u32,
+    }
+}
+
+impl YieldRecordState {
+    
+    /// Progress has been made on the thread.
+    fn on_progress(&mut self) {
+        *self = YieldRecordState::MadeProgress;
+    }
+    
+    /// Mark an atomic variable as watched.
+    fn on_watch_atomic(&mut self, alloc_id: AllocId, alloc_size: Size, offset: Size, len: Size) {
+        if let YieldRecordState::Recording {
+            watch_atomic, record_iteration, ..
+        } = self {
+            let range_map = watch_atomic.entry(alloc_id)
+            .or_insert_with(|| RangeMap::new(alloc_size, 0));
+            let mut assume_progress = false;
+            range_map.iter_mut(offset, len)
+            .for_each(|(_, watch)| {
+                if *watch != *record_iteration - 1 {
+                    // Value stored does not match the last loop
+                    // so assume some progress has been made.
+                    assume_progress = true;
+                }
+                *watch = *record_iteration
+            });
+
+            // The watch set is different so assume progress has been made
+            if assume_progress {
+                *self = YieldRecordState::MadeProgress;
+            }
+        }
+    }
+
+    /// Mark a synchronization object as watched.
+    fn on_watch_sync(&mut self, sync: SyncObject) {
+        if let YieldRecordState::Recording {
+            watch_sync, record_iteration, ..
+        } = self {
+            let count = watch_sync.entry(sync).or_insert(0);
+            if *count != *record_iteration - 1 {
+                // Different content - assume progress.
+                *self = YieldRecordState::MadeProgress; 
+            }else{
+                *count = *record_iteration;
+            }
+        }
+    }
+
+    /// Returns true if the atomic variable is currently watched.
+    fn should_wake_atomic(&self, alloc_id: AllocId, offset: Size, len: Size) -> bool {
+        if let YieldRecordState::Recording {
+            watch_atomic, ..
+        } = self {
+            if let Some(range_map) = watch_atomic.get(&alloc_id) {
+                range_map.iter(offset, len).any(|(_, &watch)| watch != 0)
+            }else{
+                false
+            }
+        }else{
+            // First iteration yield, no wake metadata
+            // so only awaken after there are no enabled threads.
+            false
+        }
+    }
+
+    /// Returns true if the sync object is currently watched.
+    fn should_wake_sync(&self, sync: SyncObject) -> bool {
+        if let YieldRecordState::Recording {
+            watch_sync, ..
+        } = self {
+            if let Some(count) = watch_sync.get(&sync) {
+                *count != 0
+            }else{
+                false
+            }
+        }else{
+            // First iteration, no wake metadata.
+            false
+        }
+    }
+
+    /// Returns the number of yield iterations that have been executed.
+    fn get_iteration_count(&self) -> u32 {
+        if let YieldRecordState::Recording {
+            record_iteration, ..
+        } = self {
+            *record_iteration
+        }else{
+            0
+        }
+    }
+
+    fn should_watch(&self) -> bool {
+        if let YieldRecordState::Recording {
+            watch_atomic, watch_sync, ..
+        } = self {
+            // Should watch if either watch hash-set is non-empty
+            !watch_atomic.is_empty() || !watch_sync.is_empty()
+        }else{
+            false
+        }
+    }
+
+    /// Starts the next yield iteration
+    fn start_iteration(&mut self) {
+        if let YieldRecordState::Recording {
+            record_iteration, ..
+        } = self {
+            *record_iteration += 1;
+        }else{
+            *self = YieldRecordState::Recording {
+                watch_atomic: FxHashMap::default(),
+                watch_sync: FxHashMap::default(),
+                record_iteration: 1
+            }
+        }
+    }
+}
+
 /// A thread.
 pub struct Thread<'mir, 'tcx> {
     state: ThreadState,
+
+    /// Metadata for blocking on yield operations
+    yield_state: YieldRecordState,
 
     /// Name of the thread.
     thread_name: Option<Vec<u8>>,
@@ -147,6 +327,23 @@ impl<'mir, 'tcx> Thread<'mir, 'tcx> {
             b"<unnamed>"
         }
     }
+
+    /// Start the thread yielding. Returns true if this thread has watch metadata.
+    fn on_yield(&mut self, max_yield: u32) -> bool {
+        let iteration_count = self.yield_state.get_iteration_count();
+        let block = if max_yield == 0 {
+            // A value of 0 never blocks
+            false
+        }else{
+            iteration_count >= max_yield
+        };
+        if block {
+            self.state = ThreadState::BlockedOnYield;
+        }else{
+            self.state = ThreadState::DelayOnYield;
+        }
+        self.yield_state.should_watch()
+    }
 }
 
 impl<'mir, 'tcx> std::fmt::Debug for Thread<'mir, 'tcx> {
@@ -159,6 +356,7 @@ impl<'mir, 'tcx> Default for Thread<'mir, 'tcx> {
     fn default() -> Self {
         Self {
             state: ThreadState::Enabled,
+            yield_state: YieldRecordState::MadeProgress,
             thread_name: None,
             stack: Vec::new(),
             join_status: ThreadJoinStatus::Joinable,
@@ -212,6 +410,11 @@ pub struct ThreadManager<'mir, 'tcx> {
     ///
     /// Note that this vector also contains terminated threads.
     threads: IndexVec<ThreadId, Thread<'mir, 'tcx>>,
+    /// Set of threads that are currently yielding.
+    yielding_thread_set: FxHashSet<ThreadId>,
+    /// The maximum number of yields making no progress required
+    /// on all threads to report a live-lock.
+    max_yield_count: u32,
     /// This field is pub(crate) because the synchronization primitives
     /// (`crate::sync`) need a way to access it.
     pub(crate) sync: SynchronizationState,
@@ -224,8 +427,8 @@ pub struct ThreadManager<'mir, 'tcx> {
     timeout_callbacks: FxHashMap<ThreadId, TimeoutCallbackInfo<'mir, 'tcx>>,
 }
 
-impl<'mir, 'tcx> Default for ThreadManager<'mir, 'tcx> {
-    fn default() -> Self {
+impl<'mir, 'tcx> ThreadManager<'mir, 'tcx> {
+    pub fn new(max_yield_count: u32) -> Self {
         let mut threads = IndexVec::new();
         // Create the main thread and add it to the list of threads.
         let mut main_thread = Thread::default();
@@ -235,6 +438,8 @@ impl<'mir, 'tcx> Default for ThreadManager<'mir, 'tcx> {
         Self {
             active_thread: ThreadId::new(0),
             threads: threads,
+            yielding_thread_set: FxHashSet::default(),
+            max_yield_count,
             sync: SynchronizationState::default(),
             thread_local_alloc_ids: Default::default(),
             yield_active_thread: false,
@@ -464,6 +669,65 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         return free_tls_statics;
     }
 
+    /// Called when the current thread performed
+    /// an atomic operation that potentially makes
+    /// progress
+    fn thread_yield_progress(&mut self) {
+        self.threads[self.active_thread].yield_state.on_progress();
+    }
+
+    /// Called when the current thread performs
+    /// an atomic operation that may be visible to other threads.
+    fn thread_yield_atomic_wake(&mut self, alloc_id: AllocId, offset: Size, len: Size) {
+        let threads = &mut self.threads;
+
+        // This thread performed an atomic update, mark as making progress.
+        threads[self.active_thread].yield_state.on_progress();
+
+        // Awake all threads that were awaiting on changes to the modified atomic.
+        self.yielding_thread_set.drain_filter(move |&thread_id| {
+            let thread = &mut threads[thread_id];
+            if thread.yield_state.should_wake_atomic(alloc_id, offset, len) {
+                thread.state = ThreadState::Enabled;
+                thread.yield_state.on_progress();
+                true
+            }else{
+                false
+            }
+        });
+    }
+
+    /// Called when the current thread performs
+    /// an atomic read operation and may want
+    /// to mark that variable as watched to wake
+    /// the current yield.
+    fn thread_yield_atomic_watch(&mut self, alloc_id: AllocId, alloc_size: Size, offset: Size, len: Size) {
+        self.threads[self.active_thread].yield_state.on_watch_atomic(alloc_id, alloc_size, offset, len)
+    }
+
+    fn thread_yield_sync_wake(&mut self, sync: SyncObject) {
+        let threads = &mut self.threads;
+
+        // This thread performed an sync update, mark as making progress.
+        threads[self.active_thread].yield_state.on_progress();
+
+        // Awake all threads that were awaiting on changes to the sync object.
+        self.yielding_thread_set.drain_filter(move |&thread_id| {
+            let thread = &mut threads[thread_id];
+            if thread.yield_state.should_wake_sync(sync) {
+                thread.state = ThreadState::Enabled;
+                thread.yield_state.on_progress();
+                true
+            }else{
+                false
+            }
+        });
+    }
+
+    fn thread_yield_sync_watch(&mut self, sync: SyncObject) {
+        self.threads[self.active_thread].yield_state.on_watch_sync(sync);
+    }
+
     /// Decide which action to take next and on which thread.
     ///
     /// The currently implemented scheduling policy is the one that is commonly
@@ -504,28 +768,51 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
             return Ok(SchedulingAction::ExecuteTimeoutCallback);
         }
         // No callbacks scheduled, pick a regular thread to execute.
-        if self.threads[self.active_thread].state == ThreadState::Enabled
-            && !self.yield_active_thread
-        {
-            // The currently active thread is still enabled, just continue with it.
-            return Ok(SchedulingAction::ExecuteStep);
-        }
-        // We need to pick a new thread for execution.
-        for (id, thread) in self.threads.iter_enumerated() {
-            if thread.state == ThreadState::Enabled {
-                if !self.yield_active_thread || id != self.active_thread {
-                    self.active_thread = id;
-                    if let Some(data_race) = data_race {
-                        data_race.thread_set_active(self.active_thread);
-                    }
-                    break;
+        if self.threads[self.active_thread].state == ThreadState::Enabled {
+            if self.yield_active_thread {
+                // The currently active thread has yielded, update the state
+                if self.threads[self.active_thread].on_yield(self.max_yield_count) {
+                    // The thread has a non-zero set of wake metadata to exit the yield
+                    // so insert into the set of threads that may wake.
+                    self.yielding_thread_set.insert(self.active_thread);
                 }
+            }else{
+                // The currently active thread is still enabled, just continue with it.
+                return Ok(SchedulingAction::ExecuteStep);
             }
         }
+        // We need to pick a new thread for execution.
+        // First try to select a thread that has not yielded.
+        let new_thread = if let Some(new_thread) = self.threads.iter_enumerated()
+            .find(|(_, thread)| thread.state == ThreadState::Enabled) {
+            Some(new_thread.0)
+        }else{
+            // No active threads, wake all non blocking yields and try again.
+            let mut new_thread = None;
+            for (id,thread) in self.threads.iter_enumerated_mut() {
+                if thread.state == ThreadState::DelayOnYield {
+
+                    // Re-enable the thread and start the next yield iteration.
+                    thread.state = ThreadState::Enabled;
+                    thread.yield_state.start_iteration();
+                    self.yielding_thread_set.remove(&id);
+                    new_thread = new_thread.or(Some(id));
+                }
+            }
+            new_thread
+        };
         self.yield_active_thread = false;
-        if self.threads[self.active_thread].state == ThreadState::Enabled {
+
+        // We found a valid thread to execute.
+        if let Some(new_thread) = new_thread {
+            self.active_thread = new_thread;
+            if let Some(data_race) = data_race {
+                data_race.thread_set_active(self.active_thread);
+            }
+            assert!(self.threads[self.active_thread].state == ThreadState::Enabled);
             return Ok(SchedulingAction::ExecuteStep);
         }
+
         // We have not found a thread to execute.
         if self.threads.iter().all(|thread| thread.state == ThreadState::Terminated) {
             unreachable!("all threads terminated without the main thread terminating?!");
@@ -535,6 +822,10 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
             // sleep until the first callback.
             std::thread::sleep(sleep_time);
             Ok(SchedulingAction::ExecuteTimeoutCallback)
+        } else if self.threads.iter().any(|thread| thread.state == ThreadState::BlockedOnYield) {
+            // At least one thread is blocked on a yield with max iterations.
+            // Report a livelock instead of a deadlock.
+            throw_machine_stop!(TerminationInfo::Livelock);
         } else {
             throw_machine_stop!(TerminationInfo::Deadlock);
         }
@@ -675,6 +966,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn block_thread(&mut self, thread: ThreadId) {
         let this = self.eval_context_mut();
         this.machine.threads.block_thread(thread);
+
+        // This is waiting on some other concurrency object
+        // so for yield live-lock detection it has made progress.
+        this.machine.threads.thread_yield_progress();
     }
 
     #[inline]
@@ -745,5 +1040,73 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             this.memory.deallocate(ptr, None, MiriMemoryKind::Tls.into())?;
         }
         Ok(())
+    }
+
+    /// Called to state that some concurrent operation has occurred
+    /// and to invalidate any current live-lock metadata.
+    #[inline]
+    fn thread_yield_concurrent_progress(&mut self) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_progress();
+    }
+
+    /// Mark internal mutex state as modified.
+    #[inline]
+    fn thread_yield_mutex_wake(&mut self, mutex: MutexId) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_sync_wake(SyncObject::Mutex(mutex));
+    }
+
+    /// Mark internal rw-lock state as modified.
+    #[inline]
+    fn thread_yield_rwlock_wake(&mut self, rwlock: RwLockId) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_sync_wake(SyncObject::RwLock(rwlock));
+    }
+
+    /// Mark internal cond-var state as modified.
+    #[inline]
+    fn thread_yield_condvar_wake(&mut self, condvar: CondvarId) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_sync_wake(SyncObject::Condvar(condvar));
+    }
+
+    /// Called when the current thread performs
+    /// an atomic operation that may be visible to other threads.
+    #[inline]
+    fn thread_yield_atomic_wake(&mut self, alloc_id: AllocId, offset: Size, len: Size) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_atomic_wake(alloc_id, offset, len);
+    }
+
+    /// Awaken any threads that are yielding on an update to a mutex.
+    #[inline]
+    fn thread_yield_mutex_watch(&mut self, mutex: MutexId) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_sync_watch(SyncObject::Mutex(mutex));
+    }
+
+    /// Awaken any threads that are yielding on an update to a rwlock.
+    #[inline]
+    fn thread_yield_rwlock_watch(&mut self, rwlock: RwLockId) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_sync_watch(SyncObject::RwLock(rwlock));
+    }
+
+    /// Awaken any threads that are yielding on an update to a condvar.
+    #[inline]
+    fn thread_yield_condvar_watch(&mut self, condvar: CondvarId) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_sync_watch(SyncObject::Condvar(condvar));
+    }
+
+    /// Called when the current thread performs
+    /// an atomic read operation and may want
+    /// to mark that variable as watched to wake
+    /// the current yield.
+    #[inline]
+    fn thread_yield_atomic_watch(&mut self, alloc_id: AllocId, alloc_size: Size, offset: Size, len: Size) {
+        let this = self.eval_context_mut();
+        this.machine.threads.thread_yield_atomic_watch(alloc_id, alloc_size, offset, len);
     }
 }

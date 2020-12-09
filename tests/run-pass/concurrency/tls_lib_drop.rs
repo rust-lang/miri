@@ -1,4 +1,5 @@
 // ignore-windows: Concurrency on Windows is not supported yet.
+// compile-flags: -Zmiri-max-yield-iterations=10
 
 use std::cell::RefCell;
 use std::thread;

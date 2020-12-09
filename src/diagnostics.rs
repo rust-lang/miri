@@ -16,6 +16,7 @@ pub enum TerminationInfo {
     UnsupportedInIsolation(String),
     ExperimentalUb { msg: String, url: String },
     Deadlock,
+    Livelock,
 }
 
 impl fmt::Display for TerminationInfo {
@@ -32,6 +33,8 @@ impl fmt::Display for TerminationInfo {
                 write!(f, "{}", msg),
             Deadlock =>
                 write!(f, "the evaluated program deadlocked"),
+            Livelock =>
+                write!(f, "the evaluated program livelocked"),
         }
     }
 }
@@ -67,6 +70,7 @@ pub fn report_error<'tcx, 'mir>(
                 ExperimentalUb { .. } =>
                     "Undefined Behavior",
                 Deadlock => "deadlock",
+                Livelock => "livelock",
             };
             let helps = match info {
                 UnsupportedInIsolation(_) =>
