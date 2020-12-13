@@ -68,9 +68,6 @@ fn once_cell_test2() {
 
 
 fn main() {
-    // This runs forever - unsure why currently
     once_cell_test1();
-
-    // This passes
     once_cell_test2();
 }
