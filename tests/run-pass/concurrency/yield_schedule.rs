@@ -183,6 +183,29 @@ fn print_yield_counters() {
     println!("Thread 4 = {:?}", j4.join().unwrap());
 }
 
+fn spin_loop() {
+    static FLAG: AtomicUsize = AtomicUsize::new(0);
+    let fun = || {
+        while FLAG.load(Ordering::Acquire) == 0 {
+            // spin and wait
+            // Note: the thread yield or spin loop hint
+            // is required for termination, otherwise
+            // this will run forever.
+            std::sync::atomic::spin_loop_hint();
+        }
+    };
+    let j1 = spawn(fun);
+    let j2 = spawn(fun);
+    let j3 = spawn(fun);
+    let j4 = spawn(fun);
+    std::thread::yield_now();
+    FLAG.store(1, Ordering::Release);
+    j1.join().unwrap();
+    j2.join().unwrap();
+    j3.join().unwrap();
+    j4.join().unwrap();
+}
+
 fn main() {
     once_cell_test1();
     once_cell_test2();
@@ -191,4 +214,5 @@ fn main() {
     yield_with_rwlock_read();
     yield_with_condvar();
     print_yield_counters();
+    spin_loop();
 }
