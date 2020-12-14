@@ -76,7 +76,7 @@ fn yield_with_mutex() {
             // yield loop for try-lock.
             if let Ok(guard) = s1.try_lock() {
                 break guard
-            }else{
+            } else {
                 std::thread::yield_now();
             }
         };
@@ -99,7 +99,7 @@ fn yield_with_rwlock_write() {
             // yield loop for try-lock.
             if let Ok(guard) = s1.try_write() {
                 break guard
-            }else{
+            } else {
                 std::thread::yield_now();
             }
         };
@@ -122,7 +122,7 @@ fn yield_with_rwlock_read() {
             // yield loop for try-lock.
             if let Ok(guard) = s1.try_read() {
                 break guard
-            }else{
+            } else {
                 std::thread::yield_now();
             }
         };
