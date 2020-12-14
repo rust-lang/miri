@@ -117,7 +117,7 @@ enum ThreadJoinStatus {
 /// Set of sync objects that can have properties queried.
 /// The futex is not included since it can only signal
 /// and awake values.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 enum SyncObject {
     /// Can query lock state.
     Mutex(MutexId),
@@ -180,7 +180,7 @@ impl YieldRecordState {
             let mut assume_progress = false;
             range_map.iter_mut(offset, len)
             .for_each(|(_, watch)| {
-                if *watch != *record_iteration - 1 {
+                if *watch < *record_iteration - 1 {
                     // Value stored does not match the last loop
                     // so assume some progress has been made.
                     assume_progress = true;
@@ -190,6 +190,7 @@ impl YieldRecordState {
 
             // The watch set is different so assume progress has been made
             if assume_progress {
+                log::trace!("Atomic watch with different value at {:?}, {:?}, {:?}", alloc_id, offset, len);
                 *self = YieldRecordState::MadeProgress;
             }
         }
@@ -201,10 +202,11 @@ impl YieldRecordState {
             watch_sync, record_iteration, ..
         } = self {
             let count = watch_sync.entry(sync).or_insert(0);
-            if *count != *record_iteration - 1 {
+            if *count < *record_iteration - 1 {
                 // Different content - assume progress.
+                log::trace!("Sync watch with different value at {:?}", sync);
                 *self = YieldRecordState::MadeProgress; 
-            }else{
+            } else {
                 *count = *record_iteration;
             }
         }
@@ -217,10 +219,10 @@ impl YieldRecordState {
         } = self {
             if let Some(range_map) = watch_atomic.get(&alloc_id) {
                 range_map.iter(offset, len).any(|(_, &watch)| watch != 0)
-            }else{
+            } else {
                 false
             }
-        }else{
+        } else {
             // First iteration yield, no wake metadata
             // so only awaken after there are no enabled threads.
             false
@@ -234,10 +236,10 @@ impl YieldRecordState {
         } = self {
             if let Some(count) = watch_sync.get(&sync) {
                 *count != 0
-            }else{
+            } else {
                 false
             }
-        }else{
+        } else {
             // First iteration, no wake metadata.
             false
         }
@@ -249,7 +251,7 @@ impl YieldRecordState {
             record_iteration, ..
         } = self {
             *record_iteration
-        }else{
+        } else {
             0
         }
     }
@@ -260,7 +262,7 @@ impl YieldRecordState {
         } = self {
             // Should watch if either watch hash-set is non-empty
             !watch_atomic.is_empty() || !watch_sync.is_empty()
-        }else{
+        } else {
             false
         }
     }
@@ -271,7 +273,7 @@ impl YieldRecordState {
             record_iteration, ..
         } = self {
             *record_iteration += 1;
-        }else{
+        } else {
             *self = YieldRecordState::Recording {
                 watch_atomic: FxHashMap::default(),
                 watch_sync: FxHashMap::default(),
@@ -334,12 +336,14 @@ impl<'mir, 'tcx> Thread<'mir, 'tcx> {
         let block = if max_yield == 0 {
             // A value of 0 never blocks
             false
-        }else{
+        } else {
             iteration_count >= max_yield
         };
         if block {
+            log::trace!("Thread entered Blocking yield");
             self.state = ThreadState::BlockedOnYield;
-        }else{
+        } else {
+            log::trace!("Thread entered standard yield with iteration {:?}", iteration_count);
             self.state = ThreadState::DelayOnYield;
         }
         self.yield_state.should_watch()
@@ -673,6 +677,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
     /// an atomic operation that potentially makes
     /// progress
     fn thread_yield_progress(&mut self) {
+        log::trace!("Thread {:?} has made progress via generic progress", self.active_thread);
         self.threads[self.active_thread].yield_state.on_progress();
     }
 
@@ -682,6 +687,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         let threads = &mut self.threads;
 
         // This thread performed an atomic update, mark as making progress.
+        log::trace!("Thread {:?} has made progress via atomic store", self.active_thread);
         threads[self.active_thread].yield_state.on_progress();
 
         // Awake all threads that were awaiting on changes to the modified atomic.
@@ -691,7 +697,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
                 thread.state = ThreadState::Enabled;
                 thread.yield_state.on_progress();
                 true
-            }else{
+            } else {
                 false
             }
         });
@@ -709,6 +715,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         let threads = &mut self.threads;
 
         // This thread performed an sync update, mark as making progress.
+        log::trace!("Thread {:?} has made progress via sync object update", self.active_thread);
         threads[self.active_thread].yield_state.on_progress();
 
         // Awake all threads that were awaiting on changes to the sync object.
@@ -718,7 +725,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
                 thread.state = ThreadState::Enabled;
                 thread.yield_state.on_progress();
                 true
-            }else{
+            } else {
                 false
             }
         });
@@ -771,12 +778,13 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         if self.threads[self.active_thread].state == ThreadState::Enabled {
             if self.yield_active_thread {
                 // The currently active thread has yielded, update the state
+                log::trace!("Yielding thread {:?}", self.active_thread);
                 if self.threads[self.active_thread].on_yield(self.max_yield_count) {
                     // The thread has a non-zero set of wake metadata to exit the yield
                     // so insert into the set of threads that may wake.
                     self.yielding_thread_set.insert(self.active_thread);
                 }
-            }else{
+            } else {
                 // The currently active thread is still enabled, just continue with it.
                 return Ok(SchedulingAction::ExecuteStep);
             }
@@ -786,7 +794,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         let new_thread = if let Some(new_thread) = self.threads.iter_enumerated()
             .find(|(_, thread)| thread.state == ThreadState::Enabled) {
             Some(new_thread.0)
-        }else{
+        } else {
             // No active threads, wake all non blocking yields and try again.
             let mut new_thread = None;
             for (id,thread) in self.threads.iter_enumerated_mut() {

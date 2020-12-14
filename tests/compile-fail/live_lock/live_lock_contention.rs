@@ -1,3 +1,5 @@
+// ignore-windows: No libc on Windows
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::spawn;
