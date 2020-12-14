@@ -80,6 +80,12 @@ pub fn report_error<'tcx, 'mir>(
                         format!("this indicates a potential bug in the program: it performed an invalid operation, but the rules it violated are still experimental"),
                         format!("see {} for further information", url),
                     ],
+                Livelock => vec![
+                    format!("All thread yields or spin loop hints are used to dynamically generated watch sets to detect livelock and avoid unnecessary spins in spin-loops."),
+                    format!("If this should not have reported a livelock then it may help to change the maximum number of spurious wakes from yields with no progress."),
+                    format!("Pass the argument `-Zmiri-max-yield-iterations=<count>` to change this value."),
+                    format!("The current value is {}, a value of 0 will allow an unlimited number of spurious wakes.", ecx.thread_yield_get_max_spurious_wake())
+                ],
                 _ => vec![],
             };
             (title, helps)

@@ -1117,4 +1117,12 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let this = self.eval_context_mut();
         this.machine.threads.thread_yield_atomic_watch(alloc_id, alloc_size, offset, len);
     }
+
+    /// Return the configuration for the maximum number of spurious wake events
+    /// from thread yields. Used for diagnostics.
+    #[inline]
+    fn thread_yield_get_max_spurious_wake(&self) -> u32 {
+        let this = self.eval_context_ref();
+        this.machine.threads.max_yield_count
+    }
 }
