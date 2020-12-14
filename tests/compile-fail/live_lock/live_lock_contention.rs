@@ -1,4 +1,4 @@
-// ignore-windows: No libc on Windows
+// ignore-windows: Concurrency on Windows is not supported yet.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

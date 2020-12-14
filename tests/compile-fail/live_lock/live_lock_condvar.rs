@@ -1,5 +1,5 @@
 // compile-flags: -Zmiri-disable-isolation
-// ignore-windows: No libc on Windows
+// ignore-windows: Concurrency on Windows is not supported yet.
 
 // FIXME: the implicit mutex unlock & lock counts as forward progress with the current detector,
 // so this runs forever. Ideally this case should be detected.

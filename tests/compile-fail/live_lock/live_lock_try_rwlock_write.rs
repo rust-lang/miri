@@ -1,4 +1,4 @@
-// ignore-windows: No libc on Windows
+// ignore-windows: Concurrency on Windows is not supported yet.
 
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
@@ -17,7 +17,7 @@ fn main() {
             // yield loop for try-lock.
             if let Ok(guard) = s1.try_write() {
                 break guard
-            }else{
+            } else {
                 unsafe { miri_yield_thread(); } //~ERROR livelock
             }
         };
