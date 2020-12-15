@@ -20,8 +20,8 @@ fn main() {
     let condvar = Condvar::new();
 
     let mut lock = mutex.lock().unwrap();
-    loop {
-        match condvar.wait_timeout(lock, Duration::from_secs(0)) {
+    loop { // Duration is not zero due to infinite time-out on macos.
+        match s1.0.wait_timeout(lock, Duration::from_millis(100)) {
             Ok(_) => break,
             Err(err) => {
                 lock = err.into_inner().0;
