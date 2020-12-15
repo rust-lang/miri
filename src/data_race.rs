@@ -591,7 +591,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
             place,
             atomic,
             "Atomic Load",
-            true,
             false,
             move |memory, clocks, index, atomic| {
                 if atomic == AtomicReadOp::Relaxed {
@@ -615,7 +614,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
             place,
             atomic,
             "Atomic Store",
-            false,
             true,
             move |memory, clocks, index, atomic| {
                 if atomic == AtomicWriteOp::Relaxed {
@@ -642,7 +640,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
             place,
             atomic,
             "Atomic RMW",
-            true,
+            // For yields the atomic write overrides all effects of the atomic read
+            // so it is treated as an atomic write.
             true,
             move |memory, clocks, index, _| {
             if acquire {
@@ -975,8 +974,7 @@ trait EvalContextPrivExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
         place: MPlaceTy<'tcx, Tag>,
         atomic: A,
         description: &str,
-        yield_watch: bool,
-        yield_wake: bool,
+        write: bool,
         mut op: impl FnMut(
             &mut MemoryCellClocks,
             &mut ThreadClockSet,
@@ -989,12 +987,11 @@ trait EvalContextPrivExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
         // Update yield metadata for yield based forward progress and live-lock detection.
         let place_ptr = place.ptr.assert_ptr();
         let size = place.layout.size;
-        if yield_watch {
+        if write {
+            this.thread_yield_atomic_wake(place_ptr.alloc_id, place_ptr.offset,size);
+        } else {
             let alloc_size = this.memory.get_raw(place_ptr.alloc_id)?.size;
             this.thread_yield_atomic_watch(place_ptr.alloc_id, alloc_size, place_ptr.offset,size);
-        }
-        if yield_wake {
-            this.thread_yield_atomic_wake(place_ptr.alloc_id, place_ptr.offset,size);
         }
 
         if let Some(data_race) = &this.memory.extra.data_race {
