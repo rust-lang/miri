@@ -9,6 +9,10 @@ use std::lazy::SyncOnceCell as OnceCell;
 use std::thread::spawn;
 use std::time::Duration;
 
+extern "Rust" {
+    fn miri_yield_thread();
+}
+
 //Variant of once_cell_does_not_leak_partially_constructed_boxes from matklad/once_cell
 // with scope replaced with manual thread joins.
 fn once_cell_test1() {
@@ -140,7 +144,7 @@ fn yield_with_condvar() {
     let s1 = shared.clone();
     let j1 = spawn(move || {
         let mut lock = s1.1.lock().unwrap();
-        loop { // Duration is not zero due to infinite time-out on macos.
+        loop {
             match s1.0.wait_timeout(lock, Duration::from_millis(100)) {
                 Ok(_) => break,
                 Err(err) => {
@@ -191,7 +195,10 @@ fn spin_loop() {
             // Note: the thread yield or spin loop hint
             // is required for termination, otherwise
             // this will run forever.
-            std::sync::atomic::spin_loop_hint();
+
+            // Note: should change to use this once cfg(miri) to use intrinsic.
+            //std::sync::atomic::spin_loop_hint();
+            unsafe { miri_yield_thread(); }
         }
     };
     let j1 = spawn(fun);
