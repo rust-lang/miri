@@ -417,6 +417,16 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             "atomic_xsub_acqrel" => this.atomic_op(args, dest, BinOp::Sub, false, AtomicRwOp::AcqRel)?,
             "atomic_xsub_relaxed" => this.atomic_op(args, dest, BinOp::Sub, false, AtomicRwOp::Relaxed)?,
 
+            "atomic_min" => this.atomic_min_max(args, dest, true, AtomicRwOp::SeqCst)?,
+            "atomic_min_acq" => this.atomic_min_max(args, dest, true, AtomicRwOp::Acquire)?,
+            "atomic_min_rel" => this.atomic_min_max(args, dest, true, AtomicRwOp::Release)?,
+            "atomic_min_acqrel" => this.atomic_min_max(args, dest, true, AtomicRwOp::AcqRel)?,
+            "atomic_min_relaxed" => this.atomic_min_max(args, dest, true, AtomicRwOp::Relaxed)?,
+            "atomic_max" => this.atomic_min_max(args, dest, false, AtomicRwOp::SeqCst)?,
+            "atomic_max_acq" => this.atomic_min_max(args, dest, false, AtomicRwOp::Acquire)?,
+            "atomic_max_rel" => this.atomic_min_max(args, dest, false, AtomicRwOp::Release)?,
+            "atomic_max_acqrel" => this.atomic_min_max(args, dest, false, AtomicRwOp::AcqRel)?,
+            "atomic_max_relaxed" => this.atomic_min_max(args, dest, false, AtomicRwOp::Relaxed)?,
 
             // Query type information
             "assert_zero_valid" |
@@ -592,6 +602,31 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         // FIXME: the weak part of this is currently not modelled,
         //  it is assumed to always succeed unconditionally.
         self.atomic_compare_exchange(args, dest, success, fail)
+    }
+
+    fn atomic_min_max(
+        &mut self, args: &[OpTy<'tcx, Tag>], dest: PlaceTy<'tcx, Tag>,
+        min: bool,
+        atomic: AtomicRwOp
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let &[place, rhs] = check_arg_count(args)?;
+        let place = this.deref_operand(place)?;
+        if !place.layout.ty.is_integral() {
+            bug!("Atomic arithmetic operations only work on integer types");
+        }
+        let rhs = this.read_immediate(rhs)?;
+
+        // Check alignment requirements. Atomics must always be aligned to their size,
+        // even if the type they wrap would be less aligned (e.g. AtomicU64 on 32bit must
+        // be 8-aligned).
+        let align = Align::from_bytes(place.layout.size.bytes()).unwrap();
+        this.memory.check_ptr_access(place.ptr, place.layout.size, align)?;
+
+        let old = this.atomic_min_max_scalar(place, rhs, min, atomic)?;
+        this.write_immediate(*old, dest)?; // old value is returned
+        Ok(())
     }
 
     fn float_to_int_unchecked<F>(

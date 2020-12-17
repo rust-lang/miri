@@ -542,6 +542,35 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
         Ok(old)
     }
 
+    /// Perform an conditional atomic exchange with a memory place and a new
+    /// scalar value, the old value is returned.
+    fn atomic_min_max_scalar(
+        &mut self,
+        place: MPlaceTy<'tcx, Tag>,
+        rhs: ImmTy<'tcx, Tag>,
+        min: bool,
+        atomic: AtomicRwOp,
+    ) -> InterpResult<'tcx, ImmTy<'tcx, Tag>> {
+        let this = self.eval_context_mut();
+
+        let old = this.allow_data_races_mut(|this| this.read_immediate(place.into()))?;
+
+        // `binary_op` will bail if either of them is not a scalar.
+        let cond = if min {
+            this.overflowing_binary_op(mir::BinOp::Lt, old, rhs)?.0
+        } else {
+            this.overflowing_binary_op(mir::BinOp::Gt, old, rhs)?.0
+        };
+
+        if cond.to_bool()? {
+            this.allow_data_races_mut(|this| this.write_immediate(*rhs, place.into()))?;
+        }
+
+        this.validate_atomic_rmw(place, atomic)?;
+        // Return the old value.
+        Ok(old)
+    }
+
     /// Perform an atomic compare and exchange at a given memory location.
     /// On success an atomic RMW operation is performed and on failure
     /// only an atomic read occurs.
