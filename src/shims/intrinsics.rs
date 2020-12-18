@@ -427,6 +427,16 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             "atomic_max_rel" => this.atomic_min_max(args, dest, false, AtomicRwOp::Release)?,
             "atomic_max_acqrel" => this.atomic_min_max(args, dest, false, AtomicRwOp::AcqRel)?,
             "atomic_max_relaxed" => this.atomic_min_max(args, dest, false, AtomicRwOp::Relaxed)?,
+            "atomic_umin" => this.atomic_min_max(args, dest, true, AtomicRwOp::SeqCst)?,
+            "atomic_umin_acq" => this.atomic_min_max(args, dest, true, AtomicRwOp::Acquire)?,
+            "atomic_umin_rel" => this.atomic_min_max(args, dest, true, AtomicRwOp::Release)?,
+            "atomic_umin_acqrel" => this.atomic_min_max(args, dest, true, AtomicRwOp::AcqRel)?,
+            "atomic_umin_relaxed" => this.atomic_min_max(args, dest, true, AtomicRwOp::Relaxed)?,
+            "atomic_umax" => this.atomic_min_max(args, dest, false, AtomicRwOp::SeqCst)?,
+            "atomic_umax_acq" => this.atomic_min_max(args, dest, false, AtomicRwOp::Acquire)?,
+            "atomic_umax_rel" => this.atomic_min_max(args, dest, false, AtomicRwOp::Release)?,
+            "atomic_umax_acqrel" => this.atomic_min_max(args, dest, false, AtomicRwOp::AcqRel)?,
+            "atomic_umax_relaxed" => this.atomic_min_max(args, dest, false, AtomicRwOp::Relaxed)?,
 
             // Query type information
             "assert_zero_valid" |
