@@ -63,6 +63,20 @@ fn atomic_u64() {
         Ok(1)
     );
     assert_eq!(ATOMIC.load(Relaxed), 0x100);
+
+    assert_eq!(ATOMIC.fetch_max(0x10, SeqCst), 0x100);
+    assert_eq!(ATOMIC.fetch_max(0x100, SeqCst), 0x100);
+    assert_eq!(ATOMIC.fetch_max(0x1000, SeqCst), 0x100);
+    assert_eq!(ATOMIC.fetch_max(0x1000, SeqCst), 0x1000);
+    assert_eq!(ATOMIC.fetch_max(0x2000, SeqCst), 0x1000);
+    assert_eq!(ATOMIC.fetch_max(0x2000, SeqCst), 0x2000);
+
+    assert_eq!(ATOMIC.fetch_min(0x2000, SeqCst), 0x2000);
+    assert_eq!(ATOMIC.fetch_min(0x2000, SeqCst), 0x2000);
+    assert_eq!(ATOMIC.fetch_max(0x1000, SeqCst), 0x2000);
+    assert_eq!(ATOMIC.fetch_max(0x1000, SeqCst), 0x1000);
+    assert_eq!(ATOMIC.fetch_max(0x100, SeqCst), 0x1000);
+    assert_eq!(ATOMIC.fetch_max(0x10, SeqCst), 0x100);
 }
 
 fn atomic_fences() {
