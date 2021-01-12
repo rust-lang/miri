@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Not;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,6 +45,8 @@ struct CrateRunInfo {
     env: Vec<(OsString, OsString)>,
     /// The current working directory.
     current_dir: OsString,
+    /// The contents passed via standard input.
+    stdin: Vec<u8>,
 }
 
 impl CrateRunInfo {
@@ -53,7 +55,13 @@ impl CrateRunInfo {
         let args = args.collect();
         let env = env::vars_os().collect();
         let current_dir = env::current_dir().unwrap().into_os_string();
-        CrateRunInfo { args, env, current_dir }
+
+        let mut stdin = Vec::new();
+        if env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some() {
+            std::io::stdin().lock().read_to_end(&mut stdin).expect("cannot read stdin");
+        }
+
+        CrateRunInfo { args, env, current_dir, stdin }
     }
 
     fn store(&self, filename: &Path) {
@@ -539,17 +547,22 @@ fn phase_cargo_rustc(args: env::Args) {
     }
 
     fn out_filename(prefix: &str, suffix: &str) -> PathBuf {
-        let mut path = PathBuf::from(get_arg_flag_value("--out-dir").unwrap());
-        path.push(format!(
-            "{}{}{}{}",
-            prefix,
-            get_arg_flag_value("--crate-name").unwrap(),
-            // This is technically a `-C` flag but the prefix seems unique enough...
-            // (and cargo passes this before the filename so it should be unique)
-            get_arg_flag_value("extra-filename").unwrap_or(String::new()),
-            suffix,
-        ));
-        path
+        if let Some(out_dir) = get_arg_flag_value("--out-dir") {
+            let mut path = PathBuf::from(out_dir);
+            path.push(format!(
+                "{}{}{}{}",
+                prefix,
+                get_arg_flag_value("--crate-name").unwrap(),
+                // This is technically a `-C` flag but the prefix seems unique enough...
+                // (and cargo passes this before the filename so it should be unique)
+                get_arg_flag_value("extra-filename").unwrap_or(String::new()),
+                suffix,
+            ));
+            path
+        } else {
+            let out_file = get_arg_flag_value("-o").unwrap();
+            PathBuf::from(out_file)
+        }
     }
 
     let verbose = std::env::var_os("MIRI_VERBOSE").is_some();
@@ -734,6 +747,44 @@ fn phase_cargo_runner(binary: &Path, binary_args: env::Args) {
     if verbose {
         eprintln!("[cargo-miri runner] {:?}", cmd);
     }
+
+    cmd.stdin(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("failed to spawn miri process");
+    {
+        let stdin = child.stdin.as_mut().expect("failed to open stdin");
+        stdin.write_all(&info.stdin).expect("failed to write out test source");
+    }
+    let exit_status = child.wait().expect("failed to run command");
+    if exit_status.success().not() {
+        std::process::exit(exit_status.code().unwrap_or(-1))
+    }
+}
+
+fn phase_cargo_rustdoc(fst_arg: &str, args: env::Args) {
+    let verbose = std::env::var_os("MIRI_VERBOSE").is_some();
+
+    // phase_cargo_miri sets the RUSTDOC env var to ourselves, so we can't use that here;
+    // just default to a straight-forward invocation for now:
+    let mut cmd = Command::new(OsString::from("rustdoc"));
+
+    // just pass everything through until we find a reason not to do that:
+    cmd.arg(fst_arg);
+    cmd.args(args);
+
+    cmd.arg("-Z").arg("unstable-options");
+
+    let cargo_miri_path = std::env::current_exe().expect("current executable path invalid");
+    cmd.arg("--test-builder").arg(&cargo_miri_path);
+    cmd.arg("--runtool").arg(&cargo_miri_path);
+    
+    // rustdoc passes generated code to rustc via stdin, rather than a temporary file,
+    // so we need to let the coming invocations know to expect that
+    cmd.env("MIRI_CALLED_FROM_RUSTDOC", "1");
+
+    if verbose {
+        eprintln!("[cargo-miri rustdoc] {:?}", cmd);
+    }
+
     exec(cmd)
 }
 
@@ -750,6 +801,30 @@ fn main() {
         return;
     }
 
+    // The way rustdoc invokes rustc is indistuingishable from the way cargo invokes rustdoc
+    // by the arguments alone, and we can't take from the args iterator in this case.
+    // phase_cargo_rustdoc sets this environment variable to let us disambiguate here
+    let invoked_as_rustc_from_rustdoc = env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some();
+    if invoked_as_rustc_from_rustdoc {
+        // ...however, we then also see this variable when rustdoc invokes us as the testrunner!
+        // The runner is invoked as `$runtool ($runtool-arg)* output_file;
+        // since we don't specify any runtool-args, and rustdoc supplies multiple arguments to
+        // the test-builder unconditionally, we can just check the number of remaining arguments:
+        if args.len() == 1 {
+            let arg = args.next().unwrap();
+            let binary = Path::new(&arg);
+            if binary.exists() {
+                phase_cargo_runner(binary, args);
+            } else {
+                show_error(format!("`cargo-miri` called with non-existing path argument `{}`; please invoke this binary through `cargo miri`", arg));
+            }
+        } else {
+            phase_cargo_rustc(args);
+        }
+
+        return;
+    }
+
     // Dispatch to `cargo-miri` phase. There are three phases:
     // - When we are called via `cargo miri`, we run as the frontend and invoke the underlying
     //   cargo. We set RUSTC_WRAPPER and CARGO_TARGET_RUNNER to ourselves.
@@ -762,16 +837,15 @@ fn main() {
         Some("miri") => phase_cargo_miri(args),
         Some("rustc") => phase_cargo_rustc(args),
         Some(arg) => {
-            // We have to distinguish the "runner" and "rustfmt" cases.
+            // We have to distinguish the "runner" and "rustdoc" cases.
             // As runner, the first argument is the binary (a file that should exist, with an absolute path);
-            // as rustfmt, the first argument is a flag (`--something`).
+            // as rustdoc, the first argument is a flag (`--something`).
             let binary = Path::new(arg);
             if binary.exists() {
                 assert!(!arg.starts_with("--")); // not a flag
                 phase_cargo_runner(binary, args);
             } else if arg.starts_with("--") {
-                // We are rustdoc.
-                eprintln!("Running doctests is not currently supported by Miri.")
+                phase_cargo_rustdoc(arg, args);
             } else {
                 show_error(format!("`cargo-miri` called with unexpected first argument `{}`; please only invoke this binary through `cargo miri`", arg));
             }
