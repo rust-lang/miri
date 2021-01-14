@@ -157,6 +157,22 @@ fn exec(mut cmd: Command) {
     }
 }
 
+/// Execute the command and pipe `input` into its stdin.
+/// If it fails, fail this process with the same exit code.
+/// Otherwise, continue.
+fn exec_with_pipe(mut cmd: Command, input: &[u8]) {
+    cmd.stdin(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("failed to spawn process");
+    {
+        let stdin = child.stdin.as_mut().expect("failed to open stdin");
+        stdin.write_all(input).expect("failed to write out test source");
+    }
+    let exit_status = child.wait().expect("failed to run command");
+    if exit_status.success().not() {
+        std::process::exit(exit_status.code().unwrap_or(-1))
+    }
+}
+
 fn xargo_version() -> Option<(u32, u32, u32)> {
     let out = xargo_check().arg("--version").output().ok()?;
     if !out.status.success() {
@@ -598,6 +614,34 @@ fn phase_cargo_rustc(args: env::Args) {
         // (Need to do this here as cargo moves that "binary" to a different place before running it.)
         info.store(&out_filename("", ".exe"));
 
+        // Rustdoc expects us to exit with an error code if the test is marked as `compile_fail`,
+        // so we need to run Miri with `MIRI_BE_RUSTC` for a check-only build.
+        if std::env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some() {
+            let mut cmd = miri();
+
+            // use our own sysroot
+            if !has_arg_flag("--sysroot") {
+                let sysroot = env::var_os("MIRI_SYSROOT")
+                    .expect("the wrapper should have set MIRI_SYSROOT");
+                cmd.arg("--sysroot").arg(sysroot);
+            }
+            
+            // don't go into "code generation" (i.e. validation)
+            if info.args.iter().position(|arg| arg.starts_with("--emit=")).is_none() {
+                cmd.arg("--emit=dep-info,metadata");
+            }
+
+            cmd.args(info.args);
+            cmd.env("MIRI_BE_RUSTC", "1");
+
+            if verbose {
+                eprintln!("[cargo-miri rustc] captured input:\n{}", std::str::from_utf8(&info.stdin).unwrap());
+                eprintln!("[cargo-miri rustc] {:?}", cmd);
+            }
+            
+            exec_with_pipe(cmd, &info.stdin);
+        }
+
         return;
     }
 
@@ -748,31 +792,40 @@ fn phase_cargo_runner(binary: &Path, binary_args: env::Args) {
         eprintln!("[cargo-miri runner] {:?}", cmd);
     }
 
-    cmd.stdin(std::process::Stdio::piped());
-    let mut child = cmd.spawn().expect("failed to spawn miri process");
-    {
-        let stdin = child.stdin.as_mut().expect("failed to open stdin");
-        stdin.write_all(&info.stdin).expect("failed to write out test source");
-    }
-    let exit_status = child.wait().expect("failed to run command");
-    if exit_status.success().not() {
-        std::process::exit(exit_status.code().unwrap_or(-1))
-    }
+    exec_with_pipe(cmd, &info.stdin)
 }
 
-fn phase_cargo_rustdoc(fst_arg: &str, args: env::Args) {
+fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
     let verbose = std::env::var_os("MIRI_VERBOSE").is_some();
 
     // phase_cargo_miri sets the RUSTDOC env var to ourselves, so we can't use that here;
     // just default to a straight-forward invocation for now:
     let mut cmd = Command::new(OsString::from("rustdoc"));
 
-    // just pass everything through until we find a reason not to do that:
+    let extern_flag = "--extern";
+    assert!(fst_arg != extern_flag);
     cmd.arg(fst_arg);
-    cmd.args(args);
+
+    // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
+    while let Some(arg) = args.next() {
+        if arg == extern_flag {
+            cmd.arg(extern_flag); // always forward flag, but adjust filename
+            // `--extern` is always passed as a separate argument by cargo.
+            let next_arg = args.next().expect("`--extern` should be followed by a filename");
+            if let Some(next_lib) = next_arg.strip_suffix(".rlib") {
+                // If this is an rlib, make it an rmeta.
+                cmd.arg(format!("{}.rmeta", next_lib));
+            } else {
+                // Some other extern file (e.g., a `.so`). Forward unchanged.
+                cmd.arg(next_arg);
+            }
+        } else {
+            cmd.arg(arg);
+        }
+    }
 
     cmd.arg("-Z").arg("unstable-options");
-
+    
     let cargo_miri_path = std::env::current_exe().expect("current executable path invalid");
     cmd.arg("--test-builder").arg(&cargo_miri_path);
     cmd.arg("--runtool").arg(&cargo_miri_path);
