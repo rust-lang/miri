@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::iter::TakeWhile;
 use std::ops::Not;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -89,29 +90,47 @@ fn has_arg_flag(name: &str) -> bool {
     args.any(|val| val == name)
 }
 
-/// Gets the value of a `--flag`.
-fn get_arg_flag_value(name: &str) -> Option<String> {
-    // Stop searching at `--`.
-    let mut args = std::env::args().take_while(|val| val != "--");
-    loop {
-        let arg = match args.next() {
-            Some(arg) => arg,
-            None => return None,
-        };
-        if !arg.starts_with(name) {
-            continue;
-        }
-        // Strip leading `name`.
-        let suffix = &arg[name.len()..];
-        if suffix.is_empty() {
-            // This argument is exactly `name`; the next one is the value.
-            return args.next();
-        } else if suffix.starts_with('=') {
-            // This argument is `name=value`; get the value.
-            // Strip leading `=`.
-            return Some(suffix[1..].to_owned());
+struct ArgFlagValueIter<'a> {
+    args: TakeWhile<env::Args, fn(&String) -> bool>,
+    name: &'a str,
+}
+
+impl<'a> ArgFlagValueIter<'a> {
+    fn new(name: &'a str) -> Self {
+        Self {
+            // Stop searching at `--`.
+            args: env::args().take_while(|val| val != "--"),
+            name,
         }
     }
+}
+
+impl Iterator for ArgFlagValueIter<'_> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        loop {
+            let arg = self.args.next()?;
+            if !arg.starts_with(self.name) {
+                continue;
+            }
+            // Strip leading `name`.
+            let suffix = &arg[self.name.len()..];
+            if suffix.is_empty() {
+                // This argument is exactly `name`; the next one is the value.
+                return self.args.next();
+            } else if suffix.starts_with('=') {
+                // This argument is `name=value`; get the value.
+                // Strip leading `=`.
+                return Some(suffix[1..].to_owned());
+            }
+        }
+    }
+}
+
+/// Gets the value of a `--flag`.
+fn get_arg_flag_value(name: &str) -> Option<String> {
+    ArgFlagValueIter::new(name).next()
 }
 
 /// Returns the path to the `miri` binary
@@ -432,18 +451,20 @@ fn phase_cargo_miri(mut args: env::Args) {
     let mut cmd = cargo();
     cmd.arg(cargo_cmd);
 
+    let host = version_info().host;
+
     // Make sure we know the build target, and cargo does, too.
     // This is needed to make the `CARGO_TARGET_*_RUNNER` env var do something,
     // and it later helps us detect which crates are proc-macro/build-script
     // (host crates) and which crates are needed for the program itself.
-    let target = if let Some(target) = get_arg_flag_value("--target") {
-        target
+    let target = get_arg_flag_value("--target");
+    let target = if let Some(ref target) = target {
+        &target
     } else {
         // No target given. Pick default and tell cargo about it.
-        let host = version_info().host;
         cmd.arg("--target");
         cmd.arg(&host);
-        host
+        &host
     };
 
     // Forward all further arguments. We do some processing here because we want to
@@ -495,9 +516,14 @@ fn phase_cargo_miri(mut args: env::Args) {
     }
     cmd.env("RUSTC_WRAPPER", &cargo_miri_path);
 
+    let runner_env_name = |target: &str| {
+        format!("CARGO_TARGET_{}_RUNNER", target.to_uppercase().replace('-', "_"))
+    };
+
     // Set the runner for the current target to us as well, so we can interpret the binaries.
-    let runner_env_name = format!("CARGO_TARGET_{}_RUNNER", target.to_uppercase().replace('-', "_"));
-    cmd.env(&runner_env_name, &cargo_miri_path);
+    for triple in &[&host, target] {
+        cmd.env(runner_env_name(triple), &cargo_miri_path);
+    }
 
     // Set rustdoc to us as well, so we can make it do nothing (see issue #584).
     cmd.env("RUSTDOC", &cargo_miri_path);
@@ -505,7 +531,9 @@ fn phase_cargo_miri(mut args: env::Args) {
     // Run cargo.
     if verbose {
         eprintln!("[cargo-miri miri] RUSTC_WRAPPER={:?}", cargo_miri_path);
-        eprintln!("[cargo-miri miri] {}={:?}", runner_env_name, cargo_miri_path);
+        for triple in &[&host, target] {
+            eprintln!("[cargo-miri miri] {}={:?}", runner_env_name(triple), cargo_miri_path);
+        }
         eprintln!("[cargo-miri miri] RUSTDOC={:?}", cargo_miri_path);
         eprintln!("[cargo-miri miri] {:?}", cmd);
         cmd.env("MIRI_VERBOSE", ""); // This makes the other phases verbose.
@@ -524,7 +552,18 @@ fn phase_cargo_rustc(args: env::Args) {
     /// never set for host crates. This matches what rustc bootstrap does,
     /// which hopefully makes it "reliable enough". This relies on us always
     /// invoking cargo itself with `--target`, which `in_cargo_miri` ensures.
+    ///
+    /// If this crate depends on `proc_macro` and it's a test, then normally
+    /// it's the unit test build of a `proc-macro` crate. Build it as a
+    /// "target" crate and cargo will then use this wrapper to run it.
     fn is_target_crate() -> bool {
+        if has_arg_flag("--test") {
+            for krate in ArgFlagValueIter::new("--extern") {
+                if krate == "proc_macro" {
+                    return true;
+                }
+            }
+        }
         get_arg_flag_value("--target").is_some()
     }
 
