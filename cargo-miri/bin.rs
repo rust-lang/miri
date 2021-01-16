@@ -792,7 +792,11 @@ fn phase_cargo_runner(binary: &Path, binary_args: env::Args) {
         eprintln!("[cargo-miri runner] {:?}", cmd);
     }
 
-    exec_with_pipe(cmd, &info.stdin)
+    if std::env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some() {
+        exec_with_pipe(cmd, &info.stdin)
+    } else {
+        exec(cmd)
+    }
 }
 
 fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
