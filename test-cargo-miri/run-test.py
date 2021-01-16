@@ -5,7 +5,7 @@ Assumes the `MIRI_SYSROOT` env var to be set appropriately,
 and the working directory to contain the cargo-miri-test project.
 '''
 
-import sys, subprocess, os
+import sys, subprocess, os, re
 
 CGREEN  = '\33[32m'
 CBOLD   = '\33[1m'
@@ -20,6 +20,9 @@ def cargo_miri(cmd):
     if 'MIRI_TEST_TARGET' in os.environ:
         args += ["--target", os.environ['MIRI_TEST_TARGET']]
     return args
+
+def scrub_timing_info(str):
+    return re.sub("finished in \d+\.\d\ds", "", str)
 
 def test(name, cmd, stdout_ref, stderr_ref, stdin=b'', env={}):
     print("Testing {}...".format(name))
@@ -36,7 +39,7 @@ def test(name, cmd, stdout_ref, stderr_ref, stdin=b'', env={}):
     (stdout, stderr) = p.communicate(input=stdin)
     stdout = stdout.decode("UTF-8")
     stderr = stderr.decode("UTF-8")
-    if p.returncode == 0 and stdout == open(stdout_ref).read() and stderr == open(stderr_ref).read():
+    if p.returncode == 0 and scrub_timing_info(stdout) == scrub_timing_info(open(stdout_ref).read()) and stderr == open(stderr_ref).read():
         # All good!
         return
     # Show output
