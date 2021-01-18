@@ -451,17 +451,21 @@ fn phase_cargo_miri(mut args: env::Args) {
     let mut cmd = cargo();
     cmd.arg(cargo_cmd);
 
+    let host = version_info().host;
     // Make sure we know the build target, and cargo does, too.
     // This is needed to make the `CARGO_TARGET_*_RUNNER` env var do something,
     // and it later helps us detect which crates are proc-macro/build-script
     // (host crates) and which crates are needed for the program itself.
     let target = if let Some(target) = get_arg_flag_value("--target") {
+        if target == host {
+            cmd.env("MIRI_TARGET_IS_HOST", "");
+        }
         target
     } else {
         // No target given. Pick default and tell cargo about it.
-        let host = version_info().host;
         cmd.arg("--target");
         cmd.arg(&host);
+        cmd.env("MIRI_TARGET_IS_HOST", "");
         host
     };
 
@@ -547,6 +551,10 @@ fn phase_cargo_rustc(args: env::Args) {
         get_arg_flag_value("--target").is_some()
     }
 
+    fn is_proc_macro() -> bool {
+        ArgFlagValueIter::new("--extern").any(|krate| krate == "proc_macro")
+    }
+
     /// Returns whether or not Cargo invoked the wrapper (this binary) to compile
     /// the final, binary crate (either a test for 'cargo test', or a binary for 'cargo run')
     /// Cargo does not give us this information directly, so we need to check
@@ -587,7 +595,7 @@ fn phase_cargo_rustc(args: env::Args) {
         _ => {},
     }
 
-    if !print && target_crate && is_runnable_crate() {
+    if !print && (target_crate || is_proc_macro()) && is_runnable_crate() {
         // This is the binary or test crate that we want to interpret under Miri.
         // But we cannot run it here, as cargo invoked us as a compiler -- our stdin and stdout are not
         // like we want them.
@@ -609,6 +617,7 @@ fn phase_cargo_rustc(args: env::Args) {
 
     let mut cmd = miri();
     let mut emit_link_hack = false;
+    let sysroot = env::var_os("MIRI_SYSROOT").expect("the wrapper should have set MIRI_SYSROOT");
     // Arguments are treated very differently depending on whether this crate is
     // for interpretation by Miri, or for use by a build script / proc macro.
     if !print && target_crate {
@@ -636,13 +645,16 @@ fn phase_cargo_rustc(args: env::Args) {
         }
 
         // Use our custom sysroot.
-        let sysroot =
-            env::var_os("MIRI_SYSROOT").expect("the wrapper should have set MIRI_SYSROOT");
         cmd.arg("--sysroot");
         cmd.arg(sysroot);
     } else {
         // For host crates or when we are printing, just forward everything.
         cmd.args(args);
+
+        if env::var_os("MIRI_TARGET_IS_HOST").is_some() {
+            cmd.arg("--sysroot");
+            cmd.arg(sysroot);
+        }
     }
 
     // We want to compile, not interpret. We still use Miri to make sure the compiler version etc
