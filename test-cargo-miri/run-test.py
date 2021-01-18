@@ -69,9 +69,11 @@ def test_cargo_miri_run():
     )
 
 def test_cargo_miri_test():
-    # rustdoc is not run on foreign targets
+    # rustdoc and unit test of proc-macro-crate is not run on foreign targets
     is_foreign = 'MIRI_TEST_TARGET' in os.environ
     rustdoc_ref = "test.stderr-empty.ref" if is_foreign else "test.stderr-rustdoc.ref"
+    proc_macro_ref = "test.proc-macro-crate.foreign.stdout.ref" if is_foreign else "test.proc-macro-crate.stdout.ref"
+    subcrate_proc_macro_lib_ref = "test.subcrate-proc-macro-crate.lib-target.foreign.stdout.ref" if is_foreign else "test.subcrate-proc-macro-crate.lib-target.stdout.ref"
 
     test("`cargo miri test`",
         cargo_miri("test"),
@@ -104,6 +106,18 @@ def test_cargo_miri_test():
         cargo_miri("test") + ["-p", "subcrate"],
         "test.subcrate.stdout.ref", "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-disable-isolation"},
+    )
+    test("`cargo miri test` (proc-macro-crate)",
+        cargo_miri("test") + ["-p", "proc-macro-crate"],
+        proc_macro_ref, "test.stderr-empty.ref",
+    )
+    test("`cargo miri test` (subcrate and proc-macro-crate, lib target)",
+        cargo_miri("test") + ["-p", "subcrate", "-p", "proc-macro-crate", "lib"],
+        subcrate_proc_macro_lib_ref, "test.stderr-empty.ref",
+    )
+    test("`cargo miri test` (proc-macro-crate, test target)",
+        cargo_miri("test") + ["-p", "proc-macro-crate", "--test", "test"],
+        "test.proc-macro-crate.test-target.stdout.ref", "test.stderr-empty.ref",
     )
 
 os.chdir(os.path.dirname(os.path.realpath(__file__)))

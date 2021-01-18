@@ -1,0 +1,18 @@
+[package]
+name = "proc-macro-crate"
+version = "0.1.0"
+authors = ["Miri Team"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+doctest = false
+
+[dependencies]
+serde = { version = "1.0.119", features = ["derive"] }
+serde_json = "1.0.61"
+
+[build-dependencies]
+num_cpus = "1.10.1"
+serde = { version = "1.0.119", features = ["derive"] }
+serde_json = "1.0.61"

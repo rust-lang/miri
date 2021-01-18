@@ -1,5 +1,5 @@
 [workspace]
-members = ["subcrate"]
+members = ["proc-macro-crate", "subcrate"]
 
 [package]
 name = "cargo-miri-test"
