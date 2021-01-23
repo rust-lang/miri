@@ -615,6 +615,7 @@ fn phase_cargo_rustc(args: env::Args) {
         info.store(&out_filename("", ".exe"));
 
         // Rustdoc expects us to exit with an error code if the test is marked as `compile_fail`,
+        // just creating the JSON file is not enough: we need to detect syntax errors,
         // so we need to run Miri with `MIRI_BE_RUSTC` for a check-only build.
         if std::env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some() {
             let mut cmd = miri();
@@ -626,8 +627,12 @@ fn phase_cargo_rustc(args: env::Args) {
                 cmd.arg("--sysroot").arg(sysroot);
             }
             
-            // don't go into "code generation" (i.e. validation)
-            if info.args.iter().position(|arg| arg.starts_with("--emit=")).is_none() {
+            // ensure --emit argument for a check-only build is present
+            if let Some(i) = info.args.iter().position(|arg| arg.starts_with("--emit=")) {
+                // We need to make sure we're not producing a binary that overwrites the JSON file.
+                // rustdoc should only ever pass an --emit=metadata argument for tests marked as `no_run`:
+                assert_eq!(info.args[i], "--emit=metadata");
+            } else {
                 cmd.arg("--emit=dep-info,metadata");
             }
 
@@ -703,6 +708,18 @@ fn phase_cargo_rustc(args: env::Args) {
     }
 }
 
+fn try_forward_patched_extern_arg(args: &mut impl Iterator<Item = String>, cmd: &mut Command) {
+    cmd.arg("--extern"); // always forward flag, but adjust filename:
+    let path = args.next().expect("`--extern` should be followed by a filename");
+    if let Some(lib) = path.strip_suffix(".rlib") {
+        // If this is an rlib, make it an rmeta.
+        cmd.arg(format!("{}.rmeta", lib));
+    } else {
+        // Some other extern file (e.g. a `.so`). Forward unchanged.
+        cmd.arg(path);
+    }
+}
+
 fn phase_cargo_runner(binary: &Path, binary_args: env::Args) {
     let verbose = std::env::var_os("MIRI_VERBOSE").is_some();
 
@@ -740,16 +757,7 @@ fn phase_cargo_runner(binary: &Path, binary_args: env::Args) {
     let json_flag = "--json";
     while let Some(arg) = args.next() {
         if arg == extern_flag {
-            cmd.arg(extern_flag); // always forward flag, but adjust filename
-            // `--extern` is always passed as a separate argument by cargo.
-            let next_arg = args.next().expect("`--extern` should be followed by a filename");
-            if let Some(next_lib) = next_arg.strip_suffix(".rlib") {
-                // If this is an rlib, make it an rmeta.
-                cmd.arg(format!("{}.rmeta", next_lib));
-            } else {
-                // Some other extern file (e.g., a `.so`). Forward unchanged.
-                cmd.arg(next_arg);
-            }
+            try_forward_patched_extern_arg(&mut args, &mut cmd);
         } else if arg.starts_with(error_format_flag) {
             let suffix = &arg[error_format_flag.len()..];
             assert!(suffix.starts_with('='));
@@ -806,6 +814,10 @@ fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
     // just default to a straight-forward invocation for now:
     let mut cmd = Command::new(OsString::from("rustdoc"));
 
+    // Because of the way the main function is structured, we have to take the first argument spearately
+    // from the rest; to simplify the following argument patching loop, we'll just skip that one.
+    // This is fine for now, because cargo will never pass an --extern argument in the first position,
+    // but we should defensively assert that this will work.
     let extern_flag = "--extern";
     assert!(fst_arg != extern_flag);
     cmd.arg(fst_arg);
@@ -813,31 +825,30 @@ fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
     // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
     while let Some(arg) = args.next() {
         if arg == extern_flag {
-            cmd.arg(extern_flag); // always forward flag, but adjust filename
-            // `--extern` is always passed as a separate argument by cargo.
-            let next_arg = args.next().expect("`--extern` should be followed by a filename");
-            if let Some(next_lib) = next_arg.strip_suffix(".rlib") {
-                // If this is an rlib, make it an rmeta.
-                cmd.arg(format!("{}.rmeta", next_lib));
-            } else {
-                // Some other extern file (e.g., a `.so`). Forward unchanged.
-                cmd.arg(next_arg);
-            }
+            try_forward_patched_extern_arg(&mut args, &mut cmd);
         } else {
             cmd.arg(arg);
         }
     }
 
+    // For each doc-test, rustdoc starts two child processes: first the test is compiled,
+    // then the produced executable is invoked. We want to reroute both of these to cargo-miri,
+    // such that the first time we'll enter phase_cargo_rustc, and phase_cargo_runner second.
+    // 
+    // rustdoc invokes the test-builder by forwarding most of its own arguments, which makes
+    // it difficult to determine when phase_cargo_rustc should run instead of phase_cargo_rustdoc.
+    // Furthermore, the test code is passed via stdin, rather than a temporary file, so we need
+    // to let phase_cargo_rustc know to expect that. We'll use this environment variable as a flag:
+    cmd.env("MIRI_CALLED_FROM_RUSTDOC", "1");
+    
+    // The `--test-builder` and `--runtool` arguments are unstable rustdoc features,
+    // which are disabled by default. We first need to enable them explicitly:
     cmd.arg("-Z").arg("unstable-options");
     
     let cargo_miri_path = std::env::current_exe().expect("current executable path invalid");
-    cmd.arg("--test-builder").arg(&cargo_miri_path);
-    cmd.arg("--runtool").arg(&cargo_miri_path);
+    cmd.arg("--test-builder").arg(&cargo_miri_path); // invoked by forwarding most arguments
+    cmd.arg("--runtool").arg(&cargo_miri_path); // invoked with just a single path argument
     
-    // rustdoc passes generated code to rustc via stdin, rather than a temporary file,
-    // so we need to let the coming invocations know to expect that
-    cmd.env("MIRI_CALLED_FROM_RUSTDOC", "1");
-
     if verbose {
         eprintln!("[cargo-miri rustdoc] {:?}", cmd);
     }
@@ -861,10 +872,10 @@ fn main() {
     // The way rustdoc invokes rustc is indistuingishable from the way cargo invokes rustdoc
     // by the arguments alone, and we can't take from the args iterator in this case.
     // phase_cargo_rustdoc sets this environment variable to let us disambiguate here
-    let invoked_as_rustc_from_rustdoc = env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some();
-    if invoked_as_rustc_from_rustdoc {
+    let invoked_by_rustdoc = env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some();
+    if invoked_by_rustdoc {
         // ...however, we then also see this variable when rustdoc invokes us as the testrunner!
-        // The runner is invoked as `$runtool ($runtool-arg)* output_file;
+        // The runner is invoked as `$runtool ($runtool-arg)* output_file`;
         // since we don't specify any runtool-args, and rustdoc supplies multiple arguments to
         // the test-builder unconditionally, we can just check the number of remaining arguments:
         if args.len() == 1 {
@@ -873,7 +884,7 @@ fn main() {
             if binary.exists() {
                 phase_cargo_runner(binary, args);
             } else {
-                show_error(format!("`cargo-miri` called with non-existing path argument `{}`; please invoke this binary through `cargo miri`", arg));
+                show_error(format!("`cargo-miri` called with non-existing path argument `{}` in rustdoc mode; please invoke this binary through `cargo miri`", arg));
             }
         } else {
             phase_cargo_rustc(args);
