@@ -708,7 +708,7 @@ fn phase_cargo_rustc(args: env::Args) {
     }
 }
 
-fn try_forward_patched_extern_arg(args: &mut impl Iterator<Item = String>, cmd: &mut Command) {
+fn forward_patched_extern_arg(args: &mut impl Iterator<Item = String>, cmd: &mut Command) {
     cmd.arg("--extern"); // always forward flag, but adjust filename:
     let path = args.next().expect("`--extern` should be followed by a filename");
     if let Some(lib) = path.strip_suffix(".rlib") {
@@ -757,7 +757,7 @@ fn phase_cargo_runner(binary: &Path, binary_args: env::Args) {
     let json_flag = "--json";
     while let Some(arg) = args.next() {
         if arg == extern_flag {
-            try_forward_patched_extern_arg(&mut args, &mut cmd);
+            forward_patched_extern_arg(&mut args, &mut cmd);
         } else if arg.starts_with(error_format_flag) {
             let suffix = &arg[error_format_flag.len()..];
             assert!(suffix.starts_with('='));
@@ -826,7 +826,7 @@ fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
     while let Some(arg) = args.next() {
         if arg == extern_flag {
             // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
-            try_forward_patched_extern_arg(&mut args, &mut cmd);
+            forward_patched_extern_arg(&mut args, &mut cmd);
         } else if arg == runtool_flag {
             // Do not forward an existing --runtool argument, since we will set this ourselves
             let _ = args.next().expect("`--runtool` should be followed by an executable name");
