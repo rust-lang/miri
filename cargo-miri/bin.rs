@@ -816,11 +816,12 @@ fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
 
     // Because of the way the main function is structured, we have to take the first argument spearately
     // from the rest; to simplify the following argument patching loop, we'll just skip that one.
-    // This is fine for now, because cargo will never pass an --extern argument in the first position,
+    // This is fine for now, because cargo will never pass the relevant arguments in the first position,
     // but we should defensively assert that this will work.
     let extern_flag = "--extern";
     let runtool_flag = "--runtool";
     assert!(fst_arg != extern_flag);
+    assert!(fst_arg != runtool_flag);
     cmd.arg(fst_arg);
 
     while let Some(arg) = args.next() {
