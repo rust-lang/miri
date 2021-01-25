@@ -819,13 +819,17 @@ fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
     // This is fine for now, because cargo will never pass an --extern argument in the first position,
     // but we should defensively assert that this will work.
     let extern_flag = "--extern";
+    let runtool_flag = "--runtool";
     assert!(fst_arg != extern_flag);
     cmd.arg(fst_arg);
 
-    // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
     while let Some(arg) = args.next() {
         if arg == extern_flag {
+            // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
             try_forward_patched_extern_arg(&mut args, &mut cmd);
+        } else if arg == runtool_flag {
+            // Do not forward an existing --runtool argument, since we will set this ourselves
+            let _ = args.next().expect("`--runtool` should be followed by an executable name");
         } else {
             cmd.arg(arg);
         }

@@ -19,6 +19,7 @@ def cargo_miri(cmd):
     args = ["cargo", "miri", cmd, "-q"]
     if 'MIRI_TEST_TARGET' in os.environ:
         args += ["--target", os.environ['MIRI_TEST_TARGET']]
+        args += ["-Zdoctest-xcompile"]
     return args
 
 def normalize_stdout(str):
