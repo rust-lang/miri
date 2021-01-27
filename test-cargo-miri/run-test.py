@@ -16,10 +16,10 @@ def fail(msg):
     sys.exit(1)
 
 def cargo_miri(cmd):
-    args = ["cargo", "miri", cmd, "-q"]
+    args = ["cargo", "+nightly", "miri", cmd, "-q"]
     if 'MIRI_TEST_TARGET' in os.environ:
-        args += ["--target", os.environ['MIRI_TEST_TARGET']]
         args += ["-Zdoctest-xcompile"]
+        args += ["--target", os.environ['MIRI_TEST_TARGET']]
     return args
 
 def normalize_stdout(str):
@@ -73,38 +73,36 @@ def test_cargo_miri_run():
     )
 
 def test_cargo_miri_test():
-    empty_ref = "test.stderr-empty.ref"
-
     test("`cargo miri test`",
         cargo_miri("test"),
-        "test.default.stdout.ref", empty_ref,
+        "test.default.stdout.ref", "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-seed=feed"},
     )
     test("`cargo miri test` (no isolation)",
         cargo_miri("test"),
-        "test.default.stdout.ref", empty_ref,
+        "test.default.stdout.ref", "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-disable-isolation"},
     )
     test("`cargo miri test` (raw-ptr tracking)",
         cargo_miri("test"),
-        "test.default.stdout.ref", empty_ref,
+        "test.default.stdout.ref", "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-track-raw-pointers"},
     )
     test("`cargo miri test` (with filter)",
         cargo_miri("test") + ["--", "--format=pretty", "le1"],
-        "test.filter.stdout.ref", empty_ref,
+        "test.filter.stdout.ref", "test.stderr-empty.ref",
     )
     test("`cargo miri test` (test target)",
         cargo_miri("test") + ["--test", "test", "--", "--format=pretty"],
-        "test.test-target.stdout.ref", empty_ref,
+        "test.test-target.stdout.ref", "test.stderr-empty.ref",
     )
     test("`cargo miri test` (bin target)",
         cargo_miri("test") + ["--bin", "cargo-miri-test", "--", "--format=pretty"],
-        "test.bin-target.stdout.ref", empty_ref,
+        "test.bin-target.stdout.ref", "test.stderr-empty.ref",
     )
     test("`cargo miri test` (subcrate, no isolation)",
         cargo_miri("test") + ["-p", "subcrate"],
-        "test.subcrate.stdout.ref", empty_ref,
+        "test.subcrate.stdout.ref", "test.stderr-proc-macro.ref",
         env={'MIRIFLAGS': "-Zmiri-disable-isolation"},
     )
 
