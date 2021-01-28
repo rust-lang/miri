@@ -882,24 +882,32 @@ fn phase_cargo_rustdoc(fst_arg: &str, mut args: env::Args) {
 
     // Because of the way the main function is structured, we have to take the first argument spearately
     // from the rest; to simplify the following argument patching loop, we'll just skip that one.
-    // This is fine for now, because cargo will never pass the relevant arguments in the first position,
+    // This is fine for now, because cargo will never pass --extern arguments in the first position,
     // but we should defensively assert that this will work.
     let extern_flag = "--extern";
-    let runtool_flag = "--runtool";
     assert!(fst_arg != extern_flag);
-    assert!(fst_arg != runtool_flag);
     cmd.arg(fst_arg);
-
+    
+    let runtool_flag = "--runtool";
+    let mut crossmode = fst_arg == runtool_flag;
     while let Some(arg) = args.next() {
         if arg == extern_flag {
             // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
             forward_patched_extern_arg(&mut args, &mut cmd);
         } else if arg == runtool_flag {
-            // Do not forward an existing --runtool argument, since we will set this ourselves
-            let _ = args.next().expect("`--runtool` should be followed by an executable name");
+            // An existing --runtool flag indicates cargo is running in cross-target mode, which we don't support.
+            // Note that this is only passed when cargo is run with the unstable -Zdoctest-xcompile flag;
+            // otherwise, we won't be called as rustdoc at all.
+            crossmode = true;
+            break;
         } else {
             cmd.arg(arg);
         }
+    }
+
+    if crossmode {
+        eprintln!("Cross-interpreting doc-tests is not currently supported by Miri.");
+        return;
     }
 
     // For each doc-test, rustdoc starts two child processes: first the test is compiled,

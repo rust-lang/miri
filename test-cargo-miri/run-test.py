@@ -16,13 +16,13 @@ def fail(msg):
     sys.exit(1)
 
 def cargo_miri(cmd):
-    args = ["cargo", "+nightly", "miri", cmd, "-q"]
+    args = ["cargo", "miri", cmd, "-q"]
     if 'MIRI_TEST_TARGET' in os.environ:
-        args += ["-Zdoctest-xcompile"]
         args += ["--target", os.environ['MIRI_TEST_TARGET']]
     return args
 
 def normalize_stdout(str):
+    str = str.replace("src\\", "src/") # normalize paths across platforms
     return re.sub("finished in \d+\.\d\ds", "finished in $TIME", str)
 
 def test(name, cmd, stdout_ref, stderr_ref, stdin=b'', env={}):
@@ -73,24 +73,29 @@ def test_cargo_miri_run():
     )
 
 def test_cargo_miri_test():
+    # rustdoc is not run on foreign targets
+    is_foreign = 'MIRI_TEST_TARGET' in os.environ
+    default_ref = "test.cross-target.stdout.ref" if is_foreign else "test.default.stdout.ref"
+    filter_ref = "test.filter.cross-target.stdout.ref" if is_foreign else "test.filter.stdout.ref"
+
     test("`cargo miri test`",
         cargo_miri("test"),
-        "test.default.stdout.ref", "test.stderr-empty.ref",
+        default_ref, "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-seed=feed"},
     )
     test("`cargo miri test` (no isolation)",
         cargo_miri("test"),
-        "test.default.stdout.ref", "test.stderr-empty.ref",
+        default_ref, "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-disable-isolation"},
     )
     test("`cargo miri test` (raw-ptr tracking)",
         cargo_miri("test"),
-        "test.default.stdout.ref", "test.stderr-empty.ref",
+        default_ref, "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-track-raw-pointers"},
     )
     test("`cargo miri test` (with filter)",
         cargo_miri("test") + ["--", "--format=pretty", "le1"],
-        "test.filter.stdout.ref", "test.stderr-empty.ref",
+        filter_ref, "test.stderr-empty.ref",
     )
     test("`cargo miri test` (test target)",
         cargo_miri("test") + ["--test", "test", "--", "--format=pretty"],
