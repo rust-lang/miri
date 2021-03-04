@@ -1,5 +1,4 @@
 #![feature(rustc_private)]
-#![feature(option_expect_none, option_unwrap_none)]
 #![feature(map_first_last)]
 #![feature(never_type)]
 #![feature(or_patterns)]

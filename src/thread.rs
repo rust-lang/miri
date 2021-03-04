@@ -255,10 +255,12 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
     ///
     /// Panics if a thread local is initialized twice for the same thread.
     fn set_thread_local_alloc_id(&self, def_id: DefId, new_alloc_id: AllocId) {
-        self.thread_local_alloc_ids
-            .borrow_mut()
-            .insert((def_id, self.active_thread), new_alloc_id)
-            .unwrap_none();
+        assert_eq!(
+            self.thread_local_alloc_ids
+                .borrow_mut()
+                .insert((def_id, self.active_thread), new_alloc_id),
+            None
+        );
     }
 
     /// Borrow the stack of the active thread.
@@ -403,9 +405,11 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         call_time: Time,
         callback: TimeoutCallback<'mir, 'tcx>,
     ) {
-        self.timeout_callbacks
-            .insert(thread, TimeoutCallbackInfo { call_time, callback })
-            .unwrap_none();
+        assert_eq!(
+            self.timeout_callbacks
+                .insert(thread, TimeoutCallbackInfo { call_time, callback }),
+            None,
+        );
     }
 
     /// Unregister the callback for the `thread`.

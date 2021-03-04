@@ -176,11 +176,13 @@ impl MemoryExtra {
     ) {
         let ptr = ptr.assert_ptr();
         assert_eq!(ptr.offset, Size::ZERO);
-        this.memory
-            .extra
-            .extern_statics
-            .insert(Symbol::intern(name), ptr.alloc_id)
-            .unwrap_none();
+        assert_eq!(
+            this.memory
+                .extra
+                .extern_statics
+                .insert(Symbol::intern(name), ptr.alloc_id),
+            None
+        );
     }
 
     /// Sets up the "extern statics" for this machine.
