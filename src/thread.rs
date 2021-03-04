@@ -405,10 +405,10 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         call_time: Time,
         callback: TimeoutCallback<'mir, 'tcx>,
     ) {
-        assert_eq!(
+        assert!(
             self.timeout_callbacks
-                .insert(thread, TimeoutCallbackInfo { call_time, callback }),
-            None,
+                .insert(thread, TimeoutCallbackInfo { call_time, callback })
+                .is_none()
         );
     }
 

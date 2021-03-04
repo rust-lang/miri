@@ -223,7 +223,7 @@ impl<'tcx> FileHandler {
             self.handles.last_key_value().map(|(fd, _)| fd.checked_add(1).unwrap()).unwrap_or(min_fd)
         });
 
-        assert_eq!(self.handles.insert(new_fd, file_handle), None);
+        assert!(self.handles.insert(new_fd, file_handle).is_none());
         new_fd
     }
 }
@@ -381,7 +381,7 @@ impl DirHandler {
     fn insert_new(&mut self, read_dir: ReadDir) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        assert_eq!(self.streams.insert(id, read_dir), None);
+        assert!(self.streams.insert(id, read_dir).is_none());
         id
     }
 }
