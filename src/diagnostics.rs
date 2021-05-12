@@ -22,16 +22,11 @@ impl fmt::Display for TerminationInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TerminationInfo::*;
         match self {
-            Exit(code) =>
-                write!(f, "the evaluated program completed with exit code {}", code),
-            Abort(msg) =>
-                write!(f, "{}", msg),
-            UnsupportedInIsolation(msg) =>
-                write!(f, "{}", msg),
-            ExperimentalUb { msg, .. } =>
-                write!(f, "{}", msg),
-            Deadlock =>
-                write!(f, "the evaluated program deadlocked"),
+            Exit(code) => write!(f, "the evaluated program completed with exit code {}", code),
+            Abort(msg) => write!(f, "{}", msg),
+            UnsupportedInIsolation(msg) => write!(f, "{}", msg),
+            ExperimentalUb { msg, .. } => write!(f, "{}", msg),
+            Deadlock => write!(f, "the evaluated program deadlocked"),
         }
     }
 }
@@ -60,58 +55,63 @@ pub fn report_error<'tcx, 'mir>(
             use TerminationInfo::*;
             let title = match info {
                 Exit(code) => return Some(*code),
-                Abort(_) =>
-                    "abnormal termination",
-                UnsupportedInIsolation(_) =>
-                    "unsupported operation",
-                ExperimentalUb { .. } =>
-                    "Undefined Behavior",
+                Abort(_) => "abnormal termination",
+                UnsupportedInIsolation(_) => "unsupported operation",
+                ExperimentalUb { .. } => "Undefined Behavior",
                 Deadlock => "deadlock",
             };
             let helps = match info {
                 UnsupportedInIsolation(_) =>
                     vec![format!("pass the flag `-Zmiri-disable-isolation` to disable isolation")],
-                ExperimentalUb { url, .. } =>
-                    vec![
-                        format!("this indicates a potential bug in the program: it performed an invalid operation, but the rules it violated are still experimental"),
-                        format!("see {} for further information", url),
-                    ],
+                ExperimentalUb { url, .. } => vec![
+                    format!(
+                        "this indicates a potential bug in the program: it performed an invalid operation, but the rules it violated are still experimental"
+                    ),
+                    format!("see {} for further information", url),
+                ],
                 _ => vec![],
             };
             (title, helps)
         }
         _ => {
             let title = match e.kind() {
-                Unsupported(_) =>
-                    "unsupported operation",
-                UndefinedBehavior(_) =>
-                    "Undefined Behavior",
-                ResourceExhaustion(_) =>
-                    "resource exhaustion",
+                Unsupported(_) => "unsupported operation",
+                UndefinedBehavior(_) => "Undefined Behavior",
+                ResourceExhaustion(_) => "resource exhaustion",
                 InvalidProgram(InvalidProgramInfo::ReferencedConstant) =>
                     "post-monomorphization error",
-                _ =>
-                    bug!("This error should be impossible in Miri: {}", e),
+                _ => bug!("This error should be impossible in Miri: {}", e),
             };
             let helps = match e.kind() {
-                Unsupported(UnsupportedOpInfo::NoMirFor(..)) =>
-                    vec![format!("make sure to use a Miri sysroot, which you can prepare with `cargo miri setup`")],
-                Unsupported(UnsupportedOpInfo::ReadBytesAsPointer | UnsupportedOpInfo::ThreadLocalStatic(_) | UnsupportedOpInfo::ReadExternStatic(_)) =>
-                    panic!("Error should never be raised by Miri: {:?}", e.kind()),
-                Unsupported(_) =>
-                    vec![format!("this is likely not a bug in the program; it indicates that the program performed an operation that the interpreter does not support")],
+                Unsupported(UnsupportedOpInfo::NoMirFor(..)) => vec![format!(
+                    "make sure to use a Miri sysroot, which you can prepare with `cargo miri setup`"
+                )],
+                Unsupported(
+                    UnsupportedOpInfo::ReadBytesAsPointer
+                    | UnsupportedOpInfo::ThreadLocalStatic(_)
+                    | UnsupportedOpInfo::ReadExternStatic(_),
+                ) => panic!("Error should never be raised by Miri: {:?}", e.kind()),
+                Unsupported(_) => vec![format!(
+                    "this is likely not a bug in the program; it indicates that the program performed an operation that the interpreter does not support"
+                )],
                 UndefinedBehavior(UndefinedBehaviorInfo::AlignmentCheckFailed { .. })
-                    if ecx.memory.extra.check_alignment == AlignmentCheck::Symbolic
-                =>
+                    if ecx.memory.extra.check_alignment == AlignmentCheck::Symbolic =>
                     vec![
-                        format!("this usually indicates that your program performed an invalid operation and caused Undefined Behavior"),
-                        format!("but due to `-Zmiri-symbolic-alignment-check`, alignment errors can also be false positives"),
+                        format!(
+                            "this usually indicates that your program performed an invalid operation and caused Undefined Behavior"
+                        ),
+                        format!(
+                            "but due to `-Zmiri-symbolic-alignment-check`, alignment errors can also be false positives"
+                        ),
                     ],
-                UndefinedBehavior(_) =>
-                    vec![
-                        format!("this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior"),
-                        format!("see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information"),
-                    ],
+                UndefinedBehavior(_) => vec![
+                    format!(
+                        "this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior"
+                    ),
+                    format!(
+                        "see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information"
+                    ),
+                ],
                 _ => vec![],
             };
             (title, helps)
@@ -120,7 +120,14 @@ pub fn report_error<'tcx, 'mir>(
 
     e.print_backtrace();
     let msg = e.to_string();
-    report_msg(*ecx.tcx, /*error*/true, &format!("{}: {}", title, msg), msg, helps, &ecx.generate_stacktrace());
+    report_msg(
+        *ecx.tcx,
+        /*error*/ true,
+        &format!("{}: {}", title, msg),
+        msg,
+        helps,
+        &ecx.generate_stacktrace(),
+    );
 
     // Debug-dump all locals.
     for (i, frame) in ecx.active_thread_stack().iter().enumerate() {
@@ -249,7 +256,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             }
             // Add popped frame back.
             if stacktrace.len() < info.stack_size {
-                assert!(stacktrace.len() == info.stack_size-1, "we should never pop more than one frame at once");
+                assert!(
+                    stacktrace.len() == info.stack_size - 1,
+                    "we should never pop more than one frame at once"
+                );
                 let frame_info = FrameInfo {
                     instance: info.instance.unwrap(),
                     span: info.span,
@@ -259,25 +269,30 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             } else if let Some(instance) = info.instance {
                 // Adjust topmost frame.
                 stacktrace[0].span = info.span;
-                assert_eq!(stacktrace[0].instance, instance, "we should not pop and push a frame in one step");
+                assert_eq!(
+                    stacktrace[0].instance, instance,
+                    "we should not pop and push a frame in one step"
+                );
             }
 
             // Show diagnostics.
             for e in diagnostics.drain(..) {
                 use NonHaltingDiagnostic::*;
                 let msg = match e {
-                    CreatedPointerTag(tag) =>
-                        format!("created tag {:?}", tag),
-                    PoppedPointerTag(item) =>
-                        format!("popped tracked tag for item {:?}", item),
-                    CreatedCallId(id) =>
-                        format!("function call with id {}", id),
-                    CreatedAlloc(AllocId(id)) =>
-                        format!("created allocation with id {}", id),
-                    FreedAlloc(AllocId(id)) =>
-                        format!("freed allocation with id {}", id),
+                    CreatedPointerTag(tag) => format!("created tag {:?}", tag),
+                    PoppedPointerTag(item) => format!("popped tracked tag for item {:?}", item),
+                    CreatedCallId(id) => format!("function call with id {}", id),
+                    CreatedAlloc(AllocId(id)) => format!("created allocation with id {}", id),
+                    FreedAlloc(AllocId(id)) => format!("freed allocation with id {}", id),
                 };
-                report_msg(*this.tcx, /*error*/false, "tracking was triggered", msg, vec![], &stacktrace);
+                report_msg(
+                    *this.tcx,
+                    /*error*/ false,
+                    "tracking was triggered",
+                    msg,
+                    vec![],
+                    &stacktrace,
+                );
             }
         });
     }
