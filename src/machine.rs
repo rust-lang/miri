@@ -354,6 +354,11 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
     }
 
     #[inline(always)]
+    fn enforce_abi(_ecx: &InterpCx<'mir, 'tcx, Self>) -> bool {
+        true
+    }
+
+    #[inline(always)]
     fn find_mir_or_eval_fn(
         ecx: &mut InterpCx<'mir, 'tcx, Self>,
         instance: ty::Instance<'tcx>,
