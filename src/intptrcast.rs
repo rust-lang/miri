@@ -65,6 +65,7 @@ impl<'mir, 'tcx> GlobalState {
                 }
             }
         };
+        assert!(!(addr == 0 && alloc_id.is_some()), "null pointer can never have an AllocId");
         // Pointers created from integers are untagged.
         Pointer::new(
             alloc_id.map(|alloc_id| Tag { alloc_id, sb: SbTag::Untagged }),
