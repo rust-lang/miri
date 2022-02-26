@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 
 use log::trace;
-use rand::Rng;
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_target::abi::{HasDataLayout, Size};
@@ -87,15 +86,22 @@ impl<'mir, 'tcx> GlobalState {
                     memory.get_size_and_align(alloc_id, AllocCheck::MaybeDead).unwrap();
 
                 // This allocation does not have a base address yet, pick one.
-                // Leave some space to the previous allocation, to give it some chance to be less aligned.
-                let slack = {
-                    let mut rng = memory.extra.rng.borrow_mut();
-                    // This means that `(global_state.next_base_addr + slack) % 16` is uniformly distributed.
-                    rng.gen_range(0..16)
-                };
-                // From next_base_addr + slack, round up to adjust for alignment.
-                let base_addr = global_state.next_base_addr.checked_add(slack).unwrap();
-                let base_addr = Self::align_addr(base_addr, align.bytes());
+                let mut base_addr = Self::align_addr(global_state.next_base_addr, align.bytes());
+
+                // 256 is an arbitrary cutoff point here, we just want a reasonable upper bound on
+                // the amount of padding we introduce per allocation.
+                if align.bytes() < 256 {
+                    // This mask would ensure that wrong pointer accesses based on an offset into
+                    // the object are also misaligned. But it potentially costs a lot of memory.
+                    //let mask =  0xff & !(align.bytes() - 1);
+
+                    // Ensure that the lowest bit which is allowed to be 1 is so.
+                    let mask = 1 << align.bytes().log2();
+                    base_addr |= mask;
+                }
+
+                let slack = base_addr - global_state.next_base_addr;
+
                 entry.insert(base_addr);
                 trace!(
                     "Assigning base address {:#x} to allocation {:?} (size: {}, align: {}, slack: {})",

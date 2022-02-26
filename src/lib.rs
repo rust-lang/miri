@@ -4,6 +4,7 @@
 #![feature(never_type)]
 #![feature(try_blocks)]
 #![feature(bool_to_option)]
+#![feature(int_log)]
 #![warn(rust_2018_idioms)]
 #![allow(clippy::cast_lossless)]
 
