@@ -430,6 +430,41 @@ impl<'mir, 'tcx> Evaluator<'mir, 'tcx> {
                 this.write_scalar(Scalar::from_u8(0), &place.into())?;
                 Self::add_extern_static(this, "_tls_used", place.ptr);
             }
+            "android" => {
+                // "environ"
+                Self::add_extern_static(
+                    this,
+                    "environ",
+                    this.machine.env_vars.environ.unwrap().ptr,
+                );
+                // A couple zero-initialized pointer-sized extern statics.
+                // Most of them are for weak symbols, which we all set to null (indicating that the
+                // symbol is not supported, and triggering fallback code which ends up calling a
+                // syscall that we do support).
+                for name in &["__cxa_thread_atexit_impl", "getrandom", "statx"] {
+                    let layout = this.machine.layouts.usize;
+                    let place = this.allocate(layout, MiriMemoryKind::ExternStatic.into())?;
+                    this.write_scalar(Scalar::from_machine_usize(0, this), &place.into())?;
+                    Self::add_extern_static(this, name, place.ptr);
+                }
+                for symbol_name in &["signal", "bsd_signal"] {
+                    let layout = this.machine.layouts.usize;
+                    let dlsym = Dlsym::from_str(symbol_name.as_bytes(), &this.tcx.sess.target.os)?
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "hardcoded `extern static` symbol {} has no dlsym handler",
+                                symbol_name
+                            )
+                        });
+                    let ecx = this.eval_context_mut();
+                    let ptr = ecx.create_fn_alloc_ptr(FnVal::Other(dlsym));
+
+                    let place = this.allocate(layout, MiriMemoryKind::ExternStatic.into())?;
+                    this.write_pointer(ptr, &place.into())?;
+
+                    Self::add_extern_static(this, symbol_name, place.ptr);
+                }
+            }
             _ => {} // No "extern statics" supported on this target
         }
         Ok(())

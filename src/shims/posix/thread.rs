@@ -97,7 +97,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
     fn prctl(&mut self, args: &[OpTy<'tcx, Tag>]) -> InterpResult<'tcx, i32> {
         let this = self.eval_context_mut();
-        this.assert_target_os("linux", "prctl");
+        this.assert_target_os_is_linux_based("prctl");
 
         if args.is_empty() {
             throw_ub_format!(

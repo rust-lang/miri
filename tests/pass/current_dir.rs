@@ -1,3 +1,4 @@
+// ignore-android: No foreign function support for __errno yet
 // compile-flags: -Zmiri-disable-isolation
 use std::env;
 use std::io::ErrorKind;

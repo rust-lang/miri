@@ -1,4 +1,5 @@
 // ignore-windows: Concurrency on Windows is not supported yet.
+// ignore-android: `libc` crate does not support `PR_SET_NAME` on Android
 // compile-flags: -Zmiri-strict-provenance
 
 use std::thread;

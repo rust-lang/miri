@@ -20,6 +20,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         _ret: mir::BasicBlock,
     ) -> InterpResult<'tcx, EmulateByNameResult<'mir, 'tcx>> {
         let this = self.eval_context_mut();
+        let target_os = this.tcx.sess.target.os.as_ref();
 
         match &*link_name.as_str() {
             // errno
@@ -30,7 +31,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             }
 
             // File related shims (but also see "syscall" below for statx)
-            // These symbols have different names on Linux and macOS, which is the only reason they are not
+            // These symbols have different names/signatures on Linux and macOS, which is the only reason they are not
             // in the `posix` module.
             "close" => {
                 let [fd] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
@@ -134,7 +135,12 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
                 let sys_getrandom = this.eval_libc("SYS_getrandom")?.to_machine_usize(this)?;
 
-                let sys_statx = this.eval_libc("SYS_statx")?.to_machine_usize(this)?;
+                let sys_statx = if target_os == "android" {
+                    // libc's Android target currently does not support SYS_statx -- fail gracefully
+                    None
+                } else {
+                    Some(this.eval_libc("SYS_statx")?.to_machine_usize(this)?)
+                };
 
                 let sys_futex = this.eval_libc("SYS_futex")?.to_machine_usize(this)?;
 
@@ -158,7 +164,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     }
                     // `statx` is used by `libstd` to retrieve metadata information on `linux`
                     // instead of using `stat`,`lstat` or `fstat` as on `macos`.
-                    id if id == sys_statx => {
+                    //
+                    // the libc crate for android however cannot properly lookup this syscall,
+                    // so we have to make this gracefull fail
+                    id if sys_statx.map(|statx| statx == id).unwrap_or(false) => {
                         // The first argument is the syscall id, so skip over it.
                         if args.len() < 6 {
                             throw_ub_format!(

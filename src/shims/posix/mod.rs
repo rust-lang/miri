@@ -5,6 +5,7 @@ mod fs;
 mod sync;
 mod thread;
 
+mod android;
 mod linux;
 mod macos;
 

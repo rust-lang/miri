@@ -1,4 +1,5 @@
 // ignore-windows: No libc on Windows
+// ignore-android: libc's Android target does not have support for __errno_location yet
 // compile-flags: -Zmiri-disable-isolation
 
 #![feature(rustc_private)]

@@ -23,6 +23,7 @@ use rustc_target::{
 
 use super::backtrace::EvalContextExt as _;
 use crate::helpers::convert::Truncate;
+use crate::helpers::target_os_is_unix;
 use crate::*;
 
 /// Returned by `emulate_foreign_item_by_name`.
@@ -700,9 +701,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 }
             }
 
-            // Platform-specific shims
             _ => match this.tcx.sess.target.os.as_ref() {
-                "linux" | "macos" => return shims::posix::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
+                target if target_os_is_unix(target) => return shims::posix::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
                 "windows" => return shims::windows::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
                 target => throw_unsup_format!("the target `{}` is not supported", target),
             }

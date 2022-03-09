@@ -976,7 +976,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     ) -> InterpResult<'tcx, i32> {
         let this = self.eval_context_mut();
 
-        this.assert_target_os("linux", "statx");
+        this.assert_target_os_is_linux_based("statx");
 
         let dirfd = this.read_scalar(dirfd_op)?.to_i32()?;
         let pathname_ptr = this.read_pointer(pathname_op)?;
@@ -1278,7 +1278,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn linux_readdir64(&mut self, dirp_op: &OpTy<'tcx, Tag>) -> InterpResult<'tcx, Scalar<Tag>> {
         let this = self.eval_context_mut();
 
-        this.assert_target_os("linux", "readdir64");
+        this.assert_target_os_is_linux_based("readdir64");
 
         let dirp = this.read_scalar(dirp_op)?.to_machine_usize(this)?;
 

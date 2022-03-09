@@ -22,7 +22,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
         let this = self.eval_context_mut();
 
-        this.assert_target_os("linux", "clock_gettime");
+        this.assert_target_os_is_linux_based("clock_gettime");
         this.check_no_isolation("`clock_gettime`")?;
 
         let clk_id = this.read_scalar(clk_id_op)?.to_i32()?;

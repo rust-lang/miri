@@ -1,3 +1,4 @@
+// ignore-android: No foreign function support for __errno yet
 // compile-flags: -Zmiri-isolation-error=warn-nobacktrace
 // normalize-stderr-test: "(getcwd|GetCurrentDirectoryW)" -> "$$GETCWD"
 // normalize-stderr-test: "(chdir|SetCurrentDirectoryW)" -> "$$SETCWD"

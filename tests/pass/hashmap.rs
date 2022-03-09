@@ -1,3 +1,5 @@
+// ignore-android: libc for Android does not have `SYS_statx`
+
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 

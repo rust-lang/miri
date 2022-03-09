@@ -21,6 +21,7 @@ function run_tests {
   fi
 
   ./miri test --locked
+
   if [ -z "${MIRI_TEST_TARGET+exists}" ]; then
     # Only for host architecture: tests with optimizations (`-O` is what cargo passes, but crank MIR
     # optimizations up all the way).
@@ -50,6 +51,7 @@ case $HOST_TARGET in
     MIRI_TEST_TARGET=i686-unknown-linux-gnu run_tests
     MIRI_TEST_TARGET=aarch64-apple-darwin run_tests
     MIRI_TEST_TARGET=i686-pc-windows-msvc run_tests
+    MIRI_TEST_TARGET=aarch64-linux-android run_tests
     ;;
   x86_64-apple-darwin)
     MIRI_TEST_TARGET=mips64-unknown-linux-gnuabi64 run_tests # big-endian architecture
