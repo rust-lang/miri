@@ -255,7 +255,7 @@ pub fn report_error<'tcx, 'mir>(
 }
 
 /// Report an error or note (depending on the `error` argument) with the given stacktrace.
-/// Also emits a full stacktrace of the interpreter stack.
+/// Also emits a stacktrace of the interpreter stack, pruned according to -Zmiri-backtrace.
 fn report_msg<'tcx>(
     tcx: TyCtxt<'tcx>,
     diag_level: DiagLevel,
@@ -279,26 +279,34 @@ fn report_msg<'tcx>(
         err.note(&span_msg);
         err.note("(no span available)");
     }
+
+    // If the stacktrace has only one frame in it and that frame has a real span, then the error
+    // already contains the file:line:column information that the stacktrace would print.
+    let stacktrace_is_redundant = stacktrace.len() == 1 && span != DUMMY_SP;
+
+    // Add visual separator before stacktrace.
+    if !stacktrace_is_redundant {
+        helps.last_mut().map(|h| h.1.push_str("\n"));
+    }
+
     // Show help messages.
-    if !helps.is_empty() {
-        // Add visual separator before backtrace.
-        helps.last_mut().unwrap().1.push_str("\n");
-        for (span_data, help) in helps {
-            if let Some(span_data) = span_data {
-                err.span_help(span_data.span(), &help);
-            } else {
-                err.help(&help);
-            }
+    for (span_data, help) in helps {
+        if let Some(span_data) = span_data {
+            err.span_help(span_data.span(), &help);
+        } else {
+            err.help(&help);
         }
     }
-    // Add backtrace
-    for (idx, frame_info) in stacktrace.iter().enumerate() {
-        let is_local = frame_info.instance.def_id().is_local();
-        // No span for non-local frames and the first frame (which is the error site).
-        if is_local && idx > 0 {
-            err.span_note(frame_info.span, &frame_info.to_string());
-        } else {
-            err.note(&frame_info.to_string());
+    if !stacktrace_is_redundant {
+        // Add stacktrace
+        for (idx, frame_info) in stacktrace.iter().enumerate() {
+            let is_local = frame_info.instance.def_id().is_local();
+            // No span for non-local frames and the first frame (which is the error site).
+            if is_local && idx > 0 {
+                err.span_note(frame_info.span, &frame_info.to_string());
+            } else {
+                err.note(&frame_info.to_string());
+            }
         }
     }
 
