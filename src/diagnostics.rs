@@ -215,7 +215,7 @@ pub fn report_error<'tcx, 'mir>(
     report_msg(
         *ecx.tcx,
         DiagLevel::Error,
-        &if let Some(title) = title { format!("{}: {}", title, msg) } else { msg.clone() },
+        &if let Some(title) = title { title.to_string() } else { msg.clone() },
         msg,
         helps,
         &stacktrace,
