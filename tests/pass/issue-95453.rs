@@ -1,4 +1,5 @@
-#![feature(allocator_api)]
+#![allow(incomplete_features)] // for triat upcasting
+#![feature(allocator_api, trait_upcasting)]
 
 use std::alloc::{AllocError, Allocator};
 use std::alloc::Layout;
@@ -37,6 +38,10 @@ impl MyTrait for [u8; 1] {
     }
 }
 
+trait TheTrait: MyTrait {}
+
+impl TheTrait for [u8; 1] {}
+
 /// `Box<T, G>` is a `ScalarPair` where the 2nd component is the allocator.
 fn test1() {
     let mut space = vec![MaybeUninit::new(0); 1];
@@ -46,6 +51,10 @@ fn test1() {
 
     let boxed = Box::new_in([42u8; 1], &once_alloc);
     let _val = *boxed;
+    let with_dyn: Box<dyn TheTrait, &OnceAlloc> = boxed;
+    assert_eq!(42, with_dyn.hello());
+    let with_dyn: Box<dyn MyTrait, &OnceAlloc> = with_dyn; // upcast
+    assert_eq!(42, with_dyn.hello());
 }
 
 // Make the allocator itself so big that the Box is not even a ScalarPair any more.
@@ -70,6 +79,10 @@ fn test2() {
 
     let boxed = Box::new_in([0u8; 1], OnceAllocRef(&once_alloc, 0));
     let _val = *boxed;
+    let with_dyn: Box<dyn TheTrait, OnceAllocRef> = boxed;
+    assert_eq!(42, with_dyn.hello());
+    let with_dyn: Box<dyn MyTrait, OnceAllocRef> = with_dyn; // upcast
+    assert_eq!(42, with_dyn.hello());
 }
 
 fn main() {
