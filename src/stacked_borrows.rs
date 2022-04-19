@@ -1,18 +1,19 @@
 //! Implements "Stacked Borrows".  See <https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md>
 //! for further information.
 
-use log::trace;
 use std::cell::RefCell;
 use std::cmp;
 use std::fmt;
 use std::num::NonZeroU64;
+
+use log::trace;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::Mutability;
 use rustc_middle::mir::RetagKind;
 use rustc_middle::ty::{
     self,
-    layout::{HasParamEnv, LayoutOf},
+    layout::{HasParamEnv, LayoutOf, TyAndLayout},
 };
 use rustc_span::DUMMY_SP;
 use rustc_target::abi::Size;
@@ -1086,8 +1087,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         // Determine mutability and whether to add a protector.
         // Cannot use `builtin_deref` because that reports *immutable* for `Box`,
         // making it useless.
-        fn qualify(ty: ty::Ty<'_>, kind: RetagKind) -> Option<(RefKind, bool)> {
-            match ty.kind() {
+        let qualify = |layout: TyAndLayout<'tcx>, kind: RetagKind| -> Option<(RefKind, bool)> {
+            match layout.ty.kind() {
                 // References are simple.
                 ty::Ref(_, _, Mutability::Mut) =>
                     Some((
@@ -1101,15 +1102,18 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     Some((RefKind::Raw { mutable: tym.mutbl == Mutability::Mut }, false)),
                 // Boxes do not get a protector: protectors reflect that references outlive the call
                 // they were passed in to; that's just not the case for boxes.
-                ty::Adt(..) if ty.is_box() => Some((RefKind::Unique { two_phase: false }, false)),
+                // HACK: We only treat boxes with ZST allocators as 'noalias'.
+                // See https://github.com/rust-lang/rust/issues/95453.
+                ty::Adt(..) if layout.ty.is_box() && layout.field(this, 1).is_zst() =>
+                    Some((RefKind::Unique { two_phase: false }, false)),
                 _ => None,
             }
-        }
+        };
 
         // We only reborrow "bare" references/boxes.
         // Not traversing into fields helps with <https://github.com/rust-lang/unsafe-code-guidelines/issues/125>,
         // but might also cost us optimization and analyses. We will have to experiment more with this.
-        if let Some((mutbl, protector)) = qualify(place.layout.ty, kind) {
+        if let Some((mutbl, protector)) = qualify(place.layout, kind) {
             // Fast path.
             let val = this.read_immediate(&this.place_to_op(place)?)?;
             let val = this.retag_reference(&val, mutbl, protector)?;
