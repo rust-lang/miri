@@ -13,5 +13,5 @@ fn main() {
     drop(x_box);
     unsafe {
         *x = zst_val;
-    } //~ ERROR dereferenced after this allocation got freed
+    } //~^ ERROR dereferenced after this allocation got freed
 }

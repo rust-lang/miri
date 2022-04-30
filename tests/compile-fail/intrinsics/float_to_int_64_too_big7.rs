@@ -8,5 +8,5 @@ extern "rust-intrinsic" {
 fn main() {
     unsafe {
         float_to_int_unchecked::<f64, i128>(f64::MIN);
-    } //~ ERROR: cannot be represented in target type `i128`
+    } //~^ ERROR: cannot be represented in target type `i128`
 }

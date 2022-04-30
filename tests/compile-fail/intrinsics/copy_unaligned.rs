@@ -11,5 +11,5 @@ fn main() {
     // Even copying 0 elements to something unaligned should error
     unsafe {
         copy_nonoverlapping(&data[5], ptr, 0);
-    } //~ ERROR accessing memory with alignment 1, but alignment 2 is required
+    } //~^ ERROR accessing memory with alignment 1, but alignment 2 is required
 }

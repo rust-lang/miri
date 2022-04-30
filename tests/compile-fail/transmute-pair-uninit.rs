@@ -18,7 +18,7 @@ fn main() {
     }
     let v = unsafe { *z.offset(first_undef) };
     if v == 0 {
+        //~^ ERROR this operation requires initialized memory
         println!("it is zero");
     }
-    //~^ ERROR this operation requires initialized memory
 }

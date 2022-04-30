@@ -14,6 +14,6 @@ fn main() {
     let u16_ptr = base_addr_aligned as *mut u16;
     unsafe {
         *u16_ptr = 2;
-    } //~ERROR memory with alignment 1, but alignment 2 is required
+    } //~^ ERROR memory with alignment 1, but alignment 2 is required
     println!("{:?}", x);
 }

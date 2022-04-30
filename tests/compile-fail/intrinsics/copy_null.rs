@@ -11,5 +11,5 @@ fn main() {
     // Even copying 0 elements from NULL should error.
     unsafe {
         copy_nonoverlapping(std::ptr::null(), ptr, 0);
-    } //~ ERROR: memory access failed: null pointer is not a valid pointer
+    } //~^ ERROR: memory access failed: null pointer is not a valid pointer
 }
