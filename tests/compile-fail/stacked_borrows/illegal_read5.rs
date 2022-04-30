@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::{mem, ptr};
 
+#[rustfmt::skip]
 fn main() {
     let rc = RefCell::new(0);
     let mut refmut = rc.borrow_mut();

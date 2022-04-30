@@ -63,6 +63,7 @@ fn more_discriminant_overflow() {
     // Computing the discriminant used to be done using the niche type (here `u8`,
     // from the `bool` field of `V1`), overflowing for variants with large enough
     // indices (`V3` and `V4`), causing them to be interpreted as other variants.
+    #[rustfmt::skip]
     #[allow(dead_code)]
     pub enum E2<X> {
         V1 { f: bool },

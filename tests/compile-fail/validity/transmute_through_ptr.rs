@@ -7,6 +7,7 @@ fn evil(x: &mut Bool) {
     unsafe { *x = 44; } // out-of-bounds enum tag
 }
 
+#[rustfmt::skip]
 fn main() {
     let mut x = Bool::True;
     evil(&mut x);

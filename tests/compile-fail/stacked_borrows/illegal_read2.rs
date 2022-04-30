@@ -1,6 +1,7 @@
 // A callee may not read the destination of our `&mut` without
 // us noticing.
 
+#[rustfmt::skip]
 fn main() {
     let mut x = 15;
     let xraw = &mut x as *mut _;
