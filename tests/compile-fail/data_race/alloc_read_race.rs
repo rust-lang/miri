@@ -1,10 +1,10 @@
 // ignore-windows: Concurrency on Windows is not supported yet.
 #![feature(new_uninit)]
 
-use std::thread::spawn;
-use std::ptr::null_mut;
-use std::sync::atomic::{Ordering, AtomicPtr};
 use std::mem::MaybeUninit;
+use std::ptr::null_mut;
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::thread::spawn;
 
 #[derive(Copy, Clone)]
 struct EvilSend<T>(pub T);

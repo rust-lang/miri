@@ -1,8 +1,8 @@
 // ignore-linux: tests Windows-only APIs
 // ignore-macos: tests Windows-only APIs
 
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 fn test1() {
     let base = "a\té \u{7f}💩\r";

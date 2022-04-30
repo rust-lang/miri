@@ -54,11 +54,11 @@ fn slice_of_zst() {
 fn test_iter_ref_consistency() {
     use std::fmt::Debug;
 
-    fn test<T : Copy + Debug + PartialEq>(x : T) {
-        let v : &[T] = &[x, x, x];
-        let v_ptrs : [*const T; 3] = match v {
+    fn test<T: Copy + Debug + PartialEq>(x: T) {
+        let v: &[T] = &[x, x, x];
+        let v_ptrs: [*const T; 3] = match v {
             [ref v1, ref v2, ref v3] => [v1 as *const _, v2 as *const _, v3 as *const _],
-            _ => unreachable!()
+            _ => unreachable!(),
         };
         let len = v.len();
 
@@ -102,19 +102,19 @@ fn test_iter_ref_consistency() {
                 assert_eq!(it.size_hint(), (remaining, Some(remaining)));
 
                 let prev = it.next_back().unwrap();
-                assert_eq!(prev as *const _, v_ptrs[remaining-1]);
+                assert_eq!(prev as *const _, v_ptrs[remaining - 1]);
             }
             assert_eq!(it.size_hint(), (0, Some(0)));
             assert_eq!(it.next_back(), None, "The final call to next_back() should return None");
         }
     }
 
-    fn test_mut<T : Copy + Debug + PartialEq>(x : T) {
-        let v : &mut [T] = &mut [x, x, x];
-        let v_ptrs : [*mut T; 3] = match v {
+    fn test_mut<T: Copy + Debug + PartialEq>(x: T) {
+        let v: &mut [T] = &mut [x, x, x];
+        let v_ptrs: [*mut T; 3] = match v {
             [ref v1, ref v2, ref v3] =>
-              [v1 as *const _ as *mut _, v2 as *const _ as *mut _, v3 as *const _ as *mut _],
-            _ => unreachable!()
+                [v1 as *const _ as *mut _, v2 as *const _ as *mut _, v3 as *const _ as *mut _],
+            _ => unreachable!(),
         };
         let len = v.len();
 
@@ -158,7 +158,7 @@ fn test_iter_ref_consistency() {
                 assert_eq!(it.size_hint(), (remaining, Some(remaining)));
 
                 let prev = it.next_back().unwrap();
-                assert_eq!(prev as *mut _, v_ptrs[remaining-1]);
+                assert_eq!(prev as *mut _, v_ptrs[remaining - 1]);
             }
             assert_eq!(it.size_hint(), (0, Some(0)));
             assert_eq!(it.next_back(), None, "The final call to next_back() should return None");
@@ -213,10 +213,14 @@ fn test_for_invalidated_pointers() {
     // The invalidated `*const` pointer (the first argument to `core::ptr::copy`) is then used
     // after the fact when `core::ptr::copy` is called, which triggers undefined behavior.
 
-    unsafe { assert_eq!(0, *buffer.as_mut_ptr_range().start ); }
+    unsafe {
+        assert_eq!(0, *buffer.as_mut_ptr_range().start);
+    }
     // Check that the pointer range is in-bounds, while we're at it
     let range = buffer.as_mut_ptr_range();
-    unsafe { assert_eq!(*range.start, *range.end.sub(len)); }
+    unsafe {
+        assert_eq!(*range.start, *range.end.sub(len));
+    }
 
     buffer.reverse();
 

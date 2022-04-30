@@ -1,7 +1,7 @@
 //error-pattern: the evaluated program leaked memory
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 struct Dummy(Rc<RefCell<Option<Dummy>>>);
 

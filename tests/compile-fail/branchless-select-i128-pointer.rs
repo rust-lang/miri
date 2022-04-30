@@ -12,7 +12,8 @@ fn main() {
         // For now, Miri brafs on it, but if this code ever passes we better make sure it behaves correctly.
         let val = unsafe {
             transmute::<_, &str>(
-                !mask & transmute::<_, TwoPtrs>("false !") | mask & transmute::<_, TwoPtrs>("true !"), //~ERROR encountered (potentially part of) a pointer, but expected plain (non-pointer) bytes
+                !mask & transmute::<_, TwoPtrs>("false !")
+                    | mask & transmute::<_, TwoPtrs>("true !"), //~ERROR encountered (potentially part of) a pointer, but expected plain (non-pointer) bytes
             )
         };
         println!("{}", val);

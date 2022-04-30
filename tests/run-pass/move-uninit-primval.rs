@@ -6,9 +6,7 @@ struct Foo {
 
 fn main() {
     unsafe {
-        let foo = Foo {
-            _inner: std::mem::uninitialized(),
-        };
+        let foo = Foo { _inner: std::mem::uninitialized() };
         let _bar = foo;
     }
 }

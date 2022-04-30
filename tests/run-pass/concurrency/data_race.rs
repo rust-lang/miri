@@ -1,7 +1,6 @@
 // ignore-windows: Concurrency on Windows is not supported yet.
 
-
-use std::sync::atomic::{AtomicUsize, fence, Ordering};
+use std::sync::atomic::{fence, AtomicUsize, Ordering};
 use std::thread::spawn;
 
 #[derive(Copy, Clone)]
@@ -17,9 +16,10 @@ fn test_fence_sync() {
     let ptr = &mut var as *mut u32;
     let evil_ptr = EvilSend(ptr);
 
-
     let j1 = spawn(move || {
-        unsafe { *evil_ptr.0 = 1; }
+        unsafe {
+            *evil_ptr.0 = 1;
+        }
         fence(Ordering::Release);
         SYNC.store(1, Ordering::Relaxed)
     });
@@ -37,16 +37,15 @@ fn test_fence_sync() {
     j2.join().unwrap();
 }
 
-
 fn test_multiple_reads() {
     let mut var = 42u32;
     let ptr = &mut var as *mut u32;
     let evil_ptr = EvilSend(ptr);
 
-    let j1 = spawn(move || unsafe {*evil_ptr.0});
-    let j2 = spawn(move || unsafe {*evil_ptr.0});
-    let j3 = spawn(move || unsafe {*evil_ptr.0});
-    let j4 = spawn(move || unsafe {*evil_ptr.0});
+    let j1 = spawn(move || unsafe { *evil_ptr.0 });
+    let j2 = spawn(move || unsafe { *evil_ptr.0 });
+    let j3 = spawn(move || unsafe { *evil_ptr.0 });
+    let j4 = spawn(move || unsafe { *evil_ptr.0 });
 
     assert_eq!(j1.join().unwrap(), 42);
     assert_eq!(j2.join().unwrap(), 42);
@@ -74,13 +73,7 @@ pub fn test_rmw_no_block() {
             }
         });
 
-        let j3 = spawn(move || {
-            if SYNC.load(Ordering::Acquire) == 2 {
-                *c.0
-            } else {
-                0
-            }
-        });
+        let j3 = spawn(move || if SYNC.load(Ordering::Acquire) == 2 { *c.0 } else { 0 });
 
         j1.join().unwrap();
         j2.join().unwrap();
@@ -100,16 +93,10 @@ pub fn test_simple_release() {
             SYNC.store(1, Ordering::Release);
         });
 
-        let j2 = spawn(move || {
-            if SYNC.load(Ordering::Acquire) == 1 {
-                *c.0
-            } else {
-                0
-            }
-        });
+        let j2 = spawn(move || if SYNC.load(Ordering::Acquire) == 1 { *c.0 } else { 0 });
 
         j1.join().unwrap();
-        assert_eq!(j2.join().unwrap(),1);
+        assert_eq!(j2.join().unwrap(), 1);
     }
 }
 
