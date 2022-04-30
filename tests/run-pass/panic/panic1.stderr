@@ -1,9 +1,9 @@
-thread 'main' panicked at 'panicking from libstd', $DIR/panic1.rs:8:5
+thread 'main' panicked at 'panicking from libstd', $DIR/panic1.rs:7:5
 stack backtrace:
    0: std::rt::begin_panic
              at RUSTLIB/$FILE:LL:COL
    1: main
-             at $DIR/panic1.rs:8:5
+             at $DIR/panic1.rs:7:5
    2: <fn() as std::ops::FnOnce<()>>::call_once - shim(fn())
              at RUSTLIB/$FILE:LL:COL
    3: std::rt::lang_start::{closure#0}

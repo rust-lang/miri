@@ -13,14 +13,14 @@ thread 'main' panicked at 'Hello from panic: 5', $DIR/catch_panic.rs:LL:26
 Caught panic message (String): Hello from panic: 5
 thread 'main' panicked at 'Hello from panic: 6', $DIR/catch_panic.rs:LL:26
 Caught panic message (String): Hello from panic: 6
-thread 'main' panicked at 'index out of bounds: the len is 3 but the index is 4', $DIR/catch_panic.rs:LL:33
+thread 'main' panicked at 'index out of bounds: the len is 3 but the index is 4', $DIR/catch_panic.rs:LL:20
 Caught panic message (String): index out of bounds: the len is 3 but the index is 4
-thread 'main' panicked at 'attempt to divide by zero', $DIR/catch_panic.rs:LL:33
+thread 'main' panicked at 'attempt to divide by zero', $DIR/catch_panic.rs:LL:20
 Caught panic message (&str): attempt to divide by zero
 thread 'main' panicked at 'align_offset: align is not a power-of-two', $LOC
 Caught panic message (&str): align_offset: align is not a power-of-two
-thread 'main' panicked at 'assertion failed: false', $DIR/catch_panic.rs:LL:29
+thread 'main' panicked at 'assertion failed: false', $DIR/catch_panic.rs:LL:9
 Caught panic message (&str): assertion failed: false
-thread 'main' panicked at 'assertion failed: false', $DIR/catch_panic.rs:LL:29
+thread 'main' panicked at 'assertion failed: false', $DIR/catch_panic.rs:LL:9
 Caught panic message (&str): assertion failed: false
 Success!
