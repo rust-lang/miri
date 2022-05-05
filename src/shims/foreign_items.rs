@@ -45,7 +45,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         // List taken from `libstd/sys_common/alloc.rs`.
         let min_align = match this.tcx.sess.target.arch.as_ref() {
             "x86" | "arm" | "mips" | "powerpc" | "powerpc64" | "asmjs" | "wasm32" => 8,
-            "x86_64" | "aarch64" | "mips64" | "s390x" | "sparc64" => 16,
+            "x86_64" | "aarch64" | "mips64" | "s390x" | "sparc64" | "loongarch64" => 16,
             arch => bug!("Unsupported target architecture: {}", arch),
         };
         // Windows always aligns, even small allocations.
