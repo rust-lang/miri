@@ -214,6 +214,9 @@ degree documented below):
   supported on Windows. We also test `i686-pc-windows-msvc`, with the same
   reduced feature set. We might ship Miri with a nightly even when some features
   on these targets regress.
+- `aarch64-linux-android` has basic support and should work for simple targets.
+  Some concurrency and filesystem operations are not supported and will fail at
+  runtime.
 
 ### Common Problems
 

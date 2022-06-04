@@ -448,7 +448,7 @@ impl<'mir, 'tcx> Evaluator<'mir, 'tcx> {
                     Self::add_extern_static(this, name, place.ptr);
                 }
                 for symbol_name in &["signal", "bsd_signal"] {
-                    let layout = this.machine.layouts.usize;
+                    let layout = this.machine.layouts.mut_raw_ptr;
                     let dlsym = Dlsym::from_str(symbol_name.as_bytes(), &this.tcx.sess.target.os)?
                         .unwrap_or_else(|| {
                             panic!(
