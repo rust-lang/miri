@@ -43,7 +43,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         match dlsym {
             Dlsym::Linux(dlsym) => linux::EvalContextExt::call_dlsym(this, dlsym, args, dest, ret),
             Dlsym::MacOs(dlsym) => macos::EvalContextExt::call_dlsym(this, dlsym, args, dest, ret),
-            Dlsym::Android(dlsym) => android::EvalContextExt::call_dlsym(this, dlsym, args, dest, ret),
+            Dlsym::Android(dlsym) =>
+                android::EvalContextExt::call_dlsym(this, dlsym, args, dest, ret),
         }
     }
 }
