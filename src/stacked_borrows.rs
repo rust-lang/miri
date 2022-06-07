@@ -79,13 +79,25 @@ impl fmt::Debug for Item {
 }
 
 /// Extra per-location state.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct Stack {
     /// Used *mostly* as a stack; never empty.
     /// Invariants:
     /// * Above a `SharedReadOnly` there can only be more `SharedReadOnly`.
     /// * Except for `Untagged`, no tag occurs in the stack more than once.
     borrows: Vec<Item>,
+}
+
+/// This implementation is primarily used when attempting to merge borrow stacks for adjacent
+/// bytes. For adjacent stacks, when the stacks differ at all, they tend to differ either in
+/// length or at the end of the borrows array. Iterating in reverse returns faster for `Stack`s
+/// that are not equal.
+impl PartialEq for Stack {
+    fn eq(&self, other: &Self) -> bool {
+        let Stack { borrows: lhs } = self;
+        let Stack { borrows: rhs } = other;
+        lhs.len() == rhs.len() && lhs.iter().rev().zip(rhs.iter().rev()).all(|(l, r)| l == r)
+    }
 }
 
 /// Extra per-allocation state.
