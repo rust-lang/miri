@@ -93,7 +93,7 @@ fn test_posix_realpath_errors() {
     // Using an existing path ensures all platforms return `ENAMETOOLONG` given a long path.
     //
     // Rather than creating a bunch of directories, we create two directories containing symlinks.
-    // Sadly we can't avoid creating directories via a path like "./././././" or"/../../" as linux
+    // Sadly we can't avoid creating directories and instead use a path like "./././././" or "./../../" as linux
     // appears to collapse "." and ".." before checking path length.
     let path = tmp();
 
