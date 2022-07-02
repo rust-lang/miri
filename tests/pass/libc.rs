@@ -4,11 +4,24 @@
 #![feature(io_error_more)]
 #![feature(rustc_private)]
 
+use std::path::PathBuf;
+
 extern crate libc;
 
-fn tmp() -> std::path::PathBuf {
+fn tmp() -> PathBuf {
     std::env::var("MIRI_TEMP")
-        .map(std::path::PathBuf::from)
+        .map(|tmp| {
+            // MIRI_TEMP is set outside of our emulated
+            // program, so it may have path separators that don't
+            // correspond to our target platform. We normalize them here
+            // before constructing a `PathBuf`
+
+            #[cfg(windows)]
+            return PathBuf::from(tmp.replace("/", "\\"));
+
+            #[cfg(not(windows))]
+            return PathBuf::from(tmp.replace("\\", "/"));
+        })
         .unwrap_or_else(|_| std::env::temp_dir())
 }
 
@@ -19,7 +32,6 @@ fn test_posix_realpath_alloc() {
     use std::fs::{remove_file, File};
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::ffi::OsStringExt;
-    use std::path::PathBuf;
 
     let buf;
     let path = tmp().join("miri_test_libc_posix_realpath_alloc");
@@ -36,10 +48,10 @@ fn test_posix_realpath_alloc() {
         libc::free(r as *mut _);
     }
     let canonical = PathBuf::from(OsString::from_vec(buf));
+    assert_eq!(path.file_name(), canonical.file_name());
+
     // Cleanup after test.
     remove_file(&path).unwrap();
-
-    assert_eq!(path.file_name(), canonical.file_name());
 }
 
 /// Test non-allocating variant of `realpath`.
@@ -47,7 +59,6 @@ fn test_posix_realpath_noalloc() {
     use std::ffi::{CStr, CString};
     use std::fs::{remove_file, File};
     use std::os::unix::ffi::OsStrExt;
-    use std::path::PathBuf;
 
     let path = tmp().join("miri_test_libc_posix_realpath_noalloc");
     let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString::new failed");
@@ -64,17 +75,18 @@ fn test_posix_realpath_noalloc() {
     }
     let c = unsafe { CStr::from_ptr(v.as_ptr()) };
     let canonical = PathBuf::from(c.to_str().expect("CStr to str"));
-    // Cleanup after test.
-    remove_file(&path).unwrap();
 
     assert_eq!(path.file_name(), canonical.file_name());
+
+    // Cleanup after test.
+    remove_file(&path).unwrap();
 }
 
 /// Test failure cases for `realpath`.
 fn test_posix_realpath_errors() {
     use std::convert::TryInto;
     use std::ffi::CString;
-    use std::fs::{create_dir_all, remove_dir, remove_file};
+    use std::fs::{create_dir_all, remove_dir_all};
     use std::io::ErrorKind;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::symlink;
@@ -89,13 +101,15 @@ fn test_posix_realpath_errors() {
 
     // Test that a long path returns an error.
     //
-    // Linux first checks if the path to exists and macos does not.
+    // Linux first checks if the path exists and macos does not.
     // Using an existing path ensures all platforms return `ENAMETOOLONG` given a long path.
     //
     // Rather than creating a bunch of directories, we create two directories containing symlinks.
     // Sadly we can't avoid creating directories and instead use a path like "./././././" or "./../../" as linux
     // appears to collapse "." and ".." before checking path length.
-    let path = tmp();
+    let path = tmp().join("posix_realpath_errors");
+    // Cleanup before test.
+    remove_dir_all(&path).ok();
 
     // The directories we will put symlinks in.
     let x = path.join("x/");
@@ -104,12 +118,6 @@ fn test_posix_realpath_errors() {
     // The symlinks in each directory pointing to each other.
     let yx_sym = y.join("x");
     let xy_sym = x.join("y");
-
-    // Cleanup before test.
-    remove_file(&yx_sym).ok();
-    remove_file(&xy_sym).ok();
-    remove_dir(&x).ok();
-    remove_dir(&y).ok();
 
     // Create directories.
     create_dir_all(&x).expect("dir x");
@@ -126,15 +134,12 @@ fn test_posix_realpath_errors() {
     let r = unsafe { libc::realpath(c_path.as_ptr(), std::ptr::null_mut()) };
     let e = std::io::Error::last_os_error();
 
-    // Cleanup after test.
-    remove_file(&yx_sym).ok();
-    remove_file(&xy_sym).ok();
-    remove_dir(&x).ok();
-    remove_dir(&y).ok();
-
     assert!(r.is_null());
     assert_eq!(e.raw_os_error(), Some(libc::ENAMETOOLONG));
     assert_eq!(e.kind(), ErrorKind::InvalidFilename);
+
+    // Cleanup after test.
+    remove_dir_all(&path).ok();
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
