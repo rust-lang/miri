@@ -1,6 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
+use crate::shims::unix::freebsd::futex::futex;
 use crate::*;
 use shims::foreign_items::EmulateByNameResult;
 use shims::unix::thread::EvalContextExt as _;
@@ -38,6 +39,20 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.write_scalar(errno_place.to_ref(this).to_scalar(), dest)?;
             }
 
+            // Futex, equivalent to Linux's SYS_futex syscall
+            "_umtx_op" => {
+                let [obj, op, val, uaddr, uaddr2] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                futex(
+                    this,
+                    obj,
+                    this.read_scalar(op)?.to_i32()?,
+                    this.read_scalar(val)?.to_u64()?,
+                    uaddr,
+                    uaddr2,
+                );
+                this.write_scalar(Scalar::from_i32(1), dest)?;
+            }
             _ => return Ok(EmulateByNameResult::NotSupported),
         }
         Ok(EmulateByNameResult::NeedsJumping)
