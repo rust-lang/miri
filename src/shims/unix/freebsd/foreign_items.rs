@@ -1,7 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
-use crate::shims::unix::freebsd::futex::futex;
+use crate::shims::unix::freebsd::sync::futex;
 use crate::*;
 use shims::foreign_items::EmulateByNameResult;
 use shims::unix::thread::EvalContextExt as _;
