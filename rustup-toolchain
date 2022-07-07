@@ -21,22 +21,32 @@ if ! which rustup-toolchain-install-master >/dev/null; then
     exit 1
 fi
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
 # Determine new commit.
 if [[ "$1" == "" ]]; then
-    NEW_COMMIT=$(cat rust-version)
+    NEW_COMMIT=$(cat "$SCRIPT_DIR/rust-version")
 elif [[ "$1" == "HEAD" ]]; then
     NEW_COMMIT=$(git ls-remote https://github.com/rust-lang/rust/ HEAD | cut -f 1)
 else
     NEW_COMMIT="$1"
 fi
-echo "$NEW_COMMIT" > rust-version
+echo "$NEW_COMMIT" > "$SCRIPT_DIR/rust-version"
 shift || true # don't fail if shifting fails
+
+# Save the working directory.
+pushd .;
+
+# Go to where this script is located.
+cd $SCRIPT_DIR;
 
 # Check if we already are at that commit.
 CUR_COMMIT=$(rustc +miri --version -v 2>/dev/null | egrep "^commit-hash: " | cut -d " " -f 2)
 if [[ "$CUR_COMMIT" == "$NEW_COMMIT" ]]; then
     echo "miri toolchain is already at commit $CUR_COMMIT."
     rustup override set miri
+    # Return to the original working directory.
+    popd;
     exit 0
 fi
 
@@ -51,3 +61,6 @@ cargo clean
 # Call 'cargo metadata' on the sources in case that changes the lockfile
 # (which fails under some setups when it is done from inside vscode).
 cargo metadata --format-version 1 --manifest-path "$(rustc --print sysroot)/lib/rustlib/rustc-src/rust/compiler/rustc/Cargo.toml" >/dev/null
+
+# Return to the original working directory.
+popd;
