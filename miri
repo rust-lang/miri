@@ -32,10 +32,10 @@ Format all sources and tests. <flags> are passed to `rustfmt`.
 ./miri clippy <flags>:
 Runs clippy on all sources. <flags> are passed to `cargo clippy`.
 
-./miri rustup <flags>:
+./miri toolchain <flags>:
 Set up a rustup toolchain called `miri` and set it as an override.
 Requires <https://github.com/kennytm/rustup-toolchain-install-master> to be installed.
-<flags> are passed to `rustup-toolchain`.
+<flags> are passed to `./rustup-toolchain`.
 
 ./miri many-seeds <command>:
 Runs <command> over and over again with different seeds for Miri. The MIRIFLAGS
@@ -159,6 +159,9 @@ find_sysroot() {
 
 # Run command.
 case "$COMMAND" in
+toolchain)
+    "$MIRIDIR/rustup-toolchain" "$@"
+    ;;
 install|install-debug)
     # "--locked" to respect the Cargo.lock file if it exists,
     # "--offline" to avoid querying the registry (for yanked packages).
@@ -215,9 +218,6 @@ run|run-debug)
 fmt)
     find "$MIRIDIR" -not \( -name target -prune \) -name '*.rs' \
         | xargs rustfmt +$TOOLCHAIN --edition=2021 --config-path "$MIRIDIR/rustfmt.toml" "$@"
-    ;;
-rustup)
-    "$MIRIDIR/rustup-toolchain" "$@"
     ;;
 clippy)
     $CARGO clippy $CARGO_BUILD_FLAGS --manifest-path "$MIRIDIR"/Cargo.toml --all-targets "$@"

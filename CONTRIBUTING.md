@@ -12,6 +12,15 @@ contact us (`oli-obk` and `RalfJ`) on the [Rust Zulip].
 
 [Rust Zulip]: https://rust-lang.zulipchat.com
 
+## The `miri` script
+
+Building and invoking Miri requires getting a bunch of flags right and setting
+up a custom sysroot with xargo. The `miri` script located at the root of the
+repository takes care of that for you.
+
+Run `./miri` without arguments to see the commands our build tool
+supports.
+
 ## Preparing the build environment
 
 Miri heavily relies on internal and unstable rustc interfaces to execute MIR,
@@ -23,25 +32,23 @@ tested against. Other versions will likely not work. After installing
 [`rustup-toolchain-install-master`], you can run the following command to
 install that exact version of rustc as a toolchain:
 ```
-./rustup-toolchain
+./miri toolchain
 ```
-This will set up a rustup toolchain called `miri` and set it as an override for
-the current directory.
+This will set up a rustup toolchain called `miri` and set it as an override.
+
+For more advanced build environment configuration, run the `rust-toolchain`
+script located at the root of the repository.
 
 [`rustup-toolchain-install-master`]: https://github.com/kennytm/rustup-toolchain-install-master
 
-## Building and testing Miri
+## Building Miri
 
-Invoking Miri requires getting a bunch of flags right and setting up a custom
-sysroot with xargo. The `miri` script takes care of that for you. With the
-build environment prepared, compiling Miri is just one command away:
+ Once the build environment is prepared, compiling Miri is just one command
+ away:
 
 ```
 ./miri build
 ```
-
-Run `./miri` without arguments to see the other commands our build tool
-supports.
 
 ### Testing the Miri driver
 
