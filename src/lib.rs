@@ -11,6 +11,8 @@
 #![feature(local_key_cell_methods)]
 #![warn(rust_2018_idioms)]
 #![allow(
+    // Needed to get this merged: https://github.com/rust-lang/rust/pull/93628
+    stable_features,
     clippy::collapsible_else_if,
     clippy::collapsible_if,
     clippy::comparison_chain,
