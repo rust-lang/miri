@@ -1,4 +1,4 @@
-// ignore-windows: Windows does not have a global environ list that the program can access directly
+//@ignore-target-windows: Windows does not have a global environ list that the program can access directly
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 fn get_environ() -> *const *const u8 {
@@ -20,5 +20,5 @@ fn main() {
     let pointer = get_environ();
     let _x = unsafe { *pointer };
     std::env::set_var("FOO", "BAR");
-    let _y = unsafe { *pointer }; //~ ERROR dereferenced after this allocation got freed
+    let _y = unsafe { *pointer }; //~ ERROR: dereferenced after this allocation got freed
 }

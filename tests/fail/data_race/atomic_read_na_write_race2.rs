@@ -1,4 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+// We want to control preemption here.
+//@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -22,7 +24,7 @@ pub fn main() {
 
         let j2 = spawn(move || {
             let atomic_ref = &mut *c.0;
-            *atomic_ref.get_mut() = 32; //~ ERROR Data race detected between Write on thread `<unnamed>` and Atomic Load on thread `<unnamed>`
+            *atomic_ref.get_mut() = 32; //~ ERROR: Data race detected between Write on thread `<unnamed>` and Atomic Load on thread `<unnamed>`
         });
 
         j1.join().unwrap();

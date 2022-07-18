@@ -1,4 +1,4 @@
-// ignore-windows: No libc on Windows
+//@ignore-target-windows: No libc on Windows
 #![feature(rustc_private)]
 
 /// Test that destroying a pthread_rwlock twice fails, even without a check for number validity
@@ -11,6 +11,6 @@ fn main() {
         libc::pthread_rwlock_destroy(&mut lock);
 
         libc::pthread_rwlock_destroy(&mut lock);
-        //~^ ERROR Undefined Behavior: using uninitialized data, but this operation requires initialized memory
+        //~^ ERROR: Undefined Behavior: using uninitialized data, but this operation requires initialized memory
     }
 }

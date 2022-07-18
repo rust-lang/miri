@@ -37,6 +37,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 
+mod c_ffi_support;
 mod concurrency;
 mod diagnostics;
 mod eval;
@@ -69,6 +70,8 @@ pub use crate::shims::time::EvalContextExt as _;
 pub use crate::shims::tls::{EvalContextExt as _, TlsData};
 pub use crate::shims::EvalContextExt as _;
 
+pub use crate::c_ffi_support::EvalContextExt as CFFIEvalContextExt;
+
 pub use crate::concurrency::data_race::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd,
     EvalContextExt as DataRaceEvalContextExt,
@@ -90,8 +93,8 @@ pub use crate::mono_hash_map::MonoHashMap;
 pub use crate::operator::EvalContextExt as OperatorEvalContextExt;
 pub use crate::range_map::RangeMap;
 pub use crate::stacked_borrows::{
-    stack::Stack, CallId, EvalContextExt as StackedBorEvalContextExt, Item, Permission, SbTag,
-    SbTagExtra, Stacks,
+    CallId, EvalContextExt as StackedBorEvalContextExt, Item, Permission, SbTag, SbTagExtra, Stack,
+    Stacks,
 };
 pub use crate::sync::{CondvarId, EvalContextExt as SyncEvalContextExt, MutexId, RwLockId};
 pub use crate::thread::{

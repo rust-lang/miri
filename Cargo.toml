@@ -20,6 +20,8 @@ doctest = false # and no doc tests
 [dependencies]
 getrandom = { version = "0.2", features = ["std"] }
 env_logger = "0.9"
+libffi = "3.0.0"
+libloading = "0.7"
 log = "0.4"
 shell-escape = "0.1.4"
 rand = "0.8"
@@ -54,6 +56,7 @@ harness = false
 
 [features]
 default = ["stack-cache"]
-# Will be enabled on CI via `--all-features`.
-expensive-debug-assertions = []
 stack-cache = []
+
+[profile.dev]
+opt-level = 2 # because it's too slow otherwise

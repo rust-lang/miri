@@ -195,9 +195,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
     /// Test if this pointer equals 0.
     fn ptr_is_null(&self, ptr: Pointer<Option<Tag>>) -> InterpResult<'tcx, bool> {
-        let this = self.eval_context_ref();
-        let null = Scalar::null_ptr(this);
-        this.ptr_eq(Scalar::from_maybe_pointer(ptr, this), null)
+        Ok(ptr.addr().bytes() == 0)
     }
 
     /// Get the `Place` for a local
@@ -261,7 +259,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let mir = this.load_mir(f.def, None)?;
         let dest = match dest {
             Some(dest) => *dest,
-            None => MPlaceTy::dangling(this.layout_of(mir.return_ty())?).into(),
+            None => MPlaceTy::fake_alloc_zst(this.layout_of(mir.return_ty())?).into(),
         };
         this.push_stack_frame(f, mir, &dest, stack_pop)?;
 
@@ -633,7 +631,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
         // Ensure that the access is within bounds.
         assert!(op_place.layout.size >= offset + layout.size);
-        let value_place = op_place.offset(offset, MemPlaceMeta::None, layout, this)?;
+        let value_place = op_place.offset(offset, layout, this)?;
         Ok(value_place)
     }
 

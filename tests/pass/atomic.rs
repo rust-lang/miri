@@ -1,10 +1,15 @@
-use std::sync::atomic::{compiler_fence, fence, AtomicBool, AtomicIsize, AtomicU64, Ordering::*};
+//@compile-flags: -Zmiri-strict-provenance
+#![feature(strict_provenance, strict_provenance_atomic_ptr)]
+use std::sync::atomic::{
+    compiler_fence, fence, AtomicBool, AtomicIsize, AtomicPtr, AtomicU64, Ordering::*,
+};
 
 fn main() {
     atomic_bool();
     atomic_all_ops();
     atomic_u64();
     atomic_fences();
+    atomic_ptr();
     weak_sometimes_fails();
 }
 
@@ -46,18 +51,22 @@ fn atomic_all_ops() {
     static ATOMIC: AtomicIsize = AtomicIsize::new(0);
     static ATOMIC_UNSIGNED: AtomicU64 = AtomicU64::new(0);
 
+    let load_orders = [Relaxed, Acquire, SeqCst];
+    let stored_orders = [Relaxed, Release, SeqCst];
+    let rmw_orders = [Relaxed, Release, Acquire, AcqRel, SeqCst];
+
     // loads
-    for o in [Relaxed, Acquire, SeqCst] {
+    for o in load_orders {
         ATOMIC.load(o);
     }
 
     // stores
-    for o in [Relaxed, Release, SeqCst] {
+    for o in stored_orders {
         ATOMIC.store(1, o);
     }
 
     // most RMWs
-    for o in [Relaxed, Release, Acquire, AcqRel, SeqCst] {
+    for o in rmw_orders {
         ATOMIC.swap(0, o);
         ATOMIC.fetch_or(0, o);
         ATOMIC.fetch_xor(0, o);
@@ -71,29 +80,13 @@ fn atomic_all_ops() {
         ATOMIC_UNSIGNED.fetch_max(0, o);
     }
 
-    // RMWs with deparate failure ordering
-    ATOMIC.store(0, SeqCst);
-    assert_eq!(ATOMIC.compare_exchange(0, 1, Relaxed, Relaxed), Ok(0));
-    assert_eq!(ATOMIC.compare_exchange(0, 2, Acquire, Relaxed), Err(1));
-    assert_eq!(ATOMIC.compare_exchange(0, 1, Release, Relaxed), Err(1));
-    assert_eq!(ATOMIC.compare_exchange(1, 0, AcqRel, Relaxed), Ok(1));
-    ATOMIC.compare_exchange(0, 1, SeqCst, Relaxed).ok();
-    ATOMIC.compare_exchange(0, 1, Acquire, Acquire).ok();
-    ATOMIC.compare_exchange(0, 1, AcqRel, Acquire).ok();
-    ATOMIC.compare_exchange(0, 1, SeqCst, Acquire).ok();
-    ATOMIC.compare_exchange(0, 1, SeqCst, SeqCst).ok();
-
-    ATOMIC.store(0, SeqCst);
-    compare_exchange_weak_loop!(ATOMIC, 0, 1, Relaxed, Relaxed);
-    assert_eq!(ATOMIC.compare_exchange_weak(0, 2, Acquire, Relaxed), Err(1));
-    assert_eq!(ATOMIC.compare_exchange_weak(0, 1, Release, Relaxed), Err(1));
-    compare_exchange_weak_loop!(ATOMIC, 1, 0, AcqRel, Relaxed);
-    assert_eq!(ATOMIC.load(Relaxed), 0);
-    ATOMIC.compare_exchange_weak(0, 1, SeqCst, Relaxed).ok();
-    ATOMIC.compare_exchange_weak(0, 1, Acquire, Acquire).ok();
-    ATOMIC.compare_exchange_weak(0, 1, AcqRel, Acquire).ok();
-    ATOMIC.compare_exchange_weak(0, 1, SeqCst, Acquire).ok();
-    ATOMIC.compare_exchange_weak(0, 1, SeqCst, SeqCst).ok();
+    // RMWs with separate failure ordering
+    for o1 in rmw_orders {
+        for o2 in load_orders {
+            let _res = ATOMIC.compare_exchange(0, 0, o1, o2);
+            let _res = ATOMIC.compare_exchange_weak(0, 0, o1, o2);
+        }
+    }
 }
 
 fn atomic_u64() {
@@ -101,7 +94,12 @@ fn atomic_u64() {
 
     ATOMIC.store(1, SeqCst);
     assert_eq!(ATOMIC.compare_exchange(0, 0x100, AcqRel, Acquire), Err(1));
+    assert_eq!(ATOMIC.compare_exchange(0, 1, Release, Relaxed), Err(1));
+    assert_eq!(ATOMIC.compare_exchange(1, 0, AcqRel, Relaxed), Ok(1));
+    assert_eq!(ATOMIC.compare_exchange(0, 1, Relaxed, Relaxed), Ok(0));
     compare_exchange_weak_loop!(ATOMIC, 1, 0x100, AcqRel, Acquire);
+    assert_eq!(ATOMIC.compare_exchange_weak(0, 2, Acquire, Relaxed), Err(0x100));
+    assert_eq!(ATOMIC.compare_exchange_weak(0, 1, Release, Relaxed), Err(0x100));
     assert_eq!(ATOMIC.load(Relaxed), 0x100);
 
     assert_eq!(ATOMIC.fetch_max(0x10, SeqCst), 0x100);
@@ -128,6 +126,54 @@ fn atomic_fences() {
     compiler_fence(Release);
     compiler_fence(Acquire);
     compiler_fence(AcqRel);
+}
+
+fn atomic_ptr() {
+    use std::ptr;
+    let array: Vec<i32> = (0..100).into_iter().collect(); // a target to point to, to test provenance things
+    let x = array.as_ptr() as *mut i32;
+
+    let ptr = AtomicPtr::<i32>::new(ptr::null_mut());
+    assert!(ptr.load(Relaxed).addr() == 0);
+    ptr.store(ptr::invalid_mut(13), SeqCst);
+    assert!(ptr.swap(x, Relaxed).addr() == 13);
+    unsafe { assert!(*ptr.load(Acquire) == 0) };
+
+    // comparison ignores provenance
+    assert_eq!(
+        ptr.compare_exchange(
+            (&mut 0 as *mut i32).with_addr(x.addr()),
+            ptr::invalid_mut(0),
+            SeqCst,
+            SeqCst
+        )
+        .unwrap()
+        .addr(),
+        x.addr(),
+    );
+    assert_eq!(
+        ptr.compare_exchange(
+            (&mut 0 as *mut i32).with_addr(x.addr()),
+            ptr::invalid_mut(0),
+            SeqCst,
+            SeqCst
+        )
+        .unwrap_err()
+        .addr(),
+        0,
+    );
+    ptr.store(x, Relaxed);
+
+    assert_eq!(ptr.fetch_ptr_add(13, AcqRel).addr(), x.addr());
+    unsafe { assert_eq!(*ptr.load(SeqCst), 13) }; // points to index 13 now
+    assert_eq!(ptr.fetch_ptr_sub(4, AcqRel).addr(), x.addr() + 13 * 4);
+    unsafe { assert_eq!(*ptr.load(SeqCst), 9) };
+    assert_eq!(ptr.fetch_or(3, AcqRel).addr(), x.addr() + 9 * 4); // ptr is 4-aligned, so set the last 2 bits
+    assert_eq!(ptr.fetch_and(!3, AcqRel).addr(), (x.addr() + 9 * 4) | 3); // and unset them again
+    unsafe { assert_eq!(*ptr.load(SeqCst), 9) };
+    assert_eq!(ptr.fetch_xor(0xdeadbeef, AcqRel).addr(), x.addr() + 9 * 4);
+    assert_eq!(ptr.fetch_xor(0xdeadbeef, AcqRel).addr(), (x.addr() + 9 * 4) ^ 0xdeadbeef);
+    unsafe { assert_eq!(*ptr.load(SeqCst), 9) }; // after XORing twice with the same thing, we get our ptr back
 }
 
 fn weak_sometimes_fails() {

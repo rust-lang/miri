@@ -1,4 +1,4 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 
 //! Ensure that thread-local statics get deallocated when the thread dies.
 
@@ -13,6 +13,6 @@ unsafe impl Send for SendRaw {}
 fn main() {
     unsafe {
         let dangling_ptr = std::thread::spawn(|| SendRaw(&TLS as *const u8)).join().unwrap();
-        let _val = *dangling_ptr.0; //~ ERROR dereferenced after this allocation got freed
+        let _val = *dangling_ptr.0; //~ ERROR: dereferenced after this allocation got freed
     }
 }

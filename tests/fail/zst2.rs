@@ -1,5 +1,5 @@
 // Some optimizations remove ZST accesses, thus masking this UB.
-// compile-flags: -Zmir-opt-level=0
+//@compile-flags: -Zmir-opt-level=0
 
 fn main() {
     // Not using the () type here, as writes of that type do not even have MIR generated.
@@ -11,5 +11,5 @@ fn main() {
     let mut x_box = Box::new(1u8);
     let x = &mut *x_box as *mut _ as *mut [u8; 0];
     drop(x_box);
-    unsafe { *x = zst_val }; //~ ERROR dereferenced after this allocation got freed
+    unsafe { *x = zst_val }; //~ ERROR: dereferenced after this allocation got freed
 }

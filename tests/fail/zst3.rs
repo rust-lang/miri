@@ -1,5 +1,5 @@
 // Some optimizations remove ZST accesses, thus masking this UB.
-// compile-flags: -Zmir-opt-level=0
+//@compile-flags: -Zmir-opt-level=0
 
 fn main() {
     // Not using the () type here, as writes of that type do not even have MIR generated.
@@ -14,5 +14,5 @@ fn main() {
     unsafe { *(x as *mut [u8; 0]) = zst_val };
     // One byte further is OOB.
     let x = x.wrapping_offset(1);
-    unsafe { *(x as *mut [u8; 0]) = zst_val }; //~ ERROR out-of-bounds
+    unsafe { *(x as *mut [u8; 0]) = zst_val }; //~ ERROR: out-of-bounds
 }

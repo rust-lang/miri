@@ -1,5 +1,5 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
-// compile-flags: -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
+//@compile-flags: -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::spawn;
@@ -39,7 +39,7 @@ pub fn main() {
 
         let j3 = spawn(move || {
             if SYNC.load(Ordering::Acquire) == 3 {
-                *c.0 //~ ERROR Data race detected between Read on thread `<unnamed>` and Write on thread `<unnamed>`
+                *c.0 //~ ERROR: Data race detected between Read on thread `<unnamed>` and Write on thread `<unnamed>`
             } else {
                 0
             }

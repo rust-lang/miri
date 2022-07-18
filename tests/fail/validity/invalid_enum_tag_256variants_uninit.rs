@@ -1,5 +1,5 @@
 // Even when uninit numbers are allowed, this enum is not.
-// compile-flags: -Zmiri-allow-uninit-numbers
+//@compile-flags: -Zmiri-allow-uninit-numbers
 #![allow(unused, deprecated, invalid_value)]
 
 #[derive(Copy, Clone)]
@@ -268,5 +268,5 @@ union MyUninit {
 }
 
 fn main() {
-    let _a = unsafe { MyUninit { init: () }.uninit }; //~ ERROR constructing invalid value at .<enum-tag>: encountered uninitialized bytes, but expected a valid enum tag
+    let _a = unsafe { MyUninit { init: () }.uninit }; //~ ERROR: constructing invalid value at .<enum-tag>: encountered uninitialized bytes, but expected a valid enum tag
 }

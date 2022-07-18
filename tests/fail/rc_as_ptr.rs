@@ -1,5 +1,5 @@
 // This should fail even without validation
-// compile-flags: -Zmiri-disable-validation
+//@compile-flags: -Zmiri-disable-validation
 
 use std::ptr;
 use std::rc::{Rc, Weak};
@@ -16,5 +16,5 @@ fn main() {
     drop(strong);
     // But not any more. We can do Weak::as_raw(&weak), but accessing the pointer would lead to
     // undefined behaviour.
-    assert_eq!(42, **unsafe { &*Weak::as_ptr(&weak) }); //~ ERROR dereferenced after this allocation got freed
+    assert_eq!(42, **unsafe { &*Weak::as_ptr(&weak) }); //~ ERROR: dereferenced after this allocation got freed
 }

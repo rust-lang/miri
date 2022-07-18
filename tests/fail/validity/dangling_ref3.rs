@@ -1,5 +1,5 @@
 // Make sure we catch this even without Stacked Borrows
-// compile-flags: -Zmiri-disable-stacked-borrows
+//@compile-flags: -Zmiri-disable-stacked-borrows
 use std::mem;
 
 fn dangling() -> *const u8 {
@@ -8,5 +8,5 @@ fn dangling() -> *const u8 {
 }
 
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(dangling()) }; //~ ERROR dangling reference (use-after-free)
+    let _x: &i32 = unsafe { mem::transmute(dangling()) }; //~ ERROR: dangling reference (use-after-free)
 }

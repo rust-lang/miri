@@ -2,7 +2,6 @@ use std::ffi::OsStr;
 
 use log::trace;
 
-use rustc_middle::mir;
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_span::Symbol;
 use rustc_target::abi::{Align, Size};
@@ -22,7 +21,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         abi: Abi,
         args: &[OpTy<'tcx, Tag>],
         dest: &PlaceTy<'tcx, Tag>,
-        ret: mir::BasicBlock,
     ) -> InterpResult<'tcx, EmulateByNameResult<'mir, 'tcx>> {
         let this = self.eval_context_mut();
 
@@ -440,12 +438,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             // Miscellaneous
             "isatty" => {
                 let [fd] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                this.read_scalar(fd)?.to_i32()?;
-                // "returns 1 if fd is an open file descriptor referring to a terminal; otherwise 0 is returned, and errno is set to indicate the error"
-                // FIXME: we just say nothing is a terminal.
-                let enotty = this.eval_libc("ENOTTY")?;
-                this.set_last_error(enotty)?;
-                this.write_null(dest)?;
+                let result = this.isatty(fd)?;
+                this.write_scalar(Scalar::from_i32(result), dest)?;
             }
             "pthread_atfork" => {
                 let [prepare, parent, child] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
@@ -537,9 +531,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             // Platform-specific shims
             _ => {
                 match this.tcx.sess.target.os.as_ref() {
-                    "linux" => return shims::unix::linux::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
-                    "macos" => return shims::unix::macos::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
-                    "freebsd" => return shims::unix::freebsd::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
+                    "linux" => return shims::unix::linux::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
+                    "macos" => return shims::unix::macos::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
+                    "freebsd" => return shims::unix::freebsd::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
                     _ => unreachable!(),
                 }
             }

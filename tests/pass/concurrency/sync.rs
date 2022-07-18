@@ -1,5 +1,5 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
-// compile-flags: -Zmiri-disable-isolation -Zmiri-strict-provenance
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
+//@compile-flags: -Zmiri-disable-isolation -Zmiri-strict-provenance
 
 use std::sync::{Arc, Barrier, Condvar, Mutex, Once, RwLock};
 use std::thread;
@@ -219,10 +219,8 @@ fn park_unpark() {
     // know Miri's timed synchronization primitives do not do that.
 
     assert!((200..1000).contains(&start.elapsed().as_millis()));
-}
 
-fn check_condvar() {
-    let _ = std::sync::Condvar::new();
+    t2.join().unwrap();
 }
 
 fn main() {
@@ -236,5 +234,4 @@ fn main() {
     check_once();
     park_timeout();
     park_unpark();
-    check_condvar();
 }

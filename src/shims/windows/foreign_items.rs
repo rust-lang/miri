@@ -1,6 +1,5 @@
 use std::iter;
 
-use rustc_middle::mir;
 use rustc_span::Symbol;
 use rustc_target::abi::Size;
 use rustc_target::spec::abi::Abi;
@@ -18,7 +17,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         abi: Abi,
         args: &[OpTy<'tcx, Tag>],
         dest: &PlaceTy<'tcx, Tag>,
-        _ret: mir::BasicBlock,
     ) -> InterpResult<'tcx, EmulateByNameResult<'mir, 'tcx>> {
         let this = self.eval_context_mut();
 
@@ -152,23 +150,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     .collect();
 
                 // Set page size.
-                let page_size = system_info.offset(
-                    field_offsets[2],
-                    MemPlaceMeta::None,
-                    dword_layout,
-                    &this.tcx,
-                )?;
+                let page_size = system_info.offset(field_offsets[2], dword_layout, &this.tcx)?;
                 this.write_scalar(
                     Scalar::from_int(PAGE_SIZE, dword_layout.size),
                     &page_size.into(),
                 )?;
                 // Set number of processors.
-                let num_cpus = system_info.offset(
-                    field_offsets[6],
-                    MemPlaceMeta::None,
-                    dword_layout,
-                    &this.tcx,
-                )?;
+                let num_cpus = system_info.offset(field_offsets[6], dword_layout, &this.tcx)?;
                 this.write_scalar(Scalar::from_int(NUM_CPUS, dword_layout.size), &num_cpus.into())?;
             }
 

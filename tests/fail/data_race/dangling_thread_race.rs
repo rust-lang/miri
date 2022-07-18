@@ -1,5 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
-// compile-flags: -Zmiri-disable-isolation
+// We want to control preemption here.
+//@compile-flags: -Zmiri-disable-isolation -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 
 use std::mem;
 use std::thread::{sleep, spawn};
@@ -33,6 +34,6 @@ fn main() {
     spawn(|| ()).join().unwrap();
 
     unsafe {
-        *c.0 = 64; //~ ERROR Data race detected between Write on thread `main` and Write on thread `<unnamed>`
+        *c.0 = 64; //~ ERROR: Data race detected between Write on thread `main` and Write on thread `<unnamed>`
     }
 }

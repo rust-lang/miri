@@ -1,4 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+// We want to control preemption here.
+//@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 
 use std::thread::spawn;
 
@@ -29,7 +31,7 @@ pub fn main() {
         });
 
         let j2 = spawn(move || {
-            *c.0 = 64; //~ ERROR Data race detected between Write on thread `<unnamed>` and Write on thread `<unnamed>`
+            *c.0 = 64; //~ ERROR: Data race detected between Write on thread `<unnamed>` and Write on thread `<unnamed>`
         });
 
         j1.join().unwrap();

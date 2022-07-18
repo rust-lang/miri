@@ -1,5 +1,5 @@
 // gets masked by optimizations
-// compile-flags: -Zmir-opt-level=0
+//@compile-flags: -Zmir-opt-level=0
 #![feature(rustc_attrs)]
 #![allow(unused_attributes)]
 
@@ -9,5 +9,5 @@ pub(crate) struct NonZero<T>(pub(crate) T);
 
 fn main() {
     // Make sure that we detect this even when no function call is happening along the way
-    let _x = Some(unsafe { NonZero(0) }); //~ ERROR encountered 0, but expected something greater or equal to 1
+    let _x = Some(unsafe { NonZero(0) }); //~ ERROR: encountered 0, but expected something greater or equal to 1
 }

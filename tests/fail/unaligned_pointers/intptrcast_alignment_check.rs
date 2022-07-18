@@ -1,4 +1,4 @@
-// compile-flags: -Zmiri-symbolic-alignment-check -Zmiri-permissive-provenance
+//@compile-flags: -Zmiri-symbolic-alignment-check -Zmiri-permissive-provenance
 // With the symbolic alignment check, even with intptrcast and without
 // validation, we want to be *sure* to catch bugs that arise from pointers being
 // insufficiently aligned. The only way to achieve that is not not let programs
@@ -12,6 +12,6 @@ fn main() {
     // Manually make sure the pointer is properly aligned.
     let base_addr_aligned = if base_addr % 2 == 0 { base_addr } else { base_addr + 1 };
     let u16_ptr = base_addr_aligned as *mut u16;
-    unsafe { *u16_ptr = 2 }; //~ERROR memory with alignment 1, but alignment 2 is required
+    unsafe { *u16_ptr = 2 }; //~ERROR: memory with alignment 1, but alignment 2 is required
     println!("{:?}", x);
 }

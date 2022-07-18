@@ -1,5 +1,5 @@
 // Make sure we catch this even without validation
-// compile-flags: -Zmiri-disable-validation
+//@compile-flags: -Zmiri-disable-validation
 
 // Make sure that we cannot load from memory a `&mut` that got already invalidated.
 fn main() {
@@ -8,5 +8,5 @@ fn main() {
     let xref = unsafe { &mut *xraw };
     let xref_in_mem = Box::new(xref);
     let _val = unsafe { *xraw }; // invalidate xref
-    let _val = *xref_in_mem; //~ ERROR borrow stack
+    let _val = *xref_in_mem; //~ ERROR: /reborrow .* tag does not exist in the borrow stack/
 }

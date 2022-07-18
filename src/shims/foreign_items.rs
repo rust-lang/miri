@@ -22,6 +22,7 @@ use rustc_target::{
 };
 
 use super::backtrace::EvalContextExt as _;
+use crate::c_ffi_support::ExternalCFuncDeclRep;
 use crate::helpers::{convert::Truncate, target_os_is_unix};
 use crate::*;
 
@@ -31,8 +32,10 @@ pub enum EmulateByNameResult<'mir, 'tcx> {
     NeedsJumping,
     /// Jumping has already been taken care of.
     AlreadyJumped,
-    /// A MIR body has been found for the function
+    /// A MIR body has been found for the function.
     MirBody(&'mir mir::Body<'tcx>, ty::Instance<'tcx>),
+    /// Executed an external C call.
+    ExecutedExternalCCall,
     /// The item is not supported.
     NotSupported,
 }
@@ -297,9 +300,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             Some(p) => p,
         };
 
-        // Second: functions that return.
-        match this.emulate_foreign_item_by_name(link_name, abi, args, dest, ret)? {
-            EmulateByNameResult::NeedsJumping => {
+        // Second: functions that return immediately.
+        match this.emulate_foreign_item_by_name(def_id, link_name, abi, args, dest)? {
+            EmulateByNameResult::NeedsJumping | EmulateByNameResult::ExecutedExternalCCall => {
                 trace!("{:?}", this.dump_place(**dest));
                 this.go_to_block(ret);
             }
@@ -310,7 +313,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     return Ok(Some(body));
                 }
 
-                this.handle_unsupported(format!("can't call foreign function: {}", link_name))?;
+                this.handle_unsupported(
+                    format!("can't call foreign function: {}; try specifying a shared object file with the flag -Zmiri-external_c_so_file=path/to/SOfile", 
+                             link_name))?;
                 return Ok(None);
             }
         }
@@ -351,13 +356,39 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     /// Emulates calling a foreign item using its name.
     fn emulate_foreign_item_by_name(
         &mut self,
+        def_id: DefId,
         link_name: Symbol,
         abi: Abi,
         args: &[OpTy<'tcx, Tag>],
         dest: &PlaceTy<'tcx, Tag>,
-        ret: mir::BasicBlock,
     ) -> InterpResult<'tcx, EmulateByNameResult<'mir, 'tcx>> {
         let this = self.eval_context_mut();
+
+        let tcx = this.tcx.tcx;
+
+        // First deal with any external C functions in linked .so file
+        // (if any SO file is specified).
+        if this.machine.external_c_so_lib.as_ref().is_some() {
+            if let Some(local_id) = def_id.as_local() {
+                if let Some(extern_c_fct_rep) = ExternalCFuncDeclRep::from_hir_node(
+                    &tcx.hir().get(tcx.hir().local_def_id_to_hir_id(local_id)),
+                    link_name,
+                ) {
+                    // An Ok(false) here means that the function being called was not exported
+                    // by the specified SO file; we should continue and check if it corresponds to
+                    // a provided shim.
+
+                    // TODO ellen! For now, continue to try the shims if there was an error in calling
+                    // the external function.
+                    // As discussed: https://github.com/rust-lang/miri/pull/2363#discussion_r922392879
+                    if let Ok(true) =
+                        this.call_and_add_external_c_fct_to_context(extern_c_fct_rep, dest, args)
+                    {
+                        return Ok(EmulateByNameResult::ExecutedExternalCCall);
+                    }
+                }
+            }
+        }
 
         // Here we dispatch all the shims for foreign functions. If you have a platform specific
         // shim, add it to the corresponding submodule.
@@ -702,14 +733,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
             // Platform-specific shims
             _ => match this.tcx.sess.target.os.as_ref() {
-                target if target_os_is_unix(target) => return shims::unix::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
-                "windows" => return shims::windows::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest, ret),
+                target if target_os_is_unix(target) => return shims::unix::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
+                "windows" => return shims::windows::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
                 target => throw_unsup_format!("the target `{}` is not supported", target),
             }
         };
-
         // We only fall through to here if we did *not* hit the `_` arm above,
-        // i.e., if we actually emulated the function.
+        // i.e., if we actually emulated the function with one of the shims.
         Ok(EmulateByNameResult::NeedsJumping)
     }
 

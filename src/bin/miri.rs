@@ -487,6 +487,19 @@ fn main() {
                 "full" => BacktraceStyle::Full,
                 _ => panic!("-Zmiri-backtrace may only be 0, 1, or full"),
             };
+        } else if let Some(param) = arg.strip_prefix("-Zmiri-external_c_so_file=") {
+            let filename = param.to_string();
+            if std::path::Path::new(&filename).exists() {
+                if let Some(other_filename) = miri_config.external_c_so_file {
+                    panic!(
+                        "-Zmiri-external_so_file external SO file is already set to {}",
+                        other_filename.display()
+                    );
+                }
+                miri_config.external_c_so_file = Some(filename.into());
+            } else {
+                panic!("-Zmiri-external_c_so_file path {} does not exist", filename);
+            }
         } else {
             // Forward to rustc.
             rustc_args.push(arg);

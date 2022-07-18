@@ -1,4 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+// We want to control preemption here.
+//@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 
 use std::thread::spawn;
 
@@ -23,7 +25,7 @@ pub fn main() {
 
         let j2 = spawn(move || {
             __rust_dealloc(
-                //~^ ERROR Data race detected between Deallocate on thread `<unnamed>` and Write on thread `<unnamed>`
+                //~^ ERROR: Data race detected between Deallocate on thread `<unnamed>` and Write on thread `<unnamed>`
                 ptr.0 as *mut _,
                 std::mem::size_of::<usize>(),
                 std::mem::align_of::<usize>(),

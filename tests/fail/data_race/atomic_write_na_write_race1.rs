@@ -1,4 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+// We want to control preemption here.
+//@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 #![feature(core_intrinsics)]
 
 use std::intrinsics::atomic_store;
@@ -22,7 +24,7 @@ pub fn main() {
 
         let j2 = spawn(move || {
             //Equivalent to: (&*c.0).store(64, Ordering::SeqCst)
-            atomic_store(c.0 as *mut usize, 64); //~ ERROR Data race detected between Atomic Store on thread `<unnamed>` and Write on thread `<unnamed>`
+            atomic_store(c.0 as *mut usize, 64); //~ ERROR: Data race detected between Atomic Store on thread `<unnamed>` and Write on thread `<unnamed>`
         });
 
         j1.join().unwrap();

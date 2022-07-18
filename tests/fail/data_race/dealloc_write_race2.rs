@@ -1,4 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+// We want to control preemption here.
+//@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 
 use std::thread::spawn;
 
@@ -28,7 +30,7 @@ pub fn main() {
         let j2 = spawn(move || {
             // Also an error of the form: Data race detected between Write on thread `<unnamed>` and Deallocate on thread `<unnamed>`
             // but the invalid allocation is detected first.
-            *ptr.0 = 2; //~ ERROR dereferenced after this allocation got freed
+            *ptr.0 = 2; //~ ERROR: dereferenced after this allocation got freed
         });
 
         j1.join().unwrap();

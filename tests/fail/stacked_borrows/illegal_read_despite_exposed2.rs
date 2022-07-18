@@ -1,4 +1,4 @@
-// compile-flags: -Zmiri-permissive-provenance
+//@compile-flags: -Zmiri-permissive-provenance
 
 fn main() {
     unsafe {
@@ -15,6 +15,6 @@ fn main() {
         // Stack: Unknown(<N), Disabled(N)
         // collapsed to Unknown(<N)
         // Stack if _fool existed: Unknown(<N), Disabled(N), SRW(N+1); collapsed to Unknown(<N+2) which would not cause an ERROR
-        let _val = *root2; //~ ERROR: borrow stack
+        let _val = *root2; //~ ERROR: /read access .* tag does not exist in the borrow stack/
     }
 }

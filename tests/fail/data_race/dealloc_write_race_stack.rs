@@ -1,5 +1,5 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
-// compile-flags: -Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
+//@compile-flags: -Zmiri-disable-isolation -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
 
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -36,7 +36,7 @@ pub fn main() {
                 sleep(Duration::from_millis(200));
 
                 // Now `stack_var` gets deallocated.
-            } //~ ERROR Data race detected between Deallocate on thread `<unnamed>` and Write on thread `<unnamed>`
+            } //~ ERROR: Data race detected between Deallocate on thread `<unnamed>` and Write on thread `<unnamed>`
         });
 
         let j2 = spawn(move || {

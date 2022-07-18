@@ -1,4 +1,4 @@
-// compile-flags: -Zmiri-disable-abi-check
+//@compile-flags: -Zmiri-disable-abi-check
 // This feature is required to trigger the error using the "C" ABI.
 #![feature(c_unwind)]
 
@@ -8,5 +8,5 @@ extern "C" {
 
 fn main() {
     unsafe { miri_start_panic(&mut 0) }
-    //~^ ERROR unwinding past a stack frame that does not allow unwinding
+    //~^ ERROR: unwinding past a stack frame that does not allow unwinding
 }

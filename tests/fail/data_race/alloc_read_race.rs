@@ -1,5 +1,5 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
-// compile-flags: -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
+//@compile-flags: -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
 #![feature(new_uninit)]
 
 use std::mem::MaybeUninit;
@@ -38,7 +38,7 @@ pub fn main() {
             let pointer = &*ptr.0;
 
             // Note: could also error due to reading uninitialized memory, but the data-race detector triggers first.
-            *pointer.load(Ordering::Relaxed) //~ ERROR Data race detected between Read on thread `<unnamed>` and Allocate on thread `<unnamed>`
+            *pointer.load(Ordering::Relaxed) //~ ERROR: Data race detected between Read on thread `<unnamed>` and Allocate on thread `<unnamed>`
         });
 
         j1.join().unwrap();

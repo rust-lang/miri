@@ -25,11 +25,11 @@ fn issue_2156() {
 use std::mem;
 
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR encountered a dangling reference (address $HEX is unallocated)
+    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR: encountered a dangling reference (address $HEX is unallocated)
 }
     ";
     let path = Path::new("$DIR/<dummy>");
-    let comments = Comments::parse(path, s);
+    let comments = Comments::parse(path, s).unwrap();
     let mut errors = vec![];
     let config = config();
     let messages = vec![
@@ -57,10 +57,10 @@ fn find_pattern() {
 use std::mem;
 
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR encountered a dangling reference (address 0x10 is unallocated)
+    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR: encountered a dangling reference (address 0x10 is unallocated)
 }
     ";
-    let comments = Comments::parse(Path::new("<dummy>"), s);
+    let comments = Comments::parse(Path::new("<dummy>"), s).unwrap();
     let config = config();
     {
         let messages = vec![vec![], vec![], vec![], vec![], vec![], vec![
@@ -149,11 +149,11 @@ fn duplicate_pattern() {
 use std::mem;
 
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR encountered a dangling reference (address 0x10 is unallocated)
-    //~^ ERROR encountered a dangling reference (address 0x10 is unallocated)
+    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR: encountered a dangling reference (address 0x10 is unallocated)
+    //~^ ERROR: encountered a dangling reference (address 0x10 is unallocated)
 }
     ";
-    let comments = Comments::parse(Path::new("<dummy>"), s);
+    let comments = Comments::parse(Path::new("<dummy>"), s).unwrap();
     let config = config();
     let messages = vec![
         vec![], vec![], vec![], vec![], vec![],
@@ -178,10 +178,10 @@ fn missing_pattern() {
 use std::mem;
 
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR encountered a dangling reference (address 0x10 is unallocated)
+    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR: encountered a dangling reference (address 0x10 is unallocated)
 }
     ";
-    let comments = Comments::parse(Path::new("<dummy>"), s);
+    let comments = Comments::parse(Path::new("<dummy>"), s).unwrap();
     let config = config();
     let messages = vec![
         vec![], vec![], vec![], vec![], vec![],
@@ -210,11 +210,11 @@ fn missing_warn_pattern() {
 use std::mem;
 
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR encountered a dangling reference (address 0x10 is unallocated)
-    //~^ WARN cake
+    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR: encountered a dangling reference (address 0x10 is unallocated)
+    //~^ WARN: cake
 }
     ";
-    let comments = Comments::parse(Path::new("<dummy>"), s);
+    let comments = Comments::parse(Path::new("<dummy>"), s).unwrap();
     let config = config();
     let messages= vec![
         vec![],
@@ -253,13 +253,13 @@ fn main() {
 fn missing_implicit_warn_pattern() {
     let s = r"
 use std::mem;
-
+//@require-annotations-for-level: ERROR
 fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR encountered a dangling reference (address 0x10 is unallocated)
-    //~^ cake
+    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ ERROR: encountered a dangling reference (address 0x10 is unallocated)
+    //~^ WARN: cake
 }
     ";
-    let comments = Comments::parse(Path::new("<dummy>"), s);
+    let comments = Comments::parse(Path::new("<dummy>"), s).unwrap();
     let config = config();
     let messages = vec![
         vec![],
@@ -286,38 +286,6 @@ fn main() {
     check_annotations(messages, vec![], Path::new("moobar"), &mut errors, &config, "", &comments);
     match &errors[..] {
         [] => {}
-        _ => panic!("{:#?}", errors),
-    }
-}
-
-#[test]
-fn implicit_err_pattern() {
-    let s = r"
-use std::mem;
-
-fn main() {
-    let _x: &i32 = unsafe { mem::transmute(16usize) }; //~ encountered a dangling reference (address 0x10 is unallocated)
-}
-    ";
-    let comments = Comments::parse(Path::new("<dummy>"), s);
-    let config = config();
-    let messages = vec![
-        vec![],
-        vec![],
-        vec![],
-        vec![],
-        vec![],
-        vec![
-            Message {
-                message: "Undefined Behavior: type validation failed: encountered a dangling reference (address 0x10 is unallocated)".to_string(),
-                level: Level::Error,
-            },
-        ],
-    ];
-    let mut errors = vec![];
-    check_annotations(messages, vec![], Path::new("moobar"), &mut errors, &config, "", &comments);
-    match &errors[..] {
-        [Error::ErrorPatternWithoutErrorAnnotation(_, 5)] => {}
         _ => panic!("{:#?}", errors),
     }
 }

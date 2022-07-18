@@ -1,4 +1,6 @@
-// ignore-windows: Concurrency on Windows is not supported yet.
+// We want to control preemption here.
+//@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-windows: Concurrency on Windows is not supported yet.
 #![feature(core_intrinsics)]
 
 use std::intrinsics;
@@ -22,7 +24,7 @@ pub fn main() {
 
         let j2 = spawn(move || {
             //Equivalent to: (&*c.0).load(Ordering::SeqCst)
-            intrinsics::atomic_load_seqcst(c.0 as *mut usize) //~ ERROR Data race detected between Atomic Load on thread `<unnamed>` and Write on thread `<unnamed>`
+            intrinsics::atomic_load_seqcst(c.0 as *mut usize) //~ ERROR: Data race detected between Atomic Load on thread `<unnamed>` and Write on thread `<unnamed>`
         });
 
         j1.join().unwrap();

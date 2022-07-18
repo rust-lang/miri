@@ -2,13 +2,13 @@ use colored::*;
 use regex::Regex;
 use std::env;
 use std::path::PathBuf;
-use ui_test::{Config, Mode, OutputConflictHandling};
+use ui_test::{color_eyre::Result, Config, Mode, OutputConflictHandling};
 
 fn miri_path() -> PathBuf {
     PathBuf::from(option_env!("MIRI").unwrap_or(env!("CARGO_BIN_EXE_miri")))
 }
 
-fn run_tests(mode: Mode, path: &str, target: Option<String>) {
+fn run_tests(mode: Mode, path: &str, target: Option<String>) -> Result<()> {
     let in_rustc_test_suite = option_env!("RUSTC_STAGE").is_some();
 
     // Add some flags we always want.
@@ -19,9 +19,10 @@ fn run_tests(mode: Mode, path: &str, target: Option<String>) {
         // Less aggressive warnings to make the rustc toolstate management less painful.
         // (We often get warnings when e.g. a feature gets stabilized or some lint gets added/improved.)
         flags.push("-Astable-features".to_owned());
+        flags.push("-Aunused".to_owned());
     } else {
         flags.push("-Dwarnings".to_owned());
-        flags.push("-Dunused".to_owned()); // overwrite the -Aunused in compiletest-rs
+        flags.push("-Dunused".to_owned());
     }
     if let Ok(sysroot) = env::var("MIRI_SYSROOT") {
         flags.push("--sysroot".to_string());
@@ -97,7 +98,7 @@ regexes! {
     // erase specific alignments
     "alignment [0-9]+"               => "alignment ALIGN",
     // erase thread caller ids
-    r"\(call [0-9]+\)"              => "(call ID)",
+    r"call [0-9]+"                  => "call ID",
     // erase platform module paths
     "sys::[a-z]+::"                  => "sys::PLATFORM::",
     // Windows file paths
@@ -108,7 +109,7 @@ regexes! {
     "sys/[a-z]+/"                    => "sys/PLATFORM/",
 }
 
-fn ui(mode: Mode, path: &str) {
+fn ui(mode: Mode, path: &str) -> Result<()> {
     let target = get_target();
 
     let msg = format!(
@@ -117,20 +118,24 @@ fn ui(mode: Mode, path: &str) {
     );
     eprintln!("{}", msg.green().bold());
 
-    run_tests(mode, path, target);
+    run_tests(mode, path, target)
 }
 
 fn get_target() -> Option<String> {
     env::var("MIRI_TEST_TARGET").ok()
 }
 
-fn main() {
+fn main() -> Result<()> {
+    ui_test::color_eyre::install()?;
+
     // Add a test env var to do environment communication tests.
     env::set_var("MIRI_ENV_VAR_TEST", "0");
     // Let the tests know where to store temp files (they might run for a different target, which can make this hard to find).
     env::set_var("MIRI_TEMP", env::temp_dir());
 
-    ui(Mode::Pass, "tests/pass");
-    ui(Mode::Panic, "tests/panic");
-    ui(Mode::Fail, "tests/fail");
+    ui(Mode::Pass, "tests/pass")?;
+    ui(Mode::Panic, "tests/panic")?;
+    ui(Mode::Fail, "tests/fail")?;
+
+    Ok(())
 }

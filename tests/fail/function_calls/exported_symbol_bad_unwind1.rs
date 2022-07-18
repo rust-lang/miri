@@ -1,4 +1,4 @@
-// compile-flags: -Zmiri-disable-abi-check
+//@compile-flags: -Zmiri-disable-abi-check
 #![feature(c_unwind)]
 
 #[no_mangle]
@@ -11,5 +11,5 @@ fn main() {
         fn unwind();
     }
     unsafe { unwind() }
-    //~^ ERROR unwinding past a stack frame that does not allow unwinding
+    //~^ ERROR: unwinding past a stack frame that does not allow unwinding
 }

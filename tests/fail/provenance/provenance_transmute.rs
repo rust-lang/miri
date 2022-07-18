@@ -1,4 +1,4 @@
-// compile-flags: -Zmiri-permissive-provenance
+//@compile-flags: -Zmiri-permissive-provenance
 #![feature(strict_provenance)]
 
 use std::mem;
@@ -13,7 +13,7 @@ unsafe fn deref(left: *const u8, right: *const u8) {
         // The compiler is allowed to replace `left_int` by `right_int` here...
         let left_ptr: *const u8 = mem::transmute(left_int);
         // ...which however means here it could be dereferencing the wrong pointer.
-        let _val = *left_ptr; //~ERROR dereferencing pointer failed
+        let _val = *left_ptr; //~ERROR: dereferencing pointer failed
     }
 }
 

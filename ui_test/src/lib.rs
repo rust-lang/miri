@@ -7,14 +7,16 @@ use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+pub use color_eyre;
+use color_eyre::eyre::Result;
 use colored::*;
-use comments::ErrorMatch;
+use parser::{ErrorMatch, Pattern};
 use regex::Regex;
 use rustc_stderr::{Level, Message};
 
-use crate::comments::{Comments, Condition};
+use crate::parser::{Comments, Condition};
 
-mod comments;
+mod parser;
 mod rustc_stderr;
 #[cfg(test)]
 mod tests;
@@ -51,7 +53,7 @@ pub enum OutputConflictHandling {
 
 pub type Filter = Vec<(Regex, &'static str)>;
 
-pub fn run_tests(config: Config) {
+pub fn run_tests(config: Config) -> Result<()> {
     eprintln!("   Compiler flags: {:?}", config.args);
 
     // Get the triple with which to run the tests
@@ -66,7 +68,7 @@ pub fn run_tests(config: Config) {
     let ignored = AtomicUsize::default();
     let filtered = AtomicUsize::default();
 
-    crossbeam::scope(|s| {
+    crossbeam::scope(|s| -> Result<()> {
         // Create a thread that is in charge of walking the directory and submitting jobs.
         // It closes the channel when it is done.
         s.spawn(|_| {
@@ -92,9 +94,11 @@ pub fn run_tests(config: Config) {
             drop(submit);
         });
 
+        let mut threads = vec![];
+
         // Create N worker threads that receive files to test.
         for _ in 0..std::thread::available_parallelism().unwrap().get() {
-            s.spawn(|_| {
+            threads.push(s.spawn(|_| -> Result<()> {
                 for path in &receive {
                     if !config.path_filter.is_empty() {
                         let path_display = path.display().to_string();
@@ -103,9 +107,9 @@ pub fn run_tests(config: Config) {
                             continue;
                         }
                     }
-                    let comments = Comments::parse_file(&path);
+                    let comments = Comments::parse_file(&path)?;
                     // Ignore file if only/ignore rules do (not) apply
-                    if !test_file_conditions(&comments, &target) {
+                    if !test_file_conditions(&comments, &target, &config) {
                         ignored.fetch_add(1, Ordering::Relaxed);
                         eprintln!(
                             "{} ... {}",
@@ -142,10 +146,15 @@ pub fn run_tests(config: Config) {
                         }
                     }
                 }
-            });
+                Ok(())
+            }));
         }
+        for thread in threads {
+            thread.join().unwrap()?;
+        }
+        Ok(())
     })
-    .unwrap();
+    .unwrap()?;
 
     // Print all errors in a single thread to show reliable output
     let failures = failures.into_inner().unwrap();
@@ -168,7 +177,12 @@ pub fn run_tests(config: Config) {
                 match error {
                     Error::ExitStatus(mode, exit_status) => eprintln!("{mode:?} got {exit_status}"),
                     Error::PatternNotFound { pattern, definition_line } => {
-                        eprintln!("`{pattern}` {} in stderr output", "not found".red());
+                        match pattern {
+                            Pattern::SubString(s) =>
+                                eprintln!("substring `{s}` {} in stderr output", "not found".red()),
+                            Pattern::Regex(r) =>
+                                eprintln!("`/{r}/` does {} stderr output", "not match".red()),
+                        }
                         eprintln!(
                             "expected because of pattern here: {}:{definition_line}",
                             path.display().to_string().bold()
@@ -206,12 +220,6 @@ pub fn run_tests(config: Config) {
                             eprintln!("    {level:?}: {message}")
                         }
                     }
-                    Error::ErrorPatternWithoutErrorAnnotation(path, line) => {
-                        eprintln!(
-                            "Annotation at {}:{line} matched an error diagnostic but did not have `ERROR` before its message",
-                            path.display()
-                        );
-                    }
                 }
                 eprintln!();
             }
@@ -246,6 +254,7 @@ pub fn run_tests(config: Config) {
         filtered.to_string().yellow(),
     );
     eprintln!();
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -253,7 +262,7 @@ enum Error {
     /// Got an invalid exit status for the given mode.
     ExitStatus(Mode, ExitStatus),
     PatternNotFound {
-        pattern: String,
+        pattern: Pattern,
         definition_line: usize,
     },
     /// A ui test checking for failure does not have any failure patterns
@@ -270,7 +279,6 @@ enum Error {
         msgs: Vec<Message>,
         path: Option<(PathBuf, usize)>,
     },
-    ErrorPatternWithoutErrorAnnotation(PathBuf, usize),
 }
 
 type Errors = Vec<Error>;
@@ -377,18 +385,15 @@ fn check_annotations(
 ) {
     if let Some((ref error_pattern, definition_line)) = comments.error_pattern {
         // first check the diagnostics messages outside of our file. We check this first, so that
-        // you can mix in-file annotations with // error-pattern annotations, even if there is overlap
+        // you can mix in-file annotations with //@error-pattern annotations, even if there is overlap
         // in the messages.
         if let Some(i) = messages_from_unknown_file_or_line
             .iter()
-            .position(|msg| msg.message.contains(error_pattern))
+            .position(|msg| error_pattern.matches(&msg.message))
         {
             messages_from_unknown_file_or_line.remove(i);
         } else {
-            errors.push(Error::PatternNotFound {
-                pattern: error_pattern.to_string(),
-                definition_line,
-            });
+            errors.push(Error::PatternNotFound { pattern: error_pattern.clone(), definition_line });
         }
     }
 
@@ -396,7 +401,7 @@ fn check_annotations(
     // We will ensure that *all* diagnostics of level at least `lowest_annotation_level`
     // are matched.
     let mut lowest_annotation_level = Level::Error;
-    for &ErrorMatch { ref matched, revision: ref rev, definition_line, line, level } in
+    for &ErrorMatch { ref pattern, revision: ref rev, definition_line, line, level } in
         &comments.error_matches
     {
         if let Some(rev) = rev {
@@ -404,36 +409,31 @@ fn check_annotations(
                 continue;
             }
         }
-        if let Some(level) = level {
-            // If we found a diagnostic with a level annotation, make sure that all
-            // diagnostics of that level have annotations, even if we don't end up finding a matching diagnostic
-            // for this pattern.
-            lowest_annotation_level = std::cmp::min(lowest_annotation_level, level);
-        }
+
+        // If we found a diagnostic with a level annotation, make sure that all
+        // diagnostics of that level have annotations, even if we don't end up finding a matching diagnostic
+        // for this pattern.
+        lowest_annotation_level = std::cmp::min(lowest_annotation_level, level);
 
         if let Some(msgs) = messages.get_mut(line) {
-            let found = msgs.iter().position(|msg| {
-                msg.message.contains(matched)
-                    // in case there is no level on the annotation, match any level.
-                    && level.map_or(true, |level| {
-                        msg.level == level
-                    })
-            });
+            let found =
+                msgs.iter().position(|msg| pattern.matches(&msg.message) && msg.level == level);
             if let Some(found) = found {
-                let msg = msgs.remove(found);
-                if msg.level == Level::Error && level.is_none() {
-                    errors
-                        .push(Error::ErrorPatternWithoutErrorAnnotation(path.to_path_buf(), line));
-                }
+                msgs.remove(found);
                 continue;
             }
         }
 
-        errors.push(Error::PatternNotFound { pattern: matched.to_string(), definition_line });
+        errors.push(Error::PatternNotFound { pattern: pattern.clone(), definition_line });
     }
 
     let filter = |msgs: Vec<Message>| -> Vec<_> {
-        msgs.into_iter().filter(|msg| msg.level >= lowest_annotation_level).collect()
+        msgs.into_iter()
+            .filter(|msg| {
+                msg.level
+                    >= comments.require_annotations_for_level.unwrap_or(lowest_annotation_level)
+            })
+            .collect()
     };
 
     let messages_from_unknown_file_or_line = filter(messages_from_unknown_file_or_line);
@@ -499,19 +499,20 @@ fn output_path(path: &Path, comments: &Comments, kind: String, target: &str) -> 
     path.with_extension(kind)
 }
 
-fn test_condition(condition: &Condition, target: &str) -> bool {
+fn test_condition(condition: &Condition, target: &str, config: &Config) -> bool {
     match condition {
         Condition::Bitwidth(bits) => get_pointer_width(target) == *bits,
         Condition::Target(t) => target.contains(t),
+        Condition::OnHost => config.target.is_none(),
     }
 }
 
 /// Returns whether according to the in-file conditions, this file should be run.
-fn test_file_conditions(comments: &Comments, target: &str) -> bool {
-    if comments.ignore.iter().any(|c| test_condition(c, target)) {
+fn test_file_conditions(comments: &Comments, target: &str, config: &Config) -> bool {
+    if comments.ignore.iter().any(|c| test_condition(c, target, config)) {
         return false;
     }
-    comments.only.iter().all(|c| test_condition(c, target))
+    comments.only.iter().all(|c| test_condition(c, target, config))
 }
 
 // Taken 1:1 from compiletest-rs
