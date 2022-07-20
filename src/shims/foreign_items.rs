@@ -24,7 +24,6 @@ use rustc_target::{
 use super::backtrace::EvalContextExt as _;
 use crate::helpers::{convert::Truncate, target_os_is_unix};
 use crate::shims::ffi_support::EvalContextExt as _;
-use crate::shims::ffi_support::ExternalCFuncDeclRep;
 use crate::*;
 
 /// Returned by `emulate_foreign_item_by_name`.
@@ -300,7 +299,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         };
 
         // Second: functions that return immediately.
-        match this.emulate_foreign_item_by_name(def_id, link_name, abi, args, dest)? {
+        match this.emulate_foreign_item_by_name(link_name, abi, args, dest)? {
             EmulateByNameResult::NeedsJumping => {
                 trace!("{:?}", this.dump_place(**dest));
                 this.go_to_block(ret);
@@ -353,7 +352,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     /// Emulates calling a foreign item using its name.
     fn emulate_foreign_item_by_name(
         &mut self,
-        def_id: DefId,
         link_name: Symbol,
         abi: Abi,
         args: &[OpTy<'tcx, Tag>],
@@ -361,21 +359,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     ) -> InterpResult<'tcx, EmulateByNameResult<'mir, 'tcx>> {
         let this = self.eval_context_mut();
 
-        let tcx = this.tcx.tcx;
-
         // First deal with any external C functions in linked .so file
         // (if any SO file is specified).
         if this.machine.external_so_lib.as_ref().is_some() {
-            let fn_sig = &tcx.fn_sig(def_id);
-            let extern_c_fct_rep = ExternalCFuncDeclRep {
-                link_name,
-                inputs_types: fn_sig.inputs().skip_binder(),
-                output_type: fn_sig.output().skip_binder(),
-            };
             // An Ok(false) here means that the function being called was not exported
             // by the specified SO file; we should continue and check if it corresponds to
             // a provided shim.
-            if this.call_and_add_external_c_fct_to_context(extern_c_fct_rep, dest, args)? {
+            if this.call_and_add_external_c_fct_to_context(link_name, dest, args)? {
                 return Ok(EmulateByNameResult::NeedsJumping);
             }
         }

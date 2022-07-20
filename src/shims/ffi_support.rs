@@ -65,7 +65,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     /// store output, depending on return type in the function signature.
     fn call_external_c_and_store_return<'a>(
         &mut self,
-        external_fct_defn: ExternalCFuncDeclRep<'tcx>,
+        link_name: Symbol,
         dest: &PlaceTy<'tcx, Tag>,
         ptr: CodePtr,
         libffi_args: Vec<libffi::high::Arg<'a>>,
@@ -79,7 +79,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             // If the return type of a function is a primitive integer type,
             // then call the function (`ptr`) with arguments `libffi_args`, store the return value as the specified
             // primitive integer type, and then write this value out to the miri memory as an integer.
-            match external_fct_defn.output_type.kind() {
+            match dest.layout.ty.kind() {
                 // ints
                 TyKind::Int(IntTy::I8) => {
                     let x = call::<i8>(ptr, libffi_args.as_slice());
@@ -136,19 +136,17 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     this.write_int(u64::try_from(x).unwrap(), dest)?;
                     return Ok(());
                 }
+                // Functions with no declared return type (i.e., the default return)
+                // have the output_type `Tuple([])`.
+                TyKind::Tuple(t_list) =>
+                    if t_list.len() == 0 {
+                        call::<()>(ptr, libffi_args.as_slice());
+                        return Ok(());
+                    },
                 _ => {}
             }
-            // Functions with no declared return type (i.e., the default return)
-            // have the output_type `Tuple([])`.
-            if let TyKind::Tuple(t_list) = external_fct_defn.output_type.kind() && t_list.len() == 0{
-                call::<()>(ptr, libffi_args.as_slice());
-                return Ok(());
-            }
             // TODO ellen! deal with all the other return types
-            throw_unsup_format!(
-                "unsupported return type to external C function: {:?}",
-                external_fct_defn.link_name
-            );
+            throw_unsup_format!("unsupported return type to external C function: {:?}", link_name);
         }
     }
 
@@ -159,12 +157,11 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     /// can be stored in Miri internal memory.
     fn call_and_add_external_c_fct_to_context(
         &mut self,
-        external_fct_defn: ExternalCFuncDeclRep<'tcx>,
+        link_name: Symbol,
         dest: &PlaceTy<'tcx, Tag>,
         args: &[OpTy<'tcx, Tag>],
     ) -> InterpResult<'tcx, bool> {
         let this = self.eval_context_mut();
-        let link_name = external_fct_defn.link_name;
         let (lib, lib_path) = this.machine.external_so_lib.as_ref().unwrap();
 
         // Load the C function from the library.
@@ -196,22 +193,18 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     != lib_path.to_str().unwrap()
                 {
                     return Ok(false);
-                } 
+                }
             }
         }
 
         // Get the function arguments, and convert them to `libffi`-compatible form.
-        if args.len() != external_fct_defn.inputs_types.len() {
-            throw_ub_format!(
-                "calling function {:?} with {} arguments; expected {}",
-                link_name,
-                args.len(),
-                external_fct_defn.inputs_types.len()
-            );
-        }
         let mut libffi_args = Vec::<CArg>::with_capacity(args.len());
-        for (cur_arg, arg_type) in args.iter().zip(external_fct_defn.inputs_types.iter()) {
-            libffi_args.push(Self::scalar_to_carg(this.read_scalar(cur_arg)?, arg_type, this)?);
+        for cur_arg in args.iter() {
+            libffi_args.push(Self::scalar_to_carg(
+                this.read_scalar(cur_arg)?,
+                &cur_arg.layout.ty,
+                this,
+            )?);
         }
 
         // Convert them to `libffi::high::Arg` type.
@@ -223,20 +216,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         // Code pointer to C function.
         let ptr = CodePtr(*func.deref() as *mut _);
         // Call the functio and store output, depending on return type in the function signature.
-        self.call_external_c_and_store_return(external_fct_defn, dest, ptr, libffi_args)?;
+        self.call_external_c_and_store_return(link_name, dest, ptr, libffi_args)?;
         Ok(true)
     }
-}
-
-#[derive(Debug)]
-/// Signature of an external C function.
-pub struct ExternalCFuncDeclRep<'tcx> {
-    /// Function name.
-    pub link_name: Symbol,
-    /// Argument types.
-    pub inputs_types: &'tcx [Ty<'tcx>],
-    /// Return type.
-    pub output_type: Ty<'tcx>,
 }
 
 #[derive(Debug, Clone)]
