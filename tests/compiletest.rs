@@ -41,7 +41,7 @@ fn run_tests(mode: Mode, path: &str, target: Option<String>) -> Result<()> {
     }
 
     // If we're on linux, then build the shared object file for testing external C function calls.
-    if env::consts::OS == "linux" {
+    if cfg!(target_os = "linux") {
         let cc = option_env!("CC").unwrap_or("cc");
         Command::new(cc)
             .args([
