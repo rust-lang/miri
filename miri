@@ -156,13 +156,6 @@ test|bless)
     # First build and get a sysroot.
     $CARGO build $CARGO_EXTRA_FLAGS --manifest-path "$MIRIDIR"/Cargo.toml
     find_sysroot
-    # if we're on linux
-    if [[ $OSTYPE == 'linux'* ]]; then
-        # rebuild the C test shared object file if it's not there
-        if [ ! -f "tests/external_C/libtestlib.so" ]; then
-            $CC -shared -o tests/external_C/libtestlib.so tests/external_C/test.c
-        fi
-    fi
     if [ "$COMMAND" = "bless" ]; then
         export MIRI_BLESS="Gesundheit"
     fi

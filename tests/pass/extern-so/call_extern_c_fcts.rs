@@ -1,6 +1,6 @@
 //@only-target-linux
 //@only-on-host
-//@compile-flags: -Zmiri-external_c_so_file=tests/external_C/libtestlib.so
+//@compile-flags: -Zmiri-extern-so-file=tests/extern-so/libtestlib.so
 
 extern "C" {
     fn add_one_int(x: i32) -> i32;
@@ -21,6 +21,7 @@ extern "C" {
     ) -> i32;
     fn add_short_to_long(x: i16, y: i64) -> i64;
     fn get_unsigned_int() -> u32;
+    fn printer();
 }
 
 fn main() {
@@ -39,5 +40,9 @@ fn main() {
 
         // test function that returns -10 as an unsigned int
         assert_eq!(get_unsigned_int(), (-10i32) as u32);
+
+        // test void function that prints from C -- call it twice
+        printer();
+        printer();
     }
 }

@@ -340,7 +340,7 @@ pub struct Evaluator<'mir, 'tcx> {
     pub(crate) since_progress_report: u32,
 
     /// Handle of the optional C shared object file
-    pub external_c_so_lib: Option<libloading::Library>,
+    pub external_so_lib: Option<(libloading::Library, std::path::PathBuf)>,
 }
 
 impl<'mir, 'tcx> Evaluator<'mir, 'tcx> {
@@ -400,13 +400,17 @@ impl<'mir, 'tcx> Evaluator<'mir, 'tcx> {
             preemption_rate: config.preemption_rate,
             report_progress: config.report_progress,
             since_progress_report: 0,
-            external_c_so_lib: config.external_c_so_file.as_ref().map(|lib_file_path| {
-                // Note: it is the user's responsibility to provide a correct SO file
-                // and if this condition is met, then this library loading is a safe operation.
-                unsafe {
-                    libloading::Library::new(lib_file_path)
-                        .expect("Failed to read specified shared object file")
-                }
+            external_so_lib: config.external_so_file.as_ref().map(|lib_file_path| {
+                // Note: it is the user's responsibility to provide a correct SO file.
+                // WATCH OUT: If an invalid/incorrect SO file is specified, this can cause
+                // undefined behaviour in Miri itself!
+                (
+                    unsafe {
+                        libloading::Library::new(lib_file_path)
+                            .expect("Failed to read specified shared object file")
+                    },
+                    lib_file_path.clone(),
+                )
             }),
         }
     }

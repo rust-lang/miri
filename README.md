@@ -285,6 +285,12 @@ environment variable. We first document the most relevant and most commonly used
   `TERM` environment variable is excluded by default to [speed up the test
   harness](https://github.com/rust-lang/miri/issues/1702). This has no effect unless
   `-Zmiri-disable-isolation` is also set.
+* `-Zmiri-extern-so-file=<path to a shared object file>` is an experimental flag for providing support
+  for FFI calls.
+  **WARNING**: If an invalid/incorrect SO file is specified, this can cause undefined behaviour in Miri itself!
+  This is [work in progress](https://github.com/rust-lang/miri/pull/2363); 
+  current support is for functions with integer arguments/returns.
+  Follow [the discussion on supporting other types](https://github.com/rust-lang/miri/issues/2365). 
 * `-Zmiri-env-forward=<var>` forwards the `var` environment variable to the interpreted program. Can
   be used multiple times to forward several variables. This takes precedence over
   `-Zmiri-env-exclude`: if a variable is both forwarded and exluced, it *will* get forwarded. This

@@ -4,10 +4,6 @@ int add_one_int(int x) {
   return 2 + x;
 }
 
-double add_int_get_float(int x) {
-  return 2.75 + x;
-}
-
 void printer() {
   printf("printing from C\n");
 }

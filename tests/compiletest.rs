@@ -2,6 +2,7 @@ use colored::*;
 use regex::Regex;
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 use ui_test::{color_eyre::Result, Config, Mode, OutputConflictHandling};
 
 fn miri_path() -> PathBuf {
@@ -37,6 +38,25 @@ fn run_tests(mode: Mode, path: &str, target: Option<String>) -> Result<()> {
     if let Some(target) = &target {
         flags.push("--target".to_string());
         flags.push(target.clone());
+    }
+
+    // If we're on linux, then build the shared object file for testing external C function calls.
+    if env::consts::OS == "linux" {
+        let cc = option_env!("CC").unwrap_or("cc");
+        Command::new(cc)
+            .args([
+                "-shared",
+                "-o",
+                "tests/extern-so/libtestlib.so",
+                "tests/extern-so/test.c",
+                // Only add the functions specified in libcode.version to the shared object file.
+                // This is to avoid automatically adding `malloc`, etc.
+                // Source: https://anadoxin.org/blog/control-over-symbol-exports-in-gcc.html/
+                "-fPIC",
+                "-Wl,--version-script=tests/extern-so/libcode.version",
+            ])
+            .output()
+            .expect("failed to generate shared object file for testing external C function calls");
     }
 
     let skip_ui_checks = env::var_os("MIRI_SKIP_UI_CHECKS").is_some();

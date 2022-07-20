@@ -22,8 +22,9 @@ use rustc_target::{
 };
 
 use super::backtrace::EvalContextExt as _;
-use crate::c_ffi_support::ExternalCFuncDeclRep;
 use crate::helpers::{convert::Truncate, target_os_is_unix};
+use crate::shims::ffi_support::EvalContextExt as _;
+use crate::shims::ffi_support::ExternalCFuncDeclRep;
 use crate::*;
 
 /// Returned by `emulate_foreign_item_by_name`.
@@ -34,8 +35,6 @@ pub enum EmulateByNameResult<'mir, 'tcx> {
     AlreadyJumped,
     /// A MIR body has been found for the function.
     MirBody(&'mir mir::Body<'tcx>, ty::Instance<'tcx>),
-    /// Executed an external C call.
-    ExecutedExternalCCall,
     /// The item is not supported.
     NotSupported,
 }
@@ -302,7 +301,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
         // Second: functions that return immediately.
         match this.emulate_foreign_item_by_name(def_id, link_name, abi, args, dest)? {
-            EmulateByNameResult::NeedsJumping | EmulateByNameResult::ExecutedExternalCCall => {
+            EmulateByNameResult::NeedsJumping => {
                 trace!("{:?}", this.dump_place(**dest));
                 this.go_to_block(ret);
             }
@@ -313,9 +312,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     return Ok(Some(body));
                 }
 
-                this.handle_unsupported(
-                    format!("can't call foreign function: {}; try specifying a shared object file with the flag -Zmiri-external_c_so_file=path/to/SOfile", 
-                             link_name))?;
+                this.handle_unsupported(format!("can't call foreign function: {}", link_name))?;
                 return Ok(None);
             }
         }
@@ -368,25 +365,18 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
 
         // First deal with any external C functions in linked .so file
         // (if any SO file is specified).
-        if this.machine.external_c_so_lib.as_ref().is_some() {
-            if let Some(local_id) = def_id.as_local() {
-                if let Some(extern_c_fct_rep) = ExternalCFuncDeclRep::from_hir_node(
-                    &tcx.hir().get(tcx.hir().local_def_id_to_hir_id(local_id)),
-                    link_name,
-                ) {
-                    // An Ok(false) here means that the function being called was not exported
-                    // by the specified SO file; we should continue and check if it corresponds to
-                    // a provided shim.
-
-                    // TODO ellen! For now, continue to try the shims if there was an error in calling
-                    // the external function.
-                    // As discussed: https://github.com/rust-lang/miri/pull/2363#discussion_r922392879
-                    if let Ok(true) =
-                        this.call_and_add_external_c_fct_to_context(extern_c_fct_rep, dest, args)
-                    {
-                        return Ok(EmulateByNameResult::ExecutedExternalCCall);
-                    }
-                }
+        if this.machine.external_so_lib.as_ref().is_some() {
+            let fn_sig = &tcx.fn_sig(def_id);
+            let extern_c_fct_rep = ExternalCFuncDeclRep {
+                link_name,
+                inputs_types: fn_sig.inputs().skip_binder(),
+                output_type: fn_sig.output().skip_binder(),
+            };
+            // An Ok(false) here means that the function being called was not exported
+            // by the specified SO file; we should continue and check if it corresponds to
+            // a provided shim.
+            if this.call_and_add_external_c_fct_to_context(extern_c_fct_rep, dest, args)? {
+                return Ok(EmulateByNameResult::NeedsJumping);
             }
         }
 
