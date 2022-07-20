@@ -4,6 +4,10 @@ use diff::{chars, lines, Result, Result::*};
 #[derive(Default)]
 struct DiffState<'a> {
     skipped_lines: usize,
+    /// When we skip a line, remember it, in case
+    /// we end up only skipping one line. In that case we just
+    /// print the line instead of `... skipped one line ...`
+    last_skipped_line: Option<&'a str>,
     /// When we see a removed line, we don't print it, we
     /// keep it around to compare it with the next added line.
     prev_left: Option<&'a str>,
@@ -11,8 +15,10 @@ struct DiffState<'a> {
 
 impl<'a> DiffState<'a> {
     fn print_skip(&mut self) {
-        if self.skipped_lines != 0 {
-            eprintln!("... {} lines skipped", self.skipped_lines);
+        match self.skipped_lines {
+            0 => {}
+            1 => eprintln!(" {}", self.last_skipped_line.unwrap()),
+            _ => eprintln!("... {} lines skipped", self.skipped_lines),
         }
         self.skipped_lines = 0;
     }
@@ -38,8 +44,9 @@ impl<'a> DiffState<'a> {
                 self.print_prev();
                 self.prev_left = Some(l);
             }
-            Both(..) => {
+            Both(l, _) => {
                 self.print_prev();
+                self.last_skipped_line = Some(l);
                 self.skipped_lines += 1
             }
             Right(r) => {
