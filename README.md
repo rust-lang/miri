@@ -287,9 +287,11 @@ environment variable. We first document the most relevant and most commonly used
   `-Zmiri-disable-isolation` is also set.
 * `-Zmiri-extern-so-file=<path to a shared object file>` is an experimental flag for providing support
   for FFI calls.
-  **WARNING**: If an invalid/incorrect SO file is specified, this can cause undefined behaviour in Miri itself!
-  This is [work in progress](https://github.com/rust-lang/miri/pull/2363); 
-  current support is for functions with integer arguments/returns.
+  **WARNING**: If an invalid/incorrect `.so` file is specified, this can cause undefined behaviour in Miri itself!
+  And of course, Miri cannot do any checks on the actions taken by the external code.
+  This is **work in progress**; currently, only integer arguments and return values are
+  supported (and no, pointer/integer casts to work around this limitation will not work;
+  they will fail horribly).
   Follow [the discussion on supporting other types](https://github.com/rust-lang/miri/issues/2365). 
 * `-Zmiri-env-forward=<var>` forwards the `var` environment variable to the interpreted program. Can
   be used multiple times to forward several variables. This takes precedence over

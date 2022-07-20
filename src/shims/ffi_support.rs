@@ -150,36 +150,27 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         }
     }
 
-    /// Call specified external C function, with supplied arguments.
-    /// Need to convert all the arguments from their hir representations to
-    /// a form compatible with C (through `libffi` call).
-    /// Then, convert return from the C call into a corresponding form that
-    /// can be stored in Miri internal memory.
-    fn call_and_add_external_c_fct_to_context(
-        &mut self,
-        link_name: Symbol,
-        dest: &PlaceTy<'tcx, Tag>,
-        args: &[OpTy<'tcx, Tag>],
-    ) -> InterpResult<'tcx, bool> {
+    /// Get the pointer to the function of the specified name in the shared object file,
+    /// if it exists. The function must be in the shared object file specified: we do *not*
+    /// return pointers to functions in dependencies of the library.  
+    fn get_func_ptr_explicitly_from_lib(&mut self, link_name: Symbol) -> Option<CodePtr> {
         let this = self.eval_context_mut();
+        // Try getting the function from the shared library.
         let (lib, lib_path) = this.machine.external_so_lib.as_ref().unwrap();
-
-        // Load the C function from the library.
-        // Because this is getting the C function from the shared object file
-        // it is not necessarily a sound operation, but there is no way around
-        // this and we've checked as much as we can.
         let func: libloading::Symbol<'_, unsafe extern "C" fn()> = unsafe {
             match lib.get(link_name.as_str().as_bytes()) {
                 Ok(x) => x,
                 Err(_) => {
-                    // Shared object file does not export this function -- try the shims next.
-                    return Ok(false);
+                    return None;
                 }
             }
         };
 
         // FIXME: this is a hack!
         // The `libloading` crate will automatically load system libraries like `libc`.
+        // On linux `libloading` is based on `dlsym`: https://docs.rs/libloading/0.7.3/src/libloading/os/unix/mod.rs.html#202
+        // and `dlsym`(https://linux.die.net/man/3/dlsym) looks through the dependency tree of the
+        // library if it can't find the symbol in the library itself.
         // So, in order to check if the function was actually found in the specified
         // `machine.external_so_lib` we need to check its `dli_fname` and compare it to
         // the specified SO file path.
@@ -192,10 +183,35 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 if std::ffi::CStr::from_ptr(info.assume_init().dli_fname).to_str().unwrap()
                     != lib_path.to_str().unwrap()
                 {
-                    return Ok(false);
+                    return None;
                 }
             }
         }
+        // Return a pointer to the function.
+        Some(CodePtr(*func.deref() as *mut _))
+    }
+
+    /// Call specified external C function, with supplied arguments.
+    /// Need to convert all the arguments from their hir representations to
+    /// a form compatible with C (through `libffi` call).
+    /// Then, convert return from the C call into a corresponding form that
+    /// can be stored in Miri internal memory.
+    fn call_and_add_external_c_fct_to_context(
+        &mut self,
+        link_name: Symbol,
+        dest: &PlaceTy<'tcx, Tag>,
+        args: &[OpTy<'tcx, Tag>],
+    ) -> InterpResult<'tcx, bool> {
+        // Get the pointer to the function in the shared object file if it exists.
+        let code_ptr = match self.get_func_ptr_explicitly_from_lib(link_name) {
+            Some(ptr) => ptr,
+            None => {
+                // Shared object file does not export this function -- try the shims next.
+                return Ok(false);
+            }
+        };
+
+        let this = self.eval_context_mut();
 
         // Get the function arguments, and convert them to `libffi`-compatible form.
         let mut libffi_args = Vec::<CArg>::with_capacity(args.len());
@@ -214,9 +230,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             .collect::<Vec<libffi::high::Arg<'_>>>();
 
         // Code pointer to C function.
-        let ptr = CodePtr(*func.deref() as *mut _);
-        // Call the functio and store output, depending on return type in the function signature.
-        self.call_external_c_and_store_return(link_name, dest, ptr, libffi_args)?;
+        // let ptr = CodePtr(*func.deref() as *mut _);
+        // Call the function and store output, depending on return type in the function signature.
+        self.call_external_c_and_store_return(link_name, dest, code_ptr, libffi_args)?;
         Ok(true)
     }
 }
