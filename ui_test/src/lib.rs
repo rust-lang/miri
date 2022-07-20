@@ -19,6 +19,7 @@ use crate::dependencies::build_dependencies;
 use crate::parser::{Comments, Condition};
 
 mod dependencies;
+mod diff;
 mod parser;
 mod rustc_stderr;
 #[cfg(test)]
@@ -261,8 +262,7 @@ pub fn run_tests(mut config: Config) -> Result<()> {
                         eprintln!("{}", "error pattern found in success test".red()),
                     Error::OutputDiffers { path, actual, expected } => {
                         eprintln!("actual output differed from expected {}", path.display());
-                        eprintln!("{}", pretty_assertions::StrComparison::new(expected, actual));
-                        eprintln!()
+                        diff::print_diff(expected, actual);
                     }
                     Error::ErrorsWithoutPattern { path: None, msgs } => {
                         eprintln!(
