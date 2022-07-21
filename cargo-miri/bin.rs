@@ -668,6 +668,9 @@ fn phase_cargo_miri(mut args: env::Args) {
             "WARNING: Ignoring `RUSTC` environment variable; set `MIRI` if you want to control the binary used as the driver."
         );
     }
+    // Work around a cargo bug where it ignores `RUSTC_WRAPPER`, so we just
+    // invoke ourselves directly and untangle the mess in `main`.
+    cmd.env("RUSTC", &cargo_miri_path);
 
     let runner_env_name =
         |triple: &str| format!("CARGO_TARGET_{}_RUNNER", triple.to_uppercase().replace('-', "_"));
@@ -1178,13 +1181,18 @@ fn main() {
 
     match args.next().as_deref() {
         Some("miri") => phase_cargo_miri(args),
-        Some("rustc") => phase_rustc(args, RustcPhase::Build),
+        // Work around a cargo bug where it ignores `RUSTC_WRAPPER`, so we get
+        // called ourselves and handle the special case for `rustc -vV`.
+        Some("-vV") => {
+            assert_eq!(args.next(), None);
+            phase_rustc(std::iter::once("-vV".into()), RustcPhase::Build)
+        }
         Some(arg) => {
-            // When both RUSTC_WRAPPER and RUSTC are set, cargo ends up invoking
-            // '$RUSTC_WRAPPER $RUSTC <args>'. So our `phase_rustc` check above might be ineffective, and we
-            // need another check here.
+            // Work around for the workaround for a cargo bug where it ignores `RUSTC_WRAPPER`,
+            // so we get called ourselves with ourselves as the first argument.
             if let Some(rustc) = std::env::var_os("RUSTC") {
-                if rustc == arg {
+                assert_eq!(rustc, std::env::current_exe().unwrap());
+                if arg == rustc {
                     return phase_rustc(args, RustcPhase::Build);
                 }
             }
