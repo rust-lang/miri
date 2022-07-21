@@ -18,7 +18,7 @@ impl<'a> DiffState<'a> {
         match self.skipped_lines {
             0 => {}
             1 => eprintln!(" {}", self.last_skipped_line.unwrap()),
-            _ => eprintln!("... {} lines skipped", self.skipped_lines),
+            _ => eprintln!("... {} lines skipped ...", self.skipped_lines),
         }
         self.skipped_lines = 0;
     }
@@ -101,10 +101,8 @@ impl<'a> DiffState<'a> {
         }
     }
 
-    fn finish(self) {
-        if self.skipped_lines != 0 {
-            eprintln!("... {} lines skipped ...", self.skipped_lines);
-        }
+    fn finish(mut self) {
+        self.print_skip();
         eprintln!()
     }
 }
