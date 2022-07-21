@@ -661,17 +661,6 @@ fn phase_cargo_miri(mut args: env::Args) {
         );
     }
     cmd.env("RUSTC_WRAPPER", &cargo_miri_path);
-    // Having both `RUSTC_WRAPPER` and `RUSTC` set does some odd things, so let's avoid that.
-    // See <https://github.com/rust-lang/miri/issues/2238>.
-    if env::var_os("RUSTC").is_some() && env::var_os("MIRI").is_none() {
-        println!(
-            "WARNING: Ignoring `RUSTC` environment variable; set `MIRI` if you want to control the binary used as the driver."
-        );
-    }
-
-    if env::var_os("RUSTC_STAGE").is_none() {
-        cmd.env_remove("RUSTC");
-    }
 
     let runner_env_name =
         |triple: &str| format!("CARGO_TARGET_{}_RUNNER", triple.to_uppercase().replace('-', "_"));
@@ -1184,19 +1173,21 @@ fn main() {
         Some("miri") => phase_cargo_miri(args),
         Some("rustc") => phase_rustc(args, RustcPhase::Build),
         Some(arg) => {
+            // When both RUSTC_WRAPPER and RUSTC are set, cargo ends up invoking
+            // '$RUSTC_WRAPPER $RUSTC <args>'. So our `phase_rustc` check above might be ineffective, and we
+            // need another check here.
+            if let Some(rustc) = std::env::var_os("RUSTC") {
+                if rustc == arg {
+                    return phase_rustc(args, RustcPhase::Build);
+                }
+            }
+
             // We have to distinguish the "runner" and "rustdoc" cases.
             // As runner, the first argument is the binary (a file that should exist, with an absolute path);
             // as rustdoc, the first argument is a flag (`--something`).
             let binary = Path::new(arg);
             if binary.exists() {
                 assert!(!arg.starts_with("--")); // not a flag
-                if let Some(rustc) = std::env::var_os("RUSTC") {
-                    if rustc == arg {
-                        // In bootstrap we can't rely on rustc just being named rustc
-                        assert!(std::env::var_os("RUSTC_STAGE").is_some());
-                        return phase_rustc(args, RustcPhase::Build);
-                    }
-                }
                 phase_runner(binary, args, RunnerPhase::Cargo);
             } else if arg.starts_with("--") {
                 phase_rustdoc(arg, args);
