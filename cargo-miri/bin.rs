@@ -201,6 +201,10 @@ fn forward_patched_extern_arg(args: &mut impl Iterator<Item = String>, cmd: &mut
 }
 
 fn forward_miri_sysroot(cmd: &mut Command) {
+    if cmd.get_args().any(|arg| arg == "--sysroot") {
+        // Sysroot already set. Let's hope it is the right one...
+        return;
+    }
     let sysroot = env::var_os("MIRI_SYSROOT").expect("the wrapper should have set MIRI_SYSROOT");
     cmd.arg("--sysroot");
     cmd.arg(sysroot);
@@ -717,7 +721,13 @@ fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // (https://github.com/rust-lang/cargo/issues/10885) and it also does not compose well with the
     // rustbuild `rustc` logic: we want to invoke rustubild's `rustc` first and then have that
     // invoke us; that is not possible with RUSTC_WRAPPER.
-    cmd.env("RUSTC", &cargo_miri_path);
+    if env::var_os("RUSTC_STAGE").is_some() {
+        // We need rustbuild's help to figure out the right sysroots.
+        cmd.env("RUSTC_REAL", &cargo_miri_path);
+        cmd.env("RUSTC_SYSROOT", env::var("MIRI_SYSROOT").unwrap());
+    } else {
+        cmd.env("RUSTC", &cargo_miri_path);
+    }
 
     let runner_env_name =
         |triple: &str| format!("CARGO_TARGET_{}_RUNNER", triple.to_uppercase().replace('-', "_"));
@@ -804,7 +814,8 @@ fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
     let verbose = std::env::var("MIRI_VERBOSE")
         .map_or(0, |verbose| verbose.parse().expect("verbosity flag must be an integer"));
     let target_crate = is_target_crate();
-    let print = get_arg_flag_value("--print").is_some() || has_arg_flag("-vV"); // whether this is cargo/xargo invoking rustc to get some infos
+    let print =
+        get_arg_flag_value("--print").is_some() || has_arg_flag("-vV") || has_arg_flag("--version"); // whether this is cargo/xargo invoking rustc to get some infos
 
     let store_json = |info: CrateRunInfo| {
         // Create a stub .d file to stop Cargo from "rebuilding" the crate:
@@ -927,15 +938,6 @@ fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
             cmd.arg("-C").arg("panic=abort");
         }
     } else {
-        // For host crates (but not when we are printing), we might still have to set the sysroot.
-        if !print {
-            // When we're running `cargo-miri` from `x.py` we need to pass the sysroot explicitly as rustc
-            // can't figure out the sysroot on its own unless it's from rustup.
-            if let Some(sysroot) = std::env::var_os("SYSROOT") {
-                cmd.arg("--sysroot").arg(sysroot);
-            }
-        }
-
         // For host crates or when we are printing, just forward everything.
         cmd.args(args);
     }
@@ -1043,10 +1045,9 @@ fn phase_runner(binary: &Path, binary_args: impl Iterator<Item = String>, phase:
             cmd.arg(arg);
         }
     }
-    // Set sysroot (if we are inside rustdoc, we already did that in `phase_cargo_rustdoc`).
-    if phase != RunnerPhase::Rustdoc {
-        forward_miri_sysroot(&mut cmd);
-    }
+    // Set our custom sysroot
+    forward_miri_sysroot(&mut cmd);
+
     // Respect `MIRIFLAGS`.
     if let Ok(a) = env::var("MIRIFLAGS") {
         // This code is taken from `RUSTFLAGS` handling in cargo.
