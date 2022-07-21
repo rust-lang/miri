@@ -668,7 +668,10 @@ fn phase_cargo_miri(mut args: env::Args) {
             "WARNING: Ignoring `RUSTC` environment variable; set `MIRI` if you want to control the binary used as the driver."
         );
     }
-    cmd.env_remove("RUSTC");
+
+    if env::var_os("RUSTC_STAGE").is_none() {
+        cmd.env_remove("RUSTC");
+    }
 
     let runner_env_name =
         |triple: &str| format!("CARGO_TARGET_{}_RUNNER", triple.to_uppercase().replace('-', "_"));
@@ -693,7 +696,13 @@ fn phase_cargo_miri(mut args: env::Args) {
             eprintln!("[cargo-miri miri] {}={:?}", host_runner_env_name, cargo_miri_path);
         }
         eprintln!("[cargo-miri miri] RUSTDOC={:?}", cargo_miri_path);
-        eprintln!("[cargo-miri miri] {:?}", cmd);
+        eprint!("[cargo-miri miri] ");
+        if verbose > 1 {
+            for (key, value) in env_vars_from_cmd(&cmd) {
+                eprintln!("{key}={value:?} \\");
+            }
+        }
+        eprintln!("{:?}", cmd);
         cmd.env("MIRI_VERBOSE", verbose.to_string()); // This makes the other phases verbose.
     }
     exec(cmd)
@@ -1181,6 +1190,13 @@ fn main() {
             let binary = Path::new(arg);
             if binary.exists() {
                 assert!(!arg.starts_with("--")); // not a flag
+                if let Some(rustc) = std::env::var_os("RUSTC") {
+                    if rustc == arg {
+                        // In bootstrap we can't rely on rustc just being named rustc
+                        assert!(std::env::var_os("RUSTC_STAGE").is_some());
+                        return phase_rustc(args, RustcPhase::Build);
+                    }
+                }
                 phase_runner(binary, args, RunnerPhase::Cargo);
             } else if arg.starts_with("--") {
                 phase_rustdoc(arg, args);
