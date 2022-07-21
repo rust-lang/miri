@@ -60,7 +60,7 @@ struct CrateRunEnv {
 
 impl CrateRunEnv {
     /// Gather all the information we need.
-    fn collect(args: env::Args, capture_stdin: bool) -> Self {
+    fn collect(args: impl Iterator<Item = String>, capture_stdin: bool) -> Self {
         let args = args.collect();
         let env = env::vars_os().collect();
         let current_dir = env::current_dir().unwrap().into_os_string();
@@ -707,7 +707,7 @@ enum RustcPhase {
     Rustdoc,
 }
 
-fn phase_rustc(mut args: env::Args, phase: RustcPhase) {
+fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
     /// Determines if we are being invoked (as rustc) to build a crate for
     /// the "target" architecture, in contrast to the "host" architecture.
     /// Host crates are for build scripts and proc macros and still need to
