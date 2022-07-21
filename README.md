@@ -337,17 +337,6 @@ The remaining flags are for advanced use only, and more likely to change or be r
 Some of these are **unsound**, which means they can lead
 to Miri failing to detect cases of undefined behavior in a program.
 
-* `-Zmiri-allow-uninit-numbers` disables the check to ensure that number types (integer and float
-  types) always hold initialized data. (They must still be initialized when any actual operation,
-  such as arithmetic, is performed.) Using this flag is **unsound** and
-  [deprecated](https://github.com/rust-lang/miri/issues/2187). This has no effect when
-  `-Zmiri-disable-validation` is present.
-* `-Zmiri-allow-ptr-int-transmute` makes Miri more accepting of transmutation between pointers and
-  integers via `mem::transmute` or union/pointer type punning. This has two effects: it disables the
-  check against integers storing a pointer (i.e., data with provenance), thus allowing
-  pointer-to-integer transmutation, and it treats integer-to-pointer transmutation as equivalent to
-  a cast. Implies `-Zmiri-permissive-provenance`. Using this flag is **unsound** and
-  [deprecated](https://github.com/rust-lang/miri/issues/2188).
 * `-Zmiri-disable-abi-check` disables checking [function ABI]. Using this flag
   is **unsound**.
 * `-Zmiri-disable-alignment-check` disables checking pointer alignment, so you
@@ -412,6 +401,9 @@ Some native rustc `-Z` flags are also very relevant for Miri:
 
 Moreover, Miri recognizes some environment variables:
 
+* `MIRI_AUTO_OPS` indicates whether the automatic execution of rustfmt, clippy and rustup-toolchain
+  should be skipped. If it is set to any value, they are skipped. This is used for avoiding
+  infinite recursion in `./miri` and to allow automated IDE actions to avoid the auto ops.
 * `MIRI_LOG`, `MIRI_BACKTRACE` control logging and backtrace printing during
   Miri executions, also [see "Testing the Miri driver" in `CONTRIBUTING.md`][testing-miri].
 * `MIRIFLAGS` (recognized by `cargo miri` and the test suite) defines extra

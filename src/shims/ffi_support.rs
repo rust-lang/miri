@@ -13,7 +13,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     /// Extract the scalar value from the result of reading a scalar from the machine,
     /// and convert it to a `CArg`.
     fn scalar_to_carg(
-        k: ScalarMaybeUninit<Tag>,
+        k: ScalarMaybeUninit<Provenance>,
         arg_type: &Ty<'tcx>,
         cx: &impl HasDataLayout,
     ) -> InterpResult<'tcx, CArg> {
@@ -66,7 +66,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn call_external_c_and_store_return<'a>(
         &mut self,
         link_name: Symbol,
-        dest: &PlaceTy<'tcx, Tag>,
+        dest: &PlaceTy<'tcx, Provenance>,
         ptr: CodePtr,
         libffi_args: Vec<libffi::high::Arg<'a>>,
     ) -> InterpResult<'tcx, ()> {
@@ -156,7 +156,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn get_func_ptr_explicitly_from_lib(&mut self, link_name: Symbol) -> Option<CodePtr> {
         let this = self.eval_context_mut();
         // Try getting the function from the shared library.
-        let (lib, lib_path) = this.machine.external_so_lib.as_ref().unwrap();
+        // On windows `_lib_path` will be unused, hence the name starting with `_`.
+        let (lib, _lib_path) = this.machine.external_so_lib.as_ref().unwrap();
         let func: libloading::Symbol<'_, unsafe extern "C" fn()> = unsafe {
             match lib.get(link_name.as_str().as_bytes()) {
                 Ok(x) => x,
@@ -177,11 +178,14 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         // This code is a reimplementation of the mechanism for getting `dli_fname` in `libloading`,
         // from: https://docs.rs/libloading/0.7.3/src/libloading/os/unix/mod.rs.html#411
         // using the `libc` crate where this interface is public.
+        // No `libc::dladdr` on windows.
+        #[cfg(unix)]
         let mut info = std::mem::MaybeUninit::<libc::Dl_info>::uninit();
+        #[cfg(unix)]
         unsafe {
             if libc::dladdr(*func.deref() as *const _, info.as_mut_ptr()) != 0 {
                 if std::ffi::CStr::from_ptr(info.assume_init().dli_fname).to_str().unwrap()
-                    != lib_path.to_str().unwrap()
+                    != _lib_path.to_str().unwrap()
                 {
                     return None;
                 }
@@ -199,8 +203,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn call_and_add_external_c_fct_to_context(
         &mut self,
         link_name: Symbol,
-        dest: &PlaceTy<'tcx, Tag>,
-        args: &[OpTy<'tcx, Tag>],
+        dest: &PlaceTy<'tcx, Provenance>,
+        args: &[OpTy<'tcx, Provenance>],
     ) -> InterpResult<'tcx, bool> {
         // Get the pointer to the function in the shared object file if it exists.
         let code_ptr = match self.get_func_ptr_explicitly_from_lib(link_name) {

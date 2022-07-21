@@ -7,8 +7,8 @@ use std::time::{Instant, SystemTime};
 /// `args` is the arguments *after* the syscall number.
 pub fn futex<'tcx>(
     this: &mut MiriEvalContext<'_, 'tcx>,
-    args: &[OpTy<'tcx, Tag>],
-    dest: &PlaceTy<'tcx, Tag>,
+    args: &[OpTy<'tcx, Provenance>],
+    dest: &PlaceTy<'tcx, Provenance>,
 ) -> InterpResult<'tcx> {
     // The amount of arguments used depends on the type of futex operation.
     // The full futex syscall takes six arguments (excluding the syscall
@@ -188,8 +188,8 @@ pub fn futex<'tcx>(
                 this.write_scalar(Scalar::from_machine_isize(0, this), dest)?;
                 // Register a timeout callback if a timeout was specified.
                 // This callback will override the return value when the timeout triggers.
-                let dest = *dest;
                 if let Some(timeout_time) = timeout_time {
+                    let dest = dest.clone();
                     this.register_timeout_callback(
                         thread,
                         timeout_time,

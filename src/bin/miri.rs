@@ -1,5 +1,5 @@
 #![feature(rustc_private, stmt_expr_attributes)]
-#![allow(clippy::manual_range_contains)]
+#![allow(clippy::manual_range_contains, clippy::useless_format)]
 
 extern crate rustc_data_structures;
 extern crate rustc_driver;
@@ -143,6 +143,11 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
     }
 }
 
+fn show_error(msg: String) -> ! {
+    eprintln!("fatal error: {}", msg);
+    std::process::exit(1)
+}
+
 fn init_early_loggers() {
     // Note that our `extern crate log` is *not* the same as rustc's; as a result, we have to
     // initialize them both, and we always initialize `miri`'s first.
@@ -214,13 +219,27 @@ fn compile_time_sysroot() -> Option<String> {
     let home = option_env!("RUSTUP_HOME").or(option_env!("MULTIRUST_HOME"));
     let toolchain = option_env!("RUSTUP_TOOLCHAIN").or(option_env!("MULTIRUST_TOOLCHAIN"));
     Some(match (home, toolchain) {
-        (Some(home), Some(toolchain)) => format!("{}/toolchains/{}", home, toolchain),
-        _ =>
-            option_env!("RUST_SYSROOT")
-                .expect(
+        (Some(home), Some(toolchain)) => {
+            // Check that at runtime, we are still in this toolchain (if there is any toolchain).
+            if let Some(toolchain_runtime) =
+                env::var_os("RUSTUP_TOOLCHAIN").or_else(|| env::var_os("MULTIRUST_TOOLCHAIN"))
+            {
+                if toolchain_runtime != toolchain {
+                    show_error(format!(
+                        "This Miri got built with local toolchain `{toolchain}`, but now is being run under a different toolchain. \n\
+                    Make sure to run Miri in the toolchain it got built with, e.g. via `cargo +{toolchain} miri`."
+                    ));
+                }
+            }
+            format!("{}/toolchains/{}", home, toolchain)
+        }
+        _ => option_env!("RUST_SYSROOT")
+            .unwrap_or_else(|| {
+                show_error(format!(
                     "To build Miri without rustup, set the `RUST_SYSROOT` env var at build time",
-                )
-                .to_owned(),
+                ))
+            })
+            .to_owned(),
     })
 }
 
@@ -328,19 +347,6 @@ fn main() {
                 "WARNING: the flag `-Zmiri-check-number-validity` no longer has any effect \
                         since it is now enabled by default"
             );
-        } else if arg == "-Zmiri-allow-uninit-numbers" {
-            eprintln!(
-                "WARNING: `-Zmiri-allow-uninit-numbers` is deprecated and planned to be removed. \
-                Please let us know at <https://github.com/rust-lang/miri/issues/2187> if you rely on this flag."
-            );
-            miri_config.allow_uninit_numbers = true;
-        } else if arg == "-Zmiri-allow-ptr-int-transmute" {
-            eprintln!(
-                "WARNING: `-Zmiri-allow-ptr-int-transmute` is deprecated and planned to be removed. \
-                Please let us know at <https://github.com/rust-lang/miri/issues/2188> if you rely on this flag."
-            );
-            miri_config.allow_ptr_int_transmute = true;
-            miri_config.provenance_mode = ProvenanceMode::Permissive;
         } else if arg == "-Zmiri-disable-abi-check" {
             miri_config.check_abi = false;
         } else if arg == "-Zmiri-disable-isolation" {
@@ -378,7 +384,6 @@ fn main() {
             eprintln!("WARNING: `-Zmiri-tag-raw-pointers` has no effect; it is enabled by default");
         } else if arg == "-Zmiri-strict-provenance" {
             miri_config.provenance_mode = ProvenanceMode::Strict;
-            miri_config.allow_ptr_int_transmute = false;
         } else if arg == "-Zmiri-permissive-provenance" {
             miri_config.provenance_mode = ProvenanceMode::Permissive;
         } else if arg == "-Zmiri-mute-stdout-stderr" {

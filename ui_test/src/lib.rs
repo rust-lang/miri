@@ -1,6 +1,7 @@
 #![allow(clippy::enum_variant_names, clippy::useless_format, clippy::too_many_arguments)]
 
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -14,8 +15,10 @@ use parser::{ErrorMatch, Pattern};
 use regex::Regex;
 use rustc_stderr::{Level, Message};
 
+use crate::dependencies::build_dependencies;
 use crate::parser::{Comments, Condition};
 
+mod dependencies;
 mod parser;
 mod rustc_stderr;
 #[cfg(test)]
@@ -24,7 +27,7 @@ mod tests;
 #[derive(Debug)]
 pub struct Config {
     /// Arguments passed to the binary that is executed.
-    pub args: Vec<String>,
+    pub args: Vec<OsString>,
     /// `None` to run on the host, otherwise a target triple
     pub target: Option<String>,
     /// Filters applied to stderr output before processing it
@@ -38,6 +41,20 @@ pub struct Config {
     pub output_conflict_handling: OutputConflictHandling,
     /// Only run tests with one of these strings in their path/name
     pub path_filter: Vec<String>,
+    /// Path to a `Cargo.toml` that describes which dependencies the tests can access.
+    pub dependencies_crate_manifest_path: Option<PathBuf>,
+    /// Can be used to override what command to run instead of `cargo` to build the
+    /// dependencies in `manifest_path`
+    pub dependency_builder: Option<DependencyBuilder>,
+    /// Print one character per test instead of one line
+    pub quiet: bool,
+}
+
+#[derive(Debug)]
+pub struct DependencyBuilder {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub envs: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -53,11 +70,25 @@ pub enum OutputConflictHandling {
 
 pub type Filter = Vec<(Regex, &'static str)>;
 
-pub fn run_tests(config: Config) -> Result<()> {
+pub fn run_tests(mut config: Config) -> Result<()> {
     eprintln!("   Compiler flags: {:?}", config.args);
 
     // Get the triple with which to run the tests
     let target = config.target.clone().unwrap_or_else(|| config.get_host());
+
+    let dependencies = build_dependencies(&config)?;
+    for (name, dependency) in dependencies.dependencies {
+        config.args.push("--extern".into());
+        let mut dep = OsString::from(name);
+        dep.push("=");
+        dep.push(dependency);
+        config.args.push(dep);
+    }
+    for import_path in dependencies.import_paths {
+        config.args.push("-L".into());
+        config.args.push(import_path.into());
+    }
+    let config = config;
 
     // A channel for files to process
     let (submit, receive) = crossbeam::channel::unbounded();
@@ -94,11 +125,50 @@ pub fn run_tests(config: Config) -> Result<()> {
             drop(submit);
         });
 
+        // A channel for the messages emitted by the individual test threads.
+        let (finished_files_sender, finished_files_recv) = crossbeam::channel::unbounded();
+        enum TestResult {
+            Ok,
+            Failed,
+            Ignored,
+        }
+
+        s.spawn(|_| {
+            if config.quiet {
+                for (i, (_, result)) in finished_files_recv.into_iter().enumerate() {
+                    // Humans start counting at 1
+                    let i = i + 1;
+                    match result {
+                        TestResult::Ok => eprint!("{}", ".".green()),
+                        TestResult::Failed => eprint!("{}", "F".red().bold()),
+                        TestResult::Ignored => eprint!("{}", "i".yellow()),
+                    }
+                    if i % 100 == 0 {
+                        eprintln!(" {i}");
+                    }
+                }
+            } else {
+                for (msg, result) in finished_files_recv {
+                    eprint!("{msg} ... ");
+                    eprintln!(
+                        "{}",
+                        match result {
+                            TestResult::Ok => "ok".green(),
+                            TestResult::Failed => "FAILED".red().bold(),
+                            TestResult::Ignored => "ignored (in-test comment)".yellow(),
+                        }
+                    );
+                }
+            }
+        });
+
         let mut threads = vec![];
 
         // Create N worker threads that receive files to test.
         for _ in 0..std::thread::available_parallelism().unwrap().get() {
+            let finished_files_sender = finished_files_sender.clone();
             threads.push(s.spawn(|_| -> Result<()> {
+                let finished_files_sender = finished_files_sender;
                 for path in &receive {
                     if !config.path_filter.is_empty() {
                         let path_display = path.display().to_string();
@@ -111,11 +181,8 @@ pub fn run_tests(config: Config) -> Result<()> {
                     // Ignore file if only/ignore rules do (not) apply
                     if !test_file_conditions(&comments, &target, &config) {
                         ignored.fetch_add(1, Ordering::Relaxed);
-                        eprintln!(
-                            "{} ... {}",
-                            path.display(),
-                            "ignored (in-test comment)".yellow()
-                        );
+                        finished_files_sender
+                            .send((path.display().to_string(), TestResult::Ignored))?;
                         continue;
                     }
                     // Run the test for all revisions
@@ -130,12 +197,11 @@ pub fn run_tests(config: Config) -> Result<()> {
                         if !revision.is_empty() {
                             write!(msg, "(revision `{revision}`) ").unwrap();
                         }
-                        write!(msg, "... ").unwrap();
                         if errors.is_empty() {
-                            eprintln!("{msg}{}", "ok".green());
+                            finished_files_sender.send((msg, TestResult::Ok))?;
                             succeeded.fetch_add(1, Ordering::Relaxed);
                         } else {
-                            eprintln!("{msg}{}", "FAILED".red().bold());
+                            finished_files_sender.send((msg, TestResult::Failed))?;
                             failures.lock().unwrap().push((
                                 path.clone(),
                                 m,
@@ -149,6 +215,7 @@ pub fn run_tests(config: Config) -> Result<()> {
                 Ok(())
             }));
         }
+
         for thread in threads {
             thread.join().unwrap()?;
         }
@@ -164,15 +231,14 @@ pub fn run_tests(config: Config) -> Result<()> {
     if !failures.is_empty() {
         for (path, miri, revision, errors, stderr) in &failures {
             eprintln!();
-            eprint!("{}", path.display().to_string().underline());
+            eprint!("{}", path.display().to_string().underline().bold());
             if !revision.is_empty() {
                 eprint!(" (revision `{}`)", revision);
             }
-            eprint!(" {}", "FAILED".red());
+            eprint!(" {}", "FAILED:".red().bold());
             eprintln!();
             eprintln!("command: {:?}", miri);
             eprintln!();
-            let mut dump_stderr = true;
             for error in errors {
                 match error {
                     Error::ExitStatus(mode, exit_status) => eprintln!("{mode:?} got {exit_status}"),
@@ -194,9 +260,6 @@ pub fn run_tests(config: Config) -> Result<()> {
                     Error::PatternFoundInPassTest =>
                         eprintln!("{}", "error pattern found in success test".red()),
                     Error::OutputDiffers { path, actual, expected } => {
-                        if path.extension().unwrap() == "stderr" {
-                            dump_stderr = false;
-                        }
                         eprintln!("actual output differed from expected {}", path.display());
                         eprintln!("{}", pretty_assertions::StrComparison::new(expected, actual));
                         eprintln!()
@@ -223,14 +286,11 @@ pub fn run_tests(config: Config) -> Result<()> {
                 }
                 eprintln!();
             }
-            // Unless we already dumped the stderr via an OutputDiffers diff, let's dump it here.
-            if dump_stderr {
-                eprintln!("actual stderr:");
-                eprintln!("{}", stderr);
-                eprintln!();
-            }
+            eprintln!("full stderr:");
+            eprintln!("{}", stderr);
+            eprintln!();
         }
-        eprintln!("{}", "failures:".red().underline());
+        eprintln!("{}", "FAILURES:".red().underline().bold());
         for (path, _miri, _revision, _errors, _stderr) in &failures {
             eprintln!("    {}", path.display());
         }
@@ -301,9 +361,7 @@ fn run_test(
     for arg in &comments.compile_flags {
         miri.arg(arg);
     }
-    for (k, v) in &comments.env_vars {
-        miri.env(k, v);
-    }
+    miri.envs(comments.env_vars.iter().map(|(k, v)| (k, v)));
     let output = miri.output().expect("could not execute miri");
     let mut errors = config.mode.ok(output.status);
     let stderr = check_test_result(

@@ -10,3 +10,4 @@ perf.data
 perf.data.old
 flamegraph.svg
 tests/extern-so/libtestlib.so
+.auto-*

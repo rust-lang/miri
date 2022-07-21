@@ -436,53 +436,14 @@ impl MemoryCellClocks {
 /// Evaluation context extensions.
 impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for MiriEvalContext<'mir, 'tcx> {}
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
-    /// Temporarily allow data-races to occur. This should only be used in
-    /// one of these cases:
-    /// - One of the appropriate `validate_atomic` functions will be called to
-    /// to treat a memory access as atomic.
-    /// - The memory being accessed should be treated as internal state, that
-    /// cannot be accessed by the interpreted program.
-    /// - Execution of the interpreted program execution has halted.
-    #[inline]
-    fn allow_data_races_ref<R>(&self, op: impl FnOnce(&MiriEvalContext<'mir, 'tcx>) -> R) -> R {
-        let this = self.eval_context_ref();
-        if let Some(data_race) = &this.machine.data_race {
-            data_race.ongoing_action_data_race_free.set(true);
-        }
-        let result = op(this);
-        if let Some(data_race) = &this.machine.data_race {
-            data_race.ongoing_action_data_race_free.set(false);
-        }
-        result
-    }
-
-    /// Same as `allow_data_races_ref`, this temporarily disables any data-race detection and
-    /// so should only be used for atomic operations or internal state that the program cannot
-    /// access.
-    #[inline]
-    fn allow_data_races_mut<R>(
-        &mut self,
-        op: impl FnOnce(&mut MiriEvalContext<'mir, 'tcx>) -> R,
-    ) -> R {
-        let this = self.eval_context_mut();
-        if let Some(data_race) = &this.machine.data_race {
-            data_race.ongoing_action_data_race_free.set(true);
-        }
-        let result = op(this);
-        if let Some(data_race) = &this.machine.data_race {
-            data_race.ongoing_action_data_race_free.set(false);
-        }
-        result
-    }
-
     /// Atomic variant of read_scalar_at_offset.
     fn read_scalar_at_offset_atomic(
         &self,
-        op: &OpTy<'tcx, Tag>,
+        op: &OpTy<'tcx, Provenance>,
         offset: u64,
         layout: TyAndLayout<'tcx>,
         atomic: AtomicReadOrd,
-    ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
+    ) -> InterpResult<'tcx, ScalarMaybeUninit<Provenance>> {
         let this = self.eval_context_ref();
         let value_place = this.deref_operand_and_offset(op, offset, layout)?;
         this.read_scalar_atomic(&value_place, atomic)
@@ -491,9 +452,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// Atomic variant of write_scalar_at_offset.
     fn write_scalar_at_offset_atomic(
         &mut self,
-        op: &OpTy<'tcx, Tag>,
+        op: &OpTy<'tcx, Provenance>,
         offset: u64,
-        value: impl Into<ScalarMaybeUninit<Tag>>,
+        value: impl Into<ScalarMaybeUninit<Provenance>>,
         layout: TyAndLayout<'tcx>,
         atomic: AtomicWriteOrd,
     ) -> InterpResult<'tcx> {
@@ -505,9 +466,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// Perform an atomic read operation at the memory location.
     fn read_scalar_atomic(
         &self,
-        place: &MPlaceTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
         atomic: AtomicReadOrd,
-    ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
+    ) -> InterpResult<'tcx, ScalarMaybeUninit<Provenance>> {
         let this = self.eval_context_ref();
         // This will read from the last store in the modification order of this location. In case
         // weak memory emulation is enabled, this may not be the store we will pick to actually read from and return.
@@ -524,8 +485,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// Perform an atomic write operation at the memory location.
     fn write_scalar_atomic(
         &mut self,
-        val: ScalarMaybeUninit<Tag>,
-        dest: &MPlaceTy<'tcx, Tag>,
+        val: ScalarMaybeUninit<Provenance>,
+        dest: &MPlaceTy<'tcx, Provenance>,
         atomic: AtomicWriteOrd,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
@@ -543,12 +504,12 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// Perform an atomic operation on a memory location.
     fn atomic_op_immediate(
         &mut self,
-        place: &MPlaceTy<'tcx, Tag>,
-        rhs: &ImmTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
+        rhs: &ImmTy<'tcx, Provenance>,
         op: mir::BinOp,
         neg: bool,
         atomic: AtomicRwOrd,
-    ) -> InterpResult<'tcx, ImmTy<'tcx, Tag>> {
+    ) -> InterpResult<'tcx, ImmTy<'tcx, Provenance>> {
         let this = self.eval_context_mut();
 
         this.validate_overlapping_atomic(place)?;
@@ -574,10 +535,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// scalar value, the old value is returned.
     fn atomic_exchange_scalar(
         &mut self,
-        place: &MPlaceTy<'tcx, Tag>,
-        new: ScalarMaybeUninit<Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
+        new: ScalarMaybeUninit<Provenance>,
         atomic: AtomicRwOrd,
-    ) -> InterpResult<'tcx, ScalarMaybeUninit<Tag>> {
+    ) -> InterpResult<'tcx, ScalarMaybeUninit<Provenance>> {
         let this = self.eval_context_mut();
 
         this.validate_overlapping_atomic(place)?;
@@ -594,11 +555,11 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// scalar value, the old value is returned.
     fn atomic_min_max_scalar(
         &mut self,
-        place: &MPlaceTy<'tcx, Tag>,
-        rhs: ImmTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
+        rhs: ImmTy<'tcx, Provenance>,
         min: bool,
         atomic: AtomicRwOrd,
-    ) -> InterpResult<'tcx, ImmTy<'tcx, Tag>> {
+    ) -> InterpResult<'tcx, ImmTy<'tcx, Provenance>> {
         let this = self.eval_context_mut();
 
         this.validate_overlapping_atomic(place)?;
@@ -634,13 +595,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// identical.
     fn atomic_compare_exchange_scalar(
         &mut self,
-        place: &MPlaceTy<'tcx, Tag>,
-        expect_old: &ImmTy<'tcx, Tag>,
-        new: ScalarMaybeUninit<Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
+        expect_old: &ImmTy<'tcx, Provenance>,
+        new: ScalarMaybeUninit<Provenance>,
         success: AtomicRwOrd,
         fail: AtomicReadOrd,
         can_fail_spuriously: bool,
-    ) -> InterpResult<'tcx, Immediate<Tag>> {
+    ) -> InterpResult<'tcx, Immediate<Provenance>> {
         use rand::Rng as _;
         let this = self.eval_context_mut();
 
@@ -690,7 +651,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// associated memory-place and on the current thread.
     fn validate_atomic_load(
         &self,
-        place: &MPlaceTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
         atomic: AtomicReadOrd,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_ref();
@@ -713,7 +674,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// associated memory-place and on the current thread.
     fn validate_atomic_store(
         &mut self,
-        place: &MPlaceTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
         atomic: AtomicWriteOrd,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
@@ -736,7 +697,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
     /// at the associated memory place and on the current thread.
     fn validate_atomic_rmw(
         &mut self,
-        place: &MPlaceTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
         atomic: AtomicRwOrd,
     ) -> InterpResult<'tcx> {
         use AtomicRwOrd::*;
@@ -1044,10 +1005,49 @@ impl VClockAlloc {
 
 impl<'mir, 'tcx: 'mir> EvalContextPrivExt<'mir, 'tcx> for MiriEvalContext<'mir, 'tcx> {}
 trait EvalContextPrivExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
+    /// Temporarily allow data-races to occur. This should only be used in
+    /// one of these cases:
+    /// - One of the appropriate `validate_atomic` functions will be called to
+    /// to treat a memory access as atomic.
+    /// - The memory being accessed should be treated as internal state, that
+    /// cannot be accessed by the interpreted program.
+    /// - Execution of the interpreted program execution has halted.
+    #[inline]
+    fn allow_data_races_ref<R>(&self, op: impl FnOnce(&MiriEvalContext<'mir, 'tcx>) -> R) -> R {
+        let this = self.eval_context_ref();
+        if let Some(data_race) = &this.machine.data_race {
+            data_race.ongoing_action_data_race_free.set(true);
+        }
+        let result = op(this);
+        if let Some(data_race) = &this.machine.data_race {
+            data_race.ongoing_action_data_race_free.set(false);
+        }
+        result
+    }
+
+    /// Same as `allow_data_races_ref`, this temporarily disables any data-race detection and
+    /// so should only be used for atomic operations or internal state that the program cannot
+    /// access.
+    #[inline]
+    fn allow_data_races_mut<R>(
+        &mut self,
+        op: impl FnOnce(&mut MiriEvalContext<'mir, 'tcx>) -> R,
+    ) -> R {
+        let this = self.eval_context_mut();
+        if let Some(data_race) = &this.machine.data_race {
+            data_race.ongoing_action_data_race_free.set(true);
+        }
+        let result = op(this);
+        if let Some(data_race) = &this.machine.data_race {
+            data_race.ongoing_action_data_race_free.set(false);
+        }
+        result
+    }
+
     /// Generic atomic operation implementation
     fn validate_atomic_op<A: Debug + Copy>(
         &self,
-        place: &MPlaceTy<'tcx, Tag>,
+        place: &MPlaceTy<'tcx, Provenance>,
         atomic: A,
         description: &str,
         mut op: impl FnMut(
@@ -1061,7 +1061,7 @@ trait EvalContextPrivExt<'mir, 'tcx: 'mir>: MiriEvalContextExt<'mir, 'tcx> {
         if let Some(data_race) = &this.machine.data_race {
             if data_race.race_detecting() {
                 let size = place.layout.size;
-                let (alloc_id, base_offset, _tag) = this.ptr_get_alloc_id(place.ptr)?;
+                let (alloc_id, base_offset, _prov) = this.ptr_get_alloc_id(place.ptr)?;
                 // Load and log the atomic operation.
                 // Note that atomic loads are possible even from read-only allocations, so `get_alloc_extra_mut` is not an option.
                 let alloc_meta = this.get_alloc_extra(alloc_id)?.data_race.as_ref().unwrap();

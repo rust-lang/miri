@@ -20,8 +20,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn call_intrinsic(
         &mut self,
         instance: ty::Instance<'tcx>,
-        args: &[OpTy<'tcx, Tag>],
-        dest: &PlaceTy<'tcx, Tag>,
+        args: &[OpTy<'tcx, Provenance>],
+        dest: &PlaceTy<'tcx, Provenance>,
         ret: Option<mir::BasicBlock>,
         _unwind: StackPopUnwind,
     ) -> InterpResult<'tcx> {
@@ -58,8 +58,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
     fn emulate_intrinsic_by_name(
         &mut self,
         intrinsic_name: &str,
-        args: &[OpTy<'tcx, Tag>],
-        dest: &PlaceTy<'tcx, Tag>,
+        args: &[OpTy<'tcx, Provenance>],
+        dest: &PlaceTy<'tcx, Provenance>,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
@@ -224,7 +224,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     "frem_fast" => mir::BinOp::Rem,
                     _ => bug!(),
                 };
-                let float_finite = |x: ImmTy<'tcx, _>| -> InterpResult<'tcx, bool> {
+                let float_finite = |x: &ImmTy<'tcx, _>| -> InterpResult<'tcx, bool> {
                     Ok(match x.layout.ty.kind() {
                         ty::Float(FloatTy::F32) => x.to_scalar()?.to_f32()?.is_finite(),
                         ty::Float(FloatTy::F64) => x.to_scalar()?.to_f64()?.is_finite(),
@@ -234,7 +234,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                         ),
                     })
                 };
-                match (float_finite(a)?, float_finite(b)?) {
+                match (float_finite(&a)?, float_finite(&b)?) {
                     (false, false) => throw_ub_format!(
                         "`{intrinsic_name}` intrinsic called with non-finite value as both parameters",
                     ),
@@ -375,9 +375,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         &self,
         f: F,
         dest_ty: ty::Ty<'tcx>,
-    ) -> InterpResult<'tcx, Scalar<Tag>>
+    ) -> InterpResult<'tcx, Scalar<Provenance>>
     where
-        F: Float + Into<Scalar<Tag>>,
+        F: Float + Into<Scalar<Provenance>>,
     {
         let this = self.eval_context_ref();
 

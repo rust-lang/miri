@@ -1,8 +1,11 @@
 //! Main evaluator loop and setting up the initial stack frame.
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::iter;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
+use std::thread;
 
 use log::info;
 
@@ -15,8 +18,6 @@ use rustc_middle::ty::{
 use rustc_target::spec::abi::Abi;
 
 use rustc_session::config::EntryFnType;
-
-use std::collections::HashSet;
 
 use crate::*;
 
@@ -78,10 +79,6 @@ pub struct MiriConfig {
     pub stacked_borrows: bool,
     /// Controls alignment checking.
     pub check_alignment: AlignmentCheck,
-    /// Controls integer and float validity initialization checking.
-    pub allow_uninit_numbers: bool,
-    /// Controls how we treat ptr2int and int2ptr transmutes.
-    pub allow_ptr_int_transmute: bool,
     /// Controls function [ABI](Abi) checking.
     pub check_abi: bool,
     /// Action for an op requiring communication with the host.
@@ -138,8 +135,6 @@ impl Default for MiriConfig {
             validate: true,
             stacked_borrows: true,
             check_alignment: AlignmentCheck::Int,
-            allow_uninit_numbers: false,
-            allow_ptr_int_transmute: false,
             check_abi: true,
             isolated_op: IsolatedOp::Reject(RejectOpWith::Abort),
             ignore_leaks: false,
@@ -175,7 +170,7 @@ pub fn create_ecx<'mir, 'tcx: 'mir>(
     entry_id: DefId,
     entry_type: EntryFnType,
     config: &MiriConfig,
-) -> InterpResult<'tcx, (InterpCx<'mir, 'tcx, Evaluator<'mir, 'tcx>>, MPlaceTy<'tcx, Tag>)> {
+) -> InterpResult<'tcx, (InterpCx<'mir, 'tcx, Evaluator<'mir, 'tcx>>, MPlaceTy<'tcx, Provenance>)> {
     let param_env = ty::ParamEnv::reveal_all();
     let layout_cx = LayoutCx { tcx, param_env };
     let mut ecx = InterpCx::new(
@@ -212,7 +207,7 @@ pub fn create_ecx<'mir, 'tcx: 'mir>(
     // Third argument (`argv`): created from `config.args`.
     let argv = {
         // Put each argument in memory, collect pointers.
-        let mut argvs = Vec::<Immediate<Tag>>::new();
+        let mut argvs = Vec::<Immediate<Provenance>>::new();
         for arg in config.args.iter() {
             // Make space for `0` terminator.
             let size = u64::try_from(arg.len()).unwrap().checked_add(1).unwrap();
@@ -337,7 +332,7 @@ pub fn eval_entry<'tcx>(
     };
 
     // Perform the main execution.
-    let res: InterpResult<'_, i64> = (|| {
+    let res: thread::Result<InterpResult<'_, i64>> = panic::catch_unwind(AssertUnwindSafe(|| {
         // Main loop.
         loop {
             let info = ecx.preprocess_diagnostics();
@@ -367,15 +362,18 @@ pub fn eval_entry<'tcx>(
         }
         let return_code = ecx.read_scalar(&ret_place.into())?.to_machine_isize(&ecx)?;
         Ok(return_code)
-    })();
+    }));
+    let res = res.unwrap_or_else(|panic_payload| {
+        ecx.handle_ice();
+        panic::resume_unwind(panic_payload)
+    });
 
-    // Machine cleanup.
-    // Execution of the program has halted so any memory access we do here
-    // cannot produce a real data race. If we do not do something to disable
-    // data race detection here, some uncommon combination of errors will
-    // cause a data race to be detected:
-    // https://github.com/rust-lang/miri/issues/2020
-    ecx.allow_data_races_mut(|ecx| EnvVars::cleanup(ecx).unwrap());
+    // Machine cleanup. Only do this if all threads have terminated; threads that are still running
+    // might cause data races (https://github.com/rust-lang/miri/issues/2020) or Stacked Borrows
+    // errors (https://github.com/rust-lang/miri/issues/2396) if we deallocate here.
+    if ecx.have_all_terminated() {
+        EnvVars::cleanup(&mut ecx).unwrap();
+    }
 
     // Process the result.
     match res {
