@@ -18,7 +18,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         cx: &impl HasDataLayout,
     ) -> InterpResult<'tcx, CArg> {
         match arg_type.kind() {
-            // If the primitive provided can be converted to a type matching the hir type pattern
+            // If the primitive provided can be converted to a type matching the type pattern
             // then create a `CArg` of this primitive value with the corresponding `CArg` constructor.
             // the ints
             TyKind::Int(IntTy::I8) => {
