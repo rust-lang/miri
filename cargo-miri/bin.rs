@@ -60,7 +60,7 @@ struct CrateRunEnv {
 
 impl CrateRunEnv {
     /// Gather all the information we need.
-    fn collect(args: env::Args, capture_stdin: bool) -> Self {
+    fn collect(args: impl Iterator<Item = String>, capture_stdin: bool) -> Self {
         let args = args.collect();
         let env = env::vars_os().collect();
         let current_dir = env::current_dir().unwrap().into_os_string();
@@ -700,29 +700,24 @@ fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // Forward all further arguments after `--` to cargo.
     cmd.arg("--").args(args);
 
-    // Set `RUSTC_WRAPPER` to ourselves.  Cargo will prepend that binary to its usual invocation,
-    // i.e., the first argument is `rustc` -- which is what we use in `main` to distinguish
-    // the two codepaths. (That extra argument is why we prefer this over setting `RUSTC`.)
+    // Make sure nobody else tries to wrap cargo.
     if env::var_os("RUSTC_WRAPPER").is_some() {
         println!(
             "WARNING: Ignoring `RUSTC_WRAPPER` environment variable, Miri does not support wrapping."
         );
     }
-    cmd.env("RUSTC_WRAPPER", &cargo_miri_path);
+    cmd.env_remove("RUSTC_WRAPPER");
     // We are going to invoke `MIRI` for everything, not `RUSTC`.
     if env::var_os("RUSTC").is_some() && env::var_os("MIRI").is_none() {
         println!(
             "WARNING: Ignoring `RUSTC` environment variable; set `MIRI` if you want to control the binary used as the driver."
         );
     }
-    // We'd prefer to just clear this env var, but cargo does not always honor `RUSTC_WRAPPER`
-    // (https://github.com/rust-lang/cargo/issues/10885). There is no good way to single out these invocations;
-    // some build scripts use the RUSTC env var as well. So we set it directly to the `miri` driver and
-    // hope that all they do is ask for the version number -- things could quickly go downhill from here.
-    // In `main`, we need the value of `RUSTC` to distinguish RUSTC_WRAPPER invocations from rustdoc
-    // or TARGET_RUNNER invocations, so we canonicalize it here to make it exceedingly unlikely that
-    // there would be a collision.
-    cmd.env("RUSTC", &fs::canonicalize(find_miri()).unwrap());
+    // We'd prefer to use `RUSTC_WRAPPER`, but cargo does not always honor that env var
+    // (https://github.com/rust-lang/cargo/issues/10885) and it also does not compose well with the
+    // rustbuild `rustc` logic: we want to invoke rustubild's `rustc` first and then have that
+    // invoke us; that is not possible with RUSTC_WRAPPER.
+    cmd.env("RUSTC", &cargo_miri_path);
 
     let runner_env_name =
         |triple: &str| format!("CARGO_TARGET_{}_RUNNER", triple.to_uppercase().replace('-', "_"));
@@ -757,7 +752,7 @@ enum RustcPhase {
     Rustdoc,
 }
 
-fn phase_rustc(mut args: env::Args, phase: RustcPhase) {
+fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
     /// Determines if we are being invoked (as rustc) to build a crate for
     /// the "target" architecture, in contrast to the "host" architecture.
     /// Host crates are for build scripts and proc macros and still need to
@@ -796,7 +791,12 @@ fn phase_rustc(mut args: env::Args, phase: RustcPhase) {
             ));
             path
         } else {
-            let out_file = get_arg_flag_value("-o").unwrap();
+            let out_file = get_arg_flag_value("-o").unwrap_or_else(|| {
+                panic!(
+                    "cannot determine out_filename from this invocation:\n{:?}",
+                    std::env::args().collect::<Vec<_>>()
+                )
+            });
             PathBuf::from(out_file)
         }
     }
@@ -1071,7 +1071,7 @@ fn phase_runner(binary: &Path, binary_args: impl Iterator<Item = String>, phase:
     }
 }
 
-fn phase_rustdoc(fst_arg: &str, mut args: env::Args) {
+fn phase_rustdoc(mut args: impl Iterator<Item = String>) {
     let verbose = std::env::var("MIRI_VERBOSE")
         .map_or(0, |verbose| verbose.parse().expect("verbosity flag must be an integer"));
 
@@ -1079,17 +1079,10 @@ fn phase_rustdoc(fst_arg: &str, mut args: env::Args) {
     // just default to a straight-forward invocation for now:
     let mut cmd = Command::new("rustdoc");
 
-    // Because of the way the main function is structured, we have to take the first argument spearately
-    // from the rest; to simplify the following argument patching loop, we'll just skip that one.
-    // This is fine for now, because cargo will never pass --extern arguments in the first position,
-    // but we should defensively assert that this will work.
     let extern_flag = "--extern";
-    assert!(fst_arg != extern_flag);
-    cmd.arg(fst_arg);
-
     let runtool_flag = "--runtool";
-    // `crossmode` records if *any* argument matches `runtool_flag`; here we check the first one.
-    let mut crossmode = fst_arg == runtool_flag;
+    // `crossmode` records if *any* argument matches `runtool_flag`.
+    let mut crossmode = false;
     while let Some(arg) = args.next() {
         if arg == extern_flag {
             // Patch --extern arguments to use *.rmeta files, since phase_cargo_rustc only creates stub *.rlib files.
@@ -1195,35 +1188,35 @@ fn main() {
         return;
     }
 
-    match args.next().as_deref() {
-        Some("miri") => phase_cargo_miri(args),
-        Some(arg) => {
-            // If the first arg is equal to the RUSTC variable (which should be set at this point),
-            // then we need to behave as rustc. This is the somewhat counter-intuitive behavior of
-            // having both RUSTC and RUSTC_WRAPPER set (see
-            // https://github.com/rust-lang/cargo/issues/10886).
-            if arg == env::var_os("RUSTC").unwrap() {
-                return phase_rustc(args, RustcPhase::Build);
-            }
-            // We have to distinguish the "runner" and "rustdoc" cases.
-            // As runner, the first argument is the binary (a file that should exist, with an absolute path);
-            // as rustdoc, the first argument is a flag (`--something`).
-            let binary = Path::new(arg);
-            if binary.exists() {
-                assert!(!arg.starts_with("--")); // not a flag
-                phase_runner(binary, args, RunnerPhase::Cargo);
-            } else if arg.starts_with("--") {
-                phase_rustdoc(arg, args);
-            } else {
-                show_error(format!(
-                    "`cargo-miri` called with unexpected first argument `{}`; please only invoke this binary through `cargo miri`",
-                    arg
-                ));
-            }
+    let mut args = args.peekable();
+    if args.next_if(|a| a == "miri").is_some() {
+        phase_cargo_miri(args);
+    } else if let Some(arg) = args.peek().cloned() {
+        // We end up here when cargo invokes us as RUSTC, RUSTDOC, or TARGET_*_RUNNER.
+        // So we need to distinguish these cases.
+        // - As runner, the first argument is the binary (a file that should exist, with an absolute
+        //   path).
+        // - As rustdoc and rustc, the first argument is a flag (`--something` or `-s`).
+        //   - As rustdoc, `--error-format` is set to "human".
+        //   - As rustc, `--error-format` is set to "json", or not set at all (for `-vV` invocations
+        //     and things coming from build scripts).
+        let binary = Path::new(&arg);
+        if binary.exists() {
+            assert!(!arg.starts_with('-')); // not a flag
+            args.next().unwrap(); // consume the to-be-run binary name
+            phase_runner(binary, args, RunnerPhase::Cargo);
+            return;
         }
-        _ =>
-            show_error(format!(
-                "`cargo-miri` called without first argument; please only invoke this binary through `cargo miri`"
-            )),
+        assert!(arg.starts_with('-')); // a flag
+        let error_format = get_arg_flag_value("--error-format");
+        if error_format.as_deref() == Some("human") {
+            phase_rustdoc(args);
+        } else {
+            phase_rustc(args, RustcPhase::Build);
+        }
+    } else {
+        show_error(format!(
+            "`cargo-miri` called without first argument; please only invoke this binary through `cargo miri`"
+        ))
     }
 }
