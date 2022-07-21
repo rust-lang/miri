@@ -1,11 +1,7 @@
 use colored::*;
 use regex::Regex;
 use std::path::{Path, PathBuf};
-<<<<<<< HEAD
 use std::{env, ffi::OsString, process::Command};
-=======
-use std::{env, ffi::OsString};
->>>>>>> master
 use ui_test::{color_eyre::Result, Config, DependencyBuilder, Mode, OutputConflictHandling};
 
 fn miri_path() -> PathBuf {
