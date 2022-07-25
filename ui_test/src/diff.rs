@@ -3,24 +3,43 @@ use diff::{chars, lines, Result, Result::*};
 
 #[derive(Default)]
 struct DiffState<'a> {
-    skipped_lines: usize,
-    /// When we skip a line, remember it, in case
-    /// we end up only skipping one line. In that case we just
-    /// print the line instead of `... skipped one line ...`
-    last_skipped_line: Option<&'a str>,
+    /// When we skip lines, remember the last `CONTEXT` ones to
+    /// display after the "skipped N lines" message
+    skipped_lines: Vec<&'a str>,
     /// When we see a removed line, we don't print it, we
     /// keep it around to compare it with the next added line.
     prev_left: Option<&'a str>,
 }
 
+/// How many lines of context are displayed around the actual diffs
+const CONTEXT: usize = 2;
+
 impl<'a> DiffState<'a> {
     fn print_skip(&mut self) {
-        match self.skipped_lines {
-            0 => {}
-            1 => eprintln!(" {}", self.last_skipped_line.unwrap()),
-            _ => eprintln!("... {} lines skipped ...", self.skipped_lines),
+        let half = self.skipped_lines.len() / 2;
+        if half < CONTEXT {
+            for line in self.skipped_lines.drain(..) {
+                eprintln!(" {line}");
+            }
+        } else {
+            for line in self.skipped_lines.iter().take(CONTEXT) {
+                eprintln!(" {line}");
+            }
+            let skipped = self.skipped_lines.len() - CONTEXT * 2;
+            match skipped {
+                0 => {}
+                1 => eprintln!(" {}", self.skipped_lines[CONTEXT]),
+                _ => eprintln!("... {skipped} lines skipped ..."),
+            }
+            for line in self.skipped_lines.iter().rev().take(CONTEXT).rev() {
+                eprintln!(" {line}");
+            }
         }
-        self.skipped_lines = 0;
+        self.skipped_lines.clear();
+    }
+
+    fn skip(&mut self, line: &'a str) {
+        self.skipped_lines.push(line);
     }
 
     fn print_prev(&mut self) {
@@ -46,8 +65,7 @@ impl<'a> DiffState<'a> {
             }
             Both(l, _) => {
                 self.print_prev();
-                self.last_skipped_line = Some(l);
-                self.skipped_lines += 1
+                self.skip(l);
             }
             Right(r) => {
                 if let Some(l) = self.prev_left.take() {
