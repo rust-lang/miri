@@ -1,21 +1,37 @@
 use libffi::{high::call::*, low::CodePtr};
 use std::ops::Deref;
 
-use rustc_middle::ty::{IntTy, Ty, TyKind, UintTy};
+use rustc_middle::ty::{IntTy, Ty, TypeAndMut, TyKind, UintTy};
 use rustc_span::Symbol;
 use rustc_target::abi::HasDataLayout;
 
 use crate::*;
 
+// pub trait HasUnderlyingPointer {
+//     fn get_underlying_raw_ptr(&self) -> *const u8;
+// }
+
+// impl HasUnderlyingPointer for Allocation {
+//     fn get_underlying_raw_ptr(&self) -> *const u8 {
+        
+//     }
+// } 
+
 impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriEvalContext<'mir, 'tcx> {}
 
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx> {
+
+    // fn get_allocation_for_id(&self, id: AllocId) -> InterpResult<'tcx, &Allocation<Provenance, AllocExtra>> {
+    //     let this = self.eval_context_ref();
+    //     this.get_alloc_raw(id)
+    // }
+
     /// Extract the scalar value from the result of reading a scalar from the machine,
     /// and convert it to a `CArg`.
     fn scalar_to_carg(
         k: ScalarMaybeUninit<Provenance>,
         arg_type: &Ty<'tcx>,
-        cx: &impl HasDataLayout,
+        cx: &MiriEvalContext<'mir, 'tcx>,
     ) -> InterpResult<'tcx, CArg> {
         match arg_type.kind() {
             // If the primitive provided can be converted to a type matching the type pattern
@@ -51,6 +67,54 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             }
             TyKind::Uint(UintTy::Usize) => {
                 return Ok(CArg::USize(k.to_machine_usize(cx)?.try_into().unwrap()));
+            }
+            // mut pointers
+            TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: rustc_hir::Mutability::Mut} ) => {
+                match some_ty.kind() {
+                    TyKind::Int(IntTy::I32) => {
+                        println!("REEEE i32 pointer ARG");
+                    },
+                    TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: rustc_hir::Mutability::Mut} ) => {
+                        match some_ty.kind() {
+                            TyKind::Int(IntTy::I32) => {
+                                println!("RECURSION BRO: **i32 arg");
+                                match k {
+                                    ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, sz)) => {
+                                        let (alloc_id, _, _) = cx.ptr_get_alloc_id(ptr.into())?;
+                                        let (size, align, _) = cx.get_alloc_info(alloc_id);
+                                        let fake_range = AllocRange{ start: rustc_target::abi::Size::ZERO, size: size};
+                                        println!("{:?}, {:?}", size, align);
+                                        let alloc = cx.get_ptr_alloc(ptr.into(), size, align)?.unwrap();
+                                        let wtf = alloc.read_integer(alloc_range(rustc_target::abi::Size::ZERO, size));
+                                        println!("UMM {:?}", wtf);
+                                        let ree = cx.memory.alloc_map().get(alloc_id).unwrap().1.get_bytes_with_uninit_and_ptr(cx, fake_range).unwrap();
+                                        println!("{:?}", ree.as_ptr());
+                                        let bytes = cx.read_bytes_ptr(ptr.into(), size);
+                                        println!("WHAT {:?}", bytes);
+                                        // println!("{:?}", ptr.into_parts().0);
+                                        // let ree = &ptr.into_parts().1.bytes();
+                                        // println!("{:?}", self.memory);
+                                        // println!("{:?}", ptr.get_alloc_id());
+                                        // unsafe {
+                                        //     println!("{:?}", *(ree as *const u64));
+                                        //     println!("{:?}", *(ptr.into_parts().1.bytes() as *mut u64));
+                                        // }
+                                        // println!("REE {:?}", intptrcast::GlobalStateInner::rel_ptr_to_addr(cx, ptr));
+                                        // let the_int = s.assert_int();
+                                        // println!("{:?}", the_int.try_to_u64().unwrap());
+                                        let inner_carg = CArg::ConstPtrUInt8(unsafe{ree.as_ptr()});
+                                        return Ok(CArg::RecMutPtrCarg(Box::new(inner_carg)));
+                                        // return Ok(CArg::USize(the_int.try_to_u64().unwrap().try_into().unwrap()));
+                                        // println!("{:?}", s.assert_int())
+                                    }, 
+                                    _ => {}
+                                }
+                            },
+                            _ => { }
+                        }
+                    }
+                    _ => { }
+                }
             }
             _ => {}
         }
@@ -135,6 +199,18 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     // Convert to `u64` since this covers both 32- and 64-bit machines.
                     this.write_int(u64::try_from(x).unwrap(), dest)?;
                     return Ok(());
+                }
+                // mut pointers
+                TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: rustc_hir::Mutability::Mut} ) => {
+                    match some_ty.kind() {
+                        TyKind::Int(IntTy::I32) => {
+                            println!("REEEE ");
+                            // let x = call::<i32>(ptr, libffi_args.as_slice());
+                            // this.write_int(x, dest)?;
+                            return Ok(());
+                        },
+                        _ => { }
+                    }
                 }
                 // Functions with no declared return type (i.e., the default return)
                 // have the output_type `Tuple([])`.
@@ -264,6 +340,27 @@ pub enum CArg {
     UInt64(u64),
     /// usize.
     USize(usize),
+    // mutable pointers
+    MutPtrInt8(*mut i8),
+    MutPtrInt16(*mut i16),
+    MutPtrInt32(*mut i32),
+    MutPtrInt64(*mut i64),
+    MutPtrUInt8(*mut u8),
+    MutPtrUInt16(*mut u16),
+    MutPtrUInt32(*mut u32),
+    MutPtrUInt64(*mut u64),
+    // const pointers
+    ConstPtrInt8(*const i8),
+    ConstPtrInt16(*const i16),
+    ConstPtrInt32(*const i32),
+    ConstPtrInt64(*const i64),
+    ConstPtrUInt8(*const u8),
+    ConstPtrUInt16(*const u16),
+    ConstPtrUInt32(*const u32),
+    ConstPtrUInt64(*const u64),
+    // recursive
+    RecConstPtrCarg(Box<CArg>),
+    RecMutPtrCarg(Box<CArg>),
 }
 
 impl<'a> CArg {
@@ -280,6 +377,24 @@ impl<'a> CArg {
             CArg::UInt32(i) => arg(i),
             CArg::UInt64(i) => arg(i),
             CArg::USize(i) => arg(i),
+            CArg::MutPtrInt8(i) => arg(i),
+            CArg::MutPtrInt16(i) => arg(i),
+            CArg::MutPtrInt32(i) => arg(i),
+            CArg::MutPtrInt64(i) => arg(i),
+            CArg::MutPtrUInt8(i) => arg(i),
+            CArg::MutPtrUInt16(i) => arg(i),
+            CArg::MutPtrUInt32(i) => arg(i),
+            CArg::MutPtrUInt64(i) => arg(i),
+            CArg::ConstPtrInt8(i) => arg(i),
+            CArg::ConstPtrInt16(i) => arg(i),
+            CArg::ConstPtrInt32(i) => arg(i),
+            CArg::ConstPtrInt64(i) => arg(i),
+            CArg::ConstPtrUInt8(i) => arg(i),
+            CArg::ConstPtrUInt16(i) => arg(i),
+            CArg::ConstPtrUInt32(i) => arg(i),
+            CArg::ConstPtrUInt64(i) => arg(i),
+            CArg::RecConstPtrCarg(box_carg) => (*box_carg).arg_downcast(),
+            CArg::RecMutPtrCarg(box_carg) => (*box_carg).arg_downcast(),
         }
     }
 }

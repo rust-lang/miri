@@ -37,7 +37,7 @@ impl<K: Hash + Eq, V> Default for MonoHashMap<K, V> {
     }
 }
 
-impl<K: Hash + Eq, V> AllocMap<K, V> for MonoHashMap<K, V> {
+impl<K: Hash + Eq, V: std::fmt::Debug> AllocMap<K, V> for MonoHashMap<K, V> {
     #[inline(always)]
     fn contains_key<Q: ?Sized + Hash + Eq>(&mut self, k: &Q) -> bool
     where
@@ -48,6 +48,7 @@ impl<K: Hash + Eq, V> AllocMap<K, V> for MonoHashMap<K, V> {
 
     #[inline(always)]
     fn insert(&mut self, k: K, v: V) -> Option<V> {
+        println!("WHY: {:?}", v);
         self.0.get_mut().insert(k, Box::new(v)).map(|x| *x)
     }
 

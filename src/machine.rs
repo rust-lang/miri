@@ -135,6 +135,7 @@ pub enum Provenance {
         sb: SbTag,
     },
     Wildcard,
+    CHasAccess,
 }
 
 /// The "extra" information a pointer has over a regular AllocId.
@@ -145,12 +146,12 @@ pub enum ProvenanceExtra {
 }
 
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-static_assert_size!(Pointer<Provenance>, 24);
+static_assert_size!(Pointer<Provenance>, 32);
 // FIXME: this would with in 24bytes but layout optimizations are not smart enough
 // #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 //static_assert_size!(Pointer<Option<Provenance>>, 24);
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-static_assert_size!(ScalarMaybeUninit<Provenance>, 32);
+static_assert_size!(ScalarMaybeUninit<Provenance>, 40);
 
 impl interpret::Provenance for Provenance {
     /// We use absolute addresses in the `offset` of a `Pointer<Provenance>`.
@@ -177,6 +178,9 @@ impl interpret::Provenance for Provenance {
             Provenance::Wildcard => {
                 write!(f, "[wildcard]")?;
             }
+            Provenance::CHasAccess => {
+                write!(f, "[c has access]")?;
+            }
         }
 
         Ok(())
@@ -186,6 +190,7 @@ impl interpret::Provenance for Provenance {
         match self {
             Provenance::Concrete { alloc_id, .. } => Some(alloc_id),
             Provenance::Wildcard => None,
+            Provenance::CHasAccess => None,
         }
     }
 }
@@ -219,6 +224,7 @@ pub struct AllocExtra {
     /// Weak memory emulation via the use of store buffers,
     ///  this is only added if it is enabled.
     pub weak_memory: Option<weak_memory::AllocExtra>,
+    // pub real_pointer: u64,
 }
 
 /// Precomputed layouts of primitive types
@@ -692,6 +698,16 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         alloc: Cow<'b, Allocation>,
         kind: Option<MemoryKind<Self::MemoryKind>>,
     ) -> InterpResult<'tcx, Cow<'b, Allocation<Self::Provenance, Self::AllocExtra>>> {
+        let (size, _, _) = ecx.get_alloc_info(id);
+        let fake_range = AllocRange{ start: rustc_target::abi::Size::ZERO, size: size};
+        let ree = ecx.memory.alloc_map().get(id).unwrap().1.get_bytes_with_uninit_and_ptr(ecx, fake_range).unwrap();
+                                        
+        // let bytes_ptr = alloc.get_bytes( ecx, fake_range);
+        // unsafe {
+        //     if bytes_ptr.is_ok() {//&& id.0 > std::num::NonZeroU64::new(1600).unwrap(){
+        //         // println!("{:?}, {:?}", id, *(bytes_ptr.unwrap().as_ptr()));
+        //     }
+        // }
         let kind = kind.expect("we set our STATIC_KIND so this cannot be None");
         if ecx.machine.tracked_alloc_ids.contains(&id) {
             register_diagnostic(NonHaltingDiagnostic::CreatedAlloc(
@@ -729,12 +745,14 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         } else {
             None
         };
+        // println!("{:?}", ree.as_ptr() as u64);
         let alloc: Allocation<Provenance, Self::AllocExtra> = alloc.adjust_from_tcx(
             &ecx.tcx,
             AllocExtra {
                 stacked_borrows: stacks.map(RefCell::new),
                 data_race: race_alloc,
                 weak_memory: buffer_alloc,
+                // real_pointer: 0,
             },
             |ptr| ecx.global_base_pointer(ptr),
         )?;
@@ -794,7 +812,7 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         match ptr.provenance {
             Provenance::Concrete { alloc_id, sb } =>
                 intptrcast::GlobalStateInner::expose_ptr(ecx, alloc_id, sb),
-            Provenance::Wildcard => {
+            Provenance::Wildcard | Provenance::CHasAccess => {
                 // No need to do anything for wildcard pointers as
                 // their provenances have already been previously exposed.
                 Ok(())
@@ -813,7 +831,7 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         rel.map(|(alloc_id, size)| {
             let sb = match ptr.provenance {
                 Provenance::Concrete { sb, .. } => ProvenanceExtra::Concrete(sb),
-                Provenance::Wildcard => ProvenanceExtra::Wildcard,
+                Provenance::Wildcard | Provenance::CHasAccess => ProvenanceExtra::Wildcard,
             };
             (alloc_id, size, sb)
         })
