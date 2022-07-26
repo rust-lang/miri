@@ -24,10 +24,6 @@ fn run_tests(mode: Mode, path: &str, target: Option<String>) -> Result<()> {
         flags.push("-Dwarnings".into());
         flags.push("-Dunused".into());
     }
-    if let Some(sysroot) = env::var_os("MIRI_SYSROOT") {
-        flags.push("--sysroot".into());
-        flags.push(sysroot);
-    }
     if let Ok(extra_flags) = env::var("MIRIFLAGS") {
         for flag in extra_flags.split_whitespace() {
             flags.push(flag.into());
@@ -152,7 +148,7 @@ regexes! {
     // erase platform file paths
     "sys/[a-z]+/"                    => "sys/PLATFORM/",
     // erase paths into the crate registry
-    r"[^ ]*/\.cargo/registry/.*/(.*\.rs)"  => "CARGO_REGISTRY/$1",
+    r"[^ ]*/\.?cargo/registry/.*/(.*\.rs)"  => "CARGO_REGISTRY/.../$1",
 }
 
 fn ui(mode: Mode, path: &str) -> Result<()> {

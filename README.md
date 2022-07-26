@@ -385,6 +385,9 @@ to Miri failing to detect cases of undefined behavior in a program.
   happening and where in your code would be a good place to look for it.
   Specifying this argument multiple times does not overwrite the previous
   values, instead it appends its values to the list. Listing a tag multiple times has no effect.
+* `-Zmiri-track-weak-memory-loads` shows a backtrace when weak memory emulation returns an outdated
+  value from a load. This can help diagnose problems that disappear under
+  `-Zmiri-disable-weak-memory-emulation`.
 
 [function ABI]: https://doc.rust-lang.org/reference/items/functions.html#extern-function-qualifier
 
@@ -414,10 +417,9 @@ Moreover, Miri recognizes some environment variables:
   checkout. Note that changing files in that directory does not automatically
   trigger a re-build of the standard library; you have to clear the Miri build
   cache manually (on Linux, `rm -rf ~/.cache/miri`).
-* `MIRI_SYSROOT` (recognized by `cargo miri` and the test suite) indicates the
-  sysroot to use. Only set this if you do not want to use the automatically
-  created sysroot. (The `miri` driver sysroot is controlled via the `--sysroot`
-  flag instead.)
+* `MIRI_SYSROOT` (recognized by `cargo miri` and the Miri driver) indicates the sysroot to use. When
+  using `cargo miri`, only set this if you do not want to use the automatically created sysroot. For
+  directly invoking the Miri driver, this variable (or a `--sysroot` flag) is mandatory.
 * `MIRI_TEST_TARGET` (recognized by the test suite and the `./miri` script) indicates which target
   architecture to test against.  `miri` and `cargo miri` accept the `--target` flag for the same
   purpose.
@@ -453,6 +455,8 @@ binaries, and as such worth documenting:
   crate currently being compiled.
 * `MIRI_VERBOSE` when set to any value tells the various `cargo-miri` phases to
   perform verbose logging.
+* `MIRI_HOST_SYSROOT` is set by bootstrap to tell `cargo-miri` which sysroot to use for *host*
+  operations.
 
 [testing-miri]: CONTRIBUTING.md#testing-the-miri-driver
 

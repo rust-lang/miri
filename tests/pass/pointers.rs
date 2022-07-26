@@ -1,4 +1,8 @@
-use std::mem::transmute;
+//@compile-flags: -Zmiri-permissive-provenance
+#![feature(ptr_metadata, const_raw_ptr_comparison)]
+
+use std::mem::{self, transmute};
+use std::ptr;
 
 fn one_line_ref() -> i16 {
     *&1
@@ -71,6 +75,19 @@ fn wide_ptr_ops() {
     assert!(!(a > b));
 }
 
+fn metadata_vtable() {
+    let p = &0i32 as &dyn std::fmt::Debug;
+    let meta: ptr::DynMetadata<_> = ptr::metadata(p as *const _);
+    assert_eq!(meta.size_of(), mem::size_of::<i32>());
+    assert_eq!(meta.align_of(), mem::align_of::<i32>());
+
+    type T = [i32; 16];
+    let p = &T::default() as &dyn std::fmt::Debug;
+    let meta: ptr::DynMetadata<_> = ptr::metadata(p as *const _);
+    assert_eq!(meta.size_of(), mem::size_of::<T>());
+    assert_eq!(meta.align_of(), mem::align_of::<T>());
+}
+
 fn main() {
     assert_eq!(one_line_ref(), 1);
     assert_eq!(basic_ref(), 1);
@@ -115,5 +132,12 @@ fn main() {
     assert!(dangling > 3);
     assert!(dangling >= 4);
 
+    // CTFE-specific equality tests, need to also work at runtime.
+    let addr = &13 as *const i32;
+    let addr2 = (addr as usize).wrapping_add(usize::MAX).wrapping_add(1);
+    assert!(addr.guaranteed_eq(addr2 as *const _));
+    assert!(addr.guaranteed_ne(0x100 as *const _));
+
     wide_ptr_ops();
+    metadata_vtable();
 }

@@ -21,6 +21,7 @@ function run_tests {
     echo "Testing host architecture"
   fi
 
+  ## ui test suite
   ./miri test --locked
   if [ -z "${MIRI_TEST_TARGET+exists}" ]; then
     # Only for host architecture: tests with optimizations (`-O` is what cargo passes, but crank MIR
@@ -30,17 +31,28 @@ function run_tests {
     MIRIFLAGS="-O -Zmir-opt-level=4" MIRI_SKIP_UI_CHECKS=1 ./miri test --locked -- tests/{pass,panic}
   fi
 
+  ## test-cargo-miri
   # On Windows, there is always "python", not "python3" or "python2".
   if command -v python3 > /dev/null; then
     PYTHON=python3
   else
     PYTHON=python
   fi
-
-  # "miri test" has built the sysroot for us, now this should pass without
-  # any interactive questions.
+  # Some environment setup that attempts to confuse the heck out of cargo-miri.
+  if [ "$HOST_TARGET" = x86_64-unknown-linux-gnu ]; then
+    # These act up on Windows (`which miri` produces a filename that does not exist?!?),
+    # so let's do this only on Linux. Also makes sure things work without these set.
+    export RUSTC=$(which rustc)
+    export MIRI=$(which miri)
+  fi
+  mkdir -p .cargo
+  echo 'build.rustc-wrapper = "thisdoesnotexist"' > .cargo/config.toml
+  # Run the actual test
   ${PYTHON} test-cargo-miri/run-test.py
   echo
+  # Clean up
+  unset RUSTC MIRI
+  rm -rf .cargo
 
   # Ensure that our benchmarks all work, on the host at least.
   if [ -z "${MIRI_TEST_TARGET+exists}" ]; then

@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "autocfg"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
+
+[[package]]
 name = "byteorder"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18,6 +24,7 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 name = "cargo-miri-test"
 version = "0.1.0"
 dependencies = [
+ "autocfg",
  "byteorder 0.5.3",
  "byteorder 1.4.3",
  "cdylib",
@@ -49,15 +56,6 @@ name = "exported_symbol_dep"
 version = "0.1.0"
 
 [[package]]
-name = "hermit-abi"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "issue_1567"
 version = "0.1.0"
 dependencies = [
@@ -82,22 +80,6 @@ version = "0.1.0"
 [[package]]
 name = "issue_rust_86261"
 version = "0.1.0"
-
-[[package]]
-name = "libc"
-version = "0.2.126"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
-
-[[package]]
-name = "num_cpus"
-version = "1.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19e64526ebdee182341572e50e9ad03965aa510cd94427a4549448f285e957a1"
-dependencies = [
- "hermit-abi",
- "libc",
-]
 
 [[package]]
 name = "proc-macro2"
@@ -132,7 +114,7 @@ dependencies = [
 name = "subcrate"
 version = "0.1.0"
 dependencies = [
- "num_cpus",
+ "byteorder 1.4.3",
 ]
 
 [[package]]

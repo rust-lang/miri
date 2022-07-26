@@ -122,15 +122,17 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
         let this = self.eval_context_mut();
 
         let ptr = this.read_pointer(ptr)?;
-        // Take apart the pointer, we need its pieces.
+        // Take apart the pointer, we need its pieces. The offset encodes the span.
         let (alloc_id, offset, _prov) = this.ptr_get_alloc_id(ptr)?;
 
-        let fn_instance =
-            if let Some(GlobalAlloc::Function(instance)) = this.tcx.get_global_alloc(alloc_id) {
-                instance
-            } else {
-                throw_ub_format!("expected function pointer, found {:?}", ptr);
-            };
+        // This has to be an actual global fn ptr, not a dlsym function.
+        let fn_instance = if let Some(GlobalAlloc::Function(instance)) =
+            this.tcx.try_get_global_alloc(alloc_id)
+        {
+            instance
+        } else {
+            throw_ub_format!("expected static function pointer, found {:?}", ptr);
+        };
 
         let lo =
             this.tcx.sess.source_map().lookup_char_pos(BytePos(offset.bytes().try_into().unwrap()));
@@ -169,9 +171,11 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             );
         }
 
-        let lineno: u32 = lo.line as u32;
+        // `u32` is not enough to fit line/colno, which can be `usize`. It seems unlikely that a
+        // file would have more than 2^32 lines or columns, but whatever, just default to 0.
+        let lineno: u32 = u32::try_from(lo.line).unwrap_or(0);
         // `lo.col` is 0-based - add 1 to make it 1-based for the caller.
-        let colno: u32 = lo.col.0 as u32 + 1;
+        let colno: u32 = u32::try_from(lo.col.0 + 1).unwrap_or(0);
 
         let dest = this.force_allocation(dest)?;
         if let ty::Adt(adt, _) = dest.layout.ty.kind() {
