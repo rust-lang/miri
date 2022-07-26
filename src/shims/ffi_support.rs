@@ -81,28 +81,9 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                                 match k {
                                     ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, sz)) => {
                                         let (alloc_id, _, _) = cx.ptr_get_alloc_id(ptr.into())?;
-                                        let (size, align, _) = cx.get_alloc_info(alloc_id);
-                                        let fake_range = AllocRange{ start: rustc_target::abi::Size::ZERO, size: size};
-                                        println!("{:?}, {:?}", size, align);
-                                        let alloc = cx.get_ptr_alloc(ptr.into(), size, align)?.unwrap();
-                                        let wtf = alloc.read_integer(alloc_range(rustc_target::abi::Size::ZERO, size));
-                                        println!("UMM {:?}", wtf);
-                                        let ree = cx.memory.alloc_map().get(alloc_id).unwrap().1.get_bytes_with_uninit_and_ptr(cx, fake_range).unwrap();
-                                        println!("{:?}", ree.as_ptr());
-                                        let bytes = cx.read_bytes_ptr(ptr.into(), size);
-                                        println!("WHAT {:?}", bytes);
-                                        // println!("{:?}", ptr.into_parts().0);
-                                        // let ree = &ptr.into_parts().1.bytes();
-                                        // println!("{:?}", self.memory);
-                                        // println!("{:?}", ptr.get_alloc_id());
-                                        // unsafe {
-                                        //     println!("{:?}", *(ree as *const u64));
-                                        //     println!("{:?}", *(ptr.into_parts().1.bytes() as *mut u64));
-                                        // }
-                                        // println!("REE {:?}", intptrcast::GlobalStateInner::rel_ptr_to_addr(cx, ptr));
-                                        // let the_int = s.assert_int();
-                                        // println!("{:?}", the_int.try_to_u64().unwrap());
-                                        let inner_carg = CArg::ConstPtrUInt8(unsafe{ree.as_ptr()});
+                                        let ree = cx.memory.alloc_map().get(alloc_id).unwrap().1.extra.real_pointer;//get_bytes_with_uninit_and_ptr(cx, fake_range).unwrap();
+                                        println!("{:?}", ree);
+                                        let inner_carg = CArg::ConstPtrUInt8(ree);
                                         return Ok(CArg::RecMutPtrCarg(Box::new(inner_carg)));
                                         // return Ok(CArg::USize(the_int.try_to_u64().unwrap().try_into().unwrap()));
                                         // println!("{:?}", s.assert_int())
