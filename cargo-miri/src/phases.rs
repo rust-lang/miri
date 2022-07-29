@@ -6,6 +6,7 @@ use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::Command;
+use std::str;
 
 use crate::{setup::*, util::*};
 
@@ -517,11 +518,10 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
             cmd.arg(arg);
         }
     }
-    // Respect `MIRIFLAGS`.
-    if let Ok(a) = env::var("MIRIFLAGS") {
-        // This code is taken from `RUSTFLAGS` handling in cargo.
-        let args = a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
-        cmd.args(args);
+
+    // Respect flags.
+    if let Some(flags) = get_miriflags() {
+        cmd.args(flags);
     }
 
     // Then pass binary arguments.
@@ -538,6 +538,27 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
     match phase {
         RunnerPhase::Rustdoc => exec_with_pipe(cmd, &info.stdin, format!("{}.stdin", binary)),
         RunnerPhase::Cargo => exec(cmd),
+    }
+}
+
+fn get_miriflags() -> Option<Vec<String>> {
+    // Fetch miri flags from cargo config.
+    let mut cmd = cargo();
+    cmd.args(["-Zunstable-options", "config", "get", "miri.flags", "--format=json-value"]);
+    let output = cmd.output().expect("failed to run `cargo config`");
+    let config_miriflags =
+        str::from_utf8(&output.stdout).expect("failed to get `cargo config` output");
+
+    // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
+    // If MIRIFLAGS is present, flags from cargo config are ignored.
+    // This matches cargo behavior for RUSTFLAGS.
+    if let Ok(a) = env::var("MIRIFLAGS") {
+        // This code is taken from `RUSTFLAGS` handling in cargo.
+        Some(a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
+    } else if let Ok(args) = serde_json::from_str::<Vec<String>>(config_miriflags) {
+        Some(args)
+    } else {
+        None
     }
 }
 
