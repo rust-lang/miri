@@ -68,33 +68,15 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
             TyKind::Uint(UintTy::Usize) => {
                 return Ok(CArg::USize(k.to_machine_usize(cx)?.try_into().unwrap()));
             }
-            // mut pointers
-            TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: rustc_hir::Mutability::Mut} ) => {
-                match some_ty.kind() {
-                    TyKind::Int(IntTy::I32) => {
-                        println!("REEEE i32 pointer ARG");
-                    },
-                    TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: rustc_hir::Mutability::Mut} ) => {
-                        match some_ty.kind() {
-                            TyKind::Int(IntTy::I32) => {
-                                println!("RECURSION BRO: **i32 arg");
-                                match k {
-                                    ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, sz)) => {
-                                        let (alloc_id, _, _) = cx.ptr_get_alloc_id(ptr.into())?;
-                                        let ree = cx.memory.alloc_map().get(alloc_id).unwrap().1.extra.real_pointer;//get_bytes_with_uninit_and_ptr(cx, fake_range).unwrap();
-                                        println!("{:?}", ree);
-                                        let inner_carg = CArg::ConstPtrUInt8(ree);
-                                        return Ok(CArg::RecMutPtrCarg(Box::new(inner_carg)));
-                                        // return Ok(CArg::USize(the_int.try_to_u64().unwrap().try_into().unwrap()));
-                                        // println!("{:?}", s.assert_int())
-                                    }, 
-                                    _ => {}
-                                }
-                            },
-                            _ => { }
-                        }
+            // pointers
+            TyKind::RawPtr(TypeAndMut{..} ) => {
+                match k {
+                    ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, sz)) => {
+                        let qq = ptr.into_parts().1.bytes_usize();
+                        // TODO select correct types rather than yoloing
+                        return Ok(CArg::RecConstPtrCarg(Box::new(CArg::ConstPtrInt32(qq as *const i32))))
                     }
-                    _ => { }
+                    _ => {}
                 }
             }
             _ => {}

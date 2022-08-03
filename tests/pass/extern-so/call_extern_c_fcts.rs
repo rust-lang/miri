@@ -3,6 +3,7 @@
 //@compile-flags: -Zmiri-extern-so-file=tests/extern-so/libtestlib.so
 
 extern "C" {
+    fn double_deref(x: *const *const i32) -> i32;
     fn add_one_int(x: i32) -> i32;
     fn add_int16(x: i16) -> i16;
     fn test_stack_spill(
@@ -44,5 +45,10 @@ fn main() {
         // test void function that prints from C -- call it twice
         printer();
         printer();
+
+        let base: i32 = 42;
+        let base_p: *const i32 = &base as *const i32;
+        let base_pp: *const *const i32 = &base_p as *const *const i32;
+        assert_eq!(double_deref(base_pp), 42);
     }
 }

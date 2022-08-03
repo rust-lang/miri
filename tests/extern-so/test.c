@@ -1,5 +1,9 @@
 #include <stdio.h>
 
+int double_deref(const int **p) {
+  return **p;
+}
+
 int add_one_int(int x) {
   return 2 + x;
 }

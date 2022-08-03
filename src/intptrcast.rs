@@ -37,9 +37,6 @@ pub struct GlobalStateInner {
     /// Whether an allocation has been exposed or not. This cannot be put
     /// into `AllocExtra` for the same reason as `base_addr`.
     exposed: FxHashSet<AllocId>,
-    /// This is used as a memory address when a new pointer is casted to an integer. It
-    /// is always larger than any address that was previously made part of a block.
-    next_base_addr: u64,
     /// The provenance to use for int2ptr casts
     provenance_mode: ProvenanceMode,
 }
@@ -50,7 +47,6 @@ impl GlobalStateInner {
             int_to_ptr_map: Vec::default(),
             base_addr: FxHashMap::default(),
             exposed: FxHashSet::default(),
-            next_base_addr: STACK_ADDR,
             provenance_mode: config.provenance_mode,
         }
     }
@@ -157,6 +153,19 @@ impl<'mir, 'tcx> GlobalStateInner {
     }
 
     fn alloc_base_addr(ecx: &MiriEvalContext<'mir, 'tcx>, alloc_id: AllocId) -> u64 {
+        // TODO avoid hole punch
+        // TODO avoid bytes hole punch
+        // TODO avoid leaked address hack
+        let base_addr: u64 = match ecx.get_alloc_raw(alloc_id) {
+            Ok(ref alloc) => {
+                let temp = alloc.bytes.as_ptr() as u64;
+                assert!(temp % 16 == 0);
+                temp
+            }
+            // Grabbing u128 for max alignment
+            Err(_) => Box::leak(Box::new(0u128)) as *const u128 as u64,
+        };
+        // With our hack, base_addr should always be fully aligned
         let mut global_state = ecx.machine.intptrcast.borrow_mut();
         let global_state = &mut *global_state;
 
@@ -167,34 +176,22 @@ impl<'mir, 'tcx> GlobalStateInner {
                 // it became dangling.  Hence we allow dead allocations.
                 let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
 
-                // This allocation does not have a base address yet, pick one.
-                // Leave some space to the previous allocation, to give it some chance to be less aligned.
-                let slack = {
-                    let mut rng = ecx.machine.rng.borrow_mut();
-                    // This means that `(global_state.next_base_addr + slack) % 16` is uniformly distributed.
-                    rng.gen_range(0..16)
-                };
-                // From next_base_addr + slack, round up to adjust for alignment.
-                let base_addr = global_state.next_base_addr.checked_add(slack).unwrap();
-                let base_addr = Self::align_addr(base_addr, align.bytes());
+                // This allocation does not have a base address yet, assign its bytes base.
                 entry.insert(base_addr);
                 trace!(
-                    "Assigning base address {:#x} to allocation {:?} (size: {}, align: {}, slack: {})",
+                    "Assigning base address {:#x} to allocation {:?} (size: {}, align: {})",
                     base_addr,
                     alloc_id,
                     size.bytes(),
                     align.bytes(),
-                    slack,
                 );
 
-                // Remember next base address.  If this allocation is zero-sized, leave a gap
-                // of at least 1 to avoid two allocations having the same base address.
-                // (The logic in `alloc_id_from_addr` assumes unique addresses, and different
-                // function/vtable pointers need to be distinguishable!)
-                global_state.next_base_addr = base_addr.checked_add(max(size.bytes(), 1)).unwrap();
-                // Given that `next_base_addr` increases in each allocation, pushing the
-                // corresponding tuple keeps `int_to_ptr_map` sorted
+                // TODO replace int_to_ptr_map's data structure, since even if we binary search for
+                // the insert location, the insertion is still linear (due to copies)
+                // I've done it the dumb obviously correct way for now.
+                global_state.int_to_ptr_map.retain(|&(ref a,_)| a != &base_addr);
                 global_state.int_to_ptr_map.push((base_addr, alloc_id));
+                global_state.int_to_ptr_map.sort();
 
                 base_addr
             }

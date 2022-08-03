@@ -1,5 +1,6 @@
 CODEABI_1.0 {
-    global: *add_one_int*; 
+    global: *double_deref*;
+        *add_one_int*; 
         *printer*; 
         *test_stack_spill*; 
         *get_unsigned_int*; 
