@@ -110,7 +110,8 @@ their name.
 
 You can pass arguments to Miri via `MIRIFLAGS`. For example,
 `MIRIFLAGS="-Zmiri-disable-stacked-borrows" cargo miri run` runs the program
-without checking the aliasing of references.
+without checking the aliasing of references. Also, you can set the `miri.flags`
+setting in [cargo configuration](https://doc.rust-lang.org/cargo/reference/config.html).
 
 When compiling code via `cargo miri`, the `cfg(miri)` config flag is set for code
 that will be interpret under Miri. You can use this to ignore test cases that fail
@@ -262,7 +263,22 @@ up the sysroot.  If you are using `miri` (the Miri driver) directly, see the
 [miri-flags]: #miri--z-flags-and-environment-variables
 
 Miri adds its own set of `-Z` flags, which are usually set via the `MIRIFLAGS`
-environment variable. We first document the most relevant and most commonly used flags:
+environment variable or using the `miri.flags` setting in
+[cargo configuration](https://doc.rust-lang.org/cargo/reference/config.html),
+they are mutually exclusive with priority of `MIRIFLAGS` environment variable:
+
+```bash
+MIRIFLAGS="-Zmiri-disable-stacked-borrows" cargo miri run
+```
+
+```toml
+# .cargo/config.toml
+
+[miri]
+flags = ["-Zmiri-disable-isolation", "-Zmiri-report-progress"]
+```
+
+We first document the most relevant and most commonly used flags:
 
 * `-Zmiri-compare-exchange-weak-failure-rate=<rate>` changes the failure rate of
   `compare_exchange_weak` operations. The default is `0.8` (so 4 out of 5 weak ops will fail).
