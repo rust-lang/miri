@@ -153,15 +153,11 @@ impl<'mir, 'tcx> GlobalStateInner {
     }
 
     fn alloc_base_addr(ecx: &MiriEvalContext<'mir, 'tcx>, alloc_id: AllocId) -> u64 {
-        // TODO avoid hole punch
-        // TODO avoid bytes hole punch
         // TODO avoid leaked address hack
-        let base_addr: u64 = match ecx.get_alloc_raw(alloc_id) {
-            Ok(ref alloc) => {
-                let temp = alloc.get_bytes_addr();
-                // TODO make this a check 
-                assert!(temp.bytes() % 16 == 0);
-                temp.bytes()
+        let base_addr: u64 = match ecx.get_alloc_base_addr(alloc_id) {
+            Ok(addr) => {
+                assert!(addr.bytes() % 16 == 0);
+                addr.bytes()
             }
             // Grabbing u128 for max alignment
             Err(_) => Box::leak(Box::new(0u128)) as *const u128 as u64,
