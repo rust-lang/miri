@@ -61,7 +61,7 @@ def test(name, cmd, stdout_ref, stderr_ref, stdin=b'', env={}):
 
     stdout_matches = check_output(stdout, stdout_ref, "stdout")
     stderr_matches = check_output(stderr, stderr_ref, "stderr")
-    
+
     if p.returncode == 0 and stdout_matches and stderr_matches:
         # All good!
         return
@@ -90,6 +90,12 @@ def test_no_rebuild(name, cmd, env={}):
         fail("Something was being rebuilt when it should not be (or we got no output)");
 
 def test_cargo_miri_run():
+    # Try to remove cargo config to avoid unexpected settings
+    try:
+        os.remove('.cargo/config.toml')
+    except OSError:
+        pass
+
     test("`cargo miri run` (no isolation)",
         cargo_miri("run"),
         "run.default.stdout.ref", "run.default.stderr.ref",
@@ -99,6 +105,44 @@ def test_cargo_miri_run():
             'MIRITESTVAR': "wrongval", # make sure the build.rs value takes precedence
         },
     )
+
+    # Create a config with isolation disabled
+    try:
+        os.mkdir('.cargo')
+    except OSError:
+        pass
+
+    with open(".cargo/config.toml", "w") as f:
+        f.write('[miri]\nflags = ["-Zmiri-disable-isolation"]')
+
+    # Testing miri.flags are taken in account
+    test("`cargo miri run` (no isolation, set from cargo config)",
+        cargo_miri("run"),
+        "run.default.stdout.ref", "run.default.stderr.ref",
+        stdin=b'12\n21\n',
+        env={
+            'MIRITESTVAR': "wrongval", # make sure the build.rs value takes precedence
+        },
+    )
+
+    # Create an empty config
+    with open(".cargo/config.toml", "w") as f:
+        f.write('[miri]\nflags = [""]')
+
+    # Check that MIRIFLAGS envar has higher precedence tha cargo config
+    test("`cargo miri run` (no isolation, ignoring cargo config)",
+        cargo_miri("run"),
+        "run.default.stdout.ref", "run.default.stderr.ref",
+        stdin=b'12\n21\n',
+        env={
+            'MIRIFLAGS': "-Zmiri-disable-isolation",
+            'MIRITESTVAR': "wrongval", # make sure the build.rs value takes precedence
+        },
+    )
+
+    # Cleaning up config after all config-related tests
+    os.remove('.cargo/config.toml')
+
     # Special test: run it again *without* `-q` to make sure nothing is being rebuilt (Miri issue #1722)
     test_no_rebuild("`cargo miri run` (no rebuild)",
         cargo_miri("run", quiet=False) + ["--", ""],
