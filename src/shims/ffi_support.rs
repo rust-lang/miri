@@ -7,24 +7,9 @@ use rustc_target::abi::HasDataLayout;
 
 use crate::*;
 
-// pub trait HasUnderlyingPointer {
-//     fn get_underlying_raw_ptr(&self) -> *const u8;
-// }
-
-// impl HasUnderlyingPointer for Allocation {
-//     fn get_underlying_raw_ptr(&self) -> *const u8 {
-        
-//     }
-// } 
-
 impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriEvalContext<'mir, 'tcx> {}
 
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx> {
-
-    // fn get_allocation_for_id(&self, id: AllocId) -> InterpResult<'tcx, &Allocation<Provenance, AllocExtra>> {
-    //     let this = self.eval_context_ref();
-    //     this.get_alloc_raw(id)
-    // }
 
     /// Extract the scalar value from the result of reading a scalar from the machine,
     /// and convert it to a `CArg`.
@@ -69,16 +54,71 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 return Ok(CArg::USize(k.to_machine_usize(cx)?.try_into().unwrap()));
             }
             // pointers
-            TyKind::RawPtr(TypeAndMut{..} ) => {
+            TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: some_mut } ) => {
                 match k {
-                    ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, sz)) => {
+                    ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, _)) => {
                         let qq = ptr.into_parts().1.bytes_usize();
-                        // TODO select correct types rather than yoloing
-                        return Ok(CArg::RecConstPtrCarg(Box::new(CArg::ConstPtrInt32(qq as *const i32))))
+                        match (some_ty.kind(), some_mut) {
+                            // int
+                            (TyKind::Int(IntTy::I8), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrInt8(qq as *mut i8));
+                            },
+                            (TyKind::Int(IntTy::I8), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrInt8(qq as *const i8));
+                            },
+                            (TyKind::Int(IntTy::I16), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrInt16(qq as *mut i16));
+                            },
+                            (TyKind::Int(IntTy::I16), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrInt16(qq as *const i16));
+                            },
+                            (TyKind::Int(IntTy::I32), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrInt32(qq as *mut i32));
+                            },
+                            (TyKind::Int(IntTy::I32), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrInt32(qq as *const i32));
+                            },
+                            (TyKind::Int(IntTy::I64), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrInt64(qq as *mut i64));
+                            },
+                            (TyKind::Int(IntTy::I64), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrInt64(qq as *const i64));
+                            },
+                            // uints
+                            (TyKind::Uint(UintTy::U8), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrUInt8(qq as *mut u8));
+                            },
+                            (TyKind::Uint(UintTy::U8), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrUInt8(qq as *const u8));
+                            },
+                            (TyKind::Uint(UintTy::U16), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrUInt16(qq as *mut u16));
+                            },
+                            (TyKind::Uint(UintTy::U16), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrUInt16(qq as *const u16));
+                            },
+                            (TyKind::Uint(UintTy::U32), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrUInt32(qq as *mut u32));
+                            },
+                            (TyKind::Uint(UintTy::U32), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrUInt32(qq as *const u32));
+                            },
+                            (TyKind::Uint(UintTy::U64), rustc_hir::Mutability::Mut) => {
+                                return Ok(CArg::MutPtrUInt64(qq as *mut u64));
+                            },
+                            (TyKind::Uint(UintTy::U64), rustc_hir::Mutability::Not) => {
+                                return Ok(CArg::ConstPtrUInt64(qq as *const u64));
+                            },
+                            // recursive case
+                            (TyKind::RawPtr(..), _) => {
+                                return Ok(CArg::RecCarg(Box::new(Self::scalar_to_carg(k, some_ty, cx)?)));
+                            }
+                            _ => {}
+                        }
                     }
                     _ => {}
                 }
-            }
+            },
             _ => {}
         }
         // If no primitives were returned then we have an unsupported type.
@@ -321,9 +361,8 @@ pub enum CArg {
     ConstPtrUInt16(*const u16),
     ConstPtrUInt32(*const u32),
     ConstPtrUInt64(*const u64),
-    // recursive
-    RecConstPtrCarg(Box<CArg>),
-    RecMutPtrCarg(Box<CArg>),
+    /// Recursive `CArg` (for nested pointers).
+    RecCarg(Box<CArg>),
 }
 
 impl<'a> CArg {
@@ -356,8 +395,7 @@ impl<'a> CArg {
             CArg::ConstPtrUInt16(i) => arg(i),
             CArg::ConstPtrUInt32(i) => arg(i),
             CArg::ConstPtrUInt64(i) => arg(i),
-            CArg::RecConstPtrCarg(box_carg) => (*box_carg).arg_downcast(),
-            CArg::RecMutPtrCarg(box_carg) => (*box_carg).arg_downcast(),
+            CArg::RecCarg(box_carg) => (*box_carg).arg_downcast(),
         }
     }
 }
