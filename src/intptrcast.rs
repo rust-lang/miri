@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::cmp::max;
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, BTreeMap};
 
 use log::trace;
 use rand::Rng;
@@ -26,9 +26,9 @@ pub type GlobalState = RefCell<GlobalStateInner>;
 
 #[derive(Clone, Debug)]
 pub struct GlobalStateInner {
-    /// This is used as a map between the address of each allocation and its `AllocId`.
-    /// It is always sorted
-    int_to_ptr_map: Vec<(u64, AllocId)>,
+    /// This is a map between the address of each allocation and its `AllocId`.
+    /// Since it's a `BTreeMap`, it is always sorted, and provides efficient insertion.
+    int_to_ptr_map: BTreeMap<u64, AllocId>,
     /// The base address for each allocation.  We cannot put that into
     /// `AllocExtra` because function pointers also have a base address, and
     /// they do not have an `AllocExtra`.
@@ -44,7 +44,7 @@ pub struct GlobalStateInner {
 impl GlobalStateInner {
     pub fn new(config: &MiriConfig) -> Self {
         GlobalStateInner {
-            int_to_ptr_map: Vec::default(),
+            int_to_ptr_map: BTreeMap::default(),
             base_addr: FxHashMap::default(),
             exposed: FxHashSet::default(),
             provenance_mode: config.provenance_mode,
@@ -59,22 +59,26 @@ impl<'mir, 'tcx> GlobalStateInner {
         let global_state = ecx.machine.intptrcast.borrow();
         assert!(global_state.provenance_mode != ProvenanceMode::Strict);
 
-        let pos = global_state.int_to_ptr_map.binary_search_by_key(&addr, |(addr, _)| *addr);
-
         // Determine the in-bounds provenance for this pointer.
         // (This is only called on an actual access, so in-bounds is the only possible kind of provenance.)
-        let alloc_id = match pos {
-            Ok(pos) => Some(global_state.int_to_ptr_map[pos].1),
-            Err(0) => None,
-            Err(pos) => {
-                // This is the largest of the adresses smaller than `int`,
-                // i.e. the greatest lower bound (glb)
-                let (glb, alloc_id) = global_state.int_to_ptr_map[pos - 1];
-                // This never overflows because `addr >= glb`
-                let offset = addr - glb;
-                // If the offset exceeds the size of the allocation, don't use this `alloc_id`.
-                let size = ecx.get_alloc_info(alloc_id).0;
-                if offset <= size.bytes() { Some(alloc_id) } else { None }
+        let alloc_id = match global_state.int_to_ptr_map.get(&addr) {
+            Some(&id) => Some(id),
+            None => {
+                // If the address is not in the map, we check the position it should be inserted at.
+                // This returns the max key in the map less than `addr`.
+                match global_state.int_to_ptr_map.range(..addr).next_back() {
+                    // Should be inserted at the beginning.
+                    None => None,
+                    // This is the largest of the adresses smaller than `int`,
+                    // i.e. the greatest lower bound (glb).
+                    Some((glb, &alloc_id)) => {
+                        // This never overflows because `addr >= glb`
+                        let offset = addr - glb;
+                        // If the offset exceeds the size of the allocation, don't use this `alloc_id`.
+                        let size = ecx.get_alloc_info(alloc_id).0;
+                        if offset <= size.bytes() { Some(alloc_id) } else { None }
+                    }
+                }
             }
         }?;
 
@@ -183,12 +187,9 @@ impl<'mir, 'tcx> GlobalStateInner {
                     align.bytes(),
                 );
 
-                // TODO replace int_to_ptr_map's data structure, since even if we binary search for
-                // the insert location, the insertion is still linear (due to copies)
-                // I've done it the dumb obviously correct way for now.
-                global_state.int_to_ptr_map.retain(|&(ref a,_)| a != &base_addr);
-                global_state.int_to_ptr_map.push((base_addr, alloc_id));
-                global_state.int_to_ptr_map.sort();
+                // Map has no duplicates so no need to remove copies.
+                // Map is always sorted.
+                global_state.int_to_ptr_map.insert(base_addr, alloc_id);
 
                 base_addr
             }
