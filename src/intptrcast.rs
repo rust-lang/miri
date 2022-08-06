@@ -158,13 +158,17 @@ impl<'mir, 'tcx> GlobalStateInner {
 
     fn alloc_base_addr(ecx: &MiriEvalContext<'mir, 'tcx>, alloc_id: AllocId) -> u64 {
         // TODO avoid leaked address hack
+        let mut is_global = false;
         let base_addr: u64 = match ecx.get_alloc_base_addr(alloc_id) {
             Ok(addr) => {
                 assert!(addr.bytes() % 16 == 0);
                 addr.bytes()
             }
             // Grabbing u128 for max alignment
-            Err(_) => Box::leak(Box::new(0u128)) as *const u128 as u64,
+            Err(_) => {
+                is_global = true;
+                Box::leak(Box::new(0u128)) as *const u128 as u64
+            }
         };
         // With our hack, base_addr should always be fully aligned
         let mut global_state = ecx.machine.intptrcast.borrow_mut();
@@ -176,6 +180,12 @@ impl<'mir, 'tcx> GlobalStateInner {
                 // There is nothing wrong with a raw pointer being cast to an integer only after
                 // it became dangling.  Hence we allow dead allocations.
                 let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
+
+                // println!("REE: {:?}, {:?}, {:?}", align, base_addr % align.bytes(), is_global);
+                let what = Self::align_addr(base_addr, align.bytes());
+                if (what != base_addr) {
+                    // println!("REEE: {:?}, {:?}, {:?}", what, base_addr, alloc_id);
+                }
 
                 // This allocation does not have a base address yet, assign its bytes base.
                 entry.insert(base_addr);
