@@ -224,7 +224,6 @@ pub struct AllocExtra {
     /// Weak memory emulation via the use of store buffers,
     ///  this is only added if it is enabled.
     pub weak_memory: Option<weak_memory::AllocExtra>,
-    pub real_pointer: *const u8,
 }
 
 /// Precomputed layouts of primitive types
@@ -690,10 +689,6 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         alloc: Cow<'b, Allocation>,
         kind: Option<MemoryKind<Self::MemoryKind>>,
     ) -> InterpResult<'tcx, Cow<'b, Allocation<Self::Provenance, Self::AllocExtra>>> {
-        let size = alloc.size();
-        let alloc_range = AllocRange{ start: rustc_target::abi::Size::ZERO, size: size};
-        let alloc_bytes_ptr = alloc.get_bytes_with_uninit_and_ptr(ecx, alloc_range).unwrap().as_ptr();
- 
         let kind = kind.expect("we set our STATIC_KIND so this cannot be None");
         if ecx.machine.tracked_alloc_ids.contains(&id) {
             register_diagnostic(NonHaltingDiagnostic::CreatedAlloc(
@@ -723,14 +718,12 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
             )
         });
         let buffer_alloc = ecx.machine.weak_memory.then(weak_memory::AllocExtra::new_allocation);
-        // println!("yup -- {:?}", id);
         let alloc: Allocation<Provenance, Self::AllocExtra> = alloc.adjust_from_tcx(
             &ecx.tcx,
             AllocExtra {
                 stacked_borrows: stacks.map(RefCell::new),
                 data_race: race_alloc,
                 weak_memory: buffer_alloc,
-                real_pointer: alloc_bytes_ptr,
             },
             |ptr| ecx.global_base_pointer(ptr),
         )?;

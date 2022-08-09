@@ -157,35 +157,43 @@ impl<'mir, 'tcx> GlobalStateInner {
     }
 
     fn alloc_base_addr(ecx: &MiriEvalContext<'mir, 'tcx>, alloc_id: AllocId) -> u64 {
-        // TODO avoid leaked address hack
-        let mut is_global = false;
-        let base_addr: u64 = match ecx.get_alloc_base_addr(alloc_id) {
-            Ok(addr) => {
-                assert!(addr.bytes() % 16 == 0);
-                addr.bytes()
-            }
-            // Grabbing u128 for max alignment
+        // With our hack, base_addr should always be fully aligned
+        let mut global_state = match ecx.machine.intptrcast.try_borrow_mut() {
+            Ok(gstate) => gstate,
             Err(_) => {
-                is_global = true;
-                Box::leak(Box::new(0u128)) as *const u128 as u64
+                // we're recursing
+                let new_addr = Box::leak(Box::new(0u128)) as *const u128 as u64;
+                unsafe {
+                    (*ecx.machine.intptrcast.as_ptr()).base_addr.insert(alloc_id, new_addr);
+                    (*ecx.machine.intptrcast.as_ptr()).int_to_ptr_map.insert(new_addr, alloc_id);
+                }
+                trace!(
+                    "Recursive case: Assigning base address {:#x} to allocation {:?}",
+                    new_addr,
+                    alloc_id,
+                );
+                return new_addr;
             }
         };
-        // With our hack, base_addr should always be fully aligned
-        let mut global_state = ecx.machine.intptrcast.borrow_mut();
         let global_state = &mut *global_state;
 
         match global_state.base_addr.entry(alloc_id) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
+                let base_addr = match ecx.get_alloc_base_addr(alloc_id)  {
+                    Ok(addr) => {
+                        assert!(addr.bytes() % 16 == 0);
+                        addr.bytes()
+                    }
+                    // Grabbing u128 for max alignment
+                    Err(_) => {
+                        // TODO avoid leaked address hack
+                        Box::leak(Box::new(0u128)) as *const u128 as u64
+                    }
+                };
                 // There is nothing wrong with a raw pointer being cast to an integer only after
                 // it became dangling.  Hence we allow dead allocations.
                 let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
-
-                // println!("REE: {:?}, {:?}, {:?}", align, base_addr % align.bytes(), is_global);
-                let what = Self::align_addr(base_addr, align.bytes());
-                if (what != base_addr) {
-                    // println!("REEE: {:?}, {:?}, {:?}", what, base_addr, alloc_id);
-                }
 
                 // This allocation does not have a base address yet, assign its bytes base.
                 entry.insert(base_addr);
@@ -200,7 +208,7 @@ impl<'mir, 'tcx> GlobalStateInner {
                 // Map has no duplicates so no need to remove copies.
                 // Map is always sorted.
                 global_state.int_to_ptr_map.insert(base_addr, alloc_id);
-
+                
                 base_addr
             }
         }
