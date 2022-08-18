@@ -132,7 +132,17 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 }
             }
 
-            // Miscelanneous
+            // Miscellaneous
+            "gnu_get_libc_release" => {
+                let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let v = this.eval_libc("gnu_get_libc_release")?;
+                this.write_scalar(v, dest)?;
+            }
+            "gnu_get_libc_version" => {
+                let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let v = this.eval_libc("gnu_get_libc_version")?;
+                this.write_scalar(v, dest)?;
+            }
             "getrandom" => {
                 let [ptr, len, flags] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;

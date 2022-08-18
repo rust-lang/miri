@@ -34,7 +34,7 @@ measureme = "10.0.0"
 # Enable some feature flags that dev-dependencies need but dependencies
 # do not.  This makes `./miri install` after `./miri build` faster.
 [target."cfg(unix)".dependencies]
-libc = "0.2"
+libc = "0.2.132"
 
 [dev-dependencies]
 colored = "2"
