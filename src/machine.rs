@@ -135,7 +135,6 @@ pub enum Provenance {
         sb: SbTag,
     },
     Wildcard,
-    CHasAccess,
 }
 
 /// The "extra" information a pointer has over a regular AllocId.
@@ -178,9 +177,6 @@ impl interpret::Provenance for Provenance {
             Provenance::Wildcard => {
                 write!(f, "[wildcard]")?;
             }
-            Provenance::CHasAccess => {
-                write!(f, "[c has access]")?;
-            }
         }
 
         Ok(())
@@ -190,7 +186,6 @@ impl interpret::Provenance for Provenance {
         match self {
             Provenance::Concrete { alloc_id, .. } => Some(alloc_id),
             Provenance::Wildcard => None,
-            Provenance::CHasAccess => None,
         }
     }
 }
@@ -775,7 +770,7 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         match ptr.provenance {
             Provenance::Concrete { alloc_id, sb } =>
                 intptrcast::GlobalStateInner::expose_ptr(ecx, alloc_id, sb),
-            Provenance::Wildcard | Provenance::CHasAccess => {
+            Provenance::Wildcard => {
                 // No need to do anything for wildcard pointers as
                 // their provenances have already been previously exposed.
                 Ok(())
@@ -794,7 +789,7 @@ impl<'mir, 'tcx> Machine<'mir, 'tcx> for Evaluator<'mir, 'tcx> {
         rel.map(|(alloc_id, size)| {
             let sb = match ptr.provenance {
                 Provenance::Concrete { sb, .. } => ProvenanceExtra::Concrete(sb),
-                Provenance::Wildcard | Provenance::CHasAccess => ProvenanceExtra::Wildcard,
+                Provenance::Wildcard => ProvenanceExtra::Wildcard,
             };
             (alloc_id, size, sb)
         })

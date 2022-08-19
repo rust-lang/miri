@@ -3,7 +3,6 @@ use std::ops::Deref;
 
 use rustc_middle::ty::{IntTy, Ty, TypeAndMut, TyKind, UintTy};
 use rustc_span::Symbol;
-use rustc_target::abi::HasDataLayout;
 
 use crate::*;
 

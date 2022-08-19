@@ -7,7 +7,7 @@ use rand::Rng;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_span::Span;
-use rustc_target::abi::{Size, Align};
+use rustc_target::abi::{HasDataLayout, Size, Align};
 
 use crate::*;
 
