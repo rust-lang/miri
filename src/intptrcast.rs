@@ -7,7 +7,7 @@ use rand::Rng;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_span::Span;
-use rustc_target::abi::{HasDataLayout, Size, Align};
+use rustc_target::abi::{Align, HasDataLayout, Size};
 
 use crate::*;
 
@@ -46,12 +46,8 @@ pub struct GlobalStateInner {
 
 impl GlobalStateInner {
     pub fn new(config: &MiriConfig) -> Self {
-        // 
-        let next_base_addr = if config.external_so_file.is_some() {
-            1
-        } else {
-            STACK_ADDR
-        };
+        //
+        let next_base_addr = if config.external_so_file.is_some() { 1 } else { STACK_ADDR };
         GlobalStateInner {
             int_to_ptr_map: BTreeMap::default(),
             base_addr: FxHashMap::default(),
@@ -168,11 +164,16 @@ impl<'mir, 'tcx> GlobalStateInner {
 
     // Create a fake address for a new allocation, of a particular size and alignment.
     // Ensure this address doesn't overlap with existing or future-assigned memory.
-    fn get_next_fake_addr(ecx: &MiriEvalContext<'mir, 'tcx>, align: Align, size: Size, next_base_addr: u64) -> (u64, u64) {
+    fn get_next_fake_addr(
+        ecx: &MiriEvalContext<'mir, 'tcx>,
+        align: Align,
+        size: Size,
+        next_base_addr: u64,
+    ) -> (u64, u64) {
         // This allocation does not have a base address yet, pick one.
         // Leave some space to the previous allocation, to give it some chance to be less aligned.
         // It also doesn't correspond to a real array of bytes.
-        // HACK: we're not going to actually have pointers in the program that correspond to 
+        // HACK: we're not going to actually have pointers in the program that correspond to
         // the really low addresses, so let's use these as placeholders for these allocations.
         // This makes sure we won't overlap with any existing (real) addresses.
         // An alternate hack, which we had before, was to create and leak a Box:
@@ -204,10 +205,15 @@ impl<'mir, 'tcx> GlobalStateInner {
                     // we're recursing
                     let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
                     let new_addr = unsafe {
+                        // can't borrow_mut to get the global state, so just refer to it 
+                        // via pointer instead
                         let next_base_addr = (*ecx.machine.intptrcast.as_ptr()).next_base_addr;
-                        let (new_addr, next_base_addr) = Self::get_next_fake_addr(ecx, align, size, next_base_addr); //Box::leak(Box::new(0u128)) as *const u128 as u64;
+                        let (new_addr, next_base_addr) =
+                            Self::get_next_fake_addr(ecx, align, size, next_base_addr);
                         (*ecx.machine.intptrcast.as_ptr()).base_addr.insert(alloc_id, new_addr);
-                        (*ecx.machine.intptrcast.as_ptr()).int_to_ptr_map.insert(new_addr, alloc_id);
+                        (*ecx.machine.intptrcast.as_ptr())
+                            .int_to_ptr_map
+                            .insert(new_addr, alloc_id);
                         (*ecx.machine.intptrcast.as_ptr()).next_base_addr = next_base_addr;
                         new_addr
                     };
@@ -252,7 +258,7 @@ impl<'mir, 'tcx> GlobalStateInner {
                 // Map has no duplicates so no need to remove copies.
                 // Map is always sorted.
                 global_state.int_to_ptr_map.insert(base_addr, alloc_id);
-                
+
                 base_addr
             }
         }

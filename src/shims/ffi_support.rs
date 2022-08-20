@@ -1,7 +1,7 @@
 use libffi::{high::call::*, low::CodePtr};
 use std::ops::Deref;
 
-use rustc_middle::ty::{IntTy, Ty, TypeAndMut, TyKind, UintTy};
+use rustc_middle::ty::{IntTy, Ty, TyKind, TypeAndMut, UintTy};
 use rustc_span::Symbol;
 
 use crate::*;
@@ -9,7 +9,6 @@ use crate::*;
 impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriEvalContext<'mir, 'tcx> {}
 
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx> {
-
     /// Extract the scalar value from the result of reading a scalar from the machine,
     /// and convert it to a `CArg`.
     fn scalar_to_carg(
@@ -53,7 +52,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                 return Ok(CArg::USize(k.to_machine_usize(cx)?.try_into().unwrap()));
             }
             // pointers
-            TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: some_mut } ) => {
+            TyKind::RawPtr(TypeAndMut { ty: some_ty, mutbl: some_mut }) => {
                 match k {
                     ScalarMaybeUninit::Scalar(Scalar::Ptr(ptr, _)) => {
                         let qq = ptr.into_parts().1.bytes_usize();
@@ -61,63 +60,65 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                             // int
                             (TyKind::Int(IntTy::I8), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrInt8(qq as *mut i8));
-                            },
+                            }
                             (TyKind::Int(IntTy::I8), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrInt8(qq as *const i8));
-                            },
+                            }
                             (TyKind::Int(IntTy::I16), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrInt16(qq as *mut i16));
-                            },
+                            }
                             (TyKind::Int(IntTy::I16), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrInt16(qq as *const i16));
-                            },
+                            }
                             (TyKind::Int(IntTy::I32), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrInt32(qq as *mut i32));
-                            },
+                            }
                             (TyKind::Int(IntTy::I32), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrInt32(qq as *const i32));
-                            },
+                            }
                             (TyKind::Int(IntTy::I64), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrInt64(qq as *mut i64));
-                            },
+                            }
                             (TyKind::Int(IntTy::I64), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrInt64(qq as *const i64));
-                            },
+                            }
                             // uints
                             (TyKind::Uint(UintTy::U8), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrUInt8(qq as *mut u8));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U8), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrUInt8(qq as *const u8));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U16), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrUInt16(qq as *mut u16));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U16), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrUInt16(qq as *const u16));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U32), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrUInt32(qq as *mut u32));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U32), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrUInt32(qq as *const u32));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U64), rustc_hir::Mutability::Mut) => {
                                 return Ok(CArg::MutPtrUInt64(qq as *mut u64));
-                            },
+                            }
                             (TyKind::Uint(UintTy::U64), rustc_hir::Mutability::Not) => {
                                 return Ok(CArg::ConstPtrUInt64(qq as *const u64));
-                            },
+                            }
                             // recursive case
                             (TyKind::RawPtr(..), _) => {
-                                return Ok(CArg::RecCarg(Box::new(Self::scalar_to_carg(k, some_ty, cx)?)));
+                                return Ok(CArg::RecCarg(Box::new(Self::scalar_to_carg(
+                                    k, some_ty, cx,
+                                )?)));
                             }
                             _ => {}
                         }
                     }
                     _ => {}
                 }
-            },
+            }
             _ => {}
         }
         // If no primitives were returned then we have an unsupported type.
@@ -203,15 +204,15 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriEvalContextExt<'mir, 'tcx
                     return Ok(());
                 }
                 // mut pointers
-                TyKind::RawPtr(TypeAndMut{ ty: some_ty, mutbl: rustc_hir::Mutability::Mut} ) => {
+                TyKind::RawPtr(TypeAndMut { ty: some_ty, mutbl: rustc_hir::Mutability::Mut }) => {
                     match some_ty.kind() {
                         TyKind::Int(IntTy::I32) => {
                             println!("REEEE ");
                             // let x = call::<i32>(ptr, libffi_args.as_slice());
                             // this.write_int(x, dest)?;
                             return Ok(());
-                        },
-                        _ => { }
+                        }
+                        _ => {}
                     }
                 }
                 // Functions with no declared return type (i.e., the default return)
