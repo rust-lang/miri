@@ -46,11 +46,17 @@ pub struct GlobalStateInner {
 
 impl GlobalStateInner {
     pub fn new(config: &MiriConfig) -> Self {
+        // 
+        let next_base_addr = if config.external_so_file.is_some() {
+            1
+        } else {
+            STACK_ADDR
+        };
         GlobalStateInner {
             int_to_ptr_map: BTreeMap::default(),
             base_addr: FxHashMap::default(),
             exposed: FxHashSet::default(),
-            next_base_addr: 1,
+            next_base_addr,
             provenance_mode: config.provenance_mode,
         }
     }
@@ -160,6 +166,8 @@ impl<'mir, 'tcx> GlobalStateInner {
         Ok(Pointer::new(Some(Provenance::Wildcard), Size::from_bytes(addr)))
     }
 
+    // Create a fake address for a new allocation, of a particular size and alignment.
+    // Ensure this address doesn't overlap with existing or future-assigned memory.
     fn get_next_fake_addr(ecx: &MiriEvalContext<'mir, 'tcx>, align: Align, size: Size, next_base_addr: u64) -> (u64, u64) {
         // This allocation does not have a base address yet, pick one.
         // Leave some space to the previous allocation, to give it some chance to be less aligned.
@@ -187,26 +195,30 @@ impl<'mir, 'tcx> GlobalStateInner {
     }
 
     fn alloc_base_addr(ecx: &MiriEvalContext<'mir, 'tcx>, alloc_id: AllocId) -> u64 {
+        let in_ffi_mode = ecx.machine.external_so_lib.is_some();
         // With our hack, base_addr should always be fully aligned
         let mut global_state = match ecx.machine.intptrcast.try_borrow_mut() {
             Ok(gstate) => gstate,
             Err(_) => {
-                // we're recursing
-                let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
-                let new_addr = unsafe {
-                    let next_base_addr = (*ecx.machine.intptrcast.as_ptr()).next_base_addr;
-                    let (new_addr, next_base_addr) = Self::get_next_fake_addr(ecx, align, size, next_base_addr); //Box::leak(Box::new(0u128)) as *const u128 as u64;
-                    (*ecx.machine.intptrcast.as_ptr()).base_addr.insert(alloc_id, new_addr);
-                    (*ecx.machine.intptrcast.as_ptr()).int_to_ptr_map.insert(new_addr, alloc_id);
-                    (*ecx.machine.intptrcast.as_ptr()).next_base_addr = next_base_addr;
-                    new_addr
-                };
-                trace!(
-                    "Recursive case: Assigning base address {:#x} to allocation {:?}",
-                    new_addr,
-                    alloc_id,
-                );
-                return new_addr;
+                if in_ffi_mode {
+                    // we're recursing
+                    let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
+                    let new_addr = unsafe {
+                        let next_base_addr = (*ecx.machine.intptrcast.as_ptr()).next_base_addr;
+                        let (new_addr, next_base_addr) = Self::get_next_fake_addr(ecx, align, size, next_base_addr); //Box::leak(Box::new(0u128)) as *const u128 as u64;
+                        (*ecx.machine.intptrcast.as_ptr()).base_addr.insert(alloc_id, new_addr);
+                        (*ecx.machine.intptrcast.as_ptr()).int_to_ptr_map.insert(new_addr, alloc_id);
+                        (*ecx.machine.intptrcast.as_ptr()).next_base_addr = next_base_addr;
+                        new_addr
+                    };
+                    trace!(
+                        "Recursive case: Assigning base address {:#x} to allocation {:?}",
+                        new_addr,
+                        alloc_id,
+                    );
+                    return new_addr;
+                }
+                panic!("Can't mutably borrow the `intptrcast` global state!");
             }
         };
         let global_state = &mut *global_state;
@@ -218,19 +230,13 @@ impl<'mir, 'tcx> GlobalStateInner {
                 // it became dangling.  Hence we allow dead allocations.
                 let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
 
-                let base_addr = match ecx.get_alloc_base_addr(alloc_id)  {
-                    Ok(addr) => {
+                let base_addr = if in_ffi_mode && let Ok(addr) = ecx.get_alloc_base_addr(alloc_id)  {
                         assert!(addr.bytes() % 16 == 0);
                         addr.bytes()
-                    }
-                    // Grabbing u128 for max alignment
-                    Err(_) => {
-                        // TODO avoid leaked address hack
-                        // Box::leak(Box::new(0u128)) as *const u128 as u64
-                        let (new_addr, next_base_addr) = Self::get_next_fake_addr(ecx, align, size, global_state.next_base_addr); //Box::leak(Box::new(0u128)) as *const u128 as u64;
-                        global_state.next_base_addr = next_base_addr;
-                        new_addr
-                    }
+                } else {
+                    let (new_addr, next_base_addr) = Self::get_next_fake_addr(ecx, align, size, global_state.next_base_addr); //Box::leak(Box::new(0u128)) as *const u128 as u64;
+                    global_state.next_base_addr = next_base_addr;
+                    new_addr
                 };
 
                 // This allocation does not have a base address yet, assign its bytes base.

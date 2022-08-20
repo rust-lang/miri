@@ -145,12 +145,12 @@ pub enum ProvenanceExtra {
 }
 
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-static_assert_size!(Pointer<Provenance>, 32);
+static_assert_size!(Pointer<Provenance>, 24);
 // FIXME: this would with in 24bytes but layout optimizations are not smart enough
 // #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 //static_assert_size!(Pointer<Option<Provenance>>, 24);
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-static_assert_size!(ScalarMaybeUninit<Provenance>, 40);
+static_assert_size!(ScalarMaybeUninit<Provenance>, 32);
 
 impl interpret::Provenance for Provenance {
     /// We use absolute addresses in the `offset` of a `Pointer<Provenance>`.
