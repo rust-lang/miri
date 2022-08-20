@@ -46,7 +46,11 @@ pub struct GlobalStateInner {
 
 impl GlobalStateInner {
     pub fn new(config: &MiriConfig) -> Self {
-        //
+        // If we're in FFI mode, then the `next_base_addr` is only used to assign fake addresses
+        // to allocations that don't have associated arrays of bytes.
+        // CURRENT HACK:
+        // We start at 1 to avoid overlap with existing/future real memory the program has 
+        // pointers to.
         let next_base_addr = if config.external_so_file.is_some() { 1 } else { STACK_ADDR };
         GlobalStateInner {
             int_to_ptr_map: BTreeMap::default(),
@@ -202,11 +206,12 @@ impl<'mir, 'tcx> GlobalStateInner {
             Ok(gstate) => gstate,
             Err(_) => {
                 if in_ffi_mode {
-                    // we're recursing
+                    // We're recursing!
                     let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
                     let new_addr = unsafe {
-                        // can't borrow_mut to get the global state, so just refer to it 
-                        // via pointer instead
+                        // Can't `borrow_mut` to get the global state, so just refer to it 
+                        // via pointer instead.
+                        // This is unsafe.
                         let next_base_addr = (*ecx.machine.intptrcast.as_ptr()).next_base_addr;
                         let (new_addr, next_base_addr) =
                             Self::get_next_fake_addr(ecx, align, size, next_base_addr);
@@ -236,9 +241,10 @@ impl<'mir, 'tcx> GlobalStateInner {
                 // it became dangling.  Hence we allow dead allocations.
                 let (size, align, _kind) = ecx.get_alloc_info(alloc_id);
 
+                // Short circuit -- only call `ecx.get_alloc_base_addr` if we're `in_ffi_mode`.
                 let base_addr = if in_ffi_mode && let Ok(addr) = ecx.get_alloc_base_addr(alloc_id)  {
-                        assert!(addr.bytes() % 16 == 0);
-                        addr.bytes()
+                    assert!(addr.bytes() % 16 == 0);
+                    addr.bytes()
                 } else {
                     let (new_addr, next_base_addr) = Self::get_next_fake_addr(ecx, align, size, global_state.next_base_addr); //Box::leak(Box::new(0u128)) as *const u128 as u64;
                     global_state.next_base_addr = next_base_addr;
