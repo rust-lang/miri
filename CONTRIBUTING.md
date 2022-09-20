@@ -275,3 +275,46 @@ see <https://rustc-dev-guide.rust-lang.org/building/how-to-build-and-run.html>.
 
 With this, you should now have a working development setup! See
 [above](#building-and-testing-miri) for how to proceed working on Miri.
+
+### Syncing the miri subtree
+
+Note: Never rebase a subtree sync (in either direction). Always redo the operation.
+
+#### Updating from the rustc repo
+
+One time setup:
+
+Add your own miri fork as `miri-your-fork` to the rustc repo:
+
+```
+git remote add miri-your-fork git@github.com:your-name/miri.git
+```
+
+Every time:
+
+```
+ulimit -Ss 1000000
+wget https://raw.githubusercontent.com/gitgitgadget/git/fe2e4819b869725f870cd3ce99f1f8150fe17dc1/contrib/subtree/git-subtree.sh
+sh git-subtree.sh push --prefix src/tools/miri/ miri-your-fork miri-subtree-sync
+rm git-subtree.sh
+```
+
+
+#### Updating the rustc fork from the miri repo
+
+One time setup:
+
+Add the miri repo as `miri` to the rustc repo:
+
+```
+git remote add miri https://github.com/rust-lang/miri.git
+```
+
+Every time:
+
+```
+ulimit -Ss 1000000
+wget https://raw.githubusercontent.com/gitgitgadget/git/fe2e4819b869725f870cd3ce99f1f8150fe17dc1/contrib/subtree/git-subtree.sh
+sh git-subtree.sh pull --prefix src/tools/miri/ miri master
+rm git-subtree.sh
+```
