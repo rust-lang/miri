@@ -280,6 +280,9 @@ With this, you should now have a working development setup! See
 
 Note: Never rebase a subtree sync (in either direction). Always redo the operation.
 
+All of these operations happen *on a checkout of the rustc repo*. At no time do you
+even need a checkout of the miri repo or run any commands in it. 
+
 #### Moving changes from the rustc repo to the miri repo
 
 One time setup:
