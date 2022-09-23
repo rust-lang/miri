@@ -302,6 +302,9 @@ sh git-subtree.sh push --prefix src/tools/miri/ miri-your-fork miri-subtree-sync
 rm git-subtree.sh
 ```
 
+Now you'll have a branch called `miri-subtree-sync` in your miri fork that you can use to open a PR to miri.
+Do not rebase this branch. If there are conflicts with the miri repo, you need to use the merge strategy, even if this
+is otherwise not permitted for other PRs to the miri repo.
 
 #### Moving changes from the miri repo to the rustc repo
 
@@ -321,3 +324,8 @@ wget https://raw.githubusercontent.com/gitgitgadget/git/fe2e4819b869725f870cd3ce
 sh git-subtree.sh pull --prefix src/tools/miri/ miri master
 rm git-subtree.sh
 ```
+
+Now your currently checked out branch has a new merge commit that pulls in the miri changes. Use this to open a PR
+against the rustc repo.
+Do not rebase this branch. If there are conflicts with the rustc repo, you need to use the merge strategy, even if this
+is otherwise not permitted for other PRs to the rustc repo.
