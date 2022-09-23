@@ -295,6 +295,8 @@ git remote add miri-your-fork git@github.com:your-name/miri.git
 
 Every time:
 
+Note: the first time you run this, `git subtree` builds a cache and this command may thusly take an hour or so.
+
 ```
 ulimit -Ss 1000000
 wget https://raw.githubusercontent.com/gitgitgadget/git/fe2e4819b869725f870cd3ce99f1f8150fe17dc1/contrib/subtree/git-subtree.sh
