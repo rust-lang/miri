@@ -280,11 +280,11 @@ With this, you should now have a working development setup! See
 
 Note: Never rebase a subtree sync (in either direction). Always redo the operation.
 
-#### Updating from the rustc repo
+#### Moving changes from the rustc repo to the miri repo
 
 One time setup:
 
-Add your own miri fork as `miri-your-fork` to the rustc repo:
+Add your own miri fork as `miri-your-fork` to your rustc checkout:
 
 ```
 git remote add miri-your-fork git@github.com:your-name/miri.git
@@ -300,11 +300,11 @@ rm git-subtree.sh
 ```
 
 
-#### Updating the rustc fork from the miri repo
+#### Moving changes from the miri repo to the rustc repo
 
 One time setup:
 
-Add the miri repo as `miri` to the rustc repo:
+Add the main miri repo as `miri` to your rustc checkout:
 
 ```
 git remote add miri https://github.com/rust-lang/miri.git
