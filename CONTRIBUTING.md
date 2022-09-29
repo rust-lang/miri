@@ -279,24 +279,22 @@ With this, you should now have a working development setup! See
 
 ### Fetching the latest changes from the rustc repo
 
-Run the josh proxy locally
+Run the josh proxy locally (in another terminal)
 
 ```
-docker run -p 8000:8000 -e JOSH_REMOTE=https://github.com -v josh-vol:/data/git joshproject/josh-proxy:latest
+docker run -it -p 8000:8000 -e JOSH_REMOTE=https://github.com JOSH_EXTRA_OPTS=--no-background -v josh-vol:/data/git joshproject/josh-proxy:latest
 ```
 
-Register the josh proxy as a remote
+And then integrate the recent changes and update the `rust-version` file
 
 ```
-git remote add josh http://localhost:8000/rust-lang/rust.git:/src/tools/miri.git
+git checkout master
+git pull
+git fetch http://localhost:8000/rust-lang/rust.git:/src/tools/miri.git master # takes ca 5-10 min the first time
+git merge FETCH_HEAD -m "merge rustc history"
+./rustup-toolchain HEAD && ./miri fmt
+git commit -am "rustup"
 ```
 
-Fetch (takes ca 5-10 min the first time)
-
-```
-git fetch josh
-git checkout josh/master
-git switch -c josh_sync
-```
-
-Now push `josh_sync` to your own miri fork and open a PR with it.
+Now push to your own miri fork and open a PR with it.
+You can stop the josh proxy with Ctrl-C.
