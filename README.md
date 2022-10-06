@@ -332,6 +332,9 @@ The remaining flags are for advanced use only, and more likely to change or be r
 Some of these are **unsound**, which means they can lead
 to Miri failing to detect cases of undefined behavior in a program.
 
+* `-Zmiri-always-two-phase` causes all `Unique` retags to be treated as
+  two-phase retags. This generally has the effect of delaying tag invalidation
+  due to `&mut` until a write occurs.
 * `-Zmiri-disable-abi-check` disables checking [function ABI]. Using this flag
   is **unsound**.
 * `-Zmiri-disable-alignment-check` disables checking pointer alignment, so you

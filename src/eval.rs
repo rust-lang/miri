@@ -134,6 +134,8 @@ pub struct MiriConfig {
     pub gc_interval: u32,
     /// The number of CPUs to be reported by miri.
     pub num_cpus: u32,
+    /// Whether we should always treat Unique retags as TwoPhase.
+    pub always_two_phase: bool,
 }
 
 impl Default for MiriConfig {
@@ -167,6 +169,7 @@ impl Default for MiriConfig {
             external_so_file: None,
             gc_interval: 10_000,
             num_cpus: 1,
+            always_two_phase: false,
         }
     }
 }

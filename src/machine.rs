@@ -430,6 +430,9 @@ pub struct MiriMachine<'mir, 'tcx> {
     pub(crate) since_gc: u32,
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
+
+    /// Whether we should always treat Unique retags as TwoPhase.
+    pub(crate) always_two_phase: bool,
 }
 
 impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
@@ -510,6 +513,7 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
             gc_interval: config.gc_interval,
             since_gc: 0,
             num_cpus: config.num_cpus,
+            always_two_phase: config.always_two_phase,
         }
     }
 
@@ -653,6 +657,7 @@ impl VisitTags for MiriMachine<'_, '_> {
             gc_interval: _,
             since_gc: _,
             num_cpus: _,
+            always_two_phase: _,
         } = self;
 
         threads.visit_tags(visit);

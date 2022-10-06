@@ -960,6 +960,30 @@ trait EvalContextPrivExt<'mir: 'ecx, 'tcx: 'mir, 'ecx>: crate::MiriInterpCxExt<'
 
 impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriInterpCx<'mir, 'tcx> {}
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
+    // Determine mutability and whether to add a protector.
+    // Cannot use `builtin_deref` because that reports *immutable* for `Box`,
+    // making it useless.
+    fn qualify(&self, ty: Ty<'_>, kind: RetagKind) -> Option<(RefKind, bool)> {
+        let this = self.eval_context_ref();
+        match ty.kind() {
+            // References are simple.
+            ty::Ref(_, _, Mutability::Mut) =>
+                Some((
+                    RefKind::Unique {
+                        two_phase: kind == RetagKind::TwoPhase || this.machine.always_two_phase,
+                    },
+                    kind == RetagKind::FnEntry,
+                )),
+            ty::Ref(_, _, Mutability::Not) => Some((RefKind::Shared, kind == RetagKind::FnEntry)),
+            // Raw pointers need to be enabled.
+            ty::RawPtr(tym) if kind == RetagKind::Raw =>
+                Some((RefKind::Raw { mutable: tym.mutbl == Mutability::Mut }, false)),
+            // Boxes are handled separately due to that allocator situation,
+            // see the visitor below.
+            _ => None,
+        }
+    }
+
     fn retag(&mut self, kind: RetagKind, place: &PlaceTy<'tcx, Provenance>) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         let retag_fields = this.machine.stacked_borrows.as_mut().unwrap().get_mut().retag_fields;
@@ -970,28 +994,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         };
         let mut visitor = RetagVisitor { ecx: this, kind, retag_cause, retag_fields };
         return visitor.visit_value(place);
-
-        // Determine mutability and whether to add a protector.
-        // Cannot use `builtin_deref` because that reports *immutable* for `Box`,
-        // making it useless.
-        fn qualify(ty: Ty<'_>, kind: RetagKind) -> Option<(RefKind, bool)> {
-            match ty.kind() {
-                // References are simple.
-                ty::Ref(_, _, Mutability::Mut) =>
-                    Some((
-                        RefKind::Unique { two_phase: kind == RetagKind::TwoPhase },
-                        kind == RetagKind::FnEntry,
-                    )),
-                ty::Ref(_, _, Mutability::Not) =>
-                    Some((RefKind::Shared, kind == RetagKind::FnEntry)),
-                // Raw pointers need to be enabled.
-                ty::RawPtr(tym) if kind == RetagKind::Raw =>
-                    Some((RefKind::Raw { mutable: tym.mutbl == Mutability::Mut }, false)),
-                // Boxes are handled separately due to that allocator situation,
-                // see the visitor below.
-                _ => None,
-            }
-        }
 
         // The actual visitor.
         struct RetagVisitor<'ecx, 'mir, 'tcx> {
@@ -1045,7 +1047,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     return Ok(());
                 }
 
-                if let Some((ref_kind, protector)) = qualify(place.layout.ty, self.kind) {
+                if let Some((ref_kind, protector)) = self.ecx.qualify(place.layout.ty, self.kind) {
                     self.retag_place(place, ref_kind, self.retag_cause, protector)?;
                 } else if matches!(place.layout.ty.kind(), ty::RawPtr(..)) {
                     // Wide raw pointers *do* have fields and their types are strange.

@@ -431,6 +431,8 @@ fn main() {
             eprintln!(
                 "WARNING: `-Zmiri-track-raw-pointers` has no effect; it is enabled by default"
             );
+        } else if arg == "-Zmiri-always-two-phase" {
+            miri_config.always_two_phase = true;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-seed=") {
             if miri_config.seed.is_some() {
                 show_error!("Cannot specify -Zmiri-seed multiple times!");
