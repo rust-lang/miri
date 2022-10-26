@@ -384,11 +384,13 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
             }
         }
 
-        // During setup, patch the panic runtime for `libpanic_abort` (mirroring what bootstrap usually does).
-        if phase == RustcPhase::Setup
-            && get_arg_flag_value("--crate-name").as_deref() == Some("panic_abort")
-        {
-            cmd.arg("-C").arg("panic=abort");
+        if phase == RustcPhase::Setup {
+            // During setup, ignore unused items, the stdlib contains some `cfg(miri)` .
+            cmd.arg("-A").arg("unused");
+            // Also patch the panic runtime for `libpanic_abort` (mirroring what bootstrap usually does).
+            if get_arg_flag_value("--crate-name").as_deref() == Some("panic_abort") {
+                cmd.arg("-C").arg("panic=abort");
+            }
         }
     } else {
         // For host crates (but not when we are just printing some info),
