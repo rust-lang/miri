@@ -44,6 +44,11 @@ pub struct ThreadId(u32);
 /// The main thread. When it terminates, the whole application terminates.
 const MAIN_THREAD: ThreadId = ThreadId(0);
 
+/// When the main thread would exit, we will yield to any other thread that is ready to execute.
+/// But we must only do that a finite number of times, or a background thread running `loop {}`
+/// will hang the program.
+const MAIN_THREAD_YIELDS_AT_SHUTDOWN: u64 = 1_000;
+
 impl ThreadId {
     pub fn to_u32(self) -> u32 {
         self.0
@@ -276,6 +281,9 @@ pub struct ThreadManager<'mir, 'tcx> {
     yield_active_thread: bool,
     /// Callbacks that are called once the specified time passes.
     timeout_callbacks: FxHashMap<ThreadId, TimeoutCallbackInfo<'mir, 'tcx>>,
+    /// When the main thread is about to exit, we give other threads a few chances to finish up
+    /// whatever they are doing before we consider them leaked.
+    main_thread_yields_at_shutdown_remaining: u64,
 }
 
 impl<'mir, 'tcx> Default for ThreadManager<'mir, 'tcx> {
@@ -290,6 +298,7 @@ impl<'mir, 'tcx> Default for ThreadManager<'mir, 'tcx> {
             thread_local_alloc_ids: Default::default(),
             yield_active_thread: false,
             timeout_callbacks: FxHashMap::default(),
+            main_thread_yields_at_shutdown_remaining: MAIN_THREAD_YIELDS_AT_SHUTDOWN,
         }
     }
 }
@@ -302,6 +311,7 @@ impl VisitTags for ThreadManager<'_, '_> {
             timeout_callbacks,
             active_thread: _,
             yield_active_thread: _,
+            main_thread_yields_at_shutdown_remaining: _,
             sync,
         } = self;
 
@@ -620,11 +630,26 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
     /// long as we can and switch only when we have to (the active thread was
     /// blocked, terminated, or has explicitly asked to be preempted).
     fn schedule(&mut self, clock: &Clock) -> InterpResult<'tcx, SchedulingAction> {
-        // Check whether the thread has **just** terminated (`check_terminated`
-        // checks whether the thread has popped all its stack and if yes, sets
-        // the thread state to terminated).
-        if self.threads[self.active_thread].check_terminated() {
-            return Ok(SchedulingAction::ExecuteDtors);
+        // If we are the main thread, and our call stack is empty but our state is Enabled, we are
+        // about to terminate.
+        // But, if there are any other threads which can execute, yield to them instead of falling
+        // through to the termination state.
+        let active_thread = &self.threads[self.active_thread];
+        if self.active_thread == MAIN_THREAD
+            && active_thread.stack.is_empty()
+            && active_thread.state == ThreadState::Enabled
+            && self.threads.iter().any(|t| t.state == ThreadState::Enabled && !t.stack.is_empty())
+            && self.main_thread_yields_at_shutdown_remaining > 0
+        {
+            self.yield_active_thread = true;
+            self.main_thread_yields_at_shutdown_remaining -= 1;
+        } else {
+            // Check whether the thread has **just** terminated (`check_terminated`
+            // checks whether the thread has popped all its stack and if yes, sets
+            // the thread state to terminated).
+            if self.threads[self.active_thread].check_terminated() {
+                return Ok(SchedulingAction::ExecuteDtors);
+            }
         }
         // If we get here again and the thread is *still* terminated, there are no more dtors to run.
         if self.threads[MAIN_THREAD].state == ThreadState::Terminated {
@@ -671,6 +696,15 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
             }
         }
         self.yield_active_thread = false;
+
+        // The main thread is special, it is allowed to yield when it is shutting down and has
+        // nothing to execute. So if another thread yields back to the main thread when it is in
+        // this partly-shut-down state, we make another pass through the scheduler to either yield
+        // back off them main thread, or enter its shutdown sequence.
+        if self.active_thread == MAIN_THREAD && self.threads[self.active_thread].stack.is_empty() {
+            return self.schedule(clock);
+        }
+
         if self.threads[self.active_thread].state == ThreadState::Enabled {
             return Ok(SchedulingAction::ExecuteStep);
         }
