@@ -48,10 +48,10 @@ Update and activate the rustup toolchain 'miri' to the commit given in the
 `rustup-toolchain-install-master` must be installed for this to work. Any extra
 flags are passed to `rustup-toolchain-install-master`.
 
-./miri rustc-pull:
-Pull and merge Miri changes from the rustc repo. The fetched commit is stored in
-the `rust-version` file, so the next `./miri toolchain` will install the rustc
-we just pulled.
+./miri rustc-pull <commit>:
+Pull and merge Miri changes from the rustc repo. Defaults to fetching the latest
+rustc commit. The fetched commit is stored in the `rust-version` file, so the
+next `./miri toolchain` will install the rustc that just got pulled.
 
 ./miri rustc-push <github user> <branch>:
 Push Miri changes back to the rustc repo. This will pull a copy of the rustc
@@ -113,15 +113,12 @@ toolchain)
     ;;
 rustc-pull)
     cd "$MIRIDIR"
-    FETCH_COMMIT=$(git ls-remote https://github.com/rust-lang/rust/ HEAD | cut -f 1)
-    # We can't pull from a commit with josh
-    # (https://github.com/josh-project/josh/issues/1034), so we just hope that
-    # nothing gets merged into rustc *during* this pull.
-    git fetch http://localhost:8000/rust-lang/rust.git$JOSH_FILTER.git master
-    # Just verify that `master` didn't move.
-    if [[ $FETCH_COMMIT != $(git ls-remote https://github.com/rust-lang/rust/ HEAD | cut -f 1) ]]; then
-        echo "Looks like something got merged into Rust *while we were pulling*. Aborting. Please try again."
+    FETCH_COMMIT="$1"
+    if [ -z "$FETCH_COMMIT" ]; then
+        FETCH_COMMIT=$(git ls-remote https://github.com/rust-lang/rust/ HEAD | cut -f 1)
     fi
+    # Fetch given rustc commit and note down which one that was
+    git fetch http://localhost:8000/rust-lang/rust.git@$FETCH_COMMIT$JOSH_FILTER.git
     echo "$FETCH_COMMIT" > rust-version # do this *before* merging as merging will fail in case of conflicts
     git merge FETCH_HEAD --no-ff -m "Merge from rustc"
     git commit rust-version --amend -m "Merge from rustc"
