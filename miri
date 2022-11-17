@@ -156,17 +156,22 @@ rustc-push)
     fi
     git fetch https://github.com/rust-lang/rust $BASE
     git push https://github.com/$USER/rust $BASE:refs/heads/$BRANCH -f
+    echo
     # Do the actual push.
     cd "$MIRIDIR"
     echo "Pushing Miri changes..."
     git push http://localhost:8000/$USER/rust.git$JOSH_FILTER.git HEAD:$BRANCH
     # Do a round-trip check to make sure the push worked as expected.
-    git fetch http://localhost:8000/$USER/rust.git@$JOSH_FILTER.git $BRANCH
+    echo
+    git fetch http://localhost:8000/$USER/rust.git@$JOSH_FILTER.git $BRANCH &>/dev/null
     if [[ $(git rev-parse HEAD) != $(git rev-parse FETCH_HEAD) ]]; then
         echo "ERROR: Josh created a non-roundtrip push! Do NOT merge this into rustc!"
         exit 1
+    else
+        echo "Confirmed that the push round-trips back to Miri properly. Please create a rustc PR:"
+        echo "    https://github.com/$USER/rust/pull/new/$BRANCH"
+        exit 0
     fi
-    exit 0
     ;;
 many-seeds)
     for SEED in $({ echo obase=16; seq 0 255; } | bc); do
