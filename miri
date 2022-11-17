@@ -160,6 +160,12 @@ rustc-push)
     cd "$MIRIDIR"
     echo "Pushing Miri changes..."
     git push http://localhost:8000/$USER/rust.git$JOSH_FILTER.git HEAD:$BRANCH
+    # Do a round-trip check to make sure the push worked as expected.
+    git fetch http://localhost:8000/$USER/rust.git@$JOSH_FILTER.git $BRANCH
+    if [[ $(git rev-parse HEAD) != $(git rev-parse FETCH_HEAD) ]]; then
+        echo "ERROR: Josh created a non-roundtrip push! Do NOT merge this into rustc!"
+        exit 1
+    fi
     exit 0
     ;;
 many-seeds)
