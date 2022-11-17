@@ -117,11 +117,13 @@ rustc-pull)
     if [ -z "$FETCH_COMMIT" ]; then
         FETCH_COMMIT=$(git ls-remote https://github.com/rust-lang/rust/ HEAD | cut -f 1)
     fi
+    # Update rust-version file. As a separate commit, since making it part of
+    # the merge has confused the heck out of josh in the past.
+    echo "$FETCH_COMMIT" > rust-version
+    git commit rust-version -m "Preparing for merge from rustc"
     # Fetch given rustc commit and note down which one that was
     git fetch http://localhost:8000/rust-lang/rust.git@$FETCH_COMMIT$JOSH_FILTER.git
-    echo "$FETCH_COMMIT" > rust-version # do this *before* merging as merging will fail in case of conflicts
     git merge FETCH_HEAD --no-ff -m "Merge from rustc"
-    git commit rust-version --amend -m "Merge from rustc"
     exit 0
     ;;
 rustc-push)
@@ -158,6 +160,12 @@ rustc-push)
     cd "$MIRIDIR"
     echo "Pushing Miri changes..."
     git push http://localhost:8000/$USER/rust.git$JOSH_FILTER.git HEAD:$BRANCH
+    # Do a round-trip check to make sure the push worked as expected.
+    git fetch http://localhost:8000/$USER/rust.git@$JOSH_FILTER.git $BRANCH
+    if [[ $(git rev-parse HEAD) != $(git rev-parse FETCH_HEAD) ]]; then
+        echo "ERROR: Josh created a non-roundtrip push! Do NOT merge this into rustc!"
+        exit 1
+    fi
     exit 0
     ;;
 many-seeds)
