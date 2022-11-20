@@ -136,7 +136,7 @@ pub struct Thread<'mir, 'tcx> {
 }
 
 impl<'mir, 'tcx> Thread<'mir, 'tcx> {
-    /// Check if the thread is done executing (no more stack frames).
+    /// Check if the thread is just done executing (still enabled, but no more stack frames).
     fn should_terminate(&self) -> bool {
         self.state == ThreadState::Enabled && self.stack.is_empty()
     }
@@ -689,15 +689,16 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         }
         self.yield_active_thread = false;
 
-        // The main thread is special, it is allowed to yield when it is shutting down and has
-        // nothing to execute. So if another thread yields back to the main thread when it is in
-        // this partly-shut-down state, we make another pass through the scheduler to either yield
-        // back off them main thread, or enter its shutdown sequence.
-        if self.active_thread == MAIN_THREAD && self.threads[self.active_thread].stack.is_empty() {
-            return self.schedule(clock);
-        }
-
         if self.threads[self.active_thread].state == ThreadState::Enabled {
+            // The main thread is special, it is allowed to yield when it is shutting down and has
+            // nothing to execute. So if another thread yields back to the main thread when it is in
+            // this partly-shut-down state, we make another pass through the scheduler to either yield
+            // back off them main thread, or enter its shutdown sequence.
+            if self.active_thread == MAIN_THREAD
+                && self.threads[self.active_thread].stack.is_empty()
+            {
+                return self.schedule(clock);
+            }
             return Ok(SchedulingAction::ExecuteStep);
         }
         // We have not found a thread to execute.
