@@ -136,16 +136,9 @@ pub struct Thread<'mir, 'tcx> {
 }
 
 impl<'mir, 'tcx> Thread<'mir, 'tcx> {
-    /// Check if the thread is done executing (no more stack frames). If yes,
-    /// change the state to terminated and return `true`.
-    fn check_terminated(&mut self) -> bool {
-        if self.state == ThreadState::Enabled {
-            if self.stack.is_empty() {
-                self.state = ThreadState::Terminated;
-                return true;
-            }
-        }
-        false
+    /// Check if the thread is done executing (no more stack frames).
+    fn should_terminate(&self) -> bool {
+        self.state == ThreadState::Enabled && self.stack.is_empty()
     }
 
     /// Get the name of the current thread, or `<unnamed>` if it was not set.
@@ -636,18 +629,17 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         // through to the termination state. This is to give them a chance to clean up and quit.
         let active_thread = &self.threads[self.active_thread];
         if self.active_thread == MAIN_THREAD
-            && active_thread.stack.is_empty()
-            && active_thread.state == ThreadState::Enabled
+            && active_thread.should_terminate()
             && self.threads.iter().any(|t| t.state == ThreadState::Enabled && !t.stack.is_empty())
             && self.main_thread_yields_at_shutdown_remaining > 0
         {
             self.yield_active_thread = true;
             self.main_thread_yields_at_shutdown_remaining -= 1;
         } else {
-            // Check whether the thread has **just** terminated (`check_terminated`
-            // checks whether the thread has popped all its stack and if yes, sets
-            // the thread state to terminated).
-            if self.threads[self.active_thread].check_terminated() {
+            // Check whether the thread ought to terminate, and if so start executing TLS
+            // destructors.
+            if self.threads[self.active_thread].should_terminate() {
+                self.threads[self.active_thread].state = ThreadState::Terminated;
                 return Ok(SchedulingAction::ExecuteDtors);
             }
         }
