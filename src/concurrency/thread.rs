@@ -633,7 +633,7 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
         // If we are the main thread, and our call stack is empty but our state is Enabled, we are
         // about to terminate.
         // But, if there are any other threads which can execute, yield to them instead of falling
-        // through to the termination state.
+        // through to the termination state. This is to give them a chance to clean up and quit.
         let active_thread = &self.threads[self.active_thread];
         if self.active_thread == MAIN_THREAD
             && active_thread.stack.is_empty()
