@@ -623,31 +623,34 @@ impl<'mir, 'tcx: 'mir> ThreadManager<'mir, 'tcx> {
     /// long as we can and switch only when we have to (the active thread was
     /// blocked, terminated, or has explicitly asked to be preempted).
     fn schedule(&mut self, clock: &Clock) -> InterpResult<'tcx, SchedulingAction> {
-        // If we are the main thread, and our call stack is empty but our state is Enabled, we are
-        // about to terminate.
-        // But, if there are any other threads which can execute, yield to them instead of falling
-        // through to the termination state. This is to give them a chance to clean up and quit.
-        let active_thread = &self.threads[self.active_thread];
-        if self.active_thread == MAIN_THREAD
-            && active_thread.should_terminate()
-            && self.threads.iter().any(|t| t.state == ThreadState::Enabled && !t.stack.is_empty())
-            && self.main_thread_yields_at_shutdown_remaining > 0
-        {
-            self.yield_active_thread = true;
-            self.main_thread_yields_at_shutdown_remaining -= 1;
-        } else {
-            // Check whether the thread ought to terminate, and if so start executing TLS
-            // destructors.
-            if self.threads[self.active_thread].should_terminate() {
-                self.threads[self.active_thread].state = ThreadState::Terminated;
-                return Ok(SchedulingAction::ExecuteDtors);
-            }
+        // Check whether the thread ought to terminate, and if so start executing TLS
+        // destructors.
+        if self.threads[self.active_thread].should_terminate() {
+            self.threads[self.active_thread].state = ThreadState::Terminated;
+            return Ok(SchedulingAction::ExecuteDtors);
         }
+
         // If we get here again and the thread is *still* terminated, there are no more dtors to run.
         if self.threads[MAIN_THREAD].state == ThreadState::Terminated {
-            // The main thread terminated; stop the program.
-            // We do *not* run TLS dtors of remaining threads, which seems to match rustc behavior.
-            return Ok(SchedulingAction::Stop);
+            // If we are the main thread and we are Terminated, we ought to stop.
+            // But, if there are any other threads which can execute, yield to them instead of falling
+            // through to the termination state. This is to give them a chance to clean up and quit.
+            let active_thread = &self.threads[self.active_thread];
+            if self.active_thread == MAIN_THREAD
+                && active_thread.state == ThreadState::Terminated
+                && self
+                    .threads
+                    .iter()
+                    .any(|t| t.state == ThreadState::Enabled && !t.stack.is_empty())
+                && self.main_thread_yields_at_shutdown_remaining > 0
+            {
+                self.yield_active_thread = true;
+                self.main_thread_yields_at_shutdown_remaining -= 1;
+            } else {
+                // The main thread terminated; stop the program.
+                // We do *not* run TLS dtors of remaining threads, which seems to match rustc behavior.
+                return Ok(SchedulingAction::Stop);
+            }
         }
         // This thread and the program can keep going.
         if self.threads[self.active_thread].state == ThreadState::Enabled
