@@ -38,15 +38,23 @@ use crate::{
 pub fn page_size() -> u64 {
     match unsafe { sysconf(_SC_PAGESIZE) }.try_into() {
         Ok(sz) => sz,
-        Err(_) => 4 * 1024 // assume 4k pages if it errored
+        Err(_) => 4 * 1024, // assume 4k pages if it errored
     }
 }
 #[cfg(target_family = "wasm")]
-pub fn page_size() -> u64 { 64 * 1024 }
-#[cfg(any(target_family = "windows", target_family = ""))]
-pub fn page_size() -> u64 { 4 * 1024 } // again assume 4k as backup
-pub fn stack_addr() -> u64 { 32 * page_size() } // not really about the "stack", but where we start assigning integer addresses to allocations
-pub fn stack_size() -> u64 { 16 * page_size() } // whatever
+pub fn page_size() -> u64 {
+    64 * 1024
+}
+#[cfg(not(any(target_family = "unix", target_family = "wasm")))]
+pub fn page_size() -> u64 {
+    4 * 1024
+} // again assume 4k as backup
+pub fn stack_addr() -> u64 {
+    32 * page_size()
+} // not really about the "stack", but where we start assigning integer addresses to allocations
+pub fn stack_size() -> u64 {
+    16 * page_size()
+} // whatever
 
 /// Extra data stored with each stack frame
 pub struct FrameExtra<'tcx> {
