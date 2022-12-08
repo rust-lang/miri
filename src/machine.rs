@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt;
 
+use libc::{sysconf, _SC_PAGESIZE};
+
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -32,9 +34,19 @@ use crate::{
 };
 
 // Some global facts about the emulated machine.
-pub const PAGE_SIZE: u64 = 4 * 1024; // FIXME: adjust to target architecture
-pub const STACK_ADDR: u64 = 32 * PAGE_SIZE; // not really about the "stack", but where we start assigning integer addresses to allocations
-pub const STACK_SIZE: u64 = 16 * PAGE_SIZE; // whatever
+#[cfg(target_family = "unix")]
+pub fn page_size() -> u64 {
+    match unsafe { sysconf(_SC_PAGESIZE) }.try_into() {
+        Ok(sz) => sz,
+        Err(_) => 4 * 1024 // assume 4k pages if it errored
+    }
+}
+#[cfg(target_family = "wasm")]
+pub fn page_size() -> u64 { 64 * 1024 }
+#[cfg(any(target_family = "windows", target_family = ""))]
+pub fn page_size() -> u64 { 4 * 1024 } // again assume 4k as backup
+pub fn stack_addr() -> u64 { 32 * page_size() } // not really about the "stack", but where we start assigning integer addresses to allocations
+pub fn stack_size() -> u64 { 16 * page_size() } // whatever
 
 /// Extra data stored with each stack frame
 pub struct FrameExtra<'tcx> {
