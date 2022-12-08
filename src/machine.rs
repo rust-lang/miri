@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt;
 
+#[cfg(target_family = "unix")]
 use libc::{sysconf, _SC_PAGESIZE};
 
 use rand::rngs::StdRng;
