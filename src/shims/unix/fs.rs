@@ -585,8 +585,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 );
             };
 
-            if mode != 0o666 {
-                throw_unsup_format!("non-default mode 0o{:o} is not supported", mode);
+            // currently we only support that the owner must always have
+            // read-write permissions and that none of the owner, group
+            // and other may have execute permissions.
+            let owner_has_read_write_permissions = mode & 0o600 == 0o600;
+            let has_any_execute_permissions = mode & 0o111 != 0;
+            if !owner_has_read_write_permissions || has_any_execute_permissions {
+                throw_unsup_format!("mode 0o{:o} is not supported", mode);
             }
 
             mirror |= o_creat;

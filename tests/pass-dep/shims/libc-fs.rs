@@ -20,6 +20,7 @@ fn main() {
     test_file_open_unix_extra_third_arg();
     #[cfg(target_os = "linux")]
     test_o_tmpfile_flag();
+    test_tempfile();
 }
 
 fn tmp() -> PathBuf {
@@ -165,4 +166,10 @@ fn test_o_tmpfile_flag() {
             .unwrap_err()
             .raw_os_error(),
     );
+}
+
+/// Test that the [`tempfile`] crate is compatible with miri.
+fn test_tempfile() {
+    let dir_path = tmp();
+    tempfile::tempfile_in(dir_path).unwrap();
 }
