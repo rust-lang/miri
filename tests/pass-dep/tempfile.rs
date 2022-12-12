@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 /// Test that the [`tempfile`] crate is compatible with miri.
 fn main() {
-    test_tempfile();
+    // test_tempfile(); // does not work when host!=target
     test_tempfile_in();
 }
 
@@ -28,9 +28,10 @@ fn tmp() -> PathBuf {
     }
 }
 
-fn test_tempfile() {
-    tempfile::tempfile().unwrap();
-}
+// does not work when host!=target:
+// fn test_tempfile() {
+//     tempfile::tempfile().unwrap();
+// }
 
 fn test_tempfile_in() {
     let dir_path = tmp();
