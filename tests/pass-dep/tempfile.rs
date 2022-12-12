@@ -1,7 +1,9 @@
 //@ignore-target-windows: no libc on Windows
 //@compile-flags: -Zmiri-disable-isolation
 
-//! Test that the [`tempfile`] crate is compatible with miri.
+use std::path::PathBuf;
+
+/// Test that the [`tempfile`] crate is compatible with miri.
 fn main() {
     test_tempfile();
     test_tempfile_in();
