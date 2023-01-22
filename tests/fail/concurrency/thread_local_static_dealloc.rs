@@ -1,4 +1,5 @@
 //! Ensure that thread-local statics get deallocated when the thread dies.
+//@ignore-target-wasm: wasm does not support threads
 
 #![feature(thread_local)]
 

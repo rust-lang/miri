@@ -1,4 +1,5 @@
 //! Check that destructors of the thread locals are executed on all OSes.
+//@ignore-target-wasm: wasm does not support threads
 
 use std::cell::RefCell;
 

@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-strict-provenance
+//@ignore-target-wasm: wasm does not support threads
 
 use std::sync::mpsc::{channel, sync_channel};
 use std::thread;

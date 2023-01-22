@@ -1,4 +1,5 @@
 //@revisions: extern_block definition both
+//@ignore-target-wasm: wasm does not support unwinding
 #![feature(rustc_attrs, c_unwind)]
 
 #[cfg_attr(any(definition, both), rustc_nounwind)]

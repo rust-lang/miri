@@ -1,3 +1,4 @@
+//@ignore-target-wasm: wasm does not support threads
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 

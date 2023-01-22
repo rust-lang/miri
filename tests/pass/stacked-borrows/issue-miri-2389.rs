@@ -1,3 +1,4 @@
+//@ignore-target-wasm: Enable this when we have a better way of turning off permissive provenance per-test.
 use std::cell::Cell;
 
 fn main() {

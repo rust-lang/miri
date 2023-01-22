@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-disable-isolation -Zmiri-strict-provenance
+//@ignore-target-wasm: wasm does not support threads
 
 use std::sync::{Arc, Barrier, Condvar, Mutex, Once, RwLock};
 use std::thread;

@@ -1,4 +1,5 @@
 //@error-pattern: the program aborted
+//@ignore-target-wasm: wasm does not support unwinding
 //@normalize-stderr-test: "\| +\^+" -> "| ^"
 //@normalize-stderr-test: "unsafe \{ libc::abort\(\) \}|crate::intrinsics::abort\(\);" -> "ABORT();"
 

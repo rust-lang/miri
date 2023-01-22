@@ -1,3 +1,4 @@
+//@ignore-target-wasm: wasm does not support threads
 use std::thread;
 
 fn main() {

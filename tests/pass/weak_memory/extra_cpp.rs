@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-ignore-leaks
+//@ignore-target-wasm: wasm does not support threads
 
 // Tests operations not perfomable through C++'s atomic API
 // but doable in safe (at least sound) Rust.

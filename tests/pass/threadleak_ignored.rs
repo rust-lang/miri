@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-ignore-leaks
+//@ignore-target-wasm: wasm does not support threads
 
 //! Test that leaking threads works, and that their destructors are not executed.
 

@@ -169,6 +169,8 @@ regexes! {
     r"\\"                           => "/",
     // erase Rust stdlib path
     "[^ `]*/(rust[^/]*|checkout)/library/" => "RUSTLIB/",
+    // erase platform file pathss - wasm-specific relative path
+    "sys/[a-z]+/../unix/"                    => "sys/PLATFORM/",
     // erase platform file paths
     "sys/[a-z]+/"                    => "sys/PLATFORM/",
     // erase paths into the crate registry

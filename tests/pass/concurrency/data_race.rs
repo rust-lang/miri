@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0
+//@ignore-target-wasm: wasm does not support threads
 
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
 use std::thread::spawn;

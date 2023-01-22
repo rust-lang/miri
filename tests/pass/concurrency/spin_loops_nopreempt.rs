@@ -1,5 +1,6 @@
 // This specifically tests behavior *without* preemption.
 //@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-wasm: wasm does not support threads
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

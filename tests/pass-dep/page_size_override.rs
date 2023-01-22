@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-force-page-size=8
+//@ignore-target-wasm: wasm does not have page_size
 
 fn main() {
     let page_size = page_size::get();

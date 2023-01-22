@@ -1,4 +1,5 @@
 //@ignore-target-windows: no libc on Windows
+//@ignore-target-wasm: Does not have libc::F_DUPFD
 //@compile-flags: -Zmiri-isolation-error=warn-nobacktrace
 //@normalize-stderr-test: "(stat(x)?)" -> "$$STAT"
 

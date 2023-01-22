@@ -1,4 +1,5 @@
 //@ignore-target-windows: File handling is not implemented yet
+//@ignore-target-wasm: Does not have std::os::unix
 //@compile-flags: -Zmiri-isolation-error=warn-nobacktrace
 //@normalize-stderr-test: "(stat(x)?)" -> "$$STAT"
 

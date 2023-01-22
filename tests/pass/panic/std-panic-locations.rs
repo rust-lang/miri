@@ -1,5 +1,6 @@
 //! Test that panic locations for `#[track_caller]` functions in std have the correct
 //! location reported.
+//@ignore-target-wasm: wasm does not support catch_unwind
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

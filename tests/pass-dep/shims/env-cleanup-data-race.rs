@@ -1,5 +1,6 @@
 //@compile-flags: -Zmiri-disable-isolation -Zmiri-preemption-rate=0
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 
 use std::ffi::CStr;
 use std::ffi::CString;

@@ -1,5 +1,6 @@
 // We are making scheduler assumptions here.
 //@compile-flags: -Zmiri-strict-provenance -Zmiri-preemption-rate=0
+//@ignore-target-wasm: wasm does not support threads
 
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;

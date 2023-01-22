@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-disable-data-race-detector
+//@ignore-target-wasm: wasm does not support threads
 
 use std::thread::spawn;
 

@@ -3,6 +3,7 @@
 // `__rust_start_panic`).
 // no-prefer-dynamic
 #![feature(c_unwind, unboxed_closures)]
+//@ignore-target-wasm: wasm does not support panic=unwind
 
 use std::panic;
 

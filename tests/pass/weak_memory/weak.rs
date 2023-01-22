@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-ignore-leaks -Zmiri-preemption-rate=0
+//@ignore-target-wasm: wasm does not support threads
 
 // Tests showing weak memory behaviours are exhibited. All tests
 // return true when the desired behaviour is seen.

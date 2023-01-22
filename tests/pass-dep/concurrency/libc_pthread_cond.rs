@@ -1,5 +1,6 @@
 //@ignore-target-windows: No libc on Windows
 //@ignore-target-apple: pthread_condattr_setclock is not supported on MacOS.
+//@ignore-target-wasm: wasm does not support threads
 //@compile-flags: -Zmiri-disable-isolation
 
 /// Test that conditional variable timeouts are working properly with both

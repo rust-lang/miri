@@ -1,4 +1,5 @@
 //@ignore-target-windows: no libc on Windows
+//@ignore-target-wasm: wasm does not have std::os::unix
 //@compile-flags: -Zmiri-disable-isolation
 
 #![feature(io_error_more)]

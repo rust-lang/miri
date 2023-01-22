@@ -628,7 +628,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     ) -> InterpResult<'tcx, Scalar<Provenance>> {
         let this = self.eval_context_ref();
         let target = &this.tcx.sess.target;
-        if target.families.iter().any(|f| f == "unix") {
+        if target.families.iter().any(|f| f == "unix") || target.os == "wasi" {
             for &(name, kind) in UNIX_IO_ERROR_TABLE {
                 if err_kind == kind {
                     return Ok(this.eval_libc(name));
@@ -666,7 +666,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     ) -> InterpResult<'tcx, Option<std::io::ErrorKind>> {
         let this = self.eval_context_ref();
         let target = &this.tcx.sess.target;
-        if target.families.iter().any(|f| f == "unix") {
+        if target.families.iter().any(|f| f == "unix") || target.os == "wasi" {
             let errnum = errnum.to_i32()?;
             for &(name, kind) in UNIX_IO_ERROR_TABLE {
                 if errnum == this.eval_libc_i32(name) {
@@ -1073,5 +1073,6 @@ pub fn get_local_crates(tcx: TyCtxt<'_>) -> Vec<CrateNum> {
 /// Helper function used inside the shims of foreign functions to check that
 /// `target_os` is a supported UNIX OS.
 pub fn target_os_is_unix(target_os: &str) -> bool {
-    matches!(target_os, "linux" | "macos" | "freebsd" | "android")
+    // See unix::foreign_items for an explanation of why "wasi" is included here.
+    matches!(target_os, "linux" | "macos" | "freebsd" | "android" | "wasi")
 }

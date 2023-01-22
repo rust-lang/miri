@@ -1,3 +1,4 @@
+//@ignore-target-wasm: wasm does not support unwinding
 #![feature(c_unwind)]
 
 extern "C" fn panic_abort() {

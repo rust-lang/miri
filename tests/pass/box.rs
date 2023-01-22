@@ -1,4 +1,5 @@
 #![feature(ptr_internals)]
+//@ignore-target-wasm: Enable this when we have a better way of turning on permissive provenance per-test.
 
 fn main() {
     into_raw();

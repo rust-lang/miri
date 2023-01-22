@@ -1,5 +1,6 @@
 //! Make sure that a retag acts like a write for the data race model.
 //@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-wasm: wasm does not support threads
 #[derive(Copy, Clone)]
 struct SendPtr(*mut u8);
 

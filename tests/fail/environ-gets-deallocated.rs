@@ -1,4 +1,5 @@
 //@ignore-target-windows: Windows does not have a global environ list that the program can access directly
+//@ignore-target-wasm: Not yet implemented
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 fn get_environ() -> *const *const u8 {

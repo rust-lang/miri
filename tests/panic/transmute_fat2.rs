@@ -1,3 +1,5 @@
+//@ignore-target-wasm: wasm does not support panic=unwind
+
 fn main() {
     #[cfg(all(target_endian = "little", target_pointer_width = "64"))]
     let bad = unsafe { std::mem::transmute::<u128, &[u8]>(42) };

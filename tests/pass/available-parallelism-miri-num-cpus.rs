@@ -1,3 +1,4 @@
+//@ignore-target-wasm: wasm does not support threads
 //@compile-flags: -Zmiri-num-cpus=1024
 
 use std::num::NonZeroUsize;

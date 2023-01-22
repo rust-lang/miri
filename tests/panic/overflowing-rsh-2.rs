@@ -1,4 +1,5 @@
 #![allow(arithmetic_overflow)]
+//@ignore-target-wasm: wasm does not support panic=unwind
 
 fn main() {
     // Make sure we catch overflows that would be hidden by first casting the RHS to u32

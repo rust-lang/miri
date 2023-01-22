@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-disable-abi-check
+//@ignore-target-wasm: wasm does not support unwinding
 #![feature(c_unwind)]
 
 #[no_mangle]

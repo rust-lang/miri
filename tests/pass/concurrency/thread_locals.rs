@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-strict-provenance
+//@ignore-target-wasm: wasm does not support threads
 
 //! The main purpose of this test is to check that if we take a pointer to
 //! thread's `t1` thread-local `A` and send it to another thread `t2`,

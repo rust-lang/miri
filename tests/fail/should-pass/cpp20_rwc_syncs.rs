@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-ignore-leaks
+//@ignore-target-wasm: wasm does not support threads
 
 // https://plv.mpi-sws.org/scfix/paper.pdf
 // 2.2 Second Problem: SC Fences are Too Weak

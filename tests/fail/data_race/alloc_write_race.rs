@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0 -Zmiri-disable-stacked-borrows
+//@ignore-target-wasm: wasm does not support threads
 #![feature(new_uninit)]
 
 use std::ptr::null_mut;

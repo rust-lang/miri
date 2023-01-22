@@ -51,6 +51,8 @@ def test(name, cmd, stdout_ref, stderr_ref, stdin=b'', env={}):
     ## Call `cargo miri`, capture all output
     p_env = os.environ.copy()
     p_env.update(env)
+    if 'MIRIFLAGS' in os.environ:
+        p_env['MIRIFLAGS'] = os.environ['MIRIFLAGS'] + " " + p_env.get('MIRIFLAGS', '')
     p = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,

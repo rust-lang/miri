@@ -1,4 +1,5 @@
 //@compile-flags: -Zmir-opt-level=0 -Zmiri-disable-weak-memory-emulation -Zmiri-preemption-rate=0 -Zmiri-disable-stacked-borrows
+//@ignore-target-wasm: wasm does not support threads
 
 // Note: mir-opt-level set to 0 to prevent the read of stack_var in thread 1
 // from being optimized away and preventing the detection of the data-race.

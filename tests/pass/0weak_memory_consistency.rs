@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-ignore-leaks -Zmiri-disable-stacked-borrows
+//@ignore-target-wasm: wasm does not support threads
 
 // The following tests check whether our weak memory emulation produces
 // any inconsistent execution outcomes

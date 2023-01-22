@@ -1,4 +1,6 @@
 //@ignore-target-apple: park_timeout on macOS uses the system clock
+//@ignore-target-wasm: wasm does not support threads
+
 use std::thread;
 use std::time::{Duration, Instant};
 

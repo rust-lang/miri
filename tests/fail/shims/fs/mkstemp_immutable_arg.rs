@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: File handling is not implemented yet
 //@compile-flags: -Zmiri-disable-isolation
 
 fn main() {

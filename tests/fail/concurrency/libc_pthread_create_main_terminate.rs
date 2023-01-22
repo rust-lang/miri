@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 //@error-pattern: the main thread terminated without waiting for all remaining threads
 
 // Check that we terminate the program when the main thread terminates.

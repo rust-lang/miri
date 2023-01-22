@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-strict-provenance
+//@ignore-target-wasm: wasi requires permissive provenance for syscalls to work
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 fn main() {

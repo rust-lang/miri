@@ -1,4 +1,5 @@
 //@ignore-target-windows: File handling is not implemented yet
+//@ignore-target-wasm: File handling is not implemented yet
 //@error-pattern: `open` not available when isolation is enabled
 
 fn main() {

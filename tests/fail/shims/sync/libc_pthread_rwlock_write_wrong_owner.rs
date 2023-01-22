@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 
 use std::cell::UnsafeCell;
 use std::sync::Arc;

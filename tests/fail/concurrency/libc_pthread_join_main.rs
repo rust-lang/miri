@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 
 // Joining the main thread is undefined behavior.
 

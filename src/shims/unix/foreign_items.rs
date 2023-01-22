@@ -601,6 +601,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     "freebsd" => shims::unix::freebsd::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
                     "linux" => shims::unix::linux::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
                     "macos" => shims::unix::macos::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
+                    // Note - wasi is not technically a unix-based OS (the rustc target has its os family set to "wasi").
+                    // However, it has a partial implementation of libc built on top of the wasi syscalls (https://github.com/WebAssembly/wasi-libc),
+                    // which libstd relies on for some functions. Thus, we treat it as a unix-based OS to allow unmodified Rust programs to run.
+                    "wasi" => shims::unix::wasi::foreign_items::EvalContextExt::emulate_foreign_item_by_name(this, link_name, abi, args, dest),
                     _ => Ok(EmulateByNameResult::NotSupported),
                 };
             }

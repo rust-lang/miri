@@ -1,6 +1,7 @@
 //@compile-flags: -Zmiri-isolation-error=warn-nobacktrace
 //@normalize-stderr-test: "(getcwd|GetCurrentDirectoryW)" -> "$$GETCWD"
 //@normalize-stderr-test: "(chdir|SetCurrentDirectoryW)" -> "$$SETCWD"
+//@ignore-target-wasm: wasm does not support errno thread_local extern
 
 use std::env;
 use std::io::ErrorKind;

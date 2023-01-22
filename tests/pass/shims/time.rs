@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-disable-isolation
+//@ignore-target-wasm: clock_time_get not yet implemented
 
 use std::time::{Duration, Instant, SystemTime};
 

@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-strict-provenance
+//@ignore-target-wasm: wasi requires permissive provenance for syscalls to work
 use std::collections::VecDeque;
 
 fn test_all_refs<'a, T: 'a>(dummy: &mut T, iter: impl Iterator<Item = &'a mut T>) {

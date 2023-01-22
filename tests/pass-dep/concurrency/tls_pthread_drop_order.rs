@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 //! Test that pthread_key destructors are run in the right order.
 //! Note that these are *not* used by actual `thread_local!` on Linux! Those use
 //! `thread_local_dtor::register_dtor` from the stdlib instead. In Miri this hits the fallback path

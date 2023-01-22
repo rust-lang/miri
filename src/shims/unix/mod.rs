@@ -9,6 +9,7 @@ mod android;
 mod freebsd;
 mod linux;
 mod macos;
+mod wasi;
 
 pub use fs::{DirHandler, FileHandler};
 

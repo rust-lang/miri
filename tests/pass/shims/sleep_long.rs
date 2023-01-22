@@ -1,4 +1,6 @@
 //@compile-flags: -Zmiri-ignore-leaks -Zmiri-disable-isolation
+//@ignore-target-wasm: wasm does not support threads
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;

@@ -369,9 +369,11 @@ pub struct MiriMachine<'mir, 'tcx> {
     /// Program arguments (`Option` because we can only initialize them after creating the ecx).
     /// These are *pointers* to argc/argv because macOS.
     /// We also need the full command line as one string because of Windows.
+    /// We also store the original `Vec<String>`, which makes wasi support easier.
     pub(crate) argc: Option<MemPlace<Provenance>>,
     pub(crate) argv: Option<MemPlace<Provenance>>,
     pub(crate) cmd_line: Option<MemPlace<Provenance>>,
+    pub(crate) args: Vec<String>,
 
     /// TLS state.
     pub(crate) tls: TlsData<'tcx>,
@@ -516,6 +518,7 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
             main_fn_ret_place: None,
             argc: None,
             argv: None,
+            args: config.args.clone(),
             cmd_line: None,
             tls: TlsData::default(),
             isolated_op: config.isolated_op,
@@ -660,6 +663,16 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
                 let val = ImmTy::from_int(0, this.machine.layouts.u8);
                 Self::alloc_extern_static(this, "_tls_used", val)?;
             }
+            "wasi" => {
+                // "environ"
+                // This is not technically part of wasi, but it is part of wasi-libc,
+                // which is used by the Rust standard library.
+                Self::add_extern_static(
+                    this,
+                    "environ",
+                    this.machine.env_vars.environ.unwrap().ptr,
+                );
+            }
             _ => {} // No "extern statics" supported on this target
         }
         Ok(())
@@ -686,6 +699,7 @@ impl VisitTags for MiriMachine<'_, '_> {
             main_fn_ret_place,
             argc,
             argv,
+            args: _,
             cmd_line,
             extern_statics,
             dir_handler,

@@ -1,5 +1,6 @@
 // We want to control preemption here.
 //@compile-flags: -Zmiri-preemption-rate=0
+//@ignore-target-wasm: wasm does not support threads
 
 #![feature(core_intrinsics)]
 

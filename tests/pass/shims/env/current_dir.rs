@@ -1,4 +1,6 @@
 //@compile-flags: -Zmiri-disable-isolation
+//@ignore-target-wasm: wasm does not support errno thread_local extern
+
 use std::env;
 use std::io::ErrorKind;
 

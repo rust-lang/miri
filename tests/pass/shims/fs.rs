@@ -1,4 +1,5 @@
 //@ignore-target-windows: File handling is not implemented yet
+//@ignore-target-wasm: File handling is not yet implemented
 //@compile-flags: -Zmiri-disable-isolation
 
 #![feature(io_error_more)]

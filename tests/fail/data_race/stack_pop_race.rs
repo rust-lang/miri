@@ -1,4 +1,6 @@
 //@compile-flags: -Zmiri-preemption-rate=0 -Zmiri-disable-stacked-borrows
+//@ignore-target-wasm: wasm does not support threads
+
 use std::thread;
 
 #[derive(Copy, Clone)]

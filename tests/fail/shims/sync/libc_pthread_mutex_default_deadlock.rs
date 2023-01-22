@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 //
 // Check that if we do not set the mutex type, it is the default.
 

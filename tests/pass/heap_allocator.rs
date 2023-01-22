@@ -1,4 +1,5 @@
 #![feature(allocator_api, slice_ptr_get)]
+//@ignore-target-wasm: Not yet implemented
 
 use std::alloc::{Allocator, Global, Layout, System};
 use std::ptr::NonNull;

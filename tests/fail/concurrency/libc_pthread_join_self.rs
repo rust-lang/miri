@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 // We are making scheduler assumptions here.
 //@compile-flags: -Zmiri-preemption-rate=0
 

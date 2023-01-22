@@ -1,4 +1,5 @@
 #![feature(c_unwind)]
+//@ignore-target-wasm: wasm does not support unwinding
 
 //! Unwinding when the caller ABI is "C" (without "-unwind") is UB.
 

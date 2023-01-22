@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 
 /// Test that destroying a pthread_mutexattr twice fails, even without a check for number validity
 

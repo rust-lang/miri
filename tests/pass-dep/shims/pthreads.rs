@@ -1,4 +1,5 @@
 //@ignore-target-windows: No libc on Windows
+//@ignore-target-wasm: wasm does not support threads
 #![feature(cstr_from_bytes_until_nul)]
 use std::ffi::{CStr, CString};
 use std::thread;
