@@ -128,8 +128,21 @@ def test_cargo_miri_run():
 def test_cargo_miri_test():
     # rustdoc is not run on foreign targets
     is_foreign = 'MIRI_TEST_TARGET' in os.environ
-    default_ref = "test.cross-target.stdout.ref" if is_foreign else "test.default.stdout.ref"
-    filter_ref = "test.filter.cross-target.stdout.ref" if is_foreign else "test.filter.stdout.ref"
+    default_ref = "test.default.stdout.ref"
+    filter_ref = "test.filter.stdout.ref"
+    cross_target_ref = "test.cross-target.stdout.ref"
+    test_target_ref = "test.test-target.stdout.ref"
+
+    if is_foreign:
+        # Wasm doesn't support catching panics, so some extra tests get ignored
+        if os.environ['MIRI_TEST_TARGET'].startswith("wasm"):
+            cross_target_ref = "test.cross-target-wasm.stdout.ref"
+            filter_ref = "test.filter.cross-target-wasm.stdout.ref"
+            test_target_ref = "test.test-target-wasm.stdout.ref"
+        else:
+            filter_ref = "test.filter.cross-target.stdout.ref"
+
+        default_ref = cross_target_ref
 
     # macOS needs permissive provenance inside getrandom_1.
     test("`cargo miri test`",
@@ -139,7 +152,7 @@ def test_cargo_miri_test():
     )
     test("`cargo miri test` (no isolation, no doctests)",
         cargo_miri("test") + ["--bins", "--tests"], # no `--lib`, we disabled that in `Cargo.toml`
-        "test.cross-target.stdout.ref", "test.stderr-empty.ref",
+        cross_target_ref, "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-permissive-provenance -Zmiri-disable-isolation"},
     )
     test("`cargo miri test` (with filter)",
@@ -148,7 +161,7 @@ def test_cargo_miri_test():
     )
     test("`cargo miri test` (test target)",
         cargo_miri("test") + ["--test", "test", "--", "--format=pretty"],
-        "test.test-target.stdout.ref", "test.stderr-empty.ref",
+        test_target_ref, "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
     )
     test("`cargo miri test` (bin target)",

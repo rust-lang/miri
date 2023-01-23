@@ -1,0 +1,11 @@
+
+running 6 tests
+test cargo_env ... ok
+test deps ... ok
+test do_panic - should panic ... ignored
+test does_not_work_on_miri ... ignored
+test fail_index_check - should panic ... ignored
+test simple ... ok
+
+test result: ok. 3 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out
+
