@@ -69,6 +69,7 @@ mod intptrcast;
 mod machine;
 mod mono_hash_map;
 mod operator;
+mod phys_alloc;
 mod range_map;
 mod shims;
 mod tag_gc;

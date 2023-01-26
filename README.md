@@ -577,6 +577,16 @@ extern "Rust" {
     /// Miri-provided extern function to deallocate memory.
     fn miri_dealloc(ptr: *mut u8, size: usize, align: usize);
 
+    /// Miri-provided extern function to allocate physical memory.
+    ///
+    /// This returns a pointer that is associated with the requested physical memory region.
+    /// Trying to allocate the same physical memory more than once will fail.
+    /// The address of the returned pointer is independent from the requested physical address.
+    ///
+    /// This is useful when running MMIO applications with miri.
+    /// Currently, no way of emulating active devices exists.
+    fn miri_alloc_phys(phys_addr: usize, size: usize) -> *mut u8;
+
     /// Convert a path from the host Miri runs on to the target Miri interprets.
     /// Performs conversion of path separators as needed.
     ///

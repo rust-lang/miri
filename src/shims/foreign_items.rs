@@ -533,6 +533,37 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.write_pointer(res, dest)?;
             }
 
+            // Miri physical memory allocation
+            "miri_alloc_phys" => {
+                let [phys_addr, size] = this.check_shim(abi, Abi::Rust, link_name, args)?;
+                let phys_addr = this.read_machine_usize(phys_addr)?;
+                let size = this.read_machine_usize(size)?;
+
+                if size == 0 {
+                    throw_ub_format!("creating allocation with size 0");
+                }
+
+                let range = phys_addr..phys_addr.checked_add(size).unwrap();
+                if let Some((existing_range, pointer)) = this.machine.phys_alloc.get(range.clone())
+                {
+                    throw_unsup_format!(
+                        "trying to allocate physical memory {range:#x?}, but {existing_range:#x?} was already allocated ({pointer:?})"
+                    );
+                }
+
+                let ptr = this.allocate_ptr(
+                    Size::from_bytes(size),
+                    Align::ONE,
+                    MiriMemoryKind::Physical.into(),
+                )?;
+
+                this.machine.phys_alloc.alloc(range, ptr).unwrap();
+
+                this.write_pointer(ptr, dest)?;
+
+                return Ok(EmulateByNameResult::NeedsJumping);
+            }
+
             // Rust allocation
             "__rust_alloc" | "miri_alloc" => {
                 let [size, align] = this.check_shim(abi, Abi::Rust, link_name, args)?;

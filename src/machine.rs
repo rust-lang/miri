@@ -85,6 +85,9 @@ pub enum MiriMemoryKind {
     Rust,
     /// `miri_alloc` memory.
     Miri,
+    /// `miri_alloc_phys` memory.
+    /// This memory may leak.
+    Physical,
     /// `malloc` memory.
     C,
     /// Windows `HeapAlloc` memory.
@@ -119,7 +122,7 @@ impl MayLeak for MiriMemoryKind {
         use self::MiriMemoryKind::*;
         match self {
             Rust | Miri | C | WinHeap | Runtime => false,
-            Machine | Global | ExternStatic | Tls => true,
+            Physical | Machine | Global | ExternStatic | Tls => true,
         }
     }
 }
@@ -130,6 +133,7 @@ impl fmt::Display for MiriMemoryKind {
         match self {
             Rust => write!(f, "Rust heap"),
             Miri => write!(f, "Miri bare-metal heap"),
+            Physical => write!(f, "Miri physical memory"),
             C => write!(f, "C heap"),
             WinHeap => write!(f, "Windows heap"),
             Machine => write!(f, "machine-managed memory"),
@@ -473,6 +477,8 @@ pub struct MiriMachine<'mir, 'tcx> {
     pub(crate) page_size: u64,
     pub(crate) stack_addr: u64,
     pub(crate) stack_size: u64,
+
+    pub(crate) phys_alloc: phys_alloc::PhysAlloc<Pointer<Provenance>>,
 }
 
 impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
@@ -575,6 +581,7 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
             page_size,
             stack_addr,
             stack_size,
+            phys_alloc: Default::default(),
         }
     }
 
@@ -722,6 +729,7 @@ impl VisitTags for MiriMachine<'_, '_> {
             page_size: _,
             stack_addr: _,
             stack_size: _,
+            phys_alloc: _,
         } = self;
 
         threads.visit_tags(visit);

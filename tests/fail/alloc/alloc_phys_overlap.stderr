@@ -1,0 +1,14 @@
+error: unsupported operation: trying to allocate physical memory $HEX..$HEX, but $HEX..$HEX was already allocated ($HEX[ALLOC]<TAG>)
+  --> $DIR/alloc_phys_overlap.rs:LL:CC
+   |
+LL |         miri_alloc_phys(PHYS_ADDR + 1, 2);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ trying to allocate physical memory $HEX..$HEX, but $HEX..$HEX was already allocated ($HEX[ALLOC]<TAG>)
+   |
+   = help: this is likely not a bug in the program; it indicates that the program performed an operation that the interpreter does not support
+   = note: BACKTRACE:
+   = note: inside `main` at $DIR/alloc_phys_overlap.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to previous error
+

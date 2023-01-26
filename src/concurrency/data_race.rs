@@ -696,6 +696,7 @@ impl VClockAlloc {
             MemoryKind::Machine(
                 MiriMemoryKind::Rust
                 | MiriMemoryKind::Miri
+                | MiriMemoryKind::Physical
                 | MiriMemoryKind::C
                 | MiriMemoryKind::WinHeap,
             )
