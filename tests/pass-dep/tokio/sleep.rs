@@ -1,4 +1,4 @@
-//@compile-flags: -Zmiri-disable-isolation -Zmiri-permissive-provenance -Zmiri-preemption-rate=0 -Zmiri-backtrace=full
+//@compile-flags: -Zmiri-disable-isolation -Zmiri-permissive-provenance -Zmiri-backtrace=full
 //@only-target-x86_64-unknown-linux: support for tokio only on linux and x86
 
 use tokio::time::{sleep, Duration, Instant};
