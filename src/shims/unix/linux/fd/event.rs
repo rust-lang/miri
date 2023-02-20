@@ -59,11 +59,13 @@ impl FileDescriptor for Event {
         bytes: &[u8],
     ) -> InterpResult<'tcx, io::Result<usize>> {
         let v1 = self.val.get();
+        let bytes = bytes
+            .try_into()
+            .map_err(|_| err_unsup_format!("we expected 8 bytes and got {}", bytes.len()))?;
         // FIXME handle blocking when addition results in exceeding the max u64 value
         // or fail with EAGAIN if the file descriptor is nonblocking.
-        let v2 = v1.checked_add(u64::from_be_bytes(bytes.try_into().unwrap())).unwrap();
+        let v2 = v1.checked_add(u64::from_be_bytes(bytes)).unwrap();
         self.val.set(v2);
-        assert_eq!(8, bytes.len());
         Ok(Ok(8))
     }
 }
