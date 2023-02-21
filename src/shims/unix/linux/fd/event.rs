@@ -62,9 +62,13 @@ impl FileDescriptor for Event {
         let bytes = bytes
             .try_into()
             .map_err(|_| err_unsup_format!("we expected 8 bytes and got {}", bytes.len()))?;
-        // FIXME handle blocking when addition results in exceeding the max u64 value
-        // or fail with EAGAIN if the file descriptor is nonblocking.
-        let v2 = v1.checked_add(u64::from_be_bytes(bytes)).unwrap();
+        let v2 = v1.checked_add(u64::from_be_bytes(bytes)).ok_or_else(|| {
+            err_unsup_format!(
+                "handle blocking when addition results \
+                in exceeding the max u64 value or fail with \
+                EAGAIN if the file descriptor is nonblocking."
+            )
+        })?;
         self.val.set(v2);
         Ok(Ok(8))
     }
