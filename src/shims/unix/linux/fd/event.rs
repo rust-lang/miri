@@ -42,10 +42,12 @@ impl FileDescriptor for Event {
     /// A write call adds the 8-byte integer value supplied in
     /// its buffer to the counter.  The maximum value that may be
     /// stored in the counter is the largest unsigned 64-bit value
-    /// minus 1 (i.e., 0xfffffffffffffffe).  If the addition would
+    /// minus 1 (i.e., 0xfffffffffffffffe).
+    ///
+    /// When write is supported in eventfd, if the addition would
     /// cause the counter's value to exceed the maximum, then the
-    /// write either blocks until a read is performed on the
-    /// file descriptor, or fails with the error EAGAIN if the
+    /// write should either block until a read is performed on the
+    /// file descriptor, or fail with the error EAGAIN if the
     /// file descriptor has been made nonblocking.
 
     /// A write fails with the error EINVAL if the size of the
