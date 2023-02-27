@@ -1,6 +1,7 @@
 use crate::shims::unix::fs::FileDescriptor;
 
 use rustc_const_eval::interpret::InterpResult;
+use rustc_target::abi::Endian;
 
 use std::cell::Cell;
 use std::io;
@@ -17,6 +18,9 @@ pub struct Event {
     /// The object contains an unsigned 64-bit integer (uint64_t) counter that is maintained by the
     /// kernel. This counter is initialized with the value specified in the argument initval.
     pub val: Cell<u64>,
+    /// We don't have access to interpcx in the file descriptor method, so we use this for passing
+    /// the machine's context.
+    pub endianness: Endian,
 }
 
 impl FileDescriptor for Event {
@@ -25,7 +29,7 @@ impl FileDescriptor for Event {
     }
 
     fn dup(&mut self) -> io::Result<Box<dyn FileDescriptor>> {
-        Ok(Box::new(Event { val: self.val.clone() }))
+        Ok(Box::new(Event { val: self.val.clone(), endianness: self.endianness }))
     }
 
     fn is_tty(&self) -> bool {
@@ -53,8 +57,6 @@ impl FileDescriptor for Event {
     /// A write fails with the error EINVAL if the size of the
     /// supplied buffer is less than 8 bytes, or if an attempt is
     /// made to write the value 0xffffffffffffffff.
-    ///
-    /// FIXME: use endianness
     fn write<'tcx>(
         &self,
         _communicate_allowed: bool,
@@ -64,7 +66,12 @@ impl FileDescriptor for Event {
         let bytes: [u8; 8] = bytes
             .try_into()
             .map_err(|_| err_unsup_format!("we expected 8 bytes and got {}", bytes.len()))?;
-        let v2 = v1.checked_add(u64::from_be_bytes(bytes)).ok_or_else(|| {
+        let step = match self.endianness {
+            Endian::Little => u64::from_le_bytes(bytes),
+            Endian::Big => u64::from_be_bytes(bytes),
+        };
+
+        let v2 = v1.checked_add(step).ok_or_else(|| {
             err_unsup_format!(
                 "Miri currently has an incomplete epoll implementation. \
                 This operation would overflow if all the numbers written \

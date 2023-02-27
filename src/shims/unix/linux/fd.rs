@@ -1,4 +1,5 @@
 use rustc_middle::ty::ScalarInt;
+use rustc_target::abi::HasDataLayout;
 
 use crate::*;
 use epoll::{Epoll, EpollEvent};
@@ -191,6 +192,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             throw_unsup_format!("{flags} is unsupported");
         }
         // FIXME handle the cloexec and nonblock flags
+        let endianness = this.data_layout().endian;
         if flags & efd_cloexec == efd_cloexec {}
         if flags & efd_nonblock == efd_nonblock {}
         if flags & efd_semaphore == efd_semaphore {
@@ -198,7 +200,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         }
 
         let fh = &mut this.machine.file_handler;
-        let fd = fh.insert_fd(Box::new(Event { val: Cell::new(val.into()) }));
+        let fd = fh.insert_fd(Box::new(Event { val: Cell::new(val.into()), endianness }));
         Ok(Scalar::from_i32(fd))
     }
 
