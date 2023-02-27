@@ -66,9 +66,10 @@ impl FileDescriptor for Event {
             .map_err(|_| err_unsup_format!("we expected 8 bytes and got {}", bytes.len()))?;
         let v2 = v1.checked_add(u64::from_be_bytes(bytes)).ok_or_else(|| {
             err_unsup_format!(
-                "handle blocking when addition results \
-                in exceeding the max u64 value or fail with \
-                EAGAIN if the file descriptor is nonblocking."
+                "Miri currently has an incomplete epoll implementation. \
+                This operation would overflow if all the numbers written \
+                to it would overflow a 64-bit integer. The correct \
+                behavior is to block or retry, which is not yet implemented."
             )
         })?;
         self.val.set(v2);
