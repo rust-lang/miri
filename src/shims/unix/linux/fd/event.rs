@@ -61,7 +61,7 @@ impl FileDescriptor for Event {
         bytes: &[u8],
     ) -> InterpResult<'tcx, io::Result<usize>> {
         let v1 = self.val.get();
-        let bytes = bytes
+        let bytes: [u8; 8] = bytes
             .try_into()
             .map_err(|_| err_unsup_format!("we expected 8 bytes and got {}", bytes.len()))?;
         let v2 = v1.checked_add(u64::from_be_bytes(bytes)).ok_or_else(|| {
