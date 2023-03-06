@@ -18,7 +18,7 @@ pub struct Event {
     /// The object contains an unsigned 64-bit integer (uint64_t) counter that is maintained by the
     /// kernel. This counter is initialized with the value specified in the argument initval.
     pub val: Cell<u64>,
-    /// We don't have access to interpcx in the file descriptor method, so we use this for passing
+    /// FIXME HACK: We don't have access to interpcx in the file descriptor method, so we use this for passing
     /// the machine's context.
     pub endianness: Endian,
 }
