@@ -83,7 +83,7 @@ function run_tests {
   fi
   # Ensure that `./miri bench` works on all relevant platforms.
   # `slice-get-unchecked` is the least complex of all available benchmarks.
-  ./miri bench slice-get-unchecked
+  CARGO_EXTRA_FLAGS="" ./miri bench slice-get-unchecked
 
   endgroup
 }
