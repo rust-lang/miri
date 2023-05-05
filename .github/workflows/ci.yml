@@ -78,6 +78,9 @@ jobs:
           rustc -Vv
           cargo -V
 
+      - name: Install hyperfine
+        run: cargo install hyperfine
+
       - name: Test
         run: bash ./ci.sh
 
