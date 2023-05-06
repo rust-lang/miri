@@ -51,6 +51,11 @@ function run_tests {
     for FILE in tests/many-seeds/*.rs; do
       MIRI_SEEDS=64 CARGO_EXTRA_FLAGS="$CARGO_EXTRA_FLAGS -q" ./miri many-seeds ./miri run "$FILE"
     done
+
+    # Ensure that `./miri bench` works on all relevant platforms.
+    # `slice-get-unchecked` is the least complex of all available benchmarks.
+    # CARGO_EXTRA_FLAGS are cleared as `--locked` is already passed internally by miri bench.
+    CARGO_EXTRA_FLAGS="" ./miri bench slice-get-unchecked
   fi
 
   ## test-cargo-miri
@@ -81,9 +86,6 @@ function run_tests {
       cargo miri run --manifest-path bench-cargo-miri/$BENCH/Cargo.toml
     done
   fi
-  # Ensure that `./miri bench` works on all relevant platforms.
-  # `slice-get-unchecked` is the least complex of all available benchmarks.
-  CARGO_EXTRA_FLAGS="" ./miri bench slice-get-unchecked
 
   endgroup
 }
