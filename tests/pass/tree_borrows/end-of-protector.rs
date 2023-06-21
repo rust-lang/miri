@@ -26,7 +26,7 @@ fn main() {
 
 unsafe fn do_nothing(x: &mut u8) {
     name!(x, "callee:x");
-    name!(x=>1, "caller:x");
+    name!(parent!(x), "caller:x");
     let alloc_id = alloc_id!(x);
     print_state!(alloc_id);
 }

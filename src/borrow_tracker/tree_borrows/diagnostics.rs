@@ -1,7 +1,7 @@
 use std::fmt;
 use std::ops::Range;
 
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_span::{Span, SpanData};
 
 use crate::borrow_tracker::tree_borrows::{
@@ -181,35 +181,67 @@ impl fmt::Display for NodeDebugInfo {
     }
 }
 
-impl<'tcx> Tree {
+impl Tree {
     /// Climb the tree to get the tag of a distant ancestor.
     /// Allows operations on tags that are unreachable by the program
     /// but still exist in the tree. Not guaranteed to perform consistently
     /// if `tag-gc=1`.
-    fn nth_parent(&self, tag: BorTag, nth_parent: u8) -> Option<BorTag> {
-        let mut idx = self.tag_mapping.get(&tag).unwrap();
-        for _ in 0..nth_parent {
+    ///
+    /// NOTE: the `nb`'th parent is computed in a "saturating" way: `nth_parent(root, 1) == root`
+    pub fn nth_parent(&self, tag: BorTag, nth_parent: u8) -> BorTag {
+        let mut idx = self.tag_mapping.get(&tag).expect("Tag not found in the allocation");
+        for dist in 0..nth_parent {
             let node = self.nodes.get(idx).unwrap();
-            idx = node.parent?;
+            let Some(parent) = node.parent else {
+                eprintln!("{tag:?} has no {nth_parent}'th parent (reached the root) at distance {dist}, exiting early");
+                break;
+            };
+            idx = parent;
         }
-        Some(self.nodes.get(idx).unwrap().tag)
+        self.nodes.get(idx).unwrap().tag
     }
 
     /// Debug helper: assign name to tag.
-    pub fn give_pointer_debug_name(
-        &mut self,
-        tag: BorTag,
-        nth_parent: u8,
-        name: &str,
-    ) -> InterpResult<'tcx> {
-        let tag = self.nth_parent(tag, nth_parent).unwrap();
+    pub fn give_pointer_debug_name(&mut self, tag: BorTag, name: &str) {
         let idx = self.tag_mapping.get(&tag).unwrap();
         if let Some(node) = self.nodes.get_mut(idx) {
             node.debug_info.add_name(name);
         } else {
             eprintln!("Tag {tag:?} (to be named '{name}') not found!");
         }
-        Ok(())
+    }
+
+    /// Find the nearest common ancestor of two tags.
+    /// This function will panic if the tags do not exist or are not part of the
+    /// correct allocation.
+    /// Unlike `nth_parent` this should be more resilient to garbage collection
+    /// and implementation details.
+    pub fn common_ancestor(&self, tag1: BorTag, tag2: BorTag) -> BorTag {
+        // To find the nearest common ancestor without paying too much
+        // on pathological cases: climb both paths in parallel.
+        let mut path1 = FxHashSet::default();
+        let mut path2 = FxHashSet::default();
+        let mut idx1 = self.tag_mapping.get(&tag1).expect("Tag not found in the allocation");
+        let mut idx2 = self.tag_mapping.get(&tag2).expect("Tag not found in the allocation");
+        loop {
+            // Record path
+            path1.insert(idx1);
+            path2.insert(idx2);
+            // Check membership of one index in the other path: if so we found the ancestor.
+            if path2.contains(&idx1) {
+                return self.nodes.get(idx1).unwrap().tag;
+            }
+            if path1.contains(&idx2) {
+                return self.nodes.get(idx2).unwrap().tag;
+            }
+            // Not found yet, climb up one step.
+            if let Some(parent1) = self.nodes.get(idx1).unwrap().parent {
+                idx1 = parent1;
+            }
+            if let Some(parent2) = self.nodes.get(idx2).unwrap().parent {
+                idx2 = parent2;
+            }
+        }
     }
 
     /// Debug helper: determines if the tree contains a tag.

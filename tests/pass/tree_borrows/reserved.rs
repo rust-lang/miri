@@ -33,7 +33,7 @@ unsafe fn print(msg: &str) {
 }
 
 unsafe fn read_second<T>(x: &mut T, y: *mut u8) {
-    name!(x as *mut T as *mut u8=>1, "caller:x");
+    name!(parent!(x as *mut T as *mut u8), "caller:x");
     name!(x as *mut T as *mut u8, "callee:x");
     name!(y, "caller:y");
     name!(y, "callee:y");

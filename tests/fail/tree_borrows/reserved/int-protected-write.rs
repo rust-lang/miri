@@ -18,7 +18,7 @@ fn main() {
         unsafe fn write_second(x: &mut u8, y: *mut u8) {
             let alloc_id = alloc_id!(x);
             name!(x, "callee:x");
-            name!(x=>1, "caller:x");
+            name!(parent!(x), "caller:x");
             name!(y, "callee:y");
             name!(y, "caller:y");
             print_state!(alloc_id);

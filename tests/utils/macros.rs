@@ -29,7 +29,30 @@ macro_rules! print_state {
     };
 }
 
-/// `name!(ptr => nth_parent, name)`: associate `name` to the `nth_parent` of `ptr`.
+/// `parent!(ptr)`: forges a pointer with the provenance of the direct parent of `ptr`.
+///
+/// Use in conjunction with `name!` to access an otherwise unreachable tag.
+macro_rules! parent {
+    ($ptr:expr) => {
+        crate::utils::miri_extern::miri_tree_nth_parent($ptr as *const u8 as *const (), 1)
+    };
+}
+
+/// `ancestor!(ptr1, ptr2)`: forges a pointer with the provenance of the
+/// nearest common ancestor of `ptr1` and `ptr2`.
+/// Caller should ensure that they are part of the same allocation.
+///
+/// Use in conjunction with `name!` to access an otherwise unreachable tag.
+macro_rules! ancestor {
+    ($ptr1:expr, $ptr2:expr) => {
+        crate::utils::miri_extern::miri_tree_common_ancestor(
+            $ptr1 as *const u8 as *const (),
+            $ptr2 as *const u8 as *const (),
+        )
+    };
+}
+
+/// `name!(tg, name)`: associate `name` to the `nth_parent` of `ptr`.
 ///
 /// `ptr` should be any pointer or reference that can be converted with `_ as *const u8`.
 ///
@@ -41,21 +64,17 @@ macro_rules! print_state {
 /// `name` is an optional string that will be used as the name. Defaults to
 /// `stringify!($ptr)` the name of `ptr` in the source code.
 macro_rules! name {
-    ($ptr:expr, $name:expr) => {
-        crate::utils::macros::name!($ptr => 0, $name);
-    };
     ($ptr:expr) => {
-        crate::utils::macros::name!($ptr => 0, stringify!($ptr));
+        crate::utils::macros::name!($ptr, stringify!($ptr));
     };
-    ($ptr:expr => $nb:expr) => {
-        crate::utils::macros::name!($ptr => $nb, stringify!($ptr));
-    };
-    ($ptr:expr => $nb:expr, $name:expr) => {
+    ($ptr:expr, $name:expr) => {
         let name = $name.as_bytes();
-        crate::utils::miri_extern::miri_pointer_name($ptr as *const u8 as *const (), $nb, name);
+        crate::utils::miri_extern::miri_pointer_name($ptr as *const u8 as *const (), name);
     };
 }
 
 pub(crate) use alloc_id;
+pub(crate) use ancestor;
 pub(crate) use name;
+pub(crate) use parent;
 pub(crate) use print_state;

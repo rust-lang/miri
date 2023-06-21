@@ -455,15 +455,28 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             "miri_pointer_name" => {
                 // This associates a name to a tag. Very useful for debugging, and also makes
                 // tests more strict.
-                let [ptr, nth_parent, name] = this.check_shim(abi, Abi::Rust, link_name, args)?;
+                let [ptr, name] = this.check_shim(abi, Abi::Rust, link_name, args)?;
                 let ptr = this.read_pointer(ptr)?;
-                let nth_parent = this.read_scalar(nth_parent)?.to_u8()?;
                 let name = this.read_byte_slice(name)?;
                 // We must make `name` owned because we need to
                 // end the shared borrow from `read_byte_slice` before we can
                 // start the mutable borrow for `give_pointer_debug_name`.
                 let name = String::from_utf8_lossy(name).into_owned();
-                this.give_pointer_debug_name(ptr, nth_parent, &name)?;
+                this.give_pointer_debug_name(ptr, &name)?;
+            }
+            "miri_tree_nth_parent" => {
+                let [ptr, nb] = this.check_shim(abi, Abi::Rust, link_name, args)?;
+                let ptr = this.read_pointer(ptr)?;
+                let nb = this.read_scalar(nb)?.to_u8()?;
+                let res = this.forge_ptr_nth_parent(ptr, nb)?;
+                this.write_pointer(res, dest)?;
+            }
+            "miri_tree_common_ancestor" => {
+                let [ptr1, ptr2] = this.check_shim(abi, Abi::Rust, link_name, args)?;
+                let ptr1 = this.read_pointer(ptr1)?;
+                let ptr2 = this.read_pointer(ptr2)?;
+                let res = this.forge_ptr_common_ancestor(ptr1, ptr2)?;
+                this.write_pointer(res, dest)?;
             }
             "miri_static_root" => {
                 let [ptr] = this.check_shim(abi, Abi::Rust, link_name, args)?;

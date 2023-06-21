@@ -65,7 +65,7 @@ extern "Rust" {
     ///
     /// This is only useful as an input to `miri_print_borrow_stacks`, and it is a separate call because
     /// getting a pointer to an allocation at runtime can change the borrow stacks in the allocation.
-    /// This function should be considered unstable. It exists only to support `miri_print_borrow_stacks` and so
+    /// This function should be considered unstable. It exists only to support `miri_print_borrow_state` and so
     /// inherits all of its instability.
     pub fn miri_get_alloc_id(ptr: *const ()) -> u64;
 
@@ -92,15 +92,87 @@ extern "Rust" {
     /// change, or it may be removed entirely.
     pub fn miri_print_borrow_state(alloc_id: u64, show_unnamed: bool);
 
-    /// Miri-provided extern function to associate a name to the nth parent of a tag.
+    /// Miri-provided extern function to associate a name to a tag.
     /// Typically the name given would be the name of the program variable that holds the pointer.
-    /// Unreachable tags can still be named by using nonzero `nth_parent` and a child tag.
+    /// Unreachable tags can still be accessed through a combination of `miri_tree_nth_parent` and
+    /// `miri_tree_common_ancestor`.
     ///
     /// This function does nothing under Stacked Borrows, since Stacked Borrows's implementation
     /// of `miri_print_borrow_state` does not show the names.
     ///
     /// Under Tree Borrows, the names also appear in error messages.
-    pub fn miri_pointer_name(ptr: *const (), nth_parent: u8, name: &[u8]);
+    pub fn miri_pointer_name(ptr: *const (), name: &[u8]);
+
+    /// Miri-provided extern function to forge the provenance of a pointer.
+    /// Use only for debugging and diagnostics.
+    ///
+    /// Under Tree Borrows, this can be used in conjunction with `miri_pointer_name`
+    /// to access a tag that is not directly accessible in the program: the pointer
+    /// returned has the same address as `ptr` and is in the same allocation, but has
+    /// the `tag` of the `nb`'th parent above `ptr`.
+    ///
+    /// `ptr` must not be a wildcard pointer.
+    /// The output can change based on implementation details of `rustc` as well as
+    /// `miri` flags such as `-Zmiri-unique-is-unique`.
+    /// Behavior might be even more unpredictable without `-Zmiri-tag-gc=0`.
+    ///
+    /// Prefer the more stable `miri_tree_common_ancestor` when possible.
+    /// In particular when `nb > 1` it is a sign that this function might not be
+    /// the right one to use.
+    ///
+    /// Example usage: naming the caller-retagged parent of a function argument
+    /// ```rs
+    /// foo(&*x);
+    /// fn foo(x: &T) {
+    ///     // `x` was reborrowed once by the caller and once by the callee
+    ///     // we can give a name to the callee's `x` with
+    ///     miri_pointer_name(x as *const T as *const (), "callee:x".as_bytes());
+    ///     // However the caller's `x` is not directly reachable.
+    ///     miri_pointer_name(
+    ///         miri_tree_nth_parent(x as *const T as *const (), 1),
+    ///         "caller:x".as_bytes(),
+    ///     );
+    /// }
+    /// ```
+    ///
+    /// This is a noop under Stacked Borrows.
+    pub fn miri_tree_nth_parent(ptr: *const (), nb: u8) -> *const ();
+
+    /// Miri-provided extern function to forge the provenance of a pointer.
+    /// Use only for debugging and diagnostics.
+    ///
+    /// Under Tree Borrows, this can be used in conjunction with `miri_pointer_name`
+    /// to access a tag that is not directly accessible in the program: the pointer
+    /// returned has the same address as `ptr1` and is in the same allocation, but
+    /// has the `tag` of the nearest common ancestor of `ptr1` and `ptr2`.
+    ///
+    /// Both `ptr1` and `ptr2` must not be wildcard pointers, and
+    /// `ptr2` must be part of the same allocation as `ptr1`.
+    ///
+    /// Example usage:
+    /// ```rs
+    /// // If you have a function that returns a pointer and you use it as such:
+    /// miri_pointer_name(
+    ///     something() as *const (),
+    ///     "something()".as_bytes(),
+    /// );
+    /// // you might not be naming the pointer you think you are: two invocations
+    /// // of `something()` might yield different tags, and the one you gave a name to
+    /// // might be later invalidated when the root pointer is still usable.
+    /// // This occurs in particular for some `as_ptr` functions.
+    ///
+    /// // To give a name to the actual underlying pointer, you can use
+    /// miri_pointer_name(
+    ///     miri_tree_common_ancestor(
+    ///         something() as *const (),
+    ///         something() as *const (),
+    ///     ),
+    ///     "root of something()".as_bytes(),
+    /// );
+    /// ```
+    ///
+    /// This is a noop under Stacked Borrows.
+    pub fn miri_tree_common_ancestor(ptr1: *const (), ptr2: *const ()) -> *const ();
 
     /// Miri-provided extern function to print (from the interpreter, not the
     /// program) the contents of a section of program memory, as bytes. Bytes

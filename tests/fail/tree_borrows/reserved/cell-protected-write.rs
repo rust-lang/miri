@@ -19,8 +19,8 @@ fn main() {
         write_second(x, y);
         unsafe fn write_second(x: &mut UnsafeCell<u8>, y: *mut u8) {
             let alloc_id = alloc_id!(x.get());
-            name!(x.get(), "callee:x");
-            name!(x.get()=>1, "caller:x");
+            name!(ancestor!(x.get(), x.get()), "callee:x");
+            name!(parent!(ancestor!(x.get(), x.get())), "caller:x");
             name!(y, "callee:y");
             name!(y, "caller:y");
             print_state!(alloc_id);

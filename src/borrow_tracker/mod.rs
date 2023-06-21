@@ -318,7 +318,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     fn give_pointer_debug_name(
         &mut self,
         ptr: Pointer<Option<Provenance>>,
-        nth_parent: u8,
         name: &str,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
@@ -328,8 +327,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.tcx.tcx.sess.warn("Stacked Borrows does not support named pointers; `miri_pointer_name` is a no-op");
                 Ok(())
             }
-            BorrowTrackerMethod::TreeBorrows =>
-                this.tb_give_pointer_debug_name(ptr, nth_parent, name),
+            BorrowTrackerMethod::TreeBorrows => this.tb_give_pointer_debug_name(ptr, name),
         }
     }
 
@@ -339,6 +337,38 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         match method {
             BorrowTrackerMethod::StackedBorrows => this.print_stacks(alloc_id),
             BorrowTrackerMethod::TreeBorrows => this.print_tree(alloc_id, show_unnamed),
+        }
+    }
+
+    /// SB: returns `ptr`.
+    /// TB: forges a pointer with the provenance of the `nb`'th parent of `ptr`
+    /// in the same allocation.
+    fn forge_ptr_nth_parent(
+        &mut self,
+        ptr: Pointer<Option<Provenance>>,
+        nb: u8,
+    ) -> InterpResult<'tcx, Pointer<Option<Provenance>>> {
+        let this = self.eval_context_mut();
+        let method = this.machine.borrow_tracker.as_ref().unwrap().borrow().borrow_tracker_method;
+        match method {
+            BorrowTrackerMethod::StackedBorrows => Ok(ptr),
+            BorrowTrackerMethod::TreeBorrows => this.tb_forge_ptr_nth_parent(ptr, nb),
+        }
+    }
+
+    /// SB: returns `ptr1`.
+    /// TB: forges a pointer with the provenance of the nearest common ancestor of
+    /// `ptr1` and `ptr2` if they belong to the same allocation.
+    fn forge_ptr_common_ancestor(
+        &mut self,
+        ptr1: Pointer<Option<Provenance>>,
+        ptr2: Pointer<Option<Provenance>>,
+    ) -> InterpResult<'tcx, Pointer<Option<Provenance>>> {
+        let this = self.eval_context_mut();
+        let method = this.machine.borrow_tracker.as_ref().unwrap().borrow().borrow_tracker_method;
+        match method {
+            BorrowTrackerMethod::StackedBorrows => Ok(ptr1),
+            BorrowTrackerMethod::TreeBorrows => this.tb_forge_ptr_common_ancestor(ptr1, ptr2),
         }
     }
 }

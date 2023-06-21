@@ -536,7 +536,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     fn tb_give_pointer_debug_name(
         &mut self,
         ptr: Pointer<Option<Provenance>>,
-        nth_parent: u8,
         name: &str,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
@@ -549,6 +548,66 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         };
         let alloc_extra = this.get_alloc_extra(alloc_id)?;
         let mut tree_borrows = alloc_extra.borrow_tracker_tb().borrow_mut();
-        tree_borrows.give_pointer_debug_name(tag, nth_parent, name)
+        tree_borrows.give_pointer_debug_name(tag, name);
+        Ok(())
+    }
+
+    /// Forge a pointer with the provenance of the `nb`'th parent of `ptr`.
+    /// No-op if `ptr` is a wildcard pointer.
+    fn tb_forge_ptr_nth_parent(
+        &mut self,
+        ptr: Pointer<Option<Provenance>>,
+        nb: u8,
+    ) -> InterpResult<'tcx, Pointer<Option<Provenance>>> {
+        let this = self.eval_context_mut();
+        let (tag, alloc_id) = match ptr.provenance {
+            Some(Provenance::Concrete { tag, alloc_id }) => (tag, alloc_id),
+            _ => {
+                eprintln!("{ptr:?} has no provenance, cannot forge ancestor");
+                return Ok(ptr);
+            }
+        };
+        let alloc_extra = this.get_alloc_extra(alloc_id)?;
+        let tree_borrows = alloc_extra.borrow_tracker_tb().borrow();
+        let forged_tag = tree_borrows.nth_parent(tag, nb);
+        Ok(ptr.map_provenance(|_| Some(Provenance::Concrete { tag: forged_tag, alloc_id })))
+    }
+
+    /// Forge a pointer with the provenance of the nearest common ancestor of `ptr1` and `ptr2`.
+    /// No-op on `ptr1` if either pointer is a wildcard pointer or if they belong to different
+    /// allocations.
+    fn tb_forge_ptr_common_ancestor(
+        &mut self,
+        ptr1: Pointer<Option<Provenance>>,
+        ptr2: Pointer<Option<Provenance>>,
+    ) -> InterpResult<'tcx, Pointer<Option<Provenance>>> {
+        let this = self.eval_context_mut();
+        let (tag1, alloc_id1) = match ptr1.provenance {
+            Some(Provenance::Concrete { tag, alloc_id }) => (tag, alloc_id),
+            _ => {
+                eprintln!("{ptr1:?} has no provenance, cannot forge ancestor");
+                return Ok(ptr1);
+            }
+        };
+        let (tag2, alloc_id2) = match ptr2.provenance {
+            Some(Provenance::Concrete { tag, alloc_id }) => (tag, alloc_id),
+            _ => {
+                eprintln!("{ptr2:?} has no provenance, cannot forge ancestor");
+                return Ok(ptr1);
+            }
+        };
+        if alloc_id1 != alloc_id2 {
+            eprintln!(
+                "{tag1:?} and {tag2:?} are not part of the same allocation, cannot forge ancestor"
+            );
+            return Ok(ptr1);
+        }
+
+        let alloc_extra = this.get_alloc_extra(alloc_id1)?;
+        let tree_borrows = alloc_extra.borrow_tracker_tb().borrow();
+        let forged_tag = tree_borrows.common_ancestor(tag1, tag2);
+        Ok(ptr1.map_provenance(|_| {
+            Some(Provenance::Concrete { tag: forged_tag, alloc_id: alloc_id1 })
+        }))
     }
 }
