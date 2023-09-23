@@ -93,8 +93,30 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     let target = get_arg_flag_value("--target");
     let target = target.as_ref().unwrap_or(host);
 
-    // We always setup.
-    let miri_sysroot = setup(&subcommand, target, &rustc_version, verbose);
+    let has_build_std = is_build_std_set();
+    if has_build_std {
+        if env::var_os("MIRI_SYSROOT").is_some() {
+            println!("WARNING: `MIRI_SYSROOT` has no effect when Cargo has `build-std` enabled.");
+        }
+        if env::var_os("MIRI_NO_STD").is_some() {
+            println!("WARNING: `MIRI_NO_STD` has no effect when Cargo has `build-std` enabled.");
+        }
+    }
+    let cargo_cmd = match subcommand {
+        MiriCommand::Forward(s) => s,
+        MiriCommand::Setup => {
+            if has_build_std {
+                println!(
+                    "NOTE: `cargo miri setup` is unnecessary when Cargo has `build-std` enabled. \
+                    libstd and friends will be built on-the-fly when `cargo miri run` or `cargo \
+                    miri test` is invoked."
+                );
+            } else {
+                setup(&subcommand, target, &rustc_version, verbose);
+            }
+            return; // `cargo miri setup` stops here.
+        }
+    };
 
     // Invoke actual cargo for the job, but with different flags.
     // We re-use `cargo test` and `cargo run`, which makes target and binary handling very easy but
@@ -107,10 +129,6 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
         .into_os_string()
         .into_string()
         .expect("current executable path is not valid UTF-8");
-    let cargo_cmd = match subcommand {
-        MiriCommand::Forward(s) => s,
-        MiriCommand::Setup => return, // `cargo miri setup` stops here.
-    };
     let metadata = get_cargo_metadata();
     let mut cmd = cargo();
     cmd.arg(&cargo_cmd);
@@ -159,8 +177,12 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // Forward all further arguments (not consumed by `ArgSplitFlagValue`) to cargo.
     cmd.args(args);
 
-    // Let it know where the Miri sysroot lives.
-    cmd.env("MIRI_SYSROOT", miri_sysroot);
+    if has_build_std {
+        cmd.env("MIRI_STD_AWARE_CARGO", "1");
+    } else {
+        // Let it know where the Miri sysroot lives.
+        cmd.env("MIRI_SYSROOT", setup(&subcommand, target, &rustc_version, verbose));
+    }
     // Set `RUSTC_WRAPPER` to ourselves.  Cargo will prepend that binary to its usual invocation,
     // i.e., the first argument is `rustc` -- which is what we use in `main` to distinguish
     // the two codepaths. (That extra argument is why we prefer this over setting `RUSTC`.)
@@ -606,8 +628,12 @@ pub fn phase_rustdoc(mut args: impl Iterator<Item = String>) {
     // which are disabled by default. We first need to enable them explicitly:
     cmd.arg("-Z").arg("unstable-options");
 
-    // rustdoc needs to know the right sysroot.
-    cmd.arg("--sysroot").arg(env::var_os("MIRI_SYSROOT").unwrap());
+    if let Some(sysroot) = env::var_os("MIRI_SYSROOT") {
+        // rustdoc needs to know the right sysroot.
+        cmd.arg("--sysroot").arg(sysroot);
+    } else if env::var_os("MIRI_STD_AWARE_CARGO").is_none() {
+        show_error!("`MIRI_SYSROOT` must be set unless `MIRI_STD_AWARE_CARGO` is set");
+    };
     // make sure the 'miri' flag is set for rustdoc
     cmd.arg("--cfg").arg("miri");
 

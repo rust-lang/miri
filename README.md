@@ -511,6 +511,7 @@ binaries, and as such worth documenting:
   perform verbose logging.
 * `MIRI_HOST_SYSROOT` is set by bootstrap to tell `cargo-miri` which sysroot to use for *host*
   operations.
+* `MIRI_STD_AWARE_CARGO` is set by `cargo-miri` when Cargo has `build-std` set to tell the Miri driver not to use the value of `MIRI_SYSROOT` and to inject compiler flags typically used for building the Miri sysroot whenever a crate from the standard library is compiled.
 
 [testing-miri]: CONTRIBUTING.md#testing-the-miri-driver
 

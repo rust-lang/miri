@@ -1,0 +1,18 @@
+{
+    "arch": "mips",
+    "cpu": "mips2",
+    "data-layout": "e-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64",
+    "features": "+mips2,+soft-float",
+    "linker-flavor": "ld.lld",
+    "llvm-abiname": "o32",
+    "llvm-target": "mipsel-none-elf",
+    "max-atomic-width": 32,
+    "os": "none",
+    "panic-strategy": "abort",
+    "position-independent-executables": false,
+    "relro-level": "full",
+    "target-c-int-width": "32",
+    "target-endian": "little",
+    "target-pointer-width": "32",
+    "relocation-model": "static"
+}
