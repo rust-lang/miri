@@ -103,7 +103,7 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
         }
     }
     let cargo_cmd = match subcommand {
-        MiriCommand::Forward(s) => s,
+        MiriCommand::Forward(ref s) => s,
         MiriCommand::Setup => {
             if has_build_std {
                 println!(
@@ -131,7 +131,7 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
         .expect("current executable path is not valid UTF-8");
     let metadata = get_cargo_metadata();
     let mut cmd = cargo();
-    cmd.arg(&cargo_cmd);
+    cmd.arg(cargo_cmd);
     // In nextest we have to also forward the main `verb`.
     if cargo_cmd == "nextest" {
         cmd.arg(

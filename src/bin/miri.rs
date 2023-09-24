@@ -243,13 +243,28 @@ fn run_compiler(
 ) -> ! {
     if target_crate {
         if env::var_os("MIRI_STD_AWARE_CARGO").is_some() {
-            let crate_name = parse_crate_name(&args).unwrap_or_else(|_| {
+            let crate_name = parse_crate_name(&args).unwrap_or_else(|| {
                 show_error!("`MIRI_STD_AWARE_CARGO` is set but `--crate-name` is not")
-            });
-            if matches!(crate_name, "std" | "core" | "alloc" | "panic_abort" | "test" | "compiler_builtins") {
+            })
+            .to_owned();
+            // This list should be kept in sync with the one from
+            // `cargo/core/compiler/standard_lib.rs`.
+            if matches!(
+                crate_name.as_str(),
+                "std"
+                | "core"
+                | "alloc"
+                | "proc_macro"
+                | "panic_abort"
+                | "panic_unwind"
+                | "test"
+                | "compiler_builtins"
+            ) {
                 // We are compiling the standard library.
-                args.extend(&["-Cdebug-assertions=off", "-Coverflow-checks=on"]);
+                args.push("-Cdebug-assertions=off".into());
+                args.push("-Coverflow-checks=on".into());
             }
+            // See `cargo_miri::phase_rustc`.
             if crate_name == "panic_abort" {
                 args.push("-Cpanic=abort".into());
             }
@@ -297,6 +312,7 @@ fn parse_comma_list<T: FromStr>(input: &str) -> Result<Vec<T>, T::Err> {
     input.split(',').map(str::parse::<T>).collect()
 }
 
+/// Extracts the value associated with the `--crate-name` argument from the given command line.
 fn parse_crate_name(args: &Vec<String>) -> Option<&str> {
     let mut iter = args.iter();
     while let Some(e) = iter.next() {
@@ -310,7 +326,7 @@ fn parse_crate_name(args: &Vec<String>) -> Option<&str> {
                 show_error!("--crate-name is missing required argument")
             }));
         }
-        show_error!("--crate-name argument is invalid")
+        show_error!("--crate-name argument is invalid");
     }
     None
 }
