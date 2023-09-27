@@ -3,3 +3,8 @@ use_small_heuristics = "Max"
 match_arm_blocks = false
 match_arm_leading_pipes = "Preserve"
 force_multiline_blocks = true
+
+ignore = [
+    # this is another repo cloned during tests
+    "test-stdarch/stdarch"
+]
