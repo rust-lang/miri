@@ -7,8 +7,7 @@ pub struct MiriFrame {
     // The size of filename of the function being executed, encoded in UTF-8
     pub filename_len: usize,
     // The line number currently being executed in `filename`, starting from '1'.
-    pub lineno: u32,
-    // The column number currently being executed in `filename`, starting from '1'.
+    pub lineno: u32, // The column number currently being executed in `filename`, starting from '1'.
     pub colno: u32,
     // The function pointer to the function currently being executed.
     // This can be compared against function pointers obtained by
@@ -137,4 +136,9 @@ extern "Rust" {
         out: *mut std::ffi::c_char,
         out_size: usize,
     ) -> usize;
+
+    /// Run the provenance GC. The GC will run automatically at some cadence, but tests we want to
+    /// have control of when it runs so that we can run it for sure at certain points to make sure
+    /// that it doesn't break anything.
+    pub fn miri_run_provenance_gc();
 }

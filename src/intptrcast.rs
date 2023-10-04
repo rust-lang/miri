@@ -46,9 +46,23 @@ pub struct GlobalStateInner {
     provenance_mode: ProvenanceMode,
 }
 
-impl VisitTags for GlobalStateInner {
-    fn visit_tags(&self, _visit: &mut dyn FnMut(BorTag)) {
-        // Nothing to visit here.
+impl VisitProvenance for GlobalStateInner {
+    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+        let GlobalStateInner {
+            int_to_ptr_map: _,
+            base_addr: _,
+            exposed,
+            next_base_addr: _,
+            provenance_mode: _,
+        } = self;
+        // Though base_addr and int_to_ptr_map contain AllocIds, we do not want to visit them.
+        // We're trying to remove unused elements from base_addr, so visiting it would prevent
+        // removing anything. int_to_ptr_map is managed by free_alloc_id, and entries in it do not
+        // actually make allocation base addresses reachable so we don't need to visit it.
+        // But exposed tags do make base addresses reachable.
+        for id in exposed {
+            id.visit_provenance(visit)
+        }
     }
 }
 
@@ -61,6 +75,10 @@ impl GlobalStateInner {
             next_base_addr: stack_addr,
             provenance_mode: config.provenance_mode,
         }
+    }
+
+    pub fn remove_unreachable_allocs(&mut self, reachable_allocs: &FxHashSet<AllocId>) {
+        self.base_addr.retain(|id, _| reachable_allocs.contains(id));
     }
 }
 

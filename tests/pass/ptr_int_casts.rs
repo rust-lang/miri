@@ -1,6 +1,10 @@
 //@revisions: stack tree
 //@[tree]compile-flags: -Zmiri-tree-borrows
 //@compile-flags: -Zmiri-permissive-provenance
+
+#[path = "../utils/mod.rs"]
+mod utils;
+
 use std::mem;
 use std::ptr;
 
@@ -46,6 +50,20 @@ fn ptr_int_casts() {
 
     // involving types other than usize
     assert_eq!((-1i32) as usize as *const i32 as usize, (-1i32) as usize);
+
+    // Check that the GC doesn't delete context that would prevent us from casting from int
+    // to pointer correctly after the allocation is dead.
+    let (ptr, int) = {
+        let local = 0u8;
+        let ptr = &local as *const u8;
+        (ptr, ptr as usize)
+    };
+    // Manually run the GC, instead of just hoping that it runs at the right time.
+    unsafe { utils::miri_run_provenance_gc() }
+    let later_int = ptr as usize;
+    assert_eq!(int, later_int);
+    let later_ptr = int as *const u8;
+    assert_eq!(ptr, later_ptr);
 }
 
 fn ptr_int_ops() {
