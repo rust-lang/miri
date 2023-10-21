@@ -1,12 +1,12 @@
 //@revisions: stack tree
 //@[tree]compile-flags: -Zmiri-tree-borrows
-#![feature(generators, generator_trait, never_type)]
+#![feature(coroutines, coroutine_trait, never_type)]
 
 use std::fmt::Debug;
 use std::mem::ManuallyDrop;
 use std::ops::{
-    Generator,
-    GeneratorState::{self, *},
+    Coroutine,
+    CoroutineState::{self, *},
 };
 use std::pin::Pin;
 use std::ptr;
@@ -15,22 +15,22 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn basic() {
     fn finish<T>(mut amt: usize, self_referential: bool, mut t: T) -> T::Return
     where
-        T: Generator<Yield = usize>,
+        T: Coroutine<Yield = usize>,
     {
         // We are not moving the `t` around until it gets dropped, so this is okay.
         let mut t = unsafe { Pin::new_unchecked(&mut t) };
         loop {
             let state = t.as_mut().resume(());
-            // Test if the generator is valid (according to type invariants).
-            // For self-referential generators however this is UB!
+            // Test if the coroutine is valid (according to type invariants).
+            // For self-referential coroutines however this is UB!
             if !self_referential {
                 let _ = unsafe { ManuallyDrop::new(ptr::read(t.as_mut().get_unchecked_mut())) };
             }
             match state {
-                GeneratorState::Yielded(y) => {
+                CoroutineState::Yielded(y) => {
                     amt -= y;
                 }
-                GeneratorState::Complete(ret) => {
+                CoroutineState::Complete(ret) => {
                     assert_eq!(amt, 0);
                     return ret;
                 }
@@ -86,7 +86,7 @@ fn basic() {
         yield 1;
     });
 
-    // also test self-referential generators
+    // also test self-referential coroutines
     assert_eq!(
         finish(5, true, static || {
             let mut x = 5;
@@ -134,9 +134,9 @@ fn basic() {
 }
 
 fn smoke_resume_arg() {
-    fn drain<G: Generator<R, Yield = Y> + Unpin, R, Y>(
+    fn drain<G: Coroutine<R, Yield = Y> + Unpin, R, Y>(
         gen: &mut G,
-        inout: Vec<(R, GeneratorState<Y, G::Return>)>,
+        inout: Vec<(R, CoroutineState<Y, G::Return>)>,
     ) where
         Y: Debug + PartialEq,
         G::Return: Debug + PartialEq,
@@ -145,7 +145,7 @@ fn smoke_resume_arg() {
 
         for (input, out) in inout {
             assert_eq!(gen.as_mut().resume(input), out);
-            // Test if the generator is valid (according to type invariants).
+            // Test if the coroutine is valid (according to type invariants).
             let _ = unsafe { ManuallyDrop::new(ptr::read(gen.as_mut().get_unchecked_mut())) };
         }
     }
