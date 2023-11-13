@@ -236,6 +236,10 @@ impl GlobalStateInner {
             tag
         })
     }
+
+    pub fn remove_unreachable_allocs(&mut self, reachable: &FxHashSet<AllocId>) {
+        self.base_ptr_tags.retain(|id, _| reachable.contains(id));
+    }
 }
 
 /// Which borrow tracking method to use
