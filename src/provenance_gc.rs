@@ -156,13 +156,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriInterpCxExt<'mir, 'tcx> {
         let this = self.eval_context_mut();
 
         let mut tags = FxHashSet::default();
-
-        let mut alloc_ids = FxHashSet::default();
-        this.memory.alloc_map().iter(|it| {
-            for (id, _) in it {
-                alloc_ids.insert(*id);
-            }
-        });
         let mut alloc_ids = FxHashSet::default();
         this.visit_provenance(&mut |id, tag| {
             if let Some(id) = id {
