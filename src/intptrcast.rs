@@ -76,6 +76,8 @@ impl GlobalStateInner {
     }
 
     pub fn remove_unreachable_allocs(&mut self, reachable_allocs: &FxHashSet<AllocId>) {
+        // `exposed` and `int_to_ptr_map` are cleared immediately when an allocation
+        // is freed, so `base_addr` is the only one we have to clean up based on the GC.
         self.base_addr.retain(|id, _| reachable_allocs.contains(id));
     }
 }
