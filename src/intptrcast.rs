@@ -47,22 +47,20 @@ pub struct GlobalStateInner {
 }
 
 impl VisitProvenance for GlobalStateInner {
-    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
         let GlobalStateInner {
             int_to_ptr_map: _,
             base_addr: _,
-            exposed,
+            exposed: _,
             next_base_addr: _,
             provenance_mode: _,
         } = self;
-        // Though base_addr and int_to_ptr_map contain AllocIds, we do not want to visit them.
-        // We're trying to remove unused elements from base_addr, so visiting it would prevent
-        // removing anything. int_to_ptr_map is managed by free_alloc_id, and entries in it do not
-        // actually make allocation base addresses reachable so we don't need to visit it.
-        // But exposed tags do make base addresses reachable.
-        for id in exposed {
-            id.visit_provenance(visit)
-        }
+        // Though base_addr, int_to_ptr_map, and exposed contain AllocIds, we do not want to visit them.
+        // int_to_ptr_map and exposed must contain live allocations, and those were already handled
+        // by visiting all AllocIds in our Machine::MemoryMap.
+        // base_addr is only relevant if we have a pointer to an AllocId and need to look up its
+        // base address; so if an AllocId is not reachable from somewhere else we can remove it
+        // here.
     }
 }
 

@@ -7,7 +7,8 @@ pub struct MiriFrame {
     // The size of filename of the function being executed, encoded in UTF-8
     pub filename_len: usize,
     // The line number currently being executed in `filename`, starting from '1'.
-    pub lineno: u32, // The column number currently being executed in `filename`, starting from '1'.
+    pub lineno: u32,
+    // The column number currently being executed in `filename`, starting from '1'.
     pub colno: u32,
     // The function pointer to the function currently being executed.
     // This can be compared against function pointers obtained by

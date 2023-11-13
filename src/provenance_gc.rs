@@ -134,7 +134,10 @@ impl VisitProvenance for Allocation<Provenance, AllocExtra<'_>> {
 
 impl VisitProvenance for crate::MiriInterpCx<'_, '_> {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
-        // Memory.
+        // Visit the contents of the allocations and the IDs themselves, to account for all
+        // live allocation IDs and all provenance in the allocation bytes, even if they are leaked.
+        // Here we exploit that `adjust_allocation` always returns `Owned`, to all
+        // tcx-managed allocations ever read or written will be copied in `alloc_map`.
         self.memory.alloc_map().iter(|it| {
             for (id, (_kind, alloc)) in it {
                 id.visit_provenance(visit);
@@ -154,16 +157,13 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriInterpCxExt<'mir, 'tcx> {
 
         let mut tags = FxHashSet::default();
 
-        // Initially populate the set of reachable AllocIds with all live allocations. This ensures
-        // that we do not remove state associated with leaked allocations.
-        // Here we exploit that `adjust_allocation` always returns `Owned`, to all
-        // tcx-managed allocations ever read or written will be copied in `alloc_map`.
         let mut alloc_ids = FxHashSet::default();
         this.memory.alloc_map().iter(|it| {
             for (id, _) in it {
                 alloc_ids.insert(*id);
             }
         });
+        let mut alloc_ids = FxHashSet::default();
         this.visit_provenance(&mut |id, tag| {
             if let Some(id) = id {
                 alloc_ids.insert(id);
