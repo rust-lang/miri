@@ -137,8 +137,8 @@ extern "Rust" {
         out_size: usize,
     ) -> usize;
 
-    /// Run the provenance GC. The GC will run automatically at some cadence, but tests we want to
-    /// have control of when it runs so that we can run it for sure at certain points to make sure
+    /// Run the provenance GC. The GC will run automatically at some cadence,
+    /// but in tests we want to for sure run it at certain points to check
     /// that it doesn't break anything.
     pub fn miri_run_provenance_gc();
 }
