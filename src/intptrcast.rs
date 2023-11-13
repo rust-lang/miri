@@ -195,6 +195,9 @@ impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriInterpCx<'mir, 
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     fn expose_ptr(&mut self, alloc_id: AllocId, tag: BorTag) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
+        // Make sure we aren't trying to expose a dead allocation; this is part of justifying the
+        // way we treat the exposed set in VisitProvenance.
+        assert!(!matches!(ecx.get_alloc_info(alloc_id).2, AllocKind::Dead));
         let global_state = ecx.machine.intptrcast.get_mut();
         // In strict mode, we don't need this, so we can save some cycles by not tracking it.
         if global_state.provenance_mode != ProvenanceMode::Strict {
