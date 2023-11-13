@@ -156,6 +156,8 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: MiriInterpCxExt<'mir, 'tcx> {
 
         // Initially populate the set of reachable AllocIds with all live allocations. This ensures
         // that we do not remove state associated with leaked allocations.
+        // Here we exploit that `adjust_allocation` always returns `Owned`, to all
+        // tcx-managed allocations ever read or written will be copied in `alloc_map`.
         let mut alloc_ids = FxHashSet::default();
         this.memory.alloc_map().iter(|it| {
             for (id, _) in it {
