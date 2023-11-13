@@ -56,7 +56,7 @@ impl VisitProvenance for GlobalStateInner {
             provenance_mode: _,
         } = self;
         // Though base_addr, int_to_ptr_map, and exposed contain AllocIds, we do not want to visit them.
-        // int_to_ptr_map and exposed must contain live allocations, and those were already handled
+        // int_to_ptr_map and exposed must contain only live allocations, and those were already handled
         // by visiting all AllocIds in our Machine::MemoryMap.
         // base_addr is only relevant if we have a pointer to an AllocId and need to look up its
         // base address; so if an AllocId is not reachable from somewhere else we can remove it
