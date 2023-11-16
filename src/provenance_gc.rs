@@ -136,15 +136,16 @@ impl VisitProvenance for crate::MiriInterpCx<'_, '_> {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
         // Visit the contents of the allocations and the IDs themselves, to account for all
         // live allocation IDs and all provenance in the allocation bytes, even if they are leaked.
-        // Here we exploit that `adjust_allocation` always returns `Owned`, to all
-        // tcx-managed allocations ever read or written will be copied in `alloc_map`.
         self.memory.alloc_map().iter(|it| {
             for (id, (_kind, alloc)) in it {
                 id.visit_provenance(visit);
                 alloc.visit_provenance(visit);
             }
         });
-
+        // Visit all the tcx-managed allocations, which includes functions and vtables.
+        self.tcx.iter_allocs(|id| {
+            id.visit_provenance(visit);
+        });
         // And all the other machine values.
         self.machine.visit_provenance(visit);
     }
