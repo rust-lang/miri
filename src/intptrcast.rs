@@ -197,17 +197,19 @@ impl<'mir, 'tcx: 'mir> EvalContextExt<'mir, 'tcx> for crate::MiriInterpCx<'mir, 
 pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     fn expose_ptr(&mut self, alloc_id: AllocId, tag: BorTag) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
-        // Exposing a dead alloc is a no-op, because it's not possible to get a dead allocation
-        // via int2ptr.
-        if matches!(ecx.get_alloc_info(alloc_id).2, AllocKind::Dead) {
-            return Ok(());
-        }
         let global_state = ecx.machine.intptrcast.get_mut();
         // In strict mode, we don't need this, so we can save some cycles by not tracking it.
         if global_state.provenance_mode == ProvenanceMode::Strict {
             return Ok(());
         }
+        // Exposing a dead alloc is a no-op, because it's not possible to get a dead allocation
+        // via int2ptr.
+        if matches!(ecx.get_alloc_info(alloc_id).2, AllocKind::Dead) {
+            return Ok(());
+        }
         trace!("Exposing allocation id {alloc_id:?}");
+        let ecx = self.eval_context_mut();
+        let global_state = ecx.machine.intptrcast.get_mut();
         global_state.exposed.insert(alloc_id);
         if ecx.machine.borrow_tracker.is_some() {
             ecx.expose_tag(alloc_id, tag)?;
