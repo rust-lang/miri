@@ -157,6 +157,8 @@ fn test_thread_local_errno() {
     use libc::__errno_location;
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     use libc::__error as __errno_location;
+    #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+    use libc::__errno as __errno_location;
 
     unsafe {
         *__errno_location() = 0xBEEF;

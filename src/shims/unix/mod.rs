@@ -8,6 +8,7 @@ mod thread;
 mod freebsd;
 mod linux;
 mod macos;
+mod solarish;
 
 pub use fs::{DirHandler, FileHandler};
 
