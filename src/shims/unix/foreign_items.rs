@@ -580,7 +580,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             }
             "getentropy" => {
                 // This function is non-standard but exists with the same signature and behavior on
-                // Linux, macOS, and FreeBSD.
+                // Linux, macOS, FreeBSD and Solaris/Illumos.
                 if !matches!(&*this.tcx.sess.target.os, "linux" | "macos" | "freebsd" | "illumos" | "solaris") {
                     throw_unsup_format!(
                         "`getentropy` is not supported on {}",
@@ -597,6 +597,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 // FreeBSD: https://man.freebsd.org/cgi/man.cgi?query=getentropy&sektion=3&format=html
                 // Linux: https://man7.org/linux/man-pages/man3/getentropy.3.html
                 // macOS: https://keith.github.io/xcode-man-pages/getentropy.2.html
+                // Solaris/Illumos: https://illumos.org/man/3C/getentropy
                 if bufsize > 256 {
                     let err = this.eval_libc("EIO");
                     this.set_last_error(err)?;

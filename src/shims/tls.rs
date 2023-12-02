@@ -238,7 +238,7 @@ impl TlsDtorsState {
         match &mut self.0 {
             Init => {
                 match this.tcx.sess.target.os.as_ref() {
-                    "linux" | "freebsd" | "android" => {
+                    "linux" | "freebsd" | "android" | "solaris" | "illumos" => {
                         // Run the pthread dtors.
                         self.0 = PthreadDtors(Default::default());
                     }
