@@ -249,3 +249,20 @@ pub fn debug_cmd(prefix: &str, verbose: usize, cmd: &Command) {
     }
     eprintln!("{prefix} running command: {cmd:?}");
 }
+
+/// Checks if Cargo's build-std setting is enabled for one or more crates.
+pub fn is_build_std_set() -> bool {
+    let cmd = cargo()
+        // TODO: remove the -Z argument when this subcommand is stabilized;
+        // see <https://github.com/rust-lang/cargo/issues/9301>
+        .args(&["-Zunstable-options", "config", "get", "--format=json-value", "unstable.build-std"])
+        .output()
+        .expect("failed to get Cargo config");
+    // TODO: Cargo will exit with an error code if the `unstable.build-std` key is not set. Should
+    // we still return false if an unrelated error has occurred?
+    if !cmd.status.success() {
+        return false;
+    }
+
+    cmd.stdout.get(0..2) == Some(b"[\"")
+}

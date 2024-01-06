@@ -1,0 +1,5 @@
+[build]
+target = "ee.json"
+
+[unstable]
+build-std = ["core"]

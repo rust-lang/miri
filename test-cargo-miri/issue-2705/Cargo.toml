@@ -1,0 +1,5 @@
+[package]
+name = "issue_2705"
+version = "0.1.0"
+authors = ["Miri Team"]
+edition = "2018"

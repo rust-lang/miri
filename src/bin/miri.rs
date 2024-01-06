@@ -255,21 +255,49 @@ fn run_compiler(
     using_internal_features: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> ! {
     if target_crate {
-        // Miri needs a custom sysroot for target crates.
-        // If no `--sysroot` is given, the `MIRI_SYSROOT` env var is consulted to find where
-        // that sysroot lives, and that is passed to rustc.
-        let sysroot_flag = "--sysroot";
-        if !args.iter().any(|e| e == sysroot_flag) {
-            // Using the built-in default here would be plain wrong, so we *require*
-            // the env var to make sure things make sense.
-            let miri_sysroot = env::var("MIRI_SYSROOT").unwrap_or_else(|_| {
-                show_error!(
-                    "Miri was invoked in 'target' mode without `MIRI_SYSROOT` or `--sysroot` being set"
-                    )
-            });
+        if env::var_os("MIRI_STD_AWARE_CARGO").is_some() {
+            let crate_name = parse_crate_name(&args).unwrap_or_else(|| {
+                show_error!("`MIRI_STD_AWARE_CARGO` is set but `--crate-name` is not")
+            })
+            .to_owned();
+            // This list should be kept in sync with the one from
+            // `cargo/core/compiler/standard_lib.rs`.
+            if matches!(
+                crate_name.as_str(),
+                "std"
+                | "core"
+                | "alloc"
+                | "proc_macro"
+                | "panic_abort"
+                | "panic_unwind"
+                | "test"
+                | "compiler_builtins"
+            ) {
+                // We are compiling the standard library.
+                args.push("-Cdebug-assertions=off".into());
+                args.push("-Coverflow-checks=on".into());
+            }
+            // See `cargo_miri::phase_rustc`.
+            if crate_name == "panic_abort" {
+                args.push("-Cpanic=abort".into());
+            }
+        } else {
+            // Miri needs a custom sysroot for target crates.
+            // If no `--sysroot` is given, the `MIRI_SYSROOT` env var is consulted to find where
+            // that sysroot lives, and that is passed to rustc.
+            let sysroot_flag = "--sysroot";
+            if !args.iter().any(|e| e == sysroot_flag) {
+                // Using the built-in default here would be plain wrong, so we *require*
+                // the env var to make sure things make sense.
+                let miri_sysroot = env::var("MIRI_SYSROOT").unwrap_or_else(|_| {
+                    show_error!(
+                        "Miri was invoked in 'target' mode without `MIRI_SYSROOT` or `--sysroot` being set"
+                        )
+                });
 
-            args.push(sysroot_flag.to_owned());
-            args.push(miri_sysroot);
+                args.push(sysroot_flag.to_owned());
+                args.push(miri_sysroot);
+            }
         }
     }
 
@@ -297,6 +325,25 @@ fn run_compiler(
 /// `<value1>,<value2>,<value3>,...`
 fn parse_comma_list<T: FromStr>(input: &str) -> Result<Vec<T>, T::Err> {
     input.split(',').map(str::parse::<T>).collect()
+}
+
+/// Extracts the value associated with the `--crate-name` argument from the given command line.
+fn parse_crate_name(args: &Vec<String>) -> Option<&str> {
+    let mut iter = args.iter();
+    while let Some(e) = iter.next() {
+        let Some(("", tail)) = e.split_once("--crate-name") else {
+            continue;
+        };
+        if let Some(("", val)) = tail.split_once("=") {
+            return Some(val);
+        } else if tail == "" {
+            return Some(iter.next().as_ref().unwrap_or_else(|| {
+                show_error!("--crate-name is missing required argument")
+            }));
+        }
+        show_error!("--crate-name argument is invalid");
+    }
+    None
 }
 
 fn main() {
