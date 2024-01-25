@@ -9,7 +9,7 @@ LL |     unsafe { __rust_realloc(ptr, layout.size(), layout.align(), new_size) }
    = note: BACKTRACE:
    = note: inside `std::alloc::realloc` at RUSTLIB/alloc/src/alloc.rs:LL:CC
 note: inside `main`
-  --> $DIR/reallocate-bad-size.rs:LL:CC
+  --> $DIR/alloc/reallocate-bad-size.rs:LL:CC
    |
 LL |         let _y = realloc(x, Layout::from_size_align_unchecked(2, 1), 1);
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -9,12 +9,12 @@ default-run = "miri"
 edition = "2021"
 
 [lib]
-test = true # we have unit tests
+test = true     # we have unit tests
 doctest = false # but no doc tests
 
 [[bin]]
 name = "miri"
-test = false # we have no unit tests
+test = false    # we have no unit tests
 doctest = false # and no doc tests
 
 [dependencies]
@@ -41,7 +41,7 @@ libloading = "0.8"
 
 [dev-dependencies]
 colored = "2"
-ui_test = "0.21.2"
+ui_test = "0.22.1"
 rustc_version = "0.4"
 regex = "1.5.5"
 lazy_static = "1.4.0"

@@ -1,5 +1,5 @@
 error: Undefined Behavior: callee has fewer arguments than expected
-  --> $DIR/libc_pthread_create_too_few_args.rs:LL:CC
+  --> tests/fail-dep/concurrency/libc_pthread_create_too_few_args.rs:LL:CC
    |
 LL |     panic!()
    |     ^^^^^^^^ callee has fewer arguments than expected

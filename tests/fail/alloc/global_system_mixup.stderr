@@ -10,7 +10,7 @@ LL |         FREE();
    = note: inside `std::sys::pal::PLATFORM::alloc::<impl std::alloc::GlobalAlloc for std::alloc::System>::dealloc` at RUSTLIB/std/src/sys/pal/PLATFORM/alloc.rs:LL:CC
    = note: inside `<std::alloc::System as std::alloc::Allocator>::deallocate` at RUSTLIB/std/src/alloc.rs:LL:CC
 note: inside `main`
-  --> $DIR/global_system_mixup.rs:LL:CC
+  --> $DIR/alloc/global_system_mixup.rs:LL:CC
    |
 LL |         System.deallocate(ptr, l);
    | ^
