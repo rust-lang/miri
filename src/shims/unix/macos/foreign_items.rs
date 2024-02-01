@@ -183,6 +183,16 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.write_scalar(res, dest)?;
             }
 
+            "CCRandomGenerateBytes" => {
+                let [buf, bufsize] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let buf = this.read_pointer(buf)?;
+                let bufsize = this.read_target_usize(bufsize)?;
+                this.gen_random(buf, bufsize)?;
+                // returning 0 (kCCSuccess)
+                this.write_scalar(Scalar::from_i32(0), dest)?;
+            }
+
             _ => return Ok(EmulateForeignItemResult::NotSupported),
         };
 
