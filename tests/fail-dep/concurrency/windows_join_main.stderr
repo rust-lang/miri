@@ -1,5 +1,5 @@
 error: deadlock: the evaluated program deadlocked
-  --> $DIR/windows_join_main.rs:LL:CC
+  --> $DIR/concurrency/windows_join_main.rs:LL:CC
    |
 LL |             assert_eq!(WaitForSingleObject(MAIN_THREAD, INFINITE), WAIT_OBJECT_0);
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the evaluated program deadlocked

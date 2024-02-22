@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::{env, process::Command};
+use ui_test::spanned::Spanned;
 use ui_test::{color_eyre::Result, Config, Match, Mode, OutputConflictHandling};
 use ui_test::{status_emitter, CommandBuilder, Format, RustfixMode};
 
@@ -66,8 +67,6 @@ fn test_config(target: &str, path: &str, mode: Mode, with_dependencies: bool) ->
         }
     }
     program.args.push("-Zui-testing".into());
-    program.args.push("--target".into());
-    program.args.push(target.into());
 
     // If we're on linux, and we're testing the extern-so functionality,
     // then build the shared object file for testing external C function calls
@@ -86,17 +85,21 @@ fn test_config(target: &str, path: &str, mode: Mode, with_dependencies: bool) ->
 
     let mut config = Config {
         target: Some(target.to_owned()),
-        stderr_filters: STDERR.clone(),
-        stdout_filters: STDOUT.clone(),
-        mode,
         program,
         out_dir: PathBuf::from(std::env::var_os("CARGO_TARGET_DIR").unwrap()).join("ui"),
-        edition: Some("2021".into()), // keep in sync with `./miri run`
         threads: std::env::var("MIRI_TEST_THREADS")
             .ok()
             .map(|threads| NonZeroUsize::new(threads.parse().unwrap()).unwrap()),
         ..Config::rustc(path)
     };
+    // keep in sync with `./miri run`
+    config.comment_defaults.base().edition = Some(Spanned::dummy("2021".into())).into();
+    config.comment_defaults.base().mode = Some(Spanned::dummy(mode)).into();
+    config.comment_defaults.base().normalize_stdout =
+        STDOUT.iter().cloned().map(|(m, v)| (m, v.into())).collect();
+    config.comment_defaults.base().normalize_stderr =
+        STDERR.iter().cloned().map(|(m, v)| (m, v.into())).collect();
+    config.filter(path, "$$DIR");
 
     if with_dependencies {
         config.dependencies_crate_manifest_path =
@@ -121,14 +124,12 @@ fn run_tests(mode: Mode, path: &str, target: &str, with_dependencies: bool) -> R
     let mut config = test_config(target, path, mode, with_dependencies);
 
     // Handle command-line arguments.
-    let args = ui_test::Args::test()?;
-    let default_bless = env::var_os("RUSTC_BLESS").is_some_and(|v| v != "0");
-    config.with_args(&args, default_bless);
-    if let OutputConflictHandling::Error(msg) = &mut config.output_conflict_handling {
-        *msg = "./miri test --bless".into();
-    }
+    let mut args = ui_test::Args::test()?;
+    args.bless |= env::var_os("RUSTC_BLESS").is_some_and(|v| v != "0");
+    config.with_args(&args);
+    config.bless_command = Some("./miri test --bless".into());
     if env::var_os("MIRI_SKIP_UI_CHECKS").is_some() {
-        assert!(!default_bless, "cannot use RUSTC_BLESS and MIRI_SKIP_UI_CHECKS at the same time");
+        assert!(!args.bless, "cannot use RUSTC_BLESS and MIRI_SKIP_UI_CHECKS at the same time");
         config.output_conflict_handling = OutputConflictHandling::Ignore;
     }
     eprintln!("   Compiler: {}", config.program.display());
