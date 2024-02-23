@@ -415,6 +415,9 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
             && get_arg_flag_value("--crate-name").as_deref() == Some("panic_abort")
         {
             cmd.arg("-C").arg("panic=abort");
+        } else if phase == RustcPhase::Setup {
+            // If the user has a custom profile, this overrides it so that the sysroot is built properly.
+            cmd.arg("-C").arg("panic=unwind");
         }
     } else {
         // For host crates (but not when we are just printing some info),
