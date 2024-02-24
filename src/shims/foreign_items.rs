@@ -38,6 +38,8 @@ impl DynSym {
 pub enum EmulateForeignItemResult {
     /// The caller is expected to jump to the return block.
     NeedsJumping,
+    /// The caller is expected to jump to the unwind block.
+    NeedsUnwind,
     /// Jumping has already been taken care of.
     AlreadyJumped,
     /// The item is not supported.
@@ -125,6 +127,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             EmulateForeignItemResult::NeedsJumping => {
                 trace!("{:?}", this.dump_place(dest));
                 this.go_to_block(ret);
+            }
+            EmulateForeignItemResult::NeedsUnwind => {
+                // Jump to the unwind block to begin unwinding.
+                this.unwind_to_block(unwind)?;
             }
             EmulateForeignItemResult::AlreadyJumped => (),
             EmulateForeignItemResult::NotSupported => {
