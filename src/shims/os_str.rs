@@ -279,20 +279,20 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     // If this is an absolute Windows path that starts with a drive letter (`C:/...`
                     // after separator conversion), it would not be considered absolute by Unix
                     // target code.
-                    if converted.get(1).copied() == Some(b':' as u16)
-                        && converted.get(2).copied() == Some(b'/' as u16)
+                    if converted.get(1).copied() == Some(u16::from(b':'))
+                        && converted.get(2).copied() == Some(u16::from(b'/'))
                     {
                         // We add a `/` at the beginning, to store the absolute Windows
                         // path in something that looks like an absolute Unix path.
-                        converted.insert(0, b'/' as u16);
+                        converted.insert(0, u16::from(b'/'));
                     }
                 }
                 PathConversion::TargetToHost => {
                     // If the path is `\C:\`, the leading backslash was probably added by the above code
                     // and we should get rid of it again.
-                    if converted.get(0).copied() == Some(b'\\' as u16)
-                        && converted.get(2).copied() == Some(b':' as u16)
-                        && converted.get(3).copied() == Some(b'\\' as u16)
+                    if converted.get(0).copied() == Some(u16::from(b'\\'))
+                        && converted.get(2).copied() == Some(u16::from(b':'))
+                        && converted.get(3).copied() == Some(u16::from(b'\\'))
                     {
                         converted.remove(0);
                     }

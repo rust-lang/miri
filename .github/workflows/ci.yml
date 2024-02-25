@@ -113,7 +113,8 @@ jobs:
             echo "Building against latest rustc git version"
             git ls-remote https://github.com/rust-lang/rust/ HEAD | cut -f 1 > rust-version
           fi
-          ./miri toolchain
+          ./miri toolchain -t x86_64-pc-windows-msvc -t  x86_64-unknown-linux-gnu -t x86_64-apple-darwin
+          sudo apt install crossbuild-essential-arm64 crossbuild-essential-amd64
 
       - name: Show Rust version
         run: |
@@ -124,7 +125,7 @@ jobs:
       - name: rustfmt
         run: ./miri fmt --check
       - name: clippy
-        run: ./miri clippy -- -D warnings
+        run: ./miri clippy --no-default-features --features stack-cache --target x86_64-pc-windows-msvc --target x86_64-unknown-linux-gnu --target x86_64-apple-darwin -- -D warnings
       - name: rustdoc
         run: RUSTDOCFLAGS="-Dwarnings" ./miri cargo doc --document-private-items
 
