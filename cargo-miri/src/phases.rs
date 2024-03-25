@@ -168,8 +168,6 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // Forward all further arguments (not consumed by `ArgSplitFlagValue`) to cargo.
     cmd.args(args);
 
-    // Let it know where the Miri sysroot lives.
-    cmd.env("MIRI_SYSROOT", miri_sysroot);
     // Set `RUSTC_WRAPPER` to ourselves.  Cargo will prepend that binary to its usual invocation,
     // i.e., the first argument is `rustc` -- which is what we use in `main` to distinguish
     // the two codepaths. (That extra argument is why we prefer this over setting `RUSTC`.)
@@ -204,6 +202,8 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // Set rustdoc to us as well, so we can run doctests.
     cmd.env("RUSTDOC", &cargo_miri_path);
 
+    // Forward some crucial information to our own re-invocations.
+    cmd.env("MIRI_SYSROOT", miri_sysroot);
     cmd.env("MIRI_LOCAL_CRATES", local_crates(&metadata));
     if verbose > 0 {
         cmd.env("MIRI_VERBOSE", verbose.to_string()); // This makes the other phases verbose.
@@ -393,6 +393,8 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
     // Arguments are treated very differently depending on whether this crate is
     // for interpretation by Miri, or for use by a build script / proc macro.
     if !info_query && target_crate {
+        // Set the sysroot.
+        cmd.arg("--sysroot").arg(env::var_os("MIRI_SYSROOT").unwrap());
         // Forward arguments, but remove "link" from "--emit" to make this a check-only build.
         let emit_flag = "--emit";
         while let Some(arg) = args.next() {
@@ -531,6 +533,12 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
         cmd.env(name, val);
     }
 
+    if phase != RunnerPhase::Rustdoc {
+        // Set the sysroot. Not necessary in rustdoc, where we already set the sysroot when invoking
+        // rustdoc itself, which will forward that flag when invoking rustc (i.e., us), so the flag
+        // is present in `info.args`.
+        cmd.arg("--sysroot").arg(env::var_os("MIRI_SYSROOT").unwrap());
+    }
     // Forward rustc arguments.
     // We need to patch "--extern" filenames because we forced a check-only
     // build without cargo knowing about that: replace `.rlib` suffix by

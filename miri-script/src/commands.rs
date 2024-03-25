@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::io::Write;
 use std::ops::Not;
+use std::path::PathBuf;
 use std::process;
 use std::thread;
 use std::time;
@@ -20,10 +21,11 @@ const JOSH_FILTER: &str =
 const JOSH_PORT: &str = "42042";
 
 impl MiriEnv {
-    fn build_miri_sysroot(&mut self, quiet: bool) -> Result<()> {
-        if self.sh.var("MIRI_SYSROOT").is_ok() {
+    /// Returns the location of the sysroot.
+    fn build_miri_sysroot(&mut self, quiet: bool) -> Result<PathBuf> {
+        if let Some(miri_sysroot) = self.sh.var_os("MIRI_SYSROOT") {
             // Sysroot already set, use that.
-            return Ok(());
+            return Ok(miri_sysroot.into());
         }
         let manifest_path = path!(self.miri_dir / "cargo-miri" / "Cargo.toml");
         let Self { toolchain, cargo_extra_flags, .. } = &self;
@@ -57,8 +59,8 @@ impl MiriEnv {
             .with_context(|| "`cargo miri setup` failed")?;
             panic!("`cargo miri setup` didn't fail again the 2nd time?");
         };
-        self.sh.set_var("MIRI_SYSROOT", output);
-        Ok(())
+        self.sh.set_var("MIRI_SYSROOT", &output);
+        Ok(output.into())
     }
 }
 
@@ -502,7 +504,7 @@ impl Command {
             flags.iter().take_while(|arg| *arg != "--").any(|arg| *arg == "--edition");
 
         // Prepare a sysroot.
-        e.build_miri_sysroot(/* quiet */ true)?;
+        let miri_sysroot = e.build_miri_sysroot(/* quiet */ true)?;
 
         // Then run the actual command.
         let miri_manifest = path!(e.miri_dir / "Cargo.toml");
@@ -514,12 +516,12 @@ impl Command {
         if dep {
             cmd!(
                 e.sh,
-                "cargo +{toolchain} --quiet test {extra_flags...} --manifest-path {miri_manifest} --test ui -- --miri-run-dep-mode {miri_flags...} {edition_flags...} {flags...}"
+                "cargo +{toolchain} --quiet test {extra_flags...} --manifest-path {miri_manifest} --test ui -- --miri-run-dep-mode --sysroot {miri_sysroot} {miri_flags...} {edition_flags...} {flags...}"
             ).quiet().run()?;
         } else {
             cmd!(
                 e.sh,
-                "cargo +{toolchain} --quiet run {extra_flags...} --manifest-path {miri_manifest} -- {miri_flags...} {edition_flags...} {flags...}"
+                "cargo +{toolchain} --quiet run {extra_flags...} --manifest-path {miri_manifest} -- --sysroot {miri_sysroot} {miri_flags...} {edition_flags...} {flags...}"
             ).quiet().run()?;
         }
         Ok(())

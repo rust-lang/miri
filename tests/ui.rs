@@ -60,6 +60,13 @@ fn test_config(target: &str, path: &str, mode: Mode, with_dependencies: bool) ->
     program.program = miri_path();
 
     // Add some flags we always want.
+    program.args.push(
+        format!(
+            "--sysroot={}",
+            env::var("MIRI_SYSROOT").expect("MIRI_SYSROOT must be set to run the ui test suite")
+        )
+        .into(),
+    );
     program.args.push("-Dwarnings".into());
     program.args.push("-Dunused".into());
     program.args.push("-Ainternal_features".into());
