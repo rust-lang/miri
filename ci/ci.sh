@@ -133,7 +133,7 @@ case $HOST_TARGET in
     # Some targets are only partially supported.
     MIRI_TEST_TARGET=x86_64-unknown-freebsd run_tests_minimal hello integer vec panic/panic concurrency/simple pthread-threadname libc-getentropy libc-getrandom libc-misc libc-fs atomic env align num_cpus
     MIRI_TEST_TARGET=i686-unknown-freebsd run_tests_minimal hello integer vec panic/panic concurrency/simple pthread-threadname libc-getentropy libc-getrandom libc-misc libc-fs atomic env align num_cpus
-
+    MIRI_TEST_TARGET=x86_64-unknown-illumos run_tests_minimal no_std
     MIRI_TEST_TARGET=aarch64-linux-android run_tests_minimal hello integer vec panic/panic
     MIRI_TEST_TARGET=wasm32-wasi run_tests_minimal no_std integer strings wasm
     MIRI_TEST_TARGET=wasm32-unknown-unknown run_tests_minimal no_std integer strings wasm
