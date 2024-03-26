@@ -729,6 +729,18 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.write_scalar(Scalar::from_i32(-1), dest)?;
             }
 
+            "_Unwind_RaiseException" => {
+                trace!("_Unwind_RaiseException: {:?}", this.frame().instance);
+
+                // Get the raw pointer stored in arg[0] (the panic payload).
+                let [payload] = this.check_shim(abi, Abi::C { unwind: true }, link_name, args)?;
+                let payload = this.read_scalar(payload)?;
+                let thread = this.active_thread_mut();
+                thread.panic_payloads.push(payload);
+
+                return Ok(EmulateForeignItemResult::NeedsUnwind);
+            }
+
             // Platform-specific shims
             _ => {
                 let target_os = &*this.tcx.sess.target.os;
