@@ -196,4 +196,3 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             Ok(Scalar::from_i32(this.fd_not_found()?))
         }
     }
-}

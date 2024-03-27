@@ -86,6 +86,12 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 let ptr = this.mremap(old_address, old_size, new_size, flags)?;
                 this.write_scalar(ptr, dest)?;
             }
+            "socket" => {
+                let [domain, type_, protocol] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let result = this.socket(domain, type_, protocol)?;
+                this.write_scalar(result, dest)?;
+            }
             "socketpair" => {
                 let [domain, type_, protocol, sv] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
