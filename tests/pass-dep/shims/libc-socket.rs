@@ -7,7 +7,6 @@
 #[path = "../../utils/mod.rs"]
 mod utils;
 
-#[cfg(target_os = "linux")]
 fn test_socket(
     socket: unsafe extern "C" fn(
         domain: libc::c_int,
