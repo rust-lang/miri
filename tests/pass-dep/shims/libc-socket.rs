@@ -9,7 +9,11 @@ mod utils;
 
 #[cfg(target_os = "linux")]
 fn test_socket(
-    socket: unsafe extern "C" fn(domain: libc::c_int, type_: libc::c_int, protocol: libc::c_int) -> libc::c_int,
+    socket: unsafe extern "C" fn(
+        domain: libc::c_int,
+        type_: libc::c_int,
+        protocol: libc::c_int,
+    ) -> libc::c_int,
 ) {
     // libc::c_int is i32 in target i686-unknown-linux-gnu
     // https://docs.rs/libc/latest/i686-unknown-linux-gnu/libc/type.c_int.html
