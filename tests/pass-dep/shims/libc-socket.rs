@@ -29,5 +29,6 @@ fn test_socket(
     assert_eq!(res, 4);
 }
 fn main() {
+    #[cfg(target_os = "linux")]
     test_socket(libc::socket);
 }
