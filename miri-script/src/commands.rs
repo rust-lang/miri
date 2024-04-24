@@ -508,7 +508,7 @@ impl Command {
         }
 
         // Prepare a sysroot, and add it to the flags.
-        let miri_sysroot = e.build_miri_sysroot(/* quiet */ true)?;
+        let miri_sysroot = e.build_miri_sysroot(/* quiet */ false)?;
         flags.push("--sysroot".into());
         flags.push(miri_sysroot.into());
 
@@ -521,13 +521,13 @@ impl Command {
         if dep {
             cmd!(
                 e.sh,
-                "cargo +{toolchain} --quiet test {extra_flags...} --manifest-path {miri_manifest} --test ui -- --miri-run-dep-mode {miri_flags...} {flags...}"
-            ).quiet().run()?;
+                "cargo +{toolchain} test {extra_flags...} --manifest-path {miri_manifest} --test ui -- --miri-run-dep-mode {miri_flags...} {flags...}"
+            ).run()?;
         } else {
             cmd!(
                 e.sh,
-                "cargo +{toolchain} --quiet run {extra_flags...} --manifest-path {miri_manifest} -- {miri_flags...} {flags...}"
-            ).quiet().run()?;
+                "cargo +{toolchain} run {extra_flags...} --manifest-path {miri_manifest} -- {miri_flags...} {flags...}"
+            ).run()?;
         }
         Ok(())
     }
