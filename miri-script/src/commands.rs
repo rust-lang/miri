@@ -500,7 +500,7 @@ impl Command {
         let miri_flags = flagsplit(&miri_flags);
         let toolchain = &e.toolchain;
         let extra_flags = &e.cargo_extra_flags;
-        let quiet_flag = if verbose { None } else { Some("--quiet") };
+        let quiet_flag = if verbose { Some("-v") } else { Some("--quiet") };
         // This closure runs the command with the given `seed_flag` added between the MIRIFLAGS and
         // the `flags` given on the command-line.
         let run_miri = |sh: &Shell, seed_flag: Option<String>| -> Result<()> {

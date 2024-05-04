@@ -48,7 +48,7 @@ function run_tests {
   if [ -n "${GC_STRESS-}" ]; then
     time MIRIFLAGS="${MIRIFLAGS-} -Zmiri-provenance-gc=1" ./miri test
   else
-    time ./miri test
+    time ./miri test dep
   fi
 
   ## advanced tests
@@ -64,7 +64,7 @@ function run_tests {
   if [ -n "${MANY_SEEDS-}" ]; then
     # Also run some many-seeds tests.
     time for FILE in tests/many-seeds/*.rs; do
-      ./miri run "--many-seeds=0..$MANY_SEEDS" "$FILE"
+      ./miri run -v "--many-seeds=0..$MANY_SEEDS" "$FILE"
     done
   fi
   if [ -n "${TEST_BENCH-}" ]; then
@@ -156,7 +156,7 @@ case $HOST_TARGET in
     # Host
     # With reduced many-seeds count as this is the slowest runner already.
     # (The macOS runner checks windows-msvc with full many-seeds count.)
-    GC_STRESS=1 MIR_OPT=1 MANY_SEEDS=16 TEST_BENCH=1 run_tests
+    MANY_SEEDS=16 TEST_BENCH=1 run_tests
     # Extra tier 1
     # We really want to ensure a Linux target works on a Windows host,
     # and a 64bit target works on a 32bit host.

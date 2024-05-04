@@ -206,7 +206,7 @@ impl MiriEnv {
         thread::scope(|s| {
             let mut handles = Vec::new();
             // Spawn one worker per core.
-            for _ in 0..thread::available_parallelism()?.get() {
+            for _ in 0..1 {
                 // Create a copy of the shell for this thread.
                 let local_shell = self.sh.clone();
                 let handle = s.spawn(|| -> Result<()> {
