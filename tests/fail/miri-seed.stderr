@@ -1,12 +1,12 @@
 error: abnormal termination: trace/breakpoint trap
-  --> $DIR/breakpoint.rs:LL:CC
+  --> $DIR/miri-seed.rs:LL:CC
    |
 LL |         core::intrinsics::breakpoint()
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ trace/breakpoint trap
    |
    = note: BACKTRACE:
-   = note: inside `main` at $DIR/breakpoint.rs:LL:CC
-   = note: This occured with miri seed: 0
+   = note: inside `main` at $DIR/miri-seed.rs:LL:CC
+   = note: This occured with miri seed: 9223372036854775807
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

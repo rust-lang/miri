@@ -17,6 +17,7 @@ note: inside `main`
    |
 LL |     into_raw();
    |     ^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 warning: integer-to-pointer cast
   --> $DIR/box.rs:LL:CC
@@ -31,4 +32,5 @@ note: inside `main`
    |
 LL |     into_unique();
    |     ^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 

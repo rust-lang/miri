@@ -14,6 +14,7 @@ LL | | }
    | |_^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/exported_symbol_shim_clashing.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

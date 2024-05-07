@@ -573,6 +573,11 @@ pub struct MiriMachine<'mir, 'tcx> {
     /// Invariant: the promised alignment will never be less than the native alignment of the
     /// allocation.
     pub(crate) symbolic_alignment: RefCell<FxHashMap<AllocId, (Size, Align)>>,
+
+    /// The seeded value for the this machine execution. Stored for diagnostics so that if an
+    /// error occurs, the user can reproduce it without having to hunt down the seed that
+    /// caused it.
+    pub(crate) rng_seed: u64,
 }
 
 impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
@@ -598,7 +603,8 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
             let path = Path::new(out).join(filename);
             measureme::Profiler::new(path).expect("Couldn't create `measureme` profiler")
         });
-        let rng = StdRng::seed_from_u64(config.seed.unwrap_or(0));
+        let rng_seed = config.seed.unwrap_or(0);
+        let rng = StdRng::seed_from_u64(rng_seed);
         let borrow_tracker = config.borrow_tracker.map(|bt| bt.instantiate_global_state(config));
         let data_race = config.data_race_detector.then(|| data_race::GlobalState::new(config));
         // Determine page size, stack address, and stack size.
@@ -700,6 +706,7 @@ impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
             allocation_spans: RefCell::new(FxHashMap::default()),
             const_cache: RefCell::new(FxHashMap::default()),
             symbolic_alignment: RefCell::new(FxHashMap::default()),
+            rng_seed
         }
     }
 
@@ -813,6 +820,7 @@ impl VisitProvenance for MiriMachine<'_, '_> {
             allocation_spans: _,
             const_cache: _,
             symbolic_alignment: _,
+            rng_seed: _,
         } = self;
 
         threads.visit_provenance(visit);

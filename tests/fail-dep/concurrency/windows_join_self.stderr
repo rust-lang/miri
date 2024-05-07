@@ -6,6 +6,7 @@ LL |             assert_eq!(WaitForSingleObject(native, INFINITE), WAIT_OBJECT_0
    |
    = note: BACKTRACE on thread `unnamed-ID`:
    = note: inside closure at $DIR/windows_join_self.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 error: deadlock: the evaluated program deadlocked
   --> RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
@@ -28,6 +29,7 @@ LL | |         }
 LL | |     })
 LL | |     .join()
    | |___________^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

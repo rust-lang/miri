@@ -48,6 +48,7 @@ LL | |             Newtype(&mut *ptr, 0),
 LL | |             || drop(Box::from_raw(ptr)),
 LL | |         )
    | |_________^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

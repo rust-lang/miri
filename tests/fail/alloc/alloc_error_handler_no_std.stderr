@@ -17,6 +17,7 @@ note: inside `start`
    |
 LL |     handle_alloc_error(Layout::for_value(&0));
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

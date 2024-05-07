@@ -16,6 +16,7 @@ LL |     let ptr_to_first = &ARRAY[0] as *const u8;
    |                        ^^^^^^^^^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/unescaped_static.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

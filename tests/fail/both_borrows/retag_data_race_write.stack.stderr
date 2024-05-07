@@ -21,6 +21,7 @@ note: inside closure
    |
 LL |     let t2 = std::thread::spawn(move || thread_2(p));
    |                                         ^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

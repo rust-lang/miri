@@ -13,6 +13,7 @@ note: inside `main`
    |
 LL |             Call(_unit = change_arg(Move(*ptr), ptr), ReturnTo(after_call), UnwindContinue())
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

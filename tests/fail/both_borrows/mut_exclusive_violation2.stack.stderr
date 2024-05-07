@@ -21,6 +21,7 @@ LL |         let raw2 = ptr2.as_mut();
    |                    ^^^^^^^^^^^^^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/mut_exclusive_violation2.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

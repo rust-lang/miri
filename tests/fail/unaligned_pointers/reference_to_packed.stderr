@@ -13,6 +13,7 @@ note: inside `main`
    |
 LL |         let p: &i32 = unsafe { raw_to_ref(ptr::addr_of!(foo.x)) };
    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

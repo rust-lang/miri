@@ -21,6 +21,7 @@ LL |     let raw2 = &mut l as *mut _; // invalidates raw1
    |                ^^^^^^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/raw_tracking.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

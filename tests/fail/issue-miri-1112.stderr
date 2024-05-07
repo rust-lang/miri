@@ -13,6 +13,7 @@ note: inside `main`
    |
 LL |         let _raw: &FunnyPointer = FunnyPointer::from_data_ptr(&hello, &meta as *const _);
    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

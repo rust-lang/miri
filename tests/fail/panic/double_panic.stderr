@@ -30,6 +30,7 @@ LL | |     let _foo = Foo;
 LL | |     panic!("first");
 LL | | }
    | |_^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

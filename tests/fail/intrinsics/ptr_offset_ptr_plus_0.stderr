@@ -13,6 +13,7 @@ LL |     let x = Box::into_raw(Box::new(0u32));
    |                           ^^^^^^^^^^^^^^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/ptr_offset_ptr_plus_0.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

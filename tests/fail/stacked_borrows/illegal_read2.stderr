@@ -21,6 +21,7 @@ LL |     let shr = unsafe { &*xraw };
    |                        ^^^^^^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/illegal_read2.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

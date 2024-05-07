@@ -12,4 +12,5 @@ LL |         let wildcard = &root0 as *const Cell<i32> as usize as *const Cell<i
    = help: Alternatively, the `-Zmiri-permissive-provenance` flag disables this warning.
    = note: BACKTRACE:
    = note: inside `main` at $DIR/issue-miri-2389.rs:LL:CC
+   = note: This occured with miri seed: 0
 

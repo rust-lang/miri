@@ -37,6 +37,7 @@ note: inside closure
    |
 LL |         let _y = as_mut(unsafe { &mut *ptr.0 }, b.clone());
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

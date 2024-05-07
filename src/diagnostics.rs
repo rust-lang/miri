@@ -539,6 +539,7 @@ pub fn report_msg<'tcx>(
             err.note(note);
         }
     }
+
     for (span_data, help) in helps {
         if let Some(span_data) = span_data {
             err.span_help(span_data.span(), help);
@@ -573,6 +574,8 @@ pub fn report_msg<'tcx>(
             err.note(format!("{frame_info} at {span}"));
         }
     }
+
+    err.note(format!("This occured with miri seed: {}", machine.rng_seed));
 
     err.emit();
 }

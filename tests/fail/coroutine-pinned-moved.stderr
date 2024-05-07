@@ -29,6 +29,7 @@ note: inside `main`
    |
 LL |     coroutine_iterator_2.next(); // and use moved value
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

@@ -7,6 +7,7 @@ LL |     let _ptr = std::ptr::with_exposed_provenance::<i32>(addr);
    = help: use Strict Provenance APIs (https://doc.rust-lang.org/nightly/std/ptr/index.html#strict-provenance, https://crates.io/crates/sptr) instead
    = note: BACKTRACE:
    = note: inside `main` at $DIR/strict_provenance_cast.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

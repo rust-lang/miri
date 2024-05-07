@@ -35,6 +35,7 @@ note: inside `main`
    |
 LL |     demo_mut_advanced_unique(&mut 0);
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

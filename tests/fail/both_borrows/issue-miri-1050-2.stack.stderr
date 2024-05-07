@@ -14,6 +14,7 @@ note: inside `main`
    |
 LL |         drop(Box::from_raw(ptr.as_ptr()));
    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

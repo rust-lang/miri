@@ -25,6 +25,7 @@ LL |     unsafe { *xraw0 = 42 }; // unfreeze
    = help: this transition corresponds to a loss of read permissions
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/pass_invalid_shr_tuple.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

@@ -42,6 +42,7 @@ LL | |         let raw = x as *mut _;
 LL | |         drop(unsafe { Box::from_raw(raw) });
 LL | |     });
    | |______^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

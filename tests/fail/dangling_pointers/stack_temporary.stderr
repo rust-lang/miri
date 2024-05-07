@@ -18,6 +18,7 @@ LL |         let x = make_ref(&mut 0); // The temporary storing "0" is deallocat
    |                                 ^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/stack_temporary.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

@@ -22,6 +22,7 @@ LL |     unsafe { *xraw = 42 }; // unfreeze
    |              ^^^^^^^^^^
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/pass_invalid_shr_option.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

@@ -6,6 +6,7 @@ LL |         let ptr = miri_alloc(123, 1);
    |
    = note: BACKTRACE:
    = note: inside `start` at $DIR/alloc-access-tracking.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: tracking was triggered
   --> $DIR/alloc-access-tracking.rs:LL:CC
@@ -15,6 +16,7 @@ LL |         *ptr = 42; // Crucially, only a write is printed here, no read!
    |
    = note: BACKTRACE:
    = note: inside `start` at $DIR/alloc-access-tracking.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: tracking was triggered
   --> $DIR/alloc-access-tracking.rs:LL:CC
@@ -24,6 +26,7 @@ LL |         assert_eq!(*ptr, 42);
    |
    = note: BACKTRACE:
    = note: inside `start` at RUSTLIB/core/src/macros/mod.rs:LL:CC
+   = note: This occured with miri seed: 0
    = note: this note originates in the macro `assert_eq` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 note: tracking was triggered
@@ -34,4 +37,5 @@ LL |         miri_dealloc(ptr, 123, 1);
    |
    = note: BACKTRACE:
    = note: inside `start` at $DIR/alloc-access-tracking.rs:LL:CC
+   = note: This occured with miri seed: 0
 

@@ -13,6 +13,7 @@ note: inside `main`
    |
 LL |         let _y = realloc(x, Layout::from_size_align_unchecked(2, 1), 1);
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

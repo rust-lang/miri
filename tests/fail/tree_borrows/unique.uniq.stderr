@@ -31,6 +31,7 @@ LL |         let _maybe_parent = *rawptr; // maybe becomes Frozen
    = help: this transition corresponds to a loss of write permissions
    = note: BACKTRACE (of the first span):
    = note: inside `main` at $DIR/unique.rs:LL:CC
+   = note: This occured with miri seed: 0
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

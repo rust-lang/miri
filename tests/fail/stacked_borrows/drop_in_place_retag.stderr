@@ -21,6 +21,7 @@ note: inside `main`
    |
 LL |         core::ptr::drop_in_place(x.cast_mut());
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: This occured with miri seed: 0
    = note: this error originates in the macro `core::ptr::addr_of` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
