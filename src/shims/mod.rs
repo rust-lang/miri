@@ -3,7 +3,7 @@
 mod alloc;
 mod backtrace;
 pub mod foreign_items;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub mod native_lib;
 pub mod unix;
 pub mod windows;

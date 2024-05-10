@@ -291,7 +291,7 @@ fn main() -> Result<()> {
         WithDependencies,
         tmpdir.path(),
     )?;
-    if cfg!(target_os = "linux") {
+    if cfg!(unix) {
         ui(Mode::Pass, "tests/native-lib/pass", &target, WithoutDependencies, tmpdir.path())?;
         ui(
             Mode::Fail { require_patterns: true, rustfix: RustfixMode::Disabled },
