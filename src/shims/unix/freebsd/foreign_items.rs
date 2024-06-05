@@ -1,6 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
+use crate::shims::unix::freebsd::sync::futex;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -82,6 +83,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [_thread, _attr] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 this.write_null(dest)?;
+            }
+
+            "_umtx_op" => {
+                let [_obj, _op, _val, _uaddr, _uaddr2] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                futex(this, args, dest)?;
             }
 
             _ => return Ok(EmulateItemResult::NotSupported),
