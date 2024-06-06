@@ -128,6 +128,10 @@ fn does_not_work_on_miri() {
 }
 ```
 
+If the majority of tests is not Miri-compatible and an opt-in scheme
+feels more appropriate, the [`test-tag`][test-tag] crate may be useful
+as well.
+
 There is no way to list all the infinite things Miri cannot do, but the
 interpreter will explicitly tell you when it finds something unsupported:
 
@@ -137,6 +141,8 @@ error: unsupported operation: can't call foreign function: bind
     = help: this is likely not a bug in the program; it indicates that the program \
             performed an operation that Miri does not support
 ```
+
+[test-tag]: https://crates.io/crates/test-tag
 
 ### Cross-interpretation: running for different targets
 
