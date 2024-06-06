@@ -16,5 +16,12 @@ pub fn futex<'tcx>(
     //void *uaddr2
     let _uaddr2 = this.read_pointer(&args[4])?;
 
-    throw_unsup_format!("Miri does not support `futex` syscall with op={}", op);
+    let umtx_op_wait_uint_private = this.eval_libc_i32("UMTX_OP_WAIT_UINT_PRIVATE");
+    let umtx_op_wake_private = this.eval_libc_i32("UMTX_OP_WAKE_PRIVATE");
+    let umtx_op_nwake_private = this.eval_libc_i32("UMTX_OP_NWAKE_PRIVATE");
+
+    //FUTEX private operations are not supported by miri
+    match op & !umtx_op_wait_uint_private & !umtx_op_wake_private & !umtx_op_nwake_private {
+        _ => throw_unsup_format!("Miri does not support `futex` syscall with op={}", op),
+    }
 }
