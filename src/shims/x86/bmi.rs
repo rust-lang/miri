@@ -26,7 +26,7 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let source = this.read_scalar(source)?.to_u32()?;
                 let mask = this.read_scalar(mask)?.to_u32()?;
-                let destination = pdep(source as u64, mask as u64) as u32;
+                let destination = (pdep(u64::from(source), u64::from(mask)) & 0xFFFF_FFFF) as u32;
 
                 this.write_scalar(Scalar::from_u32(destination), dest)?;
             }
@@ -52,7 +52,7 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let source = this.read_scalar(source)?.to_u32()?;
                 let mask = this.read_scalar(mask)?.to_u32()?;
-                let destination = pext(source as u64, mask as u64) as u32;
+                let destination = (pext(u64::from(source), u64::from(mask)) & 0xFFFF_FFFF) as u32;
 
                 this.write_scalar(Scalar::from_u32(destination), dest)?;
             }
@@ -86,14 +86,14 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 /// - https://en.wikipedia.org/wiki/X86_Bit_manipulation_instruction_set#Parallel_bit_deposit_and_extract
 fn pdep(source: u64, selector_mask: u64) -> u64 {
     let mut destination = 0u64;
-    let mut j = 0;
+    let mut j = 0usize;
     for i in 0..64 {
         if selector_mask & (1 << i) != 0 {
             if source & (1 << j) != 0 {
                 destination |= 1 << i;
             }
 
-            j += 1;
+            j = j.wrapping_add(1);
         }
     }
 
@@ -111,14 +111,14 @@ fn pdep(source: u64, selector_mask: u64) -> u64 {
 /// - https://en.wikipedia.org/wiki/X86_Bit_manipulation_instruction_set#Parallel_bit_deposit_and_extract
 fn pext(source: u64, selector_mask: u64) -> u64 {
     let mut destination = 0u64;
-    let mut j = 0;
+    let mut j = 0usize;
     for i in 0..64 {
         if selector_mask & (1 << i) != 0 {
             if source & (1 << i) != 0 {
                 destination |= 1 << j;
             }
 
-            j += 1;
+            j = j.wrapping_add(1);
         }
     }
 
