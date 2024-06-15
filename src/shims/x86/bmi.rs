@@ -82,8 +82,8 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 ///
 /// See also
 ///
-/// - https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_pdep_u64
-/// - https://en.wikipedia.org/wiki/X86_Bit_manipulation_instruction_set#Parallel_bit_deposit_and_extract
+/// - <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_pdep_u64>
+/// - <https://en.wikipedia.org/wiki/X86_Bit_manipulation_instruction_set#Parallel_bit_deposit_and_extract>
 fn pdep(source: u64, selector_mask: u64) -> u64 {
     let mut destination = 0u64;
     let mut j = 0usize;
@@ -107,8 +107,8 @@ fn pdep(source: u64, selector_mask: u64) -> u64 {
 ///
 /// See also
 ///
-/// - https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_pext_u64
-/// - https://en.wikipedia.org/wiki/X86_Bit_manipulation_instruction_set#Parallel_bit_deposit_and_extract
+/// - <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_pext_u64>
+/// - <https://en.wikipedia.org/wiki/X86_Bit_manipulation_instruction_set#Parallel_bit_deposit_and_extract>
 fn pext(source: u64, selector_mask: u64) -> u64 {
     let mut destination = 0u64;
     let mut j = 0usize;
