@@ -7,6 +7,7 @@ use std::{env, process::Command};
 use colored::*;
 use regex::bytes::Regex;
 use ui_test::color_eyre::eyre::{Context, Result};
+use ui_test::spanned::Spanned;
 use ui_test::{
     status_emitter, CommandBuilder, Config, Format, Match, Mode, OutputConflictHandling,
     RustfixMode,
@@ -63,23 +64,49 @@ fn build_native_lib() -> PathBuf {
 /// Does *not* set any args or env vars, since it is shared between the test runner and
 /// run_dep_mode.
 fn miri_config(target: &str, path: &str, mode: Mode, with_dependencies: bool) -> Config {
+    // FIXME: in ui_test 0.22.3+ this is method on Config.
+    fn fill_host_and_target(cfg: &mut Config) {
+        if cfg.host.is_none() {
+            cfg.host = Some(get_host());
+        }
+        if cfg.target.is_none() {
+            cfg.target = Some(cfg.host.clone().unwrap());
+        }
+    }
     // Miri is rustc-like, so we create a default builder for rustc and modify it
     let mut program = CommandBuilder::rustc();
     program.program = miri_path();
 
     let mut config = Config {
         target: Some(target.to_owned()),
-        stderr_filters: stderr_filters().into(),
-        stdout_filters: stdout_filters().into(),
-        mode,
         program,
         out_dir: PathBuf::from(std::env::var_os("CARGO_TARGET_DIR").unwrap()).join("ui"),
-        edition: Some("2021".into()), // keep in sync with `./miri run`
         threads: std::env::var("MIRI_TEST_THREADS")
             .ok()
             .map(|threads| NonZero::new(threads.parse().unwrap()).unwrap()),
+        output_conflict_handling: OutputConflictHandling::Error,
+        bless_command: Some("./miri test --bless".into()),
         ..Config::rustc(path)
     };
+    fill_host_and_target(&mut config);
+
+    config.comment_defaults.base().normalize_stdout =
+        stdout_filters().iter().cloned().map(|(m, v)| (m, v.into())).collect();
+    config.comment_defaults.base().normalize_stderr =
+        stderr_filters().iter().cloned().map(|(m, v)| (m, v.into())).collect();
+    config.comment_defaults.base().mode = Spanned::dummy(mode).into();
+
+    // FIXME: this is replacement of removed ui_test feature for masking path with $DIR:
+    // https://github.com/oli-obk/ui_test/pull/180
+    // Can't use path_filter or other simpler filter because 'path' here is path to test suite,
+    // not path to test, i.e. "tests/pass".
+    // regex is oversimplified and can probably fail in corner cases.
+    config.filter(path, "$$DIR");
+    config.filter(r"\$DIR[\\/]([\w-]+[\\/])*", "$$DIR/");
+
+    // keep in sync with `./miri run`
+    const EDITION: &str = "2021";
+    config.comment_defaults.base().edition = Spanned::dummy(EDITION.to_owned()).into();
 
     if with_dependencies {
         // Set the `cargo-miri` binary, which we expect to be in the same folder as the `miri` binary.
@@ -130,9 +157,11 @@ fn run_tests(
         }
     }
     config.program.args.push("-Zui-testing".into());
-    config.program.args.push("--target".into());
-    config.program.args.push(target.into());
 
+    if config.host != config.target {
+        config.program.args.push("--target".into());
+        config.program.args.push(target.into());
+    }
     // If we're testing the native-lib functionality, then build the shared object file for testing
     // external C function calls and push the relevant compiler flag.
     if path.starts_with("tests/native-lib/") {
@@ -143,14 +172,12 @@ fn run_tests(
     }
 
     // Handle command-line arguments.
-    let args = ui_test::Args::test()?;
-    let default_bless = env::var_os("RUSTC_BLESS").is_some_and(|v| v != "0");
-    config.with_args(&args, default_bless);
-    if let OutputConflictHandling::Error(msg) = &mut config.output_conflict_handling {
-        *msg = "./miri test --bless".into();
-    }
+    let mut args = ui_test::Args::test()?;
+    args.bless |= env::var_os("RUSTC_BLESS").is_some_and(|v| v != "0");
+    config.with_args(&args);
+
     if env::var_os("MIRI_SKIP_UI_CHECKS").is_some() {
-        assert!(!default_bless, "cannot use RUSTC_BLESS and MIRI_SKIP_UI_CHECKS at the same time");
+        assert!(!args.bless, "cannot use RUSTC_BLESS and MIRI_SKIP_UI_CHECKS at the same time");
         config.output_conflict_handling = OutputConflictHandling::Ignore;
     }
     eprintln!("   Compiler: {}", config.program.display());
