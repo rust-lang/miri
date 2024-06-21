@@ -191,6 +191,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.set_last_error(einval)?;
                 this.write_scalar(Scalar::from_i32(-1), dest)?;
             }
+            "sched_setaffinity" => {
+                // a no-op. The assumption is that application code should be able to recover from
+                // this operation failing with EINVAL, which in this case indicates that the
+                // affinity bit mask does not contain any processors that are physically on the
+                // system.
+                let [pid, cpusetsize, mask] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                this.read_scalar(pid)?.to_i32()?;
+                this.read_target_usize(cpusetsize)?;
+                this.deref_pointer_as(mask, this.libc_ty_layout("cpu_set_t"))?;
+                // FIXME: we just return an error.
+                let einval = this.eval_libc("EINVAL");
+                this.set_last_error(einval)?;
+                this.write_scalar(Scalar::from_i32(-1), dest)?;
+            }
 
             // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
             // These shims are enabled only when the caller is in the standard library.

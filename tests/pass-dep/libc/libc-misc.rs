@@ -63,6 +63,31 @@ fn test_sigrt() {
     assert!(max - min >= 8)
 }
 
+#[cfg(target_os = "linux")]
+fn test_affinity() {
+    use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
+
+    // If pid is zero, then the calling thread is used.
+    let pid = 0;
+
+    // Safety: valid value for this type
+    let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+
+    // miri's implementation will always error
+    let err = unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
+    assert_eq!(err, -1);
+
+    let err = std::io::Error::last_os_error();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+
+    // miri's implementation will always error
+    let err = unsafe { sched_setaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
+    assert_eq!(err, -1);
+
+    let err = std::io::Error::last_os_error();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+}
+
 fn test_dlsym() {
     let addr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, b"notasymbol\0".as_ptr().cast()) };
     assert!(addr as usize == 0);
@@ -82,5 +107,8 @@ fn main() {
     test_dlsym();
 
     #[cfg(target_os = "linux")]
-    test_sigrt();
+    {
+        test_sigrt();
+        test_affinity();
+    }
 }
