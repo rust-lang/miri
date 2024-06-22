@@ -3,8 +3,10 @@ use std::str;
 
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_span::Symbol;
+use rustc_target::abi::Size;
 use rustc_target::spec::abi::Abi;
 
+use crate::machine::CpuAffinityMask;
 use crate::shims::alloc::EvalContextExt as _;
 use crate::shims::unix::*;
 use crate::*;
@@ -265,6 +267,73 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [addr, length] = this.check_shim(abi, Abi::C {unwind: false}, link_name, args)?;
                 let result = this.munmap(addr, length)?;
                 this.write_scalar(result, dest)?;
+            }
+
+            "sched_getaffinity" => {
+                // Currently this function does not exist on all Unixes, e.g. on macOS.
+                if !matches!(&*this.tcx.sess.target.os, "linux" | "freebsd" | "android") {
+                    throw_unsup_format!(
+                        "`sched_getaffinity` is not supported on {}",
+                        this.tcx.sess.target.os
+                    );
+                }
+
+                let [pid, cpusetsize, mask] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let pid = this.read_scalar(pid)?.to_u32()?;
+                let cpusetsize = this.read_target_usize(cpusetsize)?;
+                let mask = this.read_pointer(mask)?;
+
+                let thread_id = match pid {
+                    0 => this.active_thread(),
+                    _ => ThreadId::from(pid),
+                };
+
+                if cpusetsize != std::mem::size_of::<CpuAffinityMask>() as u64 {
+                    // apparently this can happen for older kernels
+                    let einval = this.eval_libc("EINVAL");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else {
+                    let cpuset = this.machine.thread_cpu_affinity
+                        .entry(thread_id)
+                        .or_insert_with(|| CpuAffinityMask::new(this.machine.num_cpus))
+                        .clone();
+                    this.write_bytes_ptr(mask, cpuset.0.iter().copied())?;
+                    this.write_scalar(Scalar::from_i32(0), dest)?;
+                }
+            }
+            "sched_setaffinity" => {
+                // Currently this function does not exist on all Unixes, e.g. on macOS.
+                if !matches!(&*this.tcx.sess.target.os, "linux" | "freebsd" | "android") {
+                    throw_unsup_format!(
+                        "`sched_setaffinity` is not supported on {}",
+                        this.tcx.sess.target.os
+                    );
+                }
+
+                let [pid, cpusetsize, mask] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let pid = this.read_scalar(pid)?.to_u32()?;
+                let cpusetsize = this.read_target_usize(cpusetsize)?;
+                let mask = this.read_pointer(mask)?;
+
+                let thread_id = match pid {
+                    0 => this.active_thread(),
+                    _ => ThreadId::from(pid),
+                };
+
+                if cpusetsize != std::mem::size_of::<CpuAffinityMask>() as u64  {
+                    // apparently this can happen for older kernels
+                    let einval = this.eval_libc("EINVAL");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else {
+                    let bits = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
+                    let cpuset = CpuAffinityMask(bits.try_into().unwrap());
+                    this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
+                    this.write_scalar(Scalar::from_i32(0), dest)?;
+                }
             }
 
             "reallocarray" => {

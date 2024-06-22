@@ -924,6 +924,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             data_race.thread_created(&this.machine.threads, new_thread_id, current_span);
         }
 
+        // the child inherits its parent's cpu affinity
+        let parent = this.active_thread();
+        if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&parent).cloned() {
+            this.machine.thread_cpu_affinity.insert(new_thread_id, cpuset);
+        }
+
         // Write the current thread-id, switch to the next thread later
         // to treat this write operation as occurring on the current thread.
         if let Some(thread_info_place) = thread {

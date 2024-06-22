@@ -420,6 +420,34 @@ impl<'tcx> PrimitiveLayouts<'tcx> {
     }
 }
 
+/// A thread's CPU affinity mask determines the set of CPUs on which it is eligible to run.
+#[derive(Clone)]
+pub(crate) struct CpuAffinityMask(pub(crate) [u8; 128]);
+
+impl CpuAffinityMask {
+    // the default affinity mask includes only the available CPUs
+    pub fn new(mut cpu_count: u32) -> Self {
+        let mut bits = [0; 128];
+
+        // set the first cpu_count bits. The format is as follows:
+        //
+        // cpu 0    : [ 0b0000_0001, 0, 0, ..., 0 ]
+        // cpu 0, 1 : [ 0b0000_0011, 0, 0, ..., 0 ]
+        // cpu 0, 8 : [ 0b0000_0001, 0b0000_0001, 0, ..., 0 ]
+        for byte in bits.iter_mut() {
+            // set the lowest N bits of a byte
+            *byte = (0xFFu16 << Ord::min(8, cpu_count) >> 8) as u8;
+            cpu_count = cpu_count.saturating_sub(8);
+
+            if cpu_count == 0 {
+                break;
+            }
+        }
+
+        CpuAffinityMask(bits)
+    }
+}
+
 /// The machine itself.
 ///
 /// If you add anything here that stores machine values, remember to update
@@ -471,6 +499,10 @@ pub struct MiriMachine<'tcx> {
 
     /// The set of threads.
     pub(crate) threads: ThreadManager<'tcx>,
+
+    /// On which CPUs each thread is eligible to run
+    pub(crate) thread_cpu_affinity: FxHashMap<ThreadId, CpuAffinityMask>,
+
     /// The state of the primitive synchronization objects.
     pub(crate) sync: SynchronizationObjects,
 
@@ -645,6 +677,7 @@ impl<'tcx> MiriMachine<'tcx> {
             dirs: Default::default(),
             layouts,
             threads: ThreadManager::default(),
+            thread_cpu_affinity: FxHashMap::default(),
             sync: SynchronizationObjects::default(),
             static_roots: Vec::new(),
             profiler,
@@ -765,6 +798,7 @@ impl VisitProvenance for MiriMachine<'_> {
         #[rustfmt::skip]
         let MiriMachine {
             threads,
+            thread_cpu_affinity: _,
             sync: _,
             tls,
             env_vars,

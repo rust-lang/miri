@@ -73,19 +73,48 @@ fn test_affinity() {
     // Safety: valid value for this type
     let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
 
-    // miri's implementation will always error
+    // now let's properly query the cpuset
     let err = unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
-    assert_eq!(err, -1);
+    assert_eq!(err, 0);
 
-    let err = std::io::Error::last_os_error();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(unsafe { libc::CPU_ISSET(0, &cpuset) });
 
-    // miri's implementation will always error
+    // assumes `-Zmiri-num-cpus` is the default of 1
+    assert!(unsafe { !libc::CPU_ISSET(1, &cpuset) });
+    assert!(unsafe { !libc::CPU_ISSET(42, &cpuset) });
+
+    // configure cpu 1
+    unsafe { libc::CPU_SET(1, &mut cpuset) };
+
     let err = unsafe { sched_setaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
-    assert_eq!(err, -1);
+    assert_eq!(err, 0);
 
-    let err = std::io::Error::last_os_error();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    let err = unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
+    assert_eq!(err, 0);
+
+    // cpu one should now be set
+    assert!(unsafe { libc::CPU_ISSET(1, &cpuset) });
+
+    std::thread::scope(|spawner| {
+        spawner.spawn(|| {
+            // Safety: valid value for this type
+            let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+
+            let err =
+                unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
+            assert_eq!(err, 0);
+
+            // the child inherits its parent's set
+            assert!(unsafe { libc::CPU_ISSET(0, &cpuset) });
+            assert!(unsafe { libc::CPU_ISSET(1, &cpuset) });
+
+            // configure cpu 42 for the child
+            unsafe { libc::CPU_SET(42, &mut cpuset) };
+        });
+    });
+
+    // the parent's set should be unaffected
+    assert!(unsafe { !libc::CPU_ISSET(42, &cpuset) });
 }
 
 fn test_dlsym() {
