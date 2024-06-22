@@ -104,9 +104,14 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
             miri_for_host()
         )
     });
-    let host = &rustc_version.host;
-    let target = get_arg_flag_value("--target");
-    let target = target.as_ref().unwrap_or(host);
+    let mut targets = get_arg_flag_values("--target").collect::<Vec<_>>();
+    let explicit_target = if targets.is_empty() {
+        let host = &rustc_version.host;
+        targets.push(host.clone());
+        Some(host)
+    } else {
+        None
+    };
 
     // If cleaning the target directory & sysroot cache,
     // delete them then exit. There is no reason to setup a new
@@ -118,8 +123,11 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
         return;
     }
 
-    // We always setup.
-    let miri_sysroot = setup(&subcommand, target, &rustc_version, verbose, quiet);
+    for target in &targets {
+        // We always setup.
+        setup(&subcommand, target.as_str(), &rustc_version, verbose, quiet);
+    }
+    let miri_sysroot = get_sysroot_dir();
 
     // Invoke actual cargo for the job, but with different flags.
     // We re-use `cargo test` and `cargo run`, which makes target and binary handling very easy but
@@ -155,10 +163,9 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // This is needed to make the `target.runner` settings do something,
     // and it later helps us detect which crates are proc-macro/build-script
     // (host crates) and which crates are needed for the program itself.
-    if get_arg_flag_value("--target").is_none() {
-        // No target given. Explicitly pick the host.
+    if let Some(explicit_target) = explicit_target {
         cmd.arg("--target");
-        cmd.arg(host);
+        cmd.arg(explicit_target);
     }
 
     // Set ourselves as runner for al binaries invoked by cargo.
