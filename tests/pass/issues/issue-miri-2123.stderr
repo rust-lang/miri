@@ -1,0 +1,17 @@
+warning: reborrow of reference to `extern type`
+  --> RUSTLIB/core/src/ptr/metadata.rs:LL:CC
+   |
+LL |     ptr_metadata(ptr)
+   |     ^^^^^^^^^^^^^^^^^ reborrow of a reference to `extern type` is not properly supported
+   |
+   = help: `extern type` are not compatible with Miri's Stacked Borrows aliasing checks; Miri may miss bugs in this code
+   = help: try running with `MIRIFLAGS=-Zmiri-tree-borrows` to use the more permissive but also even more experimental Tree Borrows aliasing checks instead
+   = note: BACKTRACE:
+   = note: inside `std::ptr::metadata::<dyn Foo>` at RUSTLIB/core/src/ptr/metadata.rs:LL:CC
+   = note: inside `std::ptr::const_ptr::<impl *const dyn Foo>::to_raw_parts` at RUSTLIB/core/src/ptr/const_ptr.rs:LL:CC
+note: inside `main`
+  --> $DIR/issue-miri-2123.rs:LL:CC
+   |
+LL |         let (ptr, meta) = (x as *const dyn Foo).to_raw_parts();
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+

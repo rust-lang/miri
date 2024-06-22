@@ -1,0 +1,11 @@
+warning: reborrow of reference to `extern type`
+  --> $DIR/intrinsics.rs:LL:CC
+   |
+LL |     let dyn_meta = intrinsics::ptr_metadata(&[1, 2, 3] as &dyn std::fmt::Debug);
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ reborrow of a reference to `extern type` is not properly supported
+   |
+   = help: `extern type` are not compatible with Miri's Stacked Borrows aliasing checks; Miri may miss bugs in this code
+   = help: try running with `MIRIFLAGS=-Zmiri-tree-borrows` to use the more permissive but also even more experimental Tree Borrows aliasing checks instead
+   = note: BACKTRACE:
+   = note: inside `main` at $DIR/intrinsics.rs:LL:CC
+
