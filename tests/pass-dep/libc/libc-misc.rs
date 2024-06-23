@@ -73,6 +73,10 @@ fn test_affinity() {
     // Safety: valid value for this type
     let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
 
+    // getting the affinity with insufficient space will fail
+    let err = unsafe { sched_getaffinity(pid, 1, &mut cpuset) };
+    assert_eq!(err, -1);
+
     // now let's properly query the cpuset
     let err = unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
     assert_eq!(err, 0);

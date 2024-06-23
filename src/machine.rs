@@ -25,7 +25,7 @@ use rustc_middle::{
 };
 use rustc_span::def_id::{CrateNum, DefId};
 use rustc_span::{Span, SpanData, Symbol};
-use rustc_target::abi::{Align, Size};
+use rustc_target::abi::{Align, Endian, Size};
 use rustc_target::spec::abi::Abi;
 
 use crate::{
@@ -445,14 +445,30 @@ impl CpuAffinityMask {
             32 if target.arch.as_ref() != "x86_64" => {
                 let slice = self.0.get_mut(cpu / 4..cpu / 4 + 4).unwrap();
                 let offset = cpu % 32;
-                let updated = u32::from_ne_bytes(slice.try_into().unwrap()) | 1 << offset;
-                slice.copy_from_slice(&updated.to_ne_bytes());
+                match target.options.endian {
+                    Endian::Little => {
+                        let updated = u32::from_le_bytes(slice.try_into().unwrap()) | 1 << offset;
+                        slice.copy_from_slice(&updated.to_le_bytes());
+                    }
+                    Endian::Big => {
+                        let updated = u32::from_be_bytes(slice.try_into().unwrap()) | 1 << offset;
+                        slice.copy_from_slice(&updated.to_be_bytes());
+                    }
+                }
             }
             _ => {
                 let slice = self.0.get_mut(cpu / 8..cpu / 8 + 8).unwrap();
                 let offset = cpu % 64;
-                let updated = u64::from_ne_bytes(slice.try_into().unwrap()) | 1 << offset;
-                slice.copy_from_slice(&updated.to_ne_bytes());
+                match target.options.endian {
+                    Endian::Little => {
+                        let updated = u64::from_le_bytes(slice.try_into().unwrap()) | 1 << offset;
+                        slice.copy_from_slice(&updated.to_le_bytes());
+                    }
+                    Endian::Big => {
+                        let updated = u64::from_be_bytes(slice.try_into().unwrap()) | 1 << offset;
+                        slice.copy_from_slice(&updated.to_be_bytes());
+                    }
+                }
             }
         };
     }

@@ -575,8 +575,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ => ThreadId::from(pid),
                 };
 
-                if cpusetsize != std::mem::size_of::<CpuAffinityMask>() as u64 {
-                    // apparently this can happen for older kernels
+                if cpusetsize < std::mem::size_of::<CpuAffinityMask>().try_into().unwrap() {
+                    // writing the affinity mask to the pointer would write out of bounds
                     let einval = this.eval_libc("EINVAL");
                     this.set_last_error(einval)?;
                     this.write_scalar(Scalar::from_i32(-1), dest)?;
@@ -609,17 +609,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ => ThreadId::from(pid),
                 };
 
-                if cpusetsize != std::mem::size_of::<CpuAffinityMask>() as u64  {
-                    // apparently this can happen for older kernels
-                    let einval = this.eval_libc("EINVAL");
-                    this.set_last_error(einval)?;
-                    this.write_scalar(Scalar::from_i32(-1), dest)?;
-                } else {
-                    let bits = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
-                    let cpuset = CpuAffinityMask(bits.try_into().unwrap());
-                    this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
-                    this.write_scalar(Scalar::from_i32(0), dest)?;
-                }
+                // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
+                let bits = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
+                let cpuset = CpuAffinityMask(std::array::from_fn(|i| bits.get(i).copied().unwrap_or(0)));
+                this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
+
+                this.write_scalar(Scalar::from_i32(0), dest)?;
             }
 
             // Miscellaneous
