@@ -924,12 +924,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             data_race.thread_created(&this.machine.threads, new_thread_id, current_span);
         }
 
-        // the child inherits its parent's cpu affinity
-        let parent = this.active_thread();
-        if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&parent).cloned() {
-            this.machine.thread_cpu_affinity.insert(new_thread_id, cpuset);
-        }
-
         // Write the current thread-id, switch to the next thread later
         // to treat this write operation as occurring on the current thread.
         if let Some(thread_info_place) = thread {
@@ -942,6 +936,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Finally switch to new thread so that we can push the first stackframe.
         // After this all accesses will be treated as occurring in the new thread.
         let old_thread_id = this.machine.threads.set_active_thread_id(new_thread_id);
+
+        // the child inherits its parent's cpu affinity
+        if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&old_thread_id).cloned() {
+            this.machine.thread_cpu_affinity.insert(new_thread_id, cpuset);
+        }
 
         // Perform the function pointer load in the new thread frame.
         let instance = this.get_ptr_fn(start_routine)?.as_instance()?;
