@@ -142,6 +142,17 @@ def test_cargo_miri_test():
     default_ref = "test.cross-target.stdout.ref" if is_foreign else "test.default.stdout.ref"
     filter_ref = "test.filter.cross-target.stdout.ref" if is_foreign else "test.filter.stdout.ref"
 
+    targets = ["aarch64-unknown-linux-gnu", "s390x-unknown-linux-gnu"]
+    if ARGS.target in targets:
+        targets.remove(ARGS.target)
+    elif is_foreign:
+        targets.pop(0)
+
+    target_flags = []
+    for target in targets:
+        target_flags.append("--target")
+        target_flags.append(target)
+
     # macOS needs permissive provenance inside getrandom_1.
     test("`cargo miri test`",
         cargo_miri("test"),
@@ -181,7 +192,7 @@ def test_cargo_miri_test():
         env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
     )
     test("`cargo miri test` (multiple targets)",
-        cargo_miri("test") + ["--target", "x86_64-unknown-linux-gnu", "--target", "s390x-unknown-linux-gnu"],
+        cargo_miri("test") + target_flags,
         "test.multiple_targets.stdout.ref", "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
     )
