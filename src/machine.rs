@@ -500,7 +500,9 @@ pub struct MiriMachine<'tcx> {
     /// The set of threads.
     pub(crate) threads: ThreadManager<'tcx>,
 
-    /// On which CPUs each thread is eligible to run
+    /// On which CPUs each thread is eligible to run.
+    /// This has no effect at all, it is just tracked to produce the correct result
+    /// in sched_getaffinity.
     pub(crate) thread_cpu_affinity: FxHashMap<ThreadId, CpuAffinityMask>,
 
     /// The state of the primitive synchronization objects.
