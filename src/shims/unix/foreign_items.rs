@@ -297,7 +297,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 } else {
                     let cpuset = this.machine.thread_cpu_affinity
                         .entry(thread_id)
-                        .or_insert_with(|| CpuAffinityMask::new(this.machine.num_cpus))
+                        .or_insert_with(|| CpuAffinityMask::new(&this.tcx.sess.target, this.machine.num_cpus))
                         .clone();
                     this.write_bytes_ptr(mask, cpuset.0.iter().copied())?;
                     this.write_scalar(Scalar::from_i32(0), dest)?;

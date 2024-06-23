@@ -425,26 +425,36 @@ impl<'tcx> PrimitiveLayouts<'tcx> {
 pub(crate) struct CpuAffinityMask(pub(crate) [u8; 128]);
 
 impl CpuAffinityMask {
-    // the default affinity mask includes only the available CPUs
-    pub fn new(mut cpu_count: u32) -> Self {
-        let mut bits = [0; 128];
+    pub fn new(target: &rustc_target::spec::Target, cpu_count: u32) -> Self {
+        let mut this = Self([0; 128]);
 
-        // set the first cpu_count bits. The format is as follows:
-        //
-        // cpu 0    : [ 0b0000_0001, 0, 0, ..., 0 ]
-        // cpu 0, 1 : [ 0b0000_0011, 0, 0, ..., 0 ]
-        // cpu 0, 8 : [ 0b0000_0001, 0b0000_0001, 0, ..., 0 ]
-        for byte in bits.iter_mut() {
-            // set the lowest N bits of a byte
-            *byte = (0xFFu16 << Ord::min(8, cpu_count) >> 8) as u8;
-            cpu_count = cpu_count.saturating_sub(8);
-
-            if cpu_count == 0 {
-                break;
-            }
+        // the default affinity mask includes only the available CPUs
+        for i in 0..cpu_count as usize {
+            this.set(target, i);
         }
 
-        CpuAffinityMask(bits)
+        this
+    }
+
+    fn set(&mut self, target: &rustc_target::spec::Target, cpu: usize) {
+        if cpu > 8 * self.0.len() {
+            return;
+        }
+
+        match target.pointer_width {
+            32 if target.arch.as_ref() != "x86_64" => {
+                let slice = self.0.get_mut(cpu / 4..cpu / 4 + 4).unwrap();
+                let offset = cpu % 32;
+                let updated = u32::from_ne_bytes(slice.try_into().unwrap()) | 1 << offset;
+                slice.copy_from_slice(&updated.to_ne_bytes());
+            }
+            _ => {
+                let slice = self.0.get_mut(cpu / 8..cpu / 8 + 8).unwrap();
+                let offset = cpu % 64;
+                let updated = u64::from_ne_bytes(slice.try_into().unwrap()) | 1 << offset;
+                slice.copy_from_slice(&updated.to_ne_bytes());
+            }
+        };
     }
 }
 
