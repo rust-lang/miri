@@ -180,6 +180,11 @@ def test_cargo_miri_test():
         default_ref, "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
     )
+    test("`cargo miri test` (multiple targets)",
+        cargo_miri("test") + ["--target", "x86_64-unknown-linux-gnu", "--target", "s390x-unknown-linux-gnu"],
+        "test.multiple_targets.stdout.ref", "test.stderr-empty.ref",
+        env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
+    )
     del os.environ["CARGO_TARGET_DIR"] # this overrides `build.target-dir` passed by `--config`, so unset it
     test("`cargo miri test` (config-cli)",
         cargo_miri("test") + ["--config=build.target-dir=\"config-cli\""],
