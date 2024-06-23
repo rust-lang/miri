@@ -453,32 +453,20 @@ impl CpuAffinityMask {
         // Therefore we need to use the endianness of the target
         match target.pointer_width {
             32 if target.arch.as_ref() != "x86_64" => {
-                let chunk = self.0[cpu / 4..].first_chunk_mut::<4>().unwrap();
                 let offset = cpu % 32;
-                match target.options.endian {
-                    Endian::Little => {
-                        let updated = u32::from_le_bytes(*chunk) | 1 << offset;
-                        chunk.copy_from_slice(&updated.to_le_bytes());
-                    }
-                    Endian::Big => {
-                        let updated = u32::from_be_bytes(*chunk) | 1 << offset;
-                        chunk.copy_from_slice(&updated.to_be_bytes());
-                    }
-                }
+                let chunk = self.0[cpu / 4..].first_chunk_mut::<4>().unwrap();
+                *chunk = match target.options.endian {
+                    Endian::Little => (u32::from_le_bytes(*chunk) | 1 << offset).to_le_bytes(),
+                    Endian::Big => (u32::from_be_bytes(*chunk) | 1 << offset).to_be_bytes(),
+                };
             }
             _ => {
                 let chunk = self.0[cpu / 8..].first_chunk_mut::<8>().unwrap();
                 let offset = cpu % 64;
-                match target.options.endian {
-                    Endian::Little => {
-                        let updated = u64::from_le_bytes(*chunk) | 1 << offset;
-                        chunk.copy_from_slice(&updated.to_le_bytes());
-                    }
-                    Endian::Big => {
-                        let updated = u64::from_be_bytes(*chunk) | 1 << offset;
-                        chunk.copy_from_slice(&updated.to_be_bytes());
-                    }
-                }
+                *chunk = match target.options.endian {
+                    Endian::Little => (u64::from_le_bytes(*chunk) | 1 << offset).to_le_bytes(),
+                    Endian::Big => (u64::from_be_bytes(*chunk) | 1 << offset).to_be_bytes(),
+                };
             }
         };
     }
