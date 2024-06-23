@@ -421,6 +421,8 @@ impl<'tcx> PrimitiveLayouts<'tcx> {
 }
 
 /// A thread's CPU affinity mask determines the set of CPUs on which it is eligible to run.
+// the actual representation depends on the target's endianness and pointer width.
+// See CpuAffinityMask::set for details
 #[derive(Clone)]
 pub(crate) struct CpuAffinityMask(pub(crate) [u8; 128]);
 
@@ -437,36 +439,44 @@ impl CpuAffinityMask {
     }
 
     fn set(&mut self, target: &rustc_target::spec::Target, cpu: usize) {
+        // we silently ignore CPUs that are out of bounds. Linux doesn't support more than 1024
+        // CPUs apparently, so neither do we.
         if cpu > 8 * self.0.len() {
             return;
         }
 
+        // the actual representation of the bytes array is either
+        //
+        // - [u32; 32] on 32-bit platforms except x86_64
+        // - [u64; 16] everywhere else
+        //
+        // Therefore we need to use the endianness of the target
         match target.pointer_width {
             32 if target.arch.as_ref() != "x86_64" => {
-                let slice = self.0.get_mut(cpu / 4..cpu / 4 + 4).unwrap();
+                let chunk = self.0[cpu / 4..].first_chunk_mut::<4>().unwrap();
                 let offset = cpu % 32;
                 match target.options.endian {
                     Endian::Little => {
-                        let updated = u32::from_le_bytes(slice.try_into().unwrap()) | 1 << offset;
-                        slice.copy_from_slice(&updated.to_le_bytes());
+                        let updated = u32::from_le_bytes(*chunk) | 1 << offset;
+                        chunk.copy_from_slice(&updated.to_le_bytes());
                     }
                     Endian::Big => {
-                        let updated = u32::from_be_bytes(slice.try_into().unwrap()) | 1 << offset;
-                        slice.copy_from_slice(&updated.to_be_bytes());
+                        let updated = u32::from_be_bytes(*chunk) | 1 << offset;
+                        chunk.copy_from_slice(&updated.to_be_bytes());
                     }
                 }
             }
             _ => {
-                let slice = self.0.get_mut(cpu / 8..cpu / 8 + 8).unwrap();
+                let chunk = self.0[cpu / 8..].first_chunk_mut::<8>().unwrap();
                 let offset = cpu % 64;
                 match target.options.endian {
                     Endian::Little => {
-                        let updated = u64::from_le_bytes(slice.try_into().unwrap()) | 1 << offset;
-                        slice.copy_from_slice(&updated.to_le_bytes());
+                        let updated = u64::from_le_bytes(*chunk) | 1 << offset;
+                        chunk.copy_from_slice(&updated.to_le_bytes());
                     }
                     Endian::Big => {
-                        let updated = u64::from_be_bytes(slice.try_into().unwrap()) | 1 << offset;
-                        slice.copy_from_slice(&updated.to_be_bytes());
+                        let updated = u64::from_be_bytes(*chunk) | 1 << offset;
+                        chunk.copy_from_slice(&updated.to_be_bytes());
                     }
                 }
             }
