@@ -63,7 +63,7 @@ fn test_sigrt() {
     assert!(max - min >= 8)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 fn test_affinity() {
     use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
 
@@ -136,8 +136,8 @@ fn main() {
     test_dlsym();
 
     #[cfg(target_os = "linux")]
-    {
-        test_sigrt();
-        test_affinity();
-    }
+    test_sigrt();
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
+    test_affinity();
 }
