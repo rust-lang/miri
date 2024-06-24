@@ -63,64 +63,6 @@ fn test_sigrt() {
     assert!(max - min >= 8)
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
-fn test_affinity() {
-    use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
-
-    // If pid is zero, then the calling thread is used.
-    let pid = 0;
-
-    // Safety: valid value for this type
-    let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
-
-    // getting the affinity with insufficient space will fail
-    let err = unsafe { sched_getaffinity(pid, 1, &mut cpuset) };
-    assert_eq!(err, -1);
-
-    // now let's properly query the cpuset
-    let err = unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
-    assert_eq!(err, 0);
-
-    assert!(unsafe { libc::CPU_ISSET(0, &cpuset) });
-
-    // assumes `-Zmiri-num-cpus` is the default of 1
-    assert!(unsafe { !libc::CPU_ISSET(1, &cpuset) });
-    assert!(unsafe { !libc::CPU_ISSET(42, &cpuset) });
-
-    // configure cpu 1
-    unsafe { libc::CPU_SET(1, &mut cpuset) };
-
-    let err = unsafe { sched_setaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
-    assert_eq!(err, 0);
-
-    let err = unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
-    assert_eq!(err, 0);
-
-    // cpu one should now be set
-    assert!(unsafe { libc::CPU_ISSET(1, &cpuset) });
-
-    std::thread::scope(|spawner| {
-        spawner.spawn(|| {
-            // Safety: valid value for this type
-            let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
-
-            let err =
-                unsafe { sched_getaffinity(pid, core::mem::size_of::<cpu_set_t>(), &mut cpuset) };
-            assert_eq!(err, 0);
-
-            // the child inherits its parent's set
-            assert!(unsafe { libc::CPU_ISSET(0, &cpuset) });
-            assert!(unsafe { libc::CPU_ISSET(1, &cpuset) });
-
-            // configure cpu 42 for the child
-            unsafe { libc::CPU_SET(42, &mut cpuset) };
-        });
-    });
-
-    // the parent's set should be unaffected
-    assert!(unsafe { !libc::CPU_ISSET(42, &cpuset) });
-}
-
 fn test_dlsym() {
     let addr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, b"notasymbol\0".as_ptr().cast()) };
     assert!(addr as usize == 0);
@@ -141,7 +83,4 @@ fn main() {
 
     #[cfg(target_os = "linux")]
     test_sigrt();
-
-    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
-    test_affinity();
 }

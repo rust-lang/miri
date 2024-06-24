@@ -585,7 +585,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         .entry(thread_id)
                         .or_insert_with(|| CpuAffinityMask::new(&this.tcx.sess.target, this.machine.num_cpus))
                         .clone();
-                    this.write_bytes_ptr(mask, cpuset.0.iter().copied())?;
+                    this.write_bytes_ptr(mask, cpuset.as_slice().iter().copied())?;
                     this.write_scalar(Scalar::from_i32(0), dest)?;
                 }
             }
@@ -610,11 +610,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
 
                 // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
-                let bits = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
-                let cpuset = CpuAffinityMask(std::array::from_fn(|i| bits.get(i).copied().unwrap_or(0)));
-                this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
+                let cpusetsize = Ord::min(cpusetsize.try_into().unwrap(), std::mem::size_of::<CpuAffinityMask>());
 
-                this.write_scalar(Scalar::from_i32(0), dest)?;
+                let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
+                let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));
+                match CpuAffinityMask::from_array(&this.tcx.sess.target, this.machine.num_cpus, bits_array) {
+                    Some(cpuset) => {
+                        this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
+                        this.write_scalar(Scalar::from_i32(0), dest)?;
+                    }
+                    None => {
+                        // the intersection between the mask and the available CPUs was empty
+                        let einval = this.eval_libc("EINVAL");
+                        this.set_last_error(einval)?;
+                        this.write_scalar(Scalar::from_i32(-1), dest)?;
+                    }
+                }
             }
 
             // Miscellaneous

@@ -424,9 +424,16 @@ impl<'tcx> PrimitiveLayouts<'tcx> {
 // the actual representation depends on the target's endianness and pointer width.
 // See CpuAffinityMask::set for details
 #[derive(Clone)]
-pub(crate) struct CpuAffinityMask(pub(crate) [u8; 128]);
+pub(crate) struct CpuAffinityMask([u8; Self::MAX_CPUS / 8]);
 
 impl CpuAffinityMask {
+    // this is compatible with the libc `CPU_SETSIZE` constant and corresponds to the number
+    // of CPUs that a `cpu_set_t` can contain.
+    const MAX_CPUS: usize = 1024;
+
+    // code depends on the exact size of this type
+    const _SIZE_ASSERT: () = assert!(std::mem::size_of::<Self>() == 128);
+
     pub fn new(target: &rustc_target::spec::Target, cpu_count: u32) -> Self {
         let mut this = Self([0; 128]);
 
@@ -439,9 +446,9 @@ impl CpuAffinityMask {
     }
 
     fn set(&mut self, target: &rustc_target::spec::Target, cpu: usize) {
-        // we silently ignore CPUs that are out of bounds. Linux doesn't support more than 1024
-        // CPUs apparently, so neither do we.
-        if cpu > 8 * self.0.len() {
+        // we silently ignore CPUs that are out of bounds. This matches the behavior of
+        // `sched_setaffinity` with a mask that specifies more than `CPU_SETSIZE` CPUs.
+        if cpu >= Self::MAX_CPUS {
             return;
         }
 
@@ -469,6 +476,22 @@ impl CpuAffinityMask {
                 };
             }
         };
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    pub fn from_array(
+        target: &rustc_target::spec::Target,
+        cpu_count: u32,
+        bytes: [u8; 128],
+    ) -> Option<Self> {
+        // mask by what CPUs are actually available
+        let default = Self::new(target, cpu_count);
+        let masked = std::array::from_fn(|i| bytes[i] & default.0[i]);
+
+        masked.iter().any(|b| *b != 0).then_some(Self(masked))
     }
 }
 
