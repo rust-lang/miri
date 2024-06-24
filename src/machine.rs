@@ -460,15 +460,17 @@ impl CpuAffinityMask {
         // Therefore we need to use the endianness of the target
         match target.pointer_width {
             32 if target.arch.as_ref() != "x86_64" => {
+                let start = cpu / 32 * 4; // first byte of the correct u32
+                let chunk = self.0[start..].first_chunk_mut::<4>().unwrap();
                 let offset = cpu % 32;
-                let chunk = self.0[cpu / 4..].first_chunk_mut::<4>().unwrap();
                 *chunk = match target.options.endian {
                     Endian::Little => (u32::from_le_bytes(*chunk) | 1 << offset).to_le_bytes(),
                     Endian::Big => (u32::from_be_bytes(*chunk) | 1 << offset).to_be_bytes(),
                 };
             }
             _ => {
-                let chunk = self.0[cpu / 8..].first_chunk_mut::<8>().unwrap();
+                let start = cpu / 64 * 8; // first byte of the correct u64
+                let chunk = self.0[start..].first_chunk_mut::<8>().unwrap();
                 let offset = cpu % 64;
                 *chunk = match target.options.endian {
                     Endian::Little => (u64::from_le_bytes(*chunk) | 1 << offset).to_le_bytes(),
