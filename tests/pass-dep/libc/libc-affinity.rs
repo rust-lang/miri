@@ -6,7 +6,7 @@
 
 use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
 
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 
 // If pid is zero, then the calling thread is used.
 const PID: i32 = 0;
@@ -56,6 +56,21 @@ fn configure_unavailable_cpu() {
 
     // the CPU is not set because it is not available
     assert!(!unsafe { libc::CPU_ISSET(cpu_count, &cpuset) });
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
+fn large_set() {
+    // rust's libc does not currently implement dynamic cpu set allocation
+    // and related functions like `CPU_ZERO_S`. So we have to be creative
+
+    // i.e. this has 2048 bits, twice the standard number
+    let mut cpuset = [u64::MAX; 32];
+
+    let err = unsafe { sched_setaffinity(PID, size_of_val(&cpuset), cpuset.as_ptr().cast()) };
+    assert_eq!(err, 0);
+
+    let err = unsafe { sched_getaffinity(PID, size_of_val(&cpuset), cpuset.as_mut_ptr().cast()) };
+    assert_eq!(err, 0);
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
@@ -148,6 +163,7 @@ fn main() {
     {
         configure_no_cpus();
         configure_unavailable_cpu();
+        large_set();
         lying_about_size();
         parent_child();
     }
