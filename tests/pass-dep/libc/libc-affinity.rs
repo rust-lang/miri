@@ -4,11 +4,14 @@
 #![feature(pointer_is_aligned_to)]
 #![feature(strict_provenance)]
 
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
 
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 use std::mem::{size_of, size_of_val};
 
 // If pid is zero, then the calling thread is used.
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 const PID: i32 = 0;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
