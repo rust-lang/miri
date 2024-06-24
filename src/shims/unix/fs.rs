@@ -109,6 +109,7 @@ impl FileDescription for FileHandle {
     fn close<'tcx>(
         self: Box<Self>,
         communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
         // We sync the file if it was opened in a mode different than read-only.

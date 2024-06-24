@@ -3,6 +3,7 @@ use std::io;
 use std::io::{Error, ErrorKind};
 use std::mem;
 
+use fd::FdID;
 use rustc_target::abi::Endian;
 
 use crate::shims::unix::*;
@@ -28,6 +29,11 @@ struct Event {
     counter: u64,
     is_nonblock: bool,
     clock: VClock,
+    /// We have to store our own FdID in contrast to every other file descriptor out there, because
+    /// we are updating ourselves when writing and reading. Technically `Event` is like socketpair, but
+    /// it does not create two separate file descriptors. Thus we can't re-borrow ourselves via
+    /// `FileDescriptionRef::check_and_update_readiness` while already being mutably borrowed for read/write.w
+    id: FdID,
 }
 
 impl FileDescription for Event {
@@ -35,9 +41,28 @@ impl FileDescription for Event {
         "event"
     }
 
+    fn get_epoll_ready_events<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        // We only check the status of epollin and epollout flag for eventfd. If other event flags
+        // need to be supported in the future, the check should be added here.
+
+        let epollin = ecx.eval_libc_u32("EPOLLIN");
+        let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let mut ready_flags = 0;
+        // Check if it is readable.
+        if self.counter != 0 {
+            ready_flags |= epollin;
+        }
+        // Check if it is writable.
+        if self.counter != MAX_COUNTER {
+            ready_flags |= epollout;
+        }
+        Ok(ready_flags)
+    }
+
     fn close<'tcx>(
         self: Box<Self>,
         _communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
         Ok(Ok(()))
     }
@@ -70,6 +95,7 @@ impl FileDescription for Event {
                 Endian::Big => self.counter.to_be_bytes(),
             };
             self.counter = 0;
+            ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -124,6 +150,7 @@ impl FileDescription for Event {
                 }
             }
         };
+        ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
 }
@@ -178,11 +205,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("eventfd: encountered unknown unsupported flags {:#x}", flags);
         }
 
-        let fd = this.machine.fds.insert_new(Event {
+        let fds = &mut this.machine.fds;
+
+        let fd_value = fds.insert_new(Event {
             counter: val.into(),
             is_nonblock,
             clock: VClock::default(),
+            id: FdID::DUMMY,
         });
-        Ok(Scalar::from_i32(fd))
+
+        // Set the id of the `Event` to itself.
+        let fd = fds.get_ref(fd_value).unwrap();
+        let id = fd.get_id();
+        fd.borrow_mut().downcast_mut::<Event>().unwrap().id = id;
+
+        Ok(Scalar::from_i32(fd_value))
     }
 }

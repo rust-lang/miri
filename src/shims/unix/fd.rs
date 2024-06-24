@@ -3,12 +3,15 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind, IsTerminal, Read, SeekFrom, Write};
 use std::rc::Rc;
+use std::rc::Weak;
 
 use rustc_target::abi::Size;
 
+use crate::shims::unix::linux::epoll::EpollReturn;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -80,6 +83,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     fn close<'tcx>(
         self: Box<Self>,
         _communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
         throw_unsup_format!("cannot close {}", self.name());
     }
@@ -96,6 +100,13 @@ pub trait FileDescription: std::fmt::Debug + Any {
         // Most FDs are not tty's and the consequence of a wrong `false` are minor,
         // so we use a default impl here.
         false
+    }
+
+    /// Check the readiness of file description.
+    /// If the file description is ready for read and write, the u32 returned will be the XOR
+    /// of both readiness events, which is (EPOLLIN | EPOLLOUT).
+    fn get_epoll_ready_events<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        throw_unsup_format!("{}: epoll does not support this file description", self.name());
     }
 }
 
@@ -202,37 +213,122 @@ impl FileDescription for NullOutput {
         Ok(Ok(bytes.len()))
     }
 }
+/// Structure contains both the file description and its unique identifier.
+#[derive(Clone, Debug)]
+pub struct FileDescWithID<T: FileDescription + ?Sized> {
+    id: FdID,
+    file_description: RefCell<Box<T>>,
+}
 
 #[derive(Clone, Debug)]
-pub struct FileDescriptionRef(Rc<RefCell<Box<dyn FileDescription>>>);
+pub struct FileDescriptionRef(Rc<FileDescWithID<dyn FileDescription>>);
 
 impl FileDescriptionRef {
-    fn new(fd: impl FileDescription) -> Self {
-        FileDescriptionRef(Rc::new(RefCell::new(Box::new(fd))))
+    fn new(fd: impl FileDescription, id: usize) -> Self {
+        FileDescriptionRef(Rc::new(FileDescWithID {
+            id: FdID(id),
+            file_description: RefCell::new(Box::new(fd)),
+        }))
     }
 
     pub fn borrow(&self) -> Ref<'_, dyn FileDescription> {
-        Ref::map(self.0.borrow(), |fd| fd.as_ref())
+        Ref::map(self.0.file_description.borrow(), |fd| fd.as_ref())
     }
 
     pub fn borrow_mut(&self) -> RefMut<'_, dyn FileDescription> {
-        RefMut::map(self.0.borrow_mut(), |fd| fd.as_mut())
+        RefMut::map(self.0.file_description.borrow_mut(), |fd| fd.as_mut())
     }
 
-    pub fn close<'ctx>(self, communicate_allowed: bool) -> InterpResult<'ctx, io::Result<()>> {
+    pub fn close<'tcx>(
+        self,
+        communicate_allowed: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
         // Destroy this `Rc` using `into_inner` so we can call `close` instead of
         // implicitly running the destructor of the file description.
+        let id = self.get_id();
         match Rc::into_inner(self.0) {
-            Some(fd) => RefCell::into_inner(fd).close(communicate_allowed),
+            Some(fd) => {
+                // Remove entry from the global epoll_interest table.
+                ecx.machine.epoll_interests.remove(id);
+
+                RefCell::into_inner(fd.file_description).close(communicate_allowed, ecx)
+            }
             None => Ok(Ok(())),
         }
     }
+
+    pub fn downgrade(&self) -> WeakFileDescriptionRef {
+        WeakFileDescriptionRef { weak_ref: Rc::downgrade(&self.0), id: self.get_id() }
+    }
+
+    pub fn get_id(&self) -> FdID {
+        self.0.id
+    }
+
+    /// Function used to retrieve the readiness event status of a file description and insert
+    ///  an `EpollReturn` into the ready list if the file description is ready.
+    pub(crate) fn check_and_update_readiness<'tcx>(
+        &self,
+        ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
+    ) -> InterpResult<'tcx, ()> {
+        ecx.check_and_update_readiness(self.get_id(), |ecx| {
+            self.borrow_mut().get_epoll_ready_events(ecx)
+        })
+    }
+}
+
+/// WeakFileDescriptorRef holds a weak reference to the actual file description.
+#[derive(Clone, Debug, Default)]
+pub struct WeakFileDescriptionRef {
+    weak_ref: Weak<FileDescWithID<dyn FileDescription>>,
+    id: FdID,
+}
+
+impl WeakFileDescriptionRef {
+    pub fn upgrade(&self) -> Option<FileDescriptionRef> {
+        Some(FileDescriptionRef(self.weak_ref.upgrade()?))
+    }
+}
+
+// PartialEq, Eq, PartialOrd and Ord are implemented here because WeakFileDescriptionRef
+// is used as a key in the interest_list and ready_list in Epoll. It is ordered using
+// file description ID assigned.
+
+impl PartialEq for WeakFileDescriptionRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl Eq for WeakFileDescriptionRef {}
+
+impl PartialOrd for WeakFileDescriptionRef {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for WeakFileDescriptionRef {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+/// Wrapper struct for file description ID.
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct FdID(usize);
+
+impl FdID {
+    pub const DUMMY: Self = Self(usize::MAX);
 }
 
 /// The file descriptor table
 #[derive(Debug)]
 pub struct FdTable {
-    fds: BTreeMap<i32, FileDescriptionRef>,
+    pub fds: BTreeMap<i32, FileDescriptionRef>,
+    /// Unique identifier for file description, used to differentiate between various file description.
+    next_file_description_id: usize,
 }
 
 impl VisitProvenance for FdTable {
@@ -243,7 +339,7 @@ impl VisitProvenance for FdTable {
 
 impl FdTable {
     fn new() -> Self {
-        FdTable { fds: BTreeMap::new() }
+        FdTable { fds: BTreeMap::new(), next_file_description_id: 0 }
     }
     pub(crate) fn init(mute_stdout_stderr: bool) -> FdTable {
         let mut fds = FdTable::new();
@@ -260,7 +356,8 @@ impl FdTable {
 
     /// Insert a new file description to the FdTable.
     pub fn insert_new(&mut self, fd: impl FileDescription) -> i32 {
-        let file_handle = FileDescriptionRef::new(fd);
+        let file_handle = FileDescriptionRef::new(fd, self.next_file_description_id);
+        self.next_file_description_id = self.next_file_description_id.checked_add(1).unwrap();
         self.insert_ref_with_min_fd(file_handle, 0)
     }
 
@@ -317,6 +414,39 @@ impl FdTable {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// For a specific unique file descriptor id, get its ready events and update the corresponding ready lists
+    fn check_and_update_readiness(
+        &self,
+        id: FdID,
+        f: impl FnOnce(&MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32>,
+    ) -> InterpResult<'tcx, ()> {
+        let this = self.eval_context_ref();
+        // Get a list of epoll_event that is associated to a specific file description.
+        if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
+            // Retrieve the readiness events of the file description.
+            let ready_events = f(this)?;
+
+            for weak_epoll_interest in epoll_interests {
+                if let Some(epoll_interest) = weak_epoll_interest.upgrade() {
+                    // This checks if any of the events specified in epoll_interest.events match those
+                    // in ready_events.
+                    let epoll_interest = epoll_interest.borrow();
+                    let flags = epoll_interest.events & ready_events;
+                    // If there is any event that we are interested in being specified as ready,
+                    // insert a epoll_return to the ready list.
+                    if flags != 0 {
+                        let weak_fd_ref = epoll_interest.weak_file_description_ref.clone();
+                        let epoll_key = (weak_fd_ref, epoll_interest.file_descriptor);
+                        let ready_list = &mut epoll_interest.ready_list.borrow_mut();
+                        let epoll_return = EpollReturn::new(flags, epoll_interest.data);
+                        ready_list.insert(epoll_key, epoll_return);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn dup(&mut self, old_fd: i32) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
@@ -337,7 +467,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // If old_fd and new_fd point to the same description, then `dup_fd` ensures we keep the underlying file description alive.
             if let Some(file_description) = this.machine.fds.fds.insert(new_fd, dup_fd) {
                 // Ignore close error (not interpreter's) according to dup2() doc.
-                file_description.close(this.machine.communicate())?.ok();
+                file_description.close(this.machine.communicate(), this)?.ok();
             }
         }
         Ok(Scalar::from_i32(new_fd))
@@ -442,7 +572,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let Some(file_description) = this.machine.fds.remove(fd) else {
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
-        let result = file_description.close(this.machine.communicate())?;
+        let result = file_description.close(this.machine.communicate(), this)?;
         // return `0` if close is successful
         let result = result.map(|()| 0i32);
         Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
@@ -509,7 +639,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 fd.borrow_mut().pread(communicate, &mut bytes, offset, this)
             }
         };
-        drop(fd);
 
         // `File::read` never returns a value larger than `count`, so this cannot fail.
         match result?.map(|c| i64::try_from(c).unwrap()) {
@@ -568,7 +697,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 fd.borrow_mut().pwrite(communicate, &bytes, offset, this)
             }
         };
-        drop(fd);
 
         let result = result?.map(|c| i64::try_from(c).unwrap());
         Ok(Scalar::from_target_isize(this.try_unwrap_io_result(result)?, this))
