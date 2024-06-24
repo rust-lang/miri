@@ -168,3 +168,5 @@ pub const MIRI_DEFAULT_ARGS: &[&str] = &[
     // execution. Let's not do that.
     "-Zdeduplicate-diagnostics=no",
 ];
+
+pub const MAX_CPUS: usize = crate::concurrency::cpu_affinity::MAX_CPUS;
