@@ -1,17 +1,17 @@
 //@ignore-target-windows: only very limited libc on Windows
+//@ignore-target-apple: `sched_{g, s}etaffinity` are not supported on macOS
 //@compile-flags: -Zmiri-disable-isolation -Zmiri-num-cpus=4
 #![feature(io_error_more)]
 #![feature(pointer_is_aligned_to)]
 #![feature(strict_provenance)]
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
+use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
+use std::mem::{size_of, size_of_val};
+
+// If pid is zero, then the calling thread is used.
+const PID: i32 = 0;
+
 fn configure_no_cpus() {
-    use libc::{cpu_set_t, sched_setaffinity};
-    use std::mem::size_of;
-
-    // If pid is zero, then the calling thread is used.
-    const PID: i32 = 0;
-
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
     let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
@@ -28,14 +28,7 @@ fn configure_no_cpus() {
     assert_eq!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::InvalidInput);
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 fn configure_unavailable_cpu() {
-    use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
-    use std::mem::size_of;
-
-    // If pid is zero, then the calling thread is used.
-    const PID: i32 = 0;
-
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
     // Safety: valid value for this type
@@ -63,14 +56,7 @@ fn configure_unavailable_cpu() {
     assert!(!unsafe { libc::CPU_ISSET(cpu_count, &cpuset) });
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 fn large_set() {
-    use libc::{sched_getaffinity, sched_setaffinity};
-    use std::mem::size_of_val;
-
-    // If pid is zero, then the calling thread is used.
-    const PID: i32 = 0;
-
     // rust's libc does not currently implement dynamic cpu set allocation
     // and related functions like `CPU_ZERO_S`. So we have to be creative
 
@@ -84,14 +70,7 @@ fn large_set() {
     assert_eq!(err, 0);
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 fn lying_about_size() {
-    use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
-    use std::mem::size_of;
-
-    // If pid is zero, then the calling thread is used.
-    const PID: i32 = 0;
-
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
     assert!(cpu_count > 1, "this test cannot do anything interesting with just one thread");
@@ -130,14 +109,7 @@ fn lying_about_size() {
     assert_eq!(err, 0);
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
 fn parent_child() {
-    use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
-    use std::mem::size_of;
-
-    // If pid is zero, then the calling thread is used.
-    const PID: i32 = 0;
-
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
     assert!(cpu_count > 1, "this test cannot do anything interesting with just one thread");
@@ -182,12 +154,9 @@ fn parent_child() {
 }
 
 fn main() {
-    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
-    {
-        configure_no_cpus();
-        configure_unavailable_cpu();
-        large_set();
-        lying_about_size();
-        parent_child();
-    }
+    configure_no_cpus();
+    configure_unavailable_cpu();
+    large_set();
+    lying_about_size();
+    parent_child();
 }
