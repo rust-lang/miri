@@ -100,6 +100,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let epoll_ctl_add = this.eval_libc_i32("EPOLL_CTL_ADD");
         let epoll_ctl_mod = this.eval_libc_i32("EPOLL_CTL_MOD");
         let epoll_ctl_del = this.eval_libc_i32("EPOLL_CTL_DEL");
+        let epollet = this.eval_libc_i32("EPOLLET");
+
+        if op & epollet != epollet {
+            throw_unsup_format!("epoll_ctl: epollet must exists.")
+        }
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
             let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
