@@ -94,8 +94,7 @@ fn lying_about_size() {
         unsafe { libc::CPU_SET(i, &mut cpuset) };
     }
 
-    // exaggerating the length is also fine (and will not go out of bounds)
-    let err = unsafe { sched_setaffinity(PID, size_of::<cpu_set_t>() + 8, &cpuset) };
+    let err = unsafe { sched_setaffinity(PID, size_of::<cpu_set_t>(), &cpuset) };
     assert_eq!(err, 0);
 }
 

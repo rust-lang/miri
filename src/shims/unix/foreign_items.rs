@@ -610,8 +610,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
 
                 // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
-                let cpusetsize = Ord::min(cpusetsize.try_into().unwrap(), std::mem::size_of::<CpuAffinityMask>());
-
                 let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
                 let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));
                 match CpuAffinityMask::from_array(&this.tcx.sess.target, this.machine.num_cpus, bits_array) {
