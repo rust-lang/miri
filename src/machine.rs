@@ -634,6 +634,12 @@ impl<'tcx> MiriMachine<'tcx> {
         let stack_addr = if tcx.pointer_size().bits() < 32 { page_size } else { page_size * 32 };
         let stack_size =
             if tcx.pointer_size().bits() < 32 { page_size * 4 } else { page_size * 16 };
+        assert!(
+            usize::try_from(config.num_cpus).unwrap() <= cpu_affinity::MAX_CPUS,
+            "miri only supports up to {} CPUs, but {} were configured",
+            cpu_affinity::MAX_CPUS,
+            config.num_cpus
+        );
         MiriMachine {
             tcx,
             borrow_tracker,
