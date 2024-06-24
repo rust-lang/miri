@@ -133,6 +133,15 @@ fn parent_child() {
 
     // the parent's set should be unaffected
     assert!(unsafe { !libc::CPU_ISSET(1, &parent_cpuset) });
+
+    // it is important that we reset the cpu mask now for future tests
+    let mut cpuset = parent_cpuset;
+    for i in 0..cpu_count {
+        unsafe { libc::CPU_SET(i, &mut cpuset) };
+    }
+
+    let err = unsafe { sched_setaffinity(PID, size_of::<cpu_set_t>(), &cpuset) };
+    assert_eq!(err, 0);
 }
 
 fn main() {
