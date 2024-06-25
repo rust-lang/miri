@@ -475,7 +475,7 @@ pub struct MiriMachine<'tcx> {
 
     /// On which CPUs each thread is eligible to run.
     /// This has no effect at all, it is just tracked to produce the correct result
-    /// in sched_getaffinity.
+    /// in `sched_getaffinity`
     pub(crate) thread_cpu_affinity: FxHashMap<ThreadId, CpuAffinityMask>,
 
     /// The state of the primitive synchronization objects.

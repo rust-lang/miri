@@ -7,7 +7,7 @@ use rustc_target::abi::Endian;
 ///
 /// Real machines can have more CPUs than this number, and there exist APIs to set their affinity,
 /// but this is not currently supported by miri.
-pub(crate) const MAX_CPUS: usize = 1024;
+pub const MAX_CPUS: usize = 1024;
 
 /// A thread's CPU affinity mask determines the set of CPUs on which it is eligible to run.
 // the actual representation depends on the target's endianness and pointer width.
@@ -78,6 +78,7 @@ impl CpuAffinityMask {
         let default = Self::new(target, cpu_count);
         let masked = std::array::from_fn(|i| bytes[i] & default.0[i]);
 
+        // at least one thread must be set for the input to be valid
         masked.iter().any(|b| *b != 0).then_some(Self(masked))
     }
 }
