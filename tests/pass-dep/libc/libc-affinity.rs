@@ -11,6 +11,14 @@ use std::mem::{size_of, size_of_val};
 // If pid is zero, then the calling thread is used.
 const PID: i32 = 0;
 
+fn null_pointers() {
+    let err = unsafe { sched_getaffinity(PID, size_of::<cpu_set_t>(), std::ptr::null_mut()) };
+    assert_eq!(err, -1);
+
+    let err = unsafe { sched_setaffinity(PID, size_of::<cpu_set_t>(), std::ptr::null()) };
+    assert_eq!(err, -1);
+}
+
 fn configure_no_cpus() {
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
@@ -154,6 +162,7 @@ fn parent_child() {
 }
 
 fn main() {
+    null_pointers();
     configure_no_cpus();
     configure_unavailable_cpu();
     large_set();

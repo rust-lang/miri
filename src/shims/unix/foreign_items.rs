@@ -575,7 +575,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ => ThreadId::from(pid),
                 };
 
-                if cpusetsize < std::mem::size_of::<CpuAffinityMask>().try_into().unwrap() {
+                if this.ptr_is_null(mask)? {
+                    let einval = this.eval_libc("EFAULT");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else if cpusetsize < std::mem::size_of::<CpuAffinityMask>().try_into().unwrap() {
                     // writing the affinity mask to the pointer would write out of bounds
                     let einval = this.eval_libc("EINVAL");
                     this.set_last_error(einval)?;
@@ -609,19 +613,25 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ => ThreadId::from(pid),
                 };
 
-                // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
-                let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
-                let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));
-                match CpuAffinityMask::from_array(&this.tcx.sess.target, this.machine.num_cpus, bits_array) {
-                    Some(cpuset) => {
-                        this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
-                        this.write_scalar(Scalar::from_i32(0), dest)?;
-                    }
-                    None => {
-                        // the intersection between the mask and the available CPUs was empty
-                        let einval = this.eval_libc("EINVAL");
-                        this.set_last_error(einval)?;
-                        this.write_scalar(Scalar::from_i32(-1), dest)?;
+                if this.ptr_is_null(mask)? {
+                    let einval = this.eval_libc("EFAULT");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else{
+                    // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
+                    let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
+                    let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));
+                    match CpuAffinityMask::from_array(&this.tcx.sess.target, this.machine.num_cpus, bits_array) {
+                        Some(cpuset) => {
+                            this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
+                            this.write_scalar(Scalar::from_i32(0), dest)?;
+                        }
+                        None => {
+                            // the intersection between the mask and the available CPUs was empty
+                            let einval = this.eval_libc("EINVAL");
+                            this.set_last_error(einval)?;
+                            this.write_scalar(Scalar::from_i32(-1), dest)?;
+                        }
                     }
                 }
             }
