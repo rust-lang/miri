@@ -188,6 +188,12 @@ impl FileDescriptor {
             None => Ok(Ok(())),
         }
     }
+
+    // Expose the Rc address to do comparison. Potentially do impl partialord and ord for the struct.
+    // TODO: change this later
+    pub fn get_rc_address(&self) -> *const RefCell<Box<dyn FileDescription>> {
+        Rc::as_ptr(&self.0)
+    }
 }
 
 /// The file descriptor table

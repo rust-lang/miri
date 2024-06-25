@@ -1,6 +1,6 @@
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io;
-
-use rustc_data_structures::fx::FxHashMap;
 
 use crate::shims::unix::*;
 use crate::*;
@@ -11,7 +11,7 @@ use self::shims::unix::fd::FileDescriptor;
 #[derive(Clone, Debug, Default)]
 struct Epoll {
     /// The file descriptors we are watching, and what we are watching for.
-    file_descriptors: FxHashMap<i32, EpollEvent>,
+    interest_list: BTreeMap<(*const RefCell<Box<dyn FileDescription>>, i32), EpollEvent>,
 }
 
 /// Epoll Events associate events with data.
@@ -103,8 +103,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let epollet = this.eval_libc_i32("EPOLLET");
 
         if op & epollet != epollet {
-            throw_unsup_format!("epoll_ctl: epollet must exists.")
+            throw_unsup_format!("epoll_ctl: epollet flag must be included.")
         }
+
+        let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
+            return Ok(Scalar::from_i32(this.fd_not_found()?));
+        };
+        let epfd = epfd
+            .downcast_mut::<Epoll>()
+            .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?;
+
+        // Retrieve interest list
+        let interest_list = &mut epfd.interest_list;
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
             let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
@@ -115,24 +125,45 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let data = this.read_scalar(&data)?;
             let event = EpollEvent { events, data };
 
-            let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
+            // Get the Rc address of fd.
+            let Some(file_descriptor) = this.machine.fds.dup(fd) else {
                 return Ok(Scalar::from_i32(this.fd_not_found()?));
             };
-            let epfd = epfd
-                .downcast_mut::<Epoll>()
-                .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?;
 
-            epfd.file_descriptors.insert(fd, event);
+            let rc_address = file_descriptor.get_rc_address();
+
+            let epoll_key = (rc_address, fd);
+            if op == epoll_ctl_add {
+                if interest_list.contains_key(&epoll_key) {
+                    let eexist = this.eval_libc("EEXIST");
+                    this.set_last_error(eexist)?;
+                    return Ok(Scalar::from_i32(-1));
+                }
+            } else {
+                if !interest_list.contains_key(&epoll_key) {
+                    let enoent = this.eval_libc("ENOENT");
+                    this.set_last_error(enoent)?;
+                    return Ok(Scalar::from_i32(-1));
+                }
+            }
+
+            epfd.interest_list.insert(epoll_key, event);
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
-            let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
+            // Get the Rc address of fd.
+            let Some(file_descriptor) = this.machine.fds.dup(fd) else {
                 return Ok(Scalar::from_i32(this.fd_not_found()?));
             };
-            let epfd = epfd
-                .downcast_mut::<Epoll>()
-                .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?;
 
-            epfd.file_descriptors.remove(&fd);
+            let rc_address = file_descriptor.get_rc_address();
+            let epoll_key = (rc_address, fd);
+            if !interest_list.contains_key(&epoll_key) {
+                let enoent = this.eval_libc("ENOENT");
+                this.set_last_error(enoent)?;
+                return Ok(Scalar::from_i32(-1));
+            }
+
+            interest_list.remove(&epoll_key);
             Ok(Scalar::from_i32(0))
         } else {
             let einval = this.eval_libc("EINVAL");
