@@ -640,6 +640,12 @@ impl<'tcx> MiriMachine<'tcx> {
             cpu_affinity::MAX_CPUS,
             config.num_cpus
         );
+        let threads = ThreadManager::default();
+        let mut thread_cpu_affinity = FxHashMap::default();
+        thread_cpu_affinity.insert(
+            threads.active_thread(),
+            CpuAffinityMask::new(&tcx.sess.target, config.num_cpus),
+        );
         MiriMachine {
             tcx,
             borrow_tracker,
@@ -657,8 +663,8 @@ impl<'tcx> MiriMachine<'tcx> {
             fds: shims::FdTable::new(config.mute_stdout_stderr),
             dirs: Default::default(),
             layouts,
-            threads: ThreadManager::default(),
-            thread_cpu_affinity: FxHashMap::default(),
+            threads,
+            thread_cpu_affinity,
             sync: SynchronizationObjects::default(),
             static_roots: Vec::new(),
             profiler,

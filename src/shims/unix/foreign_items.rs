@@ -584,13 +584,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let einval = this.eval_libc("EINVAL");
                     this.set_last_error(einval)?;
                     this.write_scalar(Scalar::from_i32(-1), dest)?;
-                } else {
-                    let cpuset = this.machine.thread_cpu_affinity
-                        .entry(thread_id)
-                        .or_insert_with(|| CpuAffinityMask::new(&this.tcx.sess.target, this.machine.num_cpus))
-                        .clone();
+                } else if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&thread_id) {
+                    let cpuset = cpuset.clone();
                     this.write_bytes_ptr(mask, cpuset.as_slice().iter().copied())?;
                     this.write_scalar(Scalar::from_i32(0), dest)?;
+                } else {
+                    // The thread whose ID is pid could not be found
+                    let einval = this.eval_libc("ESRCH");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
                 }
             }
             "sched_setaffinity" => {
@@ -613,11 +615,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ => ThreadId::from(pid),
                 };
 
+                #[allow(clippy::map_entry)]
                 if this.ptr_is_null(mask)? {
                     let einval = this.eval_libc("EFAULT");
                     this.set_last_error(einval)?;
                     this.write_scalar(Scalar::from_i32(-1), dest)?;
-                } else{
+                } else if !this.machine.thread_cpu_affinity.contains_key(&thread_id) {
+                    // The thread whose ID is pid could not be found
+                    let einval = this.eval_libc("ESRCH");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else {
                     // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
                     let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
                     let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));

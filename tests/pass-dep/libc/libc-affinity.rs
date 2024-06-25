@@ -19,6 +19,17 @@ fn null_pointers() {
     assert_eq!(err, -1);
 }
 
+fn invalid_thread_id() {
+    // this thread ID does not exist; the affinity functions should return ESRCH
+    let tid = 42;
+
+    let err = unsafe { sched_getaffinity(tid, size_of::<cpu_set_t>(), std::ptr::null_mut()) };
+    assert_eq!(err, -1);
+
+    let err = unsafe { sched_setaffinity(tid, size_of::<cpu_set_t>(), std::ptr::null()) };
+    assert_eq!(err, -1);
+}
+
 fn configure_no_cpus() {
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
@@ -163,6 +174,7 @@ fn parent_child() {
 
 fn main() {
     null_pointers();
+    invalid_thread_id();
     configure_no_cpus();
     configure_unavailable_cpu();
     large_set();
