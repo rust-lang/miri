@@ -114,12 +114,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
 
-        let epfd = epfd
+        let interest_list = &mut epfd
             .downcast_mut::<Epoll>()
-            .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?;
-
-        // Retrieve interest list
-        let interest_list = &mut epfd.interest_list;
+            .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?
+            .interest_list;
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
             let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
@@ -132,6 +130,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // Get the Rc address of fd.
             let Some(file_descriptor) = this.machine.fds.dup(fd) else {
+                drop(epfd);
                 return Ok(Scalar::from_i32(this.fd_not_found()?));
             };
             let rc_address = file_descriptor.get_rc_address();
@@ -140,22 +139,25 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if op == epoll_ctl_add {
                 if interest_list.contains_key(&epoll_key) {
                     let eexist = this.eval_libc("EEXIST");
+                    drop(epfd);
                     this.set_last_error(eexist)?;
                     return Ok(Scalar::from_i32(-1));
                 }
             } else {
                 if !interest_list.contains_key(&epoll_key) {
                     let enoent = this.eval_libc("ENOENT");
+                    drop(epfd);
                     this.set_last_error(enoent)?;
                     return Ok(Scalar::from_i32(-1));
                 }
             }
 
-            epfd.interest_list.insert(epoll_key, event);
+            interest_list.insert(epoll_key, event);
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
             // Get the Rc address of fd.
             let Some(file_descriptor) = this.machine.fds.dup(fd) else {
+                drop(epfd);
                 return Ok(Scalar::from_i32(this.fd_not_found()?));
             };
 
@@ -163,6 +165,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let epoll_key = (rc_address, fd);
             if !interest_list.contains_key(&epoll_key) {
                 let enoent = this.eval_libc("ENOENT");
+                drop(epfd);
                 this.set_last_error(enoent)?;
                 return Ok(Scalar::from_i32(-1));
             }
@@ -171,6 +174,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Ok(Scalar::from_i32(0))
         } else {
             let einval = this.eval_libc("EINVAL");
+            drop(epfd);
             this.set_last_error(einval)?;
             Ok(Scalar::from_i32(-1))
         }
