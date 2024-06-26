@@ -98,16 +98,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let epfd = this.read_scalar(epfd)?.to_i32()?;
         let op = this.read_scalar(op)?.to_i32()?;
         let fd = this.read_scalar(fd)?.to_i32()?;
-        let _event = this.read_scalar(event)?.to_pointer(this)?;
+        let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
 
         let epoll_ctl_add = this.eval_libc_i32("EPOLL_CTL_ADD");
         let epoll_ctl_mod = this.eval_libc_i32("EPOLL_CTL_MOD");
         let epoll_ctl_del = this.eval_libc_i32("EPOLL_CTL_DEL");
-        let epollet = this.eval_libc_i32("EPOLLET");
-
-        if op & epollet != epollet {
-            throw_unsup_format!("epoll_ctl: epollet flag must be included.")
-        }
 
         // Check if epfd is a valid epoll file descriptor.
         let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
@@ -126,12 +121,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let rc_address = file_descriptor.get_rc_address();
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
-            let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
-
             let events = this.project_field(&event, 0)?;
             let events = this.read_scalar(&events)?.to_u32()?;
             let data = this.project_field(&event, 1)?;
             let data = this.read_scalar(&data)?;
+            let epollet = this.eval_libc_u32("EPOLLET");
+
+            // We only support edge-triggered notification for now.
+            if events & epollet != epollet {
+                throw_unsup_format!("epoll_ctl: epollet flag must be included.");
+            }
 
             let epoll_key = (rc_address, fd);
 

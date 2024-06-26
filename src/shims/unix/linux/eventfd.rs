@@ -30,7 +30,7 @@ struct Event {
     counter: u64,
     is_nonblock: bool,
     clock: VClock,
-    events: i32,
+    events: u32,
 }
 
 impl FileDescription for Event {
@@ -74,7 +74,7 @@ impl FileDescription for Event {
             };
             self.counter = 0;
             // Set the event mask for epoll.
-            let epollout = ecx.eval_libc_i32("EPOLLOUT");
+            let epollout = ecx.eval_libc_u32("EPOLLOUT");
             self.events |= epollout;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
@@ -121,7 +121,7 @@ impl FileDescription for Event {
                 }
                 self.counter = new_count;
                 // Set the event mask for epoll.
-                let epollin = ecx.eval_libc_i32("EPOLLIN");
+                let epollin = ecx.eval_libc_u32("EPOLLIN");
                 self.events |= epollin;
             }
             None | Some(u64::MAX) => {
