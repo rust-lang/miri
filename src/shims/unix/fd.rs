@@ -189,7 +189,8 @@ impl FileDescriptor {
         }
     }
 
-    // Expose the Rc address to do comparison. Potentially do impl partialord and ord for the struct.
+    // Expose the Rc address to do comparison. Do impl partialord and ord so we can just
+    // use FileDescriptor inside the epoll key tuple.
     // TODO: change this later
     pub fn get_rc_address(&self) -> *const RefCell<Box<dyn FileDescription>> {
         Rc::as_ptr(&self.0)

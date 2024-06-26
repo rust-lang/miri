@@ -106,9 +106,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("epoll_ctl: epollet flag must be included.")
         }
 
+        // Check if the epfd is valid.
+        // TODO: better workaround? this has immutable borrow, hence
+        // this.fd_not_found and this.set_last_error after this won't work
+        // because they use mutable borrow.
         let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
+
         let epfd = epfd
             .downcast_mut::<Epoll>()
             .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?;
@@ -129,7 +134,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let Some(file_descriptor) = this.machine.fds.dup(fd) else {
                 return Ok(Scalar::from_i32(this.fd_not_found()?));
             };
-
             let rc_address = file_descriptor.get_rc_address();
 
             let epoll_key = (rc_address, fd);
