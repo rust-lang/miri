@@ -24,7 +24,7 @@ struct Epoll {
 /// <https://man7.org/linux/man-pages/man2/epoll_ctl.2.html>
 #[derive(Clone, Debug)]
 struct EpollEvent {
-    #[warn(dead_code)]
+    #[allow(dead_code)]
     file_description: Weak<RefCell<Box<dyn FileDescription>>>,
     #[allow(dead_code)]
     events: u32,
