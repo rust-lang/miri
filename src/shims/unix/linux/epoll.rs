@@ -121,8 +121,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let rc_address = file_descriptor.get_rc_address();
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
+            // Epoll event bitmask from epoll_event struct.
             let events = this.project_field(&event, 0)?;
             let events = this.read_scalar(&events)?.to_u32()?;
+
             let data = this.project_field(&event, 1)?;
             let data = this.read_scalar(&data)?;
             let epollet = this.eval_libc_u32("EPOLLET");
@@ -150,13 +152,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     return Ok(Scalar::from_i32(-1));
                 }
             }
+
             let file_description = file_descriptor.get_weak_file_description();
             let event = EpollEvent { file_description, events, data };
-
             interest_list.insert(epoll_key, event);
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
-            // Get the Rc address of fd.
             let epoll_key = (rc_address, fd);
             if !interest_list.contains_key(&epoll_key) {
                 let enoent = this.eval_libc("ENOENT");
