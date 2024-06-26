@@ -30,6 +30,7 @@ struct Event {
     counter: u64,
     is_nonblock: bool,
     clock: VClock,
+    events: i32,
 }
 
 impl FileDescription for Event {
@@ -72,6 +73,9 @@ impl FileDescription for Event {
                 Endian::Big => self.counter.to_be_bytes(),
             };
             self.counter = 0;
+            // Set the event mask for epoll.
+            let epollout = ecx.eval_libc_i32("EPOLLOUT");
+            self.events |= epollout;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -116,6 +120,9 @@ impl FileDescription for Event {
                     self.clock.join(clock);
                 }
                 self.counter = new_count;
+                // Set the event mask for epoll.
+                let epollin = ecx.eval_libc_i32("EPOLLIN");
+                self.events |= epollin;
             }
             None | Some(u64::MAX) => {
                 if self.is_nonblock {
@@ -184,6 +191,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             counter: val.into(),
             is_nonblock,
             clock: VClock::default(),
+            events: 0,
         }));
         Ok(Scalar::from_i32(fd))
     }

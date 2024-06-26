@@ -109,15 +109,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("epoll_ctl: epollet flag must be included.")
         }
 
-        // Check if the epfd is valid.
+        // Check if epfd is a valid epoll file descriptor.
         let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
-
         let interest_list = &mut epfd
             .downcast_mut::<Epoll>()
             .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?
             .interest_list;
+
+        // Get the Rc address of fd.
+        let Some(file_descriptor) = this.machine.fds.dup(fd) else {
+            drop(epfd);
+            return Ok(Scalar::from_i32(this.fd_not_found()?));
+        };
+        let rc_address = file_descriptor.get_rc_address();
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
             let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
@@ -127,16 +133,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let data = this.project_field(&event, 1)?;
             let data = this.read_scalar(&data)?;
 
-            // Get the Rc address of fd.
-            let Some(file_descriptor) = this.machine.fds.dup(fd) else {
-                drop(epfd);
-                return Ok(Scalar::from_i32(this.fd_not_found()?));
-            };
-            let rc_address = file_descriptor.get_rc_address();
-
             let epoll_key = (rc_address, fd);
 
-            // Check the fd is already in the interest list.
+            // Check if the fd is already in the interest list.
             if op == epoll_ctl_add {
                 if interest_list.contains_key(&epoll_key) {
                     let eexist = this.eval_libc("EEXIST");
@@ -159,12 +158,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
             // Get the Rc address of fd.
-            let Some(file_descriptor) = this.machine.fds.dup(fd) else {
-                drop(epfd);
-                return Ok(Scalar::from_i32(this.fd_not_found()?));
-            };
-
-            let rc_address = file_descriptor.get_rc_address();
             let epoll_key = (rc_address, fd);
             if !interest_list.contains_key(&epoll_key) {
                 let enoent = this.eval_libc("ENOENT");

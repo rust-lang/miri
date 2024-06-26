@@ -32,6 +32,7 @@ struct Buffer {
     /// If all writers of this buffer are dropped, buf_has_writer becomes false and we
     /// indicate EOF instead of blocking.
     buf_has_writer: bool,
+    events: i32,
 }
 
 impl FileDescription for SocketPair {
@@ -93,6 +94,9 @@ impl FileDescription for SocketPair {
         // Do full read / partial read based on the space available.
         // Conveniently, `read` exists on `VecDeque` and has exactly the desired behavior.
         let actual_read_size = readbuf.buf.read(bytes).unwrap();
+        // Set event mask.
+        let epollout = ecx.eval_libc_i32("EPOLLOUT");
+        readbuf.events |= epollout;
         return Ok(Ok(actual_read_size));
     }
 
@@ -133,6 +137,9 @@ impl FileDescription for SocketPair {
         // Do full write / partial write based on the space available.
         let actual_write_size = write_size.min(available_space);
         writebuf.buf.extend(&bytes[..actual_write_size]);
+        // Set event mask.
+        let epollin = ecx.eval_libc_i32("EPOLLIN");
+        writebuf.events |= epollin;
         return Ok(Ok(actual_write_size));
     }
 }
@@ -200,12 +207,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             buf: VecDeque::new(),
             clock: VClock::default(),
             buf_has_writer: true,
+            events: 0,
         }));
 
         let buffer2 = Rc::new(RefCell::new(Buffer {
             buf: VecDeque::new(),
             clock: VClock::default(),
             buf_has_writer: true,
+            events: 0,
         }));
 
         let socketpair_0 = SocketPair {
