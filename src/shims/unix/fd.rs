@@ -6,6 +6,7 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind, IsTerminal, Read, SeekFrom, Write};
 use std::rc::Rc;
+use std::rc::Weak;
 
 use rustc_target::abi::Size;
 
@@ -194,6 +195,10 @@ impl FileDescriptor {
     // TODO: change this later
     pub fn get_rc_address(&self) -> *const RefCell<Box<dyn FileDescription>> {
         Rc::as_ptr(&self.0)
+    }
+
+    pub fn get_weak_file_description(&self) -> Weak<RefCell<Box<dyn FileDescription>>> {
+        Rc::downgrade(&self.0)
     }
 }
 

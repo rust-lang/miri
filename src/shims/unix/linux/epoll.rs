@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
+use std::rc::Weak;
 
 use crate::shims::unix::*;
 use crate::*;
@@ -23,6 +24,8 @@ struct Epoll {
 /// <https://man7.org/linux/man-pages/man2/epoll_ctl.2.html>
 #[derive(Clone, Debug)]
 struct EpollEvent {
+    #[warn(dead_code)]
+    file_description: Weak<RefCell<Box<dyn FileDescription>>>,
     #[allow(dead_code)]
     events: u32,
     /// `Scalar` is used to represent the
@@ -107,9 +110,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         // Check if the epfd is valid.
-        // TODO: better workaround? this has immutable borrow, hence
-        // this.fd_not_found and this.set_last_error after this won't work
-        // because they use mutable borrow.
         let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
@@ -126,7 +126,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let events = this.read_scalar(&events)?.to_u32()?;
             let data = this.project_field(&event, 1)?;
             let data = this.read_scalar(&data)?;
-            let event = EpollEvent { events, data };
 
             // Get the Rc address of fd.
             let Some(file_descriptor) = this.machine.fds.dup(fd) else {
@@ -136,6 +135,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let rc_address = file_descriptor.get_rc_address();
 
             let epoll_key = (rc_address, fd);
+
+            // Check the fd is already in the interest list.
             if op == epoll_ctl_add {
                 if interest_list.contains_key(&epoll_key) {
                     let eexist = this.eval_libc("EEXIST");
@@ -151,6 +152,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     return Ok(Scalar::from_i32(-1));
                 }
             }
+            let file_description = file_descriptor.get_weak_file_description();
+            let event = EpollEvent { file_description, events, data };
 
             interest_list.insert(epoll_key, event);
             Ok(Scalar::from_i32(0))
