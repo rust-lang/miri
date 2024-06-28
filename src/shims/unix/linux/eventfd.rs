@@ -2,9 +2,11 @@
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::mem;
+use std::rc::{Rc, Weak};
 
 use rustc_target::abi::Endian;
 
+use crate::shims::unix::linux::epoll::{EpollEvent, EpollReturn};
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -31,6 +33,34 @@ struct Event {
     is_nonblock: bool,
     clock: VClock,
     events: u32,
+    epoll_events: Vec<Weak<EpollEvent>>,
+}
+
+impl Event {
+    fn update_readiness(&self, flag: u32) {
+        for event in &self.epoll_events {
+            if let Some(epoll_event) = event.upgrade() {
+                if epoll_event.events & flag == flag {
+                    // The file description is self, so the upgrade should always suceed.
+                    let address = Rc::as_ptr(&epoll_event.file_description.upgrade().unwrap());
+                    let epoll_key = (address, epoll_event.file_descriptor);
+                    // Retrieve the epoll return if it is already in the return list.
+                    let ready_list = &mut epoll_event.ready_list.borrow_mut();
+                    match ready_list.get_mut(&epoll_key) {
+                        Some(epoll_return) => {
+                            // Update the flag of existing epoll return entry.
+                            epoll_return.events |= flag;
+                        }
+                        None => {
+                            // Add a new epoll return entry to the ready list.
+                            let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
+                            ready_list.insert(epoll_key, epoll_return);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl FileDescription for Event {
@@ -76,6 +106,8 @@ impl FileDescription for Event {
             // Set the event mask for epoll.
             let epollout = ecx.eval_libc_u32("EPOLLOUT");
             self.events |= epollout;
+            // Update ready list.
+            self.update_readiness(epollout);
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -121,8 +153,11 @@ impl FileDescription for Event {
                 }
                 self.counter = new_count;
                 // Set the event mask for epoll.
+                // TODO: verify
                 let epollin = ecx.eval_libc_u32("EPOLLIN");
                 self.events |= epollin;
+                // Update ready list.
+                self.update_readiness(epollin);
             }
             None | Some(u64::MAX) => {
                 if self.is_nonblock {
@@ -192,6 +227,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             is_nonblock,
             clock: VClock::default(),
             events: 0,
+            epoll_events: Vec::new(),
         }));
         Ok(Scalar::from_i32(fd))
     }

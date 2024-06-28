@@ -24,7 +24,6 @@ struct SocketPair {
     writebuf: Weak<RefCell<Buffer>>,
     readbuf: Rc<RefCell<Buffer>>,
     is_nonblock: bool,
-    #[allow(dead_code)]
     epoll_events: Vec<Weak<EpollEvent>>,
 }
 
