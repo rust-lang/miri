@@ -4,6 +4,7 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::rc::{Rc, Weak};
 
+use crate::shims::unix::linux::epoll::EpollReturn;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -23,7 +24,37 @@ struct SocketPair {
     writebuf: Weak<RefCell<Buffer>>,
     readbuf: Rc<RefCell<Buffer>>,
     is_nonblock: bool,
+    #[allow(dead_code)]
     epoll_events: Vec<Weak<EpollEvent>>,
+}
+
+impl SocketPair {
+    // This function will add epollreturn to ready list if there are matching events in
+    // interest list.
+    fn update_readiness(&self, flag: u32) {
+        for event in &self.epoll_events {
+            if let Some(epoll_event) = event.upgrade() {
+                if epoll_event.events & flag == flag {
+                    // The file description is self, so the upgrade should always suceed.
+                    let address = Rc::as_ptr(&epoll_event.file_description.upgrade().unwrap());
+                    let epoll_key = (address, epoll_event.file_descriptor);
+                    // Retrieve the epoll return if it is already in the return list.
+                    let ready_list = &mut epoll_event.ready_list.borrow_mut();
+                    match ready_list.get_mut(&epoll_key) {
+                        Some(epoll_return) => {
+                            // Update the flag of existing epoll return entry.
+                            epoll_return.events |= flag;
+                        }
+                        None => {
+                            // Add a new epoll return entry to the ready list.
+                            let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
+                            ready_list.insert(epoll_key, epoll_return);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -97,8 +128,11 @@ impl FileDescription for SocketPair {
         // Conveniently, `read` exists on `VecDeque` and has exactly the desired behavior.
         let actual_read_size = readbuf.buf.read(bytes).unwrap();
         // Set event mask.
+        // TODO: this subject to change.
         let epollout = ecx.eval_libc_u32("EPOLLOUT");
         readbuf.events |= epollout;
+        // Update ready list.
+        self.update_readiness(epollout);
         return Ok(Ok(actual_read_size));
     }
 
@@ -142,6 +176,8 @@ impl FileDescription for SocketPair {
         // Set event mask.
         let epollin = ecx.eval_libc_u32("EPOLLIN");
         writebuf.events |= epollin;
+        // Update ready list.
+        self.update_readiness(epollin);
         return Ok(Ok(actual_write_size));
     }
 }

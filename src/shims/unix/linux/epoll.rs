@@ -17,13 +17,11 @@ struct Epoll {
 }
 
 #[derive(Debug)]
-struct EpollReturn {
+pub struct EpollReturn {
     #[allow(dead_code)]
-    file_description: Weak<RefCell<Box<dyn FileDescription>>>,
+    pub events: u32,
     #[allow(dead_code)]
-    events: u32,
-    #[allow(dead_code)]
-    data: Scalar,
+    pub data: Scalar,
 }
 
 /// Epoll Events associate events with data.
@@ -36,17 +34,18 @@ struct EpollReturn {
 #[derive(Clone, Debug)]
 pub struct EpollEvent {
     #[allow(dead_code)]
-    file_descriptor: i32,
+    pub file_descriptor: i32,
     #[allow(dead_code)]
-    file_description: Weak<RefCell<Box<dyn FileDescription>>>,
+    pub file_description: Weak<RefCell<Box<dyn FileDescription>>>,
     #[allow(dead_code)]
-    events: u32,
+    pub events: u32,
     /// `Scalar` is used to represent the
     /// `epoll_data` type union.
     #[allow(dead_code)]
-    data: Scalar,
+    pub data: Scalar,
     #[allow(dead_code)]
-    ready_list: Rc<RefCell<BTreeMap<(*const RefCell<Box<dyn FileDescription>>, i32), EpollReturn>>>,
+    pub ready_list:
+        Rc<RefCell<BTreeMap<(*const RefCell<Box<dyn FileDescription>>, i32), EpollReturn>>>,
 }
 
 impl FileDescription for Epoll {
