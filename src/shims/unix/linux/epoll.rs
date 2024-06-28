@@ -36,6 +36,8 @@ struct EpollReturn {
 #[derive(Clone, Debug)]
 pub struct EpollEvent {
     #[allow(dead_code)]
+    file_descriptor: i32,
+    #[allow(dead_code)]
     file_description: Weak<RefCell<Box<dyn FileDescription>>>,
     #[allow(dead_code)]
     events: u32,
@@ -172,8 +174,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             let file_description = file_descriptor.get_weak_file_description();
-            let event =
-                EpollEvent { file_description, events, data, ready_list: Rc::clone(ready_list) };
+            let event = EpollEvent {
+                file_descriptor: fd,
+                file_description,
+                events,
+                data,
+                ready_list: Rc::clone(ready_list),
+            };
             interest_list.insert(epoll_key, event);
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
