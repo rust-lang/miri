@@ -34,7 +34,7 @@ struct EpollReturn {
 ///
 /// <https://man7.org/linux/man-pages/man2/epoll_ctl.2.html>
 #[derive(Clone, Debug)]
-struct EpollEvent {
+pub struct EpollEvent {
     #[allow(dead_code)]
     file_description: Weak<RefCell<Box<dyn FileDescription>>>,
     #[allow(dead_code)]

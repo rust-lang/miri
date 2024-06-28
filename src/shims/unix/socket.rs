@@ -8,6 +8,7 @@ use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
 use self::fd::FileDescriptor;
+use self::shims::unix::linux::epoll::EpollEvent;
 
 /// The maximum capacity of the socketpair buffer in bytes.
 /// This number is arbitrary as the value can always
@@ -22,6 +23,7 @@ struct SocketPair {
     writebuf: Weak<RefCell<Buffer>>,
     readbuf: Rc<RefCell<Buffer>>,
     is_nonblock: bool,
+    epoll_events: Vec<Weak<EpollEvent>>,
 }
 
 #[derive(Debug)]
@@ -221,12 +223,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             writebuf: Rc::downgrade(&buffer1),
             readbuf: Rc::clone(&buffer2),
             is_nonblock: is_sock_nonblock,
+            epoll_events: Vec::new(),
         };
 
         let socketpair_1 = SocketPair {
             writebuf: Rc::downgrade(&buffer2),
             readbuf: Rc::clone(&buffer1),
             is_nonblock: is_sock_nonblock,
+            epoll_events: Vec::new(),
         };
 
         let fds = &mut this.machine.fds;
