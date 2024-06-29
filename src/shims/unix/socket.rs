@@ -27,7 +27,52 @@ struct SocketPair {
     epoll_events: Vec<Weak<EpollEvent>>,
 }
 
+#[derive(Debug)]
+struct Buffer {
+    buf: VecDeque<u8>,
+    clock: VClock,
+    /// Indicates if there is at least one active writer to this buffer.
+    /// If all writers of this buffer are dropped, buf_has_writer becomes false and we
+    /// indicate EOF instead of blocking.
+    buf_has_writer: bool,
+    events: u32,
+}
+
 impl SocketPair {
+    // This function will check the readiness of current file description and return bitmask
+    // that can reflect the readiness.
+    // TODO: passing the flag using function parameter is quite hacky... improve this.
+    fn check_readiness(&self, epollin: u32, epollout: u32, epollrdup: u32) -> u32 {
+        let readbuf = self.readbuf.borrow();
+        // Start with complement of 0, then unset the flag if we found something is not
+        // doable,
+        let mut readiness: u32 = !0;
+        // Check if the writeend has closed.
+        if readbuf.buf_has_writer {
+            readiness &= !epollrdup;
+        }
+
+        // Unset flag if it is unreadable.
+        if readbuf.buf.is_empty() {
+            readiness &= !epollin;
+        }
+
+        // Unset flag if it is not writable.
+        match self.writebuf.upgrade() {
+            Some(writebuf) => {
+                let writebuf = writebuf.borrow();
+                let data_size = writebuf.buf.len();
+                let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(data_size);
+                if available_space == 0 {
+                    readiness &= epollout;
+                }
+            }
+            None => {
+                readiness &= epollout;
+            }
+        }
+        readiness
+    }
     // This function will add epollreturn to ready list if there are matching events in
     // interest list.
     fn update_readiness(&self, flag: u32) {
@@ -56,17 +101,6 @@ impl SocketPair {
     }
 }
 
-#[derive(Debug)]
-struct Buffer {
-    buf: VecDeque<u8>,
-    clock: VClock,
-    /// Indicates if there is at least one active writer to this buffer.
-    /// If all writers of this buffer are dropped, buf_has_writer becomes false and we
-    /// indicate EOF instead of blocking.
-    buf_has_writer: bool,
-    events: u32,
-}
-
 impl FileDescription for SocketPair {
     fn name(&self) -> &'static str {
         "socketpair"
@@ -81,6 +115,7 @@ impl FileDescription for SocketPair {
         if let Some(writebuf) = self.writebuf.upgrade() {
             writebuf.borrow_mut().buf_has_writer = false;
         };
+        // TODO: how to notify another file description using epollrdhup?
         Ok(Ok(()))
     }
 
@@ -127,11 +162,13 @@ impl FileDescription for SocketPair {
         // Conveniently, `read` exists on `VecDeque` and has exactly the desired behavior.
         let actual_read_size = readbuf.buf.read(bytes).unwrap();
         // Set event mask.
-        // TODO: this subject to change.
+        let epollin = ecx.eval_libc_u32("EPOLLIN");
         let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
+        let readiness = self.check_readiness(epollin, epollout, epollrdhup);
+        self.update_readiness(readiness);
+        // TODO: maybe we should not keep a record, we should just check it instantly instead.
         readbuf.events |= epollout;
-        // Update ready list.
-        self.update_readiness(epollout);
         return Ok(Ok(actual_read_size));
     }
 
@@ -172,11 +209,14 @@ impl FileDescription for SocketPair {
         // Do full write / partial write based on the space available.
         let actual_write_size = write_size.min(available_space);
         writebuf.buf.extend(&bytes[..actual_write_size]);
-        // Set event mask.
+        // check the readiness of current file description and update it.
         let epollin = ecx.eval_libc_u32("EPOLLIN");
+        let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
+        let readiness = self.check_readiness(epollin, epollout, epollrdhup);
+        self.update_readiness(readiness);
+        // TODO: maybe we should not keep a record, we should just check it instantly instead.
         writebuf.events |= epollin;
-        // Update ready list.
-        self.update_readiness(epollin);
         return Ok(Ok(actual_write_size));
     }
 }
