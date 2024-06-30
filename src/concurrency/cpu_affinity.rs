@@ -37,12 +37,12 @@ impl CpuAffinityMask {
             return;
         }
 
-        // the actual representation of the bytes array is either
+        // The actual representation of the bytes array is either
         //
         // - [u32; 32] on 32-bit platforms except x86_64
         // - [u64; 16] everywhere else
         //
-        // Therefore we need to use the endianness of the target
+        // Within the array elements, we need to use the endianness of the target.
         match target.pointer_width {
             32 if target.arch.as_ref() != "x86_64" => {
                 let start = cpu / 32 * 4; // first byte of the correct u32
