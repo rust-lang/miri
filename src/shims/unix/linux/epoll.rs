@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
+use crate::shims::unix::fd::WeakFileDescriptor;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -12,8 +13,8 @@ use self::shims::unix::fd::FileDescriptor;
 #[derive(Clone, Debug, Default)]
 struct Epoll {
     /// The file descriptors we are watching, and what we are watching for.
-    interest_list: BTreeMap<(*const RefCell<Box<dyn FileDescription>>, i32), EpollEvent>,
-    ready_list: Rc<RefCell<BTreeMap<(*const RefCell<Box<dyn FileDescription>>, i32), EpollReturn>>>,
+    interest_list: BTreeMap<(WeakFileDescriptor, i32), EpollEvent>,
+    ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptor, i32), EpollReturn>>>,
 }
 
 #[derive(Debug)]
@@ -36,7 +37,7 @@ pub struct EpollEvent {
     #[allow(dead_code)]
     pub file_descriptor: i32,
     #[allow(dead_code)]
-    pub file_description: Weak<RefCell<Box<dyn FileDescription>>>,
+    pub weak_file_descriptor: WeakFileDescriptor,
     #[allow(dead_code)]
     pub events: u32,
     /// `Scalar` is used to represent the
@@ -44,8 +45,7 @@ pub struct EpollEvent {
     #[allow(dead_code)]
     pub data: Scalar,
     #[allow(dead_code)]
-    pub ready_list:
-        Rc<RefCell<BTreeMap<(*const RefCell<Box<dyn FileDescription>>, i32), EpollReturn>>>,
+    pub ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptor, i32), EpollReturn>>>,
 }
 
 impl FileDescription for Epoll {
@@ -137,7 +137,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             drop(epfd);
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
-        let rc_address = file_descriptor.get_rc_address();
+        let weak_file_descriptor = file_descriptor.get_weak_file_descriptor();
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
             // Epoll event bitmask from epoll_event struct.
@@ -153,7 +153,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 throw_unsup_format!("epoll_ctl: epollet flag must be included.");
             }
 
-            let epoll_key = (rc_address, fd);
+            let epoll_key = (weak_file_descriptor, fd);
 
             // Check if the fd is already in the interest list.
             if op == epoll_ctl_add {
@@ -172,10 +172,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
 
-            let file_description = file_descriptor.get_weak_file_description();
+            let file_description = file_descriptor.get_weak_file_descriptor();
             let event = EpollEvent {
                 file_descriptor: fd,
-                file_description,
+                weak_file_descriptor: file_description,
                 events,
                 data,
                 ready_list: Rc::clone(ready_list),
@@ -183,7 +183,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interest_list.insert(epoll_key, event);
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
-            let epoll_key = (rc_address, fd);
+            let epoll_key = (weak_file_descriptor, fd);
             if !interest_list.contains_key(&epoll_key) {
                 let enoent = this.eval_libc("ENOENT");
                 drop(epfd);

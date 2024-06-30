@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind, IsTerminal, Read, SeekFrom, Write};
 use std::rc::Rc;
@@ -190,15 +191,45 @@ impl FileDescriptor {
         }
     }
 
-    // Expose the Rc address to do comparison. Do impl partialord and ord so we can just
-    // use FileDescriptor inside the epoll key tuple.
-    // TODO: change this later
-    pub fn get_rc_address(&self) -> *const RefCell<Box<dyn FileDescription>> {
-        Rc::as_ptr(&self.0)
+    pub fn get_weak_file_descriptor(&self) -> WeakFileDescriptor {
+        WeakFileDescriptor(Rc::downgrade(&self.0))
+    }
+}
+
+// File descriptor that holds weak ref to file description so it can be used in ready_list and
+// interest list of epoll.
+// We want to prevent the list from holding strong reference to the file description so it can
+// be properly closed.
+// TODO: rephrase.
+#[derive(Clone, Debug)]
+pub struct WeakFileDescriptor(Weak<RefCell<Box<dyn FileDescription>>>);
+
+impl WeakFileDescriptor {
+    pub fn get_weak_file_description(self) -> Weak<RefCell<Box<dyn FileDescription>>> {
+        self.0
     }
 
-    pub fn get_weak_file_description(&self) -> Weak<RefCell<Box<dyn FileDescription>>> {
-        Rc::downgrade(&self.0)
+    pub fn get_option_file_description(&self) -> Option<Rc<RefCell<Box<dyn FileDescription>>>> {
+        self.0.upgrade()
+    }
+}
+
+impl PartialOrd for WeakFileDescriptor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Eq for WeakFileDescriptor {}
+
+impl PartialEq for WeakFileDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0.as_ptr(), other.0.as_ptr())
+    }
+}
+
+impl Ord for WeakFileDescriptor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.as_ptr().cmp(&other.0.as_ptr())
     }
 }
 

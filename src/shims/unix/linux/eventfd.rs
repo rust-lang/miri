@@ -2,7 +2,7 @@
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::mem;
-use std::rc::{Rc, Weak};
+use std::rc::Weak;
 
 use rustc_target::abi::Endian;
 
@@ -42,8 +42,8 @@ impl Event {
             if let Some(epoll_event) = event.upgrade() {
                 if epoll_event.events & flag == flag {
                     // The file description is self, so the upgrade should always suceed.
-                    let address = Rc::as_ptr(&epoll_event.file_description.upgrade().unwrap());
-                    let epoll_key = (address, epoll_event.file_descriptor);
+                    let weak_file_descriptor = epoll_event.weak_file_descriptor.clone();
+                    let epoll_key = (weak_file_descriptor, epoll_event.file_descriptor);
                     // Retrieve the epoll return if it is already in the return list.
                     let ready_list = &mut epoll_event.ready_list.borrow_mut();
                     match ready_list.get_mut(&epoll_key) {
