@@ -40,12 +40,12 @@ impl CpuAffinityMask {
 
         // The actual representation of the bytes array is either
         //
-        // - [u32; 32] on 32-bit platforms except x86_64
+        // - [u32; 32] on 32-bit platforms
         // - [u64; 16] everywhere else
         //
         // Within the array elements, we need to use the endianness of the target.
         match target.pointer_width {
-            32 if target.arch.as_ref() != "x86_64" => {
+            32 => {
                 let start = cpu / 32 * 4; // first byte of the correct u32
                 let chunk = self.0[start..].first_chunk_mut::<4>().unwrap();
                 let offset = cpu % 32;
