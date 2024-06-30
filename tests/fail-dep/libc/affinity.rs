@@ -10,7 +10,7 @@ fn main() {
     // If pid is zero, then the calling thread is used.
     const PID: i32 = 0;
 
-    let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+    let cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
 
     let err = unsafe { sched_setaffinity(PID, size_of::<cpu_set_t>() + 1, &cpuset) }; //~ ERROR: memory access failed
     assert_eq!(err, 0);
