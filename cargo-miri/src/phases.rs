@@ -105,11 +105,14 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
         )
     });
     let mut targets = get_arg_flag_values("--target").collect::<Vec<_>>();
-    let explicit_target = if targets.is_empty() {
+    // If `targets` is empty, we need to add a `--target $HOST` flag ourselves, and also ensure
+    // that the host target is indeed setup.
+    let target_flag = if targets.is_empty() {
         let host = &rustc_version.host;
         targets.push(host.clone());
         Some(host)
     } else {
+        // We don't need to add a `--target` flag, we just forward the user's flags.
         None
     };
 
@@ -163,9 +166,9 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     // This is needed to make the `target.runner` settings do something,
     // and it later helps us detect which crates are proc-macro/build-script
     // (host crates) and which crates are needed for the program itself.
-    if let Some(explicit_target) = explicit_target {
+    if let Some(target_flag) = target_flag {
         cmd.arg("--target");
-        cmd.arg(explicit_target);
+        cmd.arg(target_flag);
     }
 
     // Set ourselves as runner for al binaries invoked by cargo.
