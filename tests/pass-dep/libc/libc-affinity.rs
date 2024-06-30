@@ -89,7 +89,7 @@ fn large_set() {
     assert_eq!(err, 0);
 }
 
-fn lying_about_size() {
+fn set_custom_cpu_mask() {
     let cpu_count = std::thread::available_parallelism().unwrap().get();
 
     assert!(cpu_count > 1, "this test cannot do anything interesting with just one thread");
@@ -178,6 +178,6 @@ fn main() {
     configure_no_cpus();
     configure_unavailable_cpu();
     large_set();
-    lying_about_size();
+    set_custom_cpu_mask();
     parent_child();
 }
