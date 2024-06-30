@@ -13,14 +13,15 @@ pub const MAX_CPUS: usize = 1024;
 // the actual representation depends on the target's endianness and pointer width.
 // See CpuAffinityMask::set for details
 #[derive(Clone)]
-pub(crate) struct CpuAffinityMask([u8; MAX_CPUS / 8]);
+pub(crate) struct CpuAffinityMask([u8; Self::CPU_MASK_BYTES]);
 
 impl CpuAffinityMask {
+    const CPU_MASK_BYTES: usize = MAX_CPUS / 8;
     // code depends on the exact size of this type
-    const _SIZE_ASSERT: () = assert!(std::mem::size_of::<Self>() == 128);
+    const _SIZE_ASSERT: () = assert!(std::mem::size_of::<Self>() == Self::CPU_MASK_BYTES);
 
     pub fn new(target: &rustc_target::spec::Target, cpu_count: u32) -> Self {
-        let mut this = Self([0; 128]);
+        let mut this = Self([0; Self::CPU_MASK_BYTES]);
 
         // the default affinity mask includes only the available CPUs
         for i in 0..cpu_count as usize {
@@ -72,7 +73,7 @@ impl CpuAffinityMask {
     pub fn from_array(
         target: &rustc_target::spec::Target,
         cpu_count: u32,
-        bytes: [u8; 128],
+        bytes: [u8; Self::CPU_MASK_BYTES],
     ) -> Option<Self> {
         // mask by what CPUs are actually available
         let default = Self::new(target, cpu_count);
