@@ -37,6 +37,18 @@ struct Event {
 }
 
 impl Event {
+    fn check_readiness(&self, epollin: u32, epollout: u32, _epollrdhup: u32) -> u32 {
+        let mut readiness: u32 = u32::MAX;
+        // Check if it is readable.
+        if self.counter == 0 {
+            readiness &= !epollin;
+        }
+        // Check if it is writable.
+        if self.counter == MAX_COUNTER {
+            readiness &= !epollout;
+        }
+        readiness
+    }
     fn update_readiness(&self, flag: u32) {
         for event in &self.epoll_events {
             if let Some(epoll_event) = event.upgrade() {
@@ -104,7 +116,11 @@ impl FileDescription for Event {
             };
             self.counter = 0;
             // Set the event mask for epoll.
+            let epollin = ecx.eval_libc_u32("EPOLLIN");
             let epollout = ecx.eval_libc_u32("EPOLLOUT");
+            let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
+            let readiness = self.check_readiness(epollin, epollout, epollrdhup);
+            self.update_readiness(readiness);
             self.events |= epollout;
             // Update ready list.
             self.update_readiness(epollout);
@@ -153,7 +169,11 @@ impl FileDescription for Event {
                 }
                 self.counter = new_count;
                 // Set the event mask for epoll.
-                // TODO: verify
+                let epollin = ecx.eval_libc_u32("EPOLLIN");
+                let epollout = ecx.eval_libc_u32("EPOLLOUT");
+                let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
+                let readiness = self.check_readiness(epollin, epollout, epollrdhup);
+                self.update_readiness(readiness);
                 let epollin = ecx.eval_libc_u32("EPOLLIN");
                 self.events |= epollin;
                 // Update ready list.

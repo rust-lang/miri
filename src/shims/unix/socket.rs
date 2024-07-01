@@ -42,14 +42,14 @@ impl SocketPair {
     // This function will check the readiness of current file description and return bitmask
     // that can reflect the readiness.
     // TODO: passing the flag using function parameter is quite hacky... improve this.
-    fn check_readiness(&self, epollin: u32, epollout: u32, epollrdup: u32) -> u32 {
+    fn check_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32 {
         let readbuf = self.readbuf.borrow();
         // Start with complement of 0, then unset the flag if we found something is not
         // doable,
-        let mut readiness: u32 = !0;
+        let mut readiness: u32 = u32::MAX;
         // Check if the writeend has closed.
         if readbuf.buf_has_writer {
-            readiness &= !epollrdup;
+            readiness &= !epollrdhup;
         }
 
         // Unset flag if it is unreadable.
