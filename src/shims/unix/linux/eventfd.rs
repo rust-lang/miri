@@ -32,7 +32,6 @@ struct Event {
     counter: u64,
     is_nonblock: bool,
     clock: VClock,
-    events: u32,
     epoll_events: Vec<Weak<EpollEvent>>,
 }
 
@@ -121,7 +120,6 @@ impl FileDescription for Event {
             let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
             let readiness = self.check_readiness(epollin, epollout, epollrdhup);
             self.update_readiness(readiness);
-            self.events |= epollout;
             // Update ready list.
             self.update_readiness(epollout);
             return Ok(Ok(U64_ARRAY_SIZE));
@@ -175,7 +173,6 @@ impl FileDescription for Event {
                 let readiness = self.check_readiness(epollin, epollout, epollrdhup);
                 self.update_readiness(readiness);
                 let epollin = ecx.eval_libc_u32("EPOLLIN");
-                self.events |= epollin;
                 // Update ready list.
                 self.update_readiness(epollin);
             }
@@ -246,7 +243,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             counter: val.into(),
             is_nonblock,
             clock: VClock::default(),
-            events: 0,
             epoll_events: Vec::new(),
         }));
         Ok(Scalar::from_i32(fd))

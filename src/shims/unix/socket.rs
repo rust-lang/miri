@@ -35,7 +35,6 @@ struct Buffer {
     /// If all writers of this buffer are dropped, buf_has_writer becomes false and we
     /// indicate EOF instead of blocking.
     buf_has_writer: bool,
-    events: u32,
 }
 
 impl SocketPair {
@@ -167,8 +166,6 @@ impl FileDescription for SocketPair {
         let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
         let readiness = self.check_readiness(epollin, epollout, epollrdhup);
         self.update_readiness(readiness);
-        // TODO: maybe we should not keep a record, we should just check it instantly instead.
-        readbuf.events |= epollout;
         return Ok(Ok(actual_read_size));
     }
 
@@ -215,8 +212,6 @@ impl FileDescription for SocketPair {
         let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
         let readiness = self.check_readiness(epollin, epollout, epollrdhup);
         self.update_readiness(readiness);
-        // TODO: maybe we should not keep a record, we should just check it instantly instead.
-        writebuf.events |= epollin;
         return Ok(Ok(actual_write_size));
     }
 }
@@ -284,14 +279,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             buf: VecDeque::new(),
             clock: VClock::default(),
             buf_has_writer: true,
-            events: 0,
         }));
 
         let buffer2 = Rc::new(RefCell::new(Buffer {
             buf: VecDeque::new(),
             clock: VClock::default(),
             buf_has_writer: true,
-            events: 0,
         }));
 
         let socketpair_0 = SocketPair {
