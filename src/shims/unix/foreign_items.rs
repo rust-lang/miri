@@ -579,7 +579,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let einval = this.eval_libc("EFAULT");
                     this.set_last_error(einval)?;
                     this.write_scalar(Scalar::from_i32(-1), dest)?;
-                } else if cpusetsize < std::mem::size_of::<CpuAffinityMask>().try_into().unwrap() {
+                } else if cpusetsize < CpuAffinityMask::CPU_MASK_BYTES.try_into().unwrap() {
                     // Writing the affinity mask to the pointer would write out of bounds.
                     let einval = this.eval_libc("EINVAL");
                     this.set_last_error(einval)?;
@@ -626,9 +626,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.set_last_error(einval)?;
                     this.write_scalar(Scalar::from_i32(-1), dest)?;
                 } else {
-                    // NOTE: cpusetsize might be smaller than `mem::size_of::<CpuAffinityMask>()`
+                    // NOTE: cpusetsize might be smaller than `CpuAffinityMask::CPU_MASK_BYTES`
                     let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
-                    // This ignores the bytes beyond MAX_CPUS.
+                    // This ignores the bytes beyond `CpuAffinityMask::CPU_MASK_BYTES`
                     let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));
                     match CpuAffinityMask::from_array(&this.tcx.sess.target, this.machine.num_cpus, bits_array) {
                         Some(cpuset) => {

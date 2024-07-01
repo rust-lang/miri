@@ -16,9 +16,7 @@ pub const MAX_CPUS: usize = 1024;
 pub(crate) struct CpuAffinityMask([u8; Self::CPU_MASK_BYTES]);
 
 impl CpuAffinityMask {
-    const CPU_MASK_BYTES: usize = MAX_CPUS / 8;
-    // code depends on the exact size of this type
-    const _SIZE_ASSERT: () = assert!(std::mem::size_of::<Self>() == Self::CPU_MASK_BYTES);
+    pub(crate) const CPU_MASK_BYTES: usize = MAX_CPUS / 8;
 
     pub fn new(target: &rustc_target::spec::Target, cpu_count: u32) -> Self {
         let mut this = Self([0; Self::CPU_MASK_BYTES]);
