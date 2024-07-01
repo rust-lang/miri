@@ -205,11 +205,7 @@ impl FileDescriptor {
 pub struct WeakFileDescriptor(Weak<RefCell<Box<dyn FileDescription>>>);
 
 impl WeakFileDescriptor {
-    pub fn get_weak_file_description(self) -> Weak<RefCell<Box<dyn FileDescription>>> {
-        self.0
-    }
-
-    pub fn get_option_file_description(&self) -> Option<Rc<RefCell<Box<dyn FileDescription>>>> {
+    pub fn get_file_description(&self) -> Option<Rc<RefCell<Box<dyn FileDescription>>>> {
         self.0.upgrade()
     }
 }

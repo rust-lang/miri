@@ -199,7 +199,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interest_list.insert(epoll_key, event);
             // TODO: Check and update if there is any event. Compilation error for this
             //let target_file_description =
-            //    weak_file_descriptor.get_option_file_description().unwrap().borrow_mut();
+            //    weak_file_descriptor.get_file_description().unwrap().borrow_mut();
             //target_file_description.check_and_update_readiness(epollin, epollout, epollrdhup);
 
             Ok(Scalar::from_i32(0))
@@ -275,7 +275,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // FIXME return number of events ready when scheme for marking events ready exists
         throw_unsup_format!("returning ready events from epoll_wait is not yet implemented");
 
-        // TODO: loop through the list, and return ready events and toggle epollreturn::should_notify
+        // TODO: loop through the list, return number of ready events
+        // TODO: toggle should_notify
+        // TODO: return the information in epoll_return
         // to false.
     }
 }
