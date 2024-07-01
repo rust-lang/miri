@@ -23,6 +23,7 @@ pub struct EpollReturn {
     pub events: u32,
     #[allow(dead_code)]
     pub data: Scalar,
+    pub should_notify: bool,
 }
 
 /// Epoll Events associate events with data.
@@ -54,6 +55,8 @@ pub trait EpollTarget {
         self.update_readiness(self.check_readiness(epollin, epollout, epollrdhup));
     }
     fn check_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32;
+    // TODO: update_readiness should only have one implementation, but there is no access
+    // to self.epoll_events now.
     fn update_readiness(&self, flag: u32);
 }
 
@@ -130,9 +133,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let epoll_ctl_add = this.eval_libc_i32("EPOLL_CTL_ADD");
         let epoll_ctl_mod = this.eval_libc_i32("EPOLL_CTL_MOD");
         let epoll_ctl_del = this.eval_libc_i32("EPOLL_CTL_DEL");
-        let epollin = this.eval_libc_u32("EPOLLIN");
-        let epollout = this.eval_libc_u32("EPOLLOUT");
-        let epollrdhup = this.eval_libc_u32("EPOLLRDHUP");
+        //let epollin = this.eval_libc_u32("EPOLLIN");
+        //let epollout = this.eval_libc_u32("EPOLLOUT");
+        //let epollrdhup = this.eval_libc_u32("EPOLLRDHUP");
         let epollet = this.eval_libc_u32("EPOLLET");
 
         // Check if epfd is a valid epoll file descriptor.
@@ -271,5 +274,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // FIXME return number of events ready when scheme for marking events ready exists
         throw_unsup_format!("returning ready events from epoll_wait is not yet implemented");
+
+        // TODO: loop through the list, and return ready events and toggle epollreturn::should_notify
+        // to false.
     }
 }
