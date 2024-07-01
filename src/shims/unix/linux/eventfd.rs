@@ -6,7 +6,7 @@ use std::rc::Weak;
 
 use rustc_target::abi::Endian;
 
-use crate::shims::unix::linux::epoll::{EpollEvent, EpollReturn};
+use crate::shims::unix::linux::epoll::{EpollEvent, EpollReturn, EpollTarget};
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -35,7 +35,11 @@ struct Event {
     epoll_events: Vec<Weak<EpollEvent>>,
 }
 
-impl Event {
+impl EpollTarget for Event {
+    fn check_and_update_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) {
+        self.update_readiness(self.check_readiness(epollin, epollout, epollrdhup));
+    }
+
     fn check_readiness(&self, epollin: u32, epollout: u32, _epollrdhup: u32) -> u32 {
         let mut readiness: u32 = u32::MAX;
         // Check if it is readable.
@@ -49,6 +53,7 @@ impl Event {
         readiness
     }
     fn update_readiness(&self, flag: u32) {
+        // TODO: separate the check for each independent flags.
         for event in &self.epoll_events {
             if let Some(epoll_event) = event.upgrade() {
                 if epoll_event.events & flag == flag {
@@ -118,10 +123,7 @@ impl FileDescription for Event {
             let epollin = ecx.eval_libc_u32("EPOLLIN");
             let epollout = ecx.eval_libc_u32("EPOLLOUT");
             let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-            let readiness = self.check_readiness(epollin, epollout, epollrdhup);
-            self.update_readiness(readiness);
-            // Update ready list.
-            self.update_readiness(epollout);
+            self.check_and_update_readiness(epollin, epollout, epollrdhup);
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -170,11 +172,7 @@ impl FileDescription for Event {
                 let epollin = ecx.eval_libc_u32("EPOLLIN");
                 let epollout = ecx.eval_libc_u32("EPOLLOUT");
                 let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-                let readiness = self.check_readiness(epollin, epollout, epollrdhup);
-                self.update_readiness(readiness);
-                let epollin = ecx.eval_libc_u32("EPOLLIN");
-                // Update ready list.
-                self.update_readiness(epollin);
+                self.check_and_update_readiness(epollin, epollout, epollrdhup);
             }
             None | Some(u64::MAX) => {
                 if self.is_nonblock {

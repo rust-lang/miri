@@ -48,6 +48,15 @@ pub struct EpollEvent {
     pub ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptor, i32), EpollReturn>>>,
 }
 
+// This trait is for any file description that can be monitored by epoll.
+pub trait EpollTarget {
+    fn check_and_update_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) {
+        self.update_readiness(self.check_readiness(epollin, epollout, epollrdhup));
+    }
+    fn check_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32;
+    fn update_readiness(&self, flag: u32);
+}
+
 impl FileDescription for Epoll {
     fn name(&self) -> &'static str {
         "epoll"
@@ -117,9 +126,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let fd = this.read_scalar(fd)?.to_i32()?;
         let event = this.deref_pointer_as(event, this.libc_ty_layout("epoll_event"))?;
 
+        // TODO: why is these flags i32?
         let epoll_ctl_add = this.eval_libc_i32("EPOLL_CTL_ADD");
         let epoll_ctl_mod = this.eval_libc_i32("EPOLL_CTL_MOD");
         let epoll_ctl_del = this.eval_libc_i32("EPOLL_CTL_DEL");
+        let epollin = this.eval_libc_u32("EPOLLIN");
+        let epollout = this.eval_libc_u32("EPOLLOUT");
+        let epollrdhup = this.eval_libc_u32("EPOLLRDHUP");
+        let epollet = this.eval_libc_u32("EPOLLET");
 
         // Check if epfd is a valid epoll file descriptor.
         let Some(mut epfd) = this.machine.fds.get_mut(epfd) else {
@@ -146,7 +160,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             let data = this.project_field(&event, 1)?;
             let data = this.read_scalar(&data)?;
-            let epollet = this.eval_libc_u32("EPOLLET");
 
             // We only support edge-triggered notification for now.
             if events & epollet != epollet {
@@ -172,15 +185,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
 
-            let file_description = file_descriptor.get_weak_file_descriptor();
+            let weak_file_descriptor = file_descriptor.get_weak_file_descriptor();
             let event = EpollEvent {
                 file_descriptor: fd,
-                weak_file_descriptor: file_description,
+                weak_file_descriptor,
                 events,
                 data,
                 ready_list: Rc::clone(ready_list),
             };
             interest_list.insert(epoll_key, event);
+            // TODO: Check and update if there is any event. Compilation error for this
+            //let target_file_description =
+            //    weak_file_descriptor.get_option_file_description().unwrap().borrow_mut();
+            //target_file_description.check_and_update_readiness(epollin, epollout, epollrdhup);
+
             Ok(Scalar::from_i32(0))
         } else if op == epoll_ctl_del {
             let epoll_key = (weak_file_descriptor, fd);

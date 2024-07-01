@@ -4,7 +4,7 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::rc::{Rc, Weak};
 
-use crate::shims::unix::linux::epoll::EpollReturn;
+use crate::shims::unix::linux::epoll::{EpollReturn, EpollTarget};
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -37,7 +37,10 @@ struct Buffer {
     buf_has_writer: bool,
 }
 
-impl SocketPair {
+impl EpollTarget for SocketPair {
+    fn check_and_update_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) {
+        self.update_readiness(self.check_readiness(epollin, epollout, epollrdhup));
+    }
     // This function will check the readiness of current file description and return bitmask
     // that can reflect the readiness.
     // TODO: passing the flag using function parameter is quite hacky... improve this.
@@ -77,19 +80,19 @@ impl SocketPair {
     fn update_readiness(&self, flag: u32) {
         for event in &self.epoll_events {
             if let Some(epoll_event) = event.upgrade() {
+                // TODO: separate the check for each independent flags.
                 if epoll_event.events & flag == flag {
                     // The file description is self, so the upgrade should always suceed.
                     let weak_file_descriptor = epoll_event.weak_file_descriptor.clone();
                     let epoll_key = (weak_file_descriptor, epoll_event.file_descriptor);
                     // Retrieve the epoll return if it is already in the return list.
                     let ready_list = &mut epoll_event.ready_list.borrow_mut();
+                    // Add a new epoll entry if it doesn't exist, or modify the event mask if it exists.
                     match ready_list.get_mut(&epoll_key) {
                         Some(epoll_return) => {
-                            // Update the flag of existing epoll return entry.
                             epoll_return.events |= flag;
                         }
                         None => {
-                            // Add a new epoll return entry to the ready list.
                             let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
                             ready_list.insert(epoll_key, epoll_return);
                         }
@@ -114,7 +117,8 @@ impl FileDescription for SocketPair {
         if let Some(writebuf) = self.writebuf.upgrade() {
             writebuf.borrow_mut().buf_has_writer = false;
         };
-        // TODO: how to notify another file description using epollrdhup?
+        // TODO: how to notify another file description from here? We only have access to
+        // current file description.
         Ok(Ok(()))
     }
 
@@ -164,8 +168,7 @@ impl FileDescription for SocketPair {
         let epollin = ecx.eval_libc_u32("EPOLLIN");
         let epollout = ecx.eval_libc_u32("EPOLLOUT");
         let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-        let readiness = self.check_readiness(epollin, epollout, epollrdhup);
-        self.update_readiness(readiness);
+        self.check_and_update_readiness(epollin, epollout, epollrdhup);
         return Ok(Ok(actual_read_size));
     }
 
@@ -210,8 +213,7 @@ impl FileDescription for SocketPair {
         let epollin = ecx.eval_libc_u32("EPOLLIN");
         let epollout = ecx.eval_libc_u32("EPOLLOUT");
         let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-        let readiness = self.check_readiness(epollin, epollout, epollrdhup);
-        self.update_readiness(readiness);
+        self.check_and_update_readiness(epollin, epollout, epollrdhup);
         return Ok(Ok(actual_write_size));
     }
 }
