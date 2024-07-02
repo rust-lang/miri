@@ -3,8 +3,10 @@ use std::str;
 
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_span::Symbol;
+use rustc_target::abi::Size;
 use rustc_target::spec::abi::Abi;
 
+use crate::concurrency::cpu_affinity::CpuAffinityMask;
 use crate::shims::alloc::EvalContextExt as _;
 use crate::shims::unix::*;
 use crate::*;
@@ -557,6 +559,95 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [req, rem] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.nanosleep(req, rem)?;
                 this.write_scalar(Scalar::from_i32(result), dest)?;
+            }
+            "sched_getaffinity" => {
+                // Currently this function does not exist on all Unixes, e.g. on macOS.
+                if !matches!(&*this.tcx.sess.target.os, "linux" | "freebsd" | "android") {
+                    throw_unsup_format!(
+                        "`sched_getaffinity` is not supported on {}",
+                        this.tcx.sess.target.os
+                    );
+                }
+
+                let [pid, cpusetsize, mask] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let pid = this.read_scalar(pid)?.to_u32()?;
+                let cpusetsize = this.read_target_usize(cpusetsize)?;
+                let mask = this.read_pointer(mask)?;
+
+                let thread_id = match pid {
+                    0 => this.active_thread(),
+                    _ => ThreadId::from(pid),
+                };
+
+                if this.ptr_is_null(mask)? {
+                    let einval = this.eval_libc("EFAULT");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else if cpusetsize < CpuAffinityMask::CPU_MASK_BYTES.try_into().unwrap() {
+                    // Writing the affinity mask to the pointer would write out of bounds.
+                    let einval = this.eval_libc("EINVAL");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&thread_id) {
+                    let cpuset = cpuset.clone();
+                    this.write_bytes_ptr(mask, cpuset.as_slice().iter().copied())?;
+                    this.write_scalar(Scalar::from_i32(0), dest)?;
+                } else {
+                    // The thread whose ID is pid could not be found
+                    let einval = this.eval_libc("ESRCH");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                }
+            }
+            "sched_setaffinity" => {
+                // Currently this function does not exist on all Unixes, e.g. on macOS.
+                if !matches!(&*this.tcx.sess.target.os, "linux" | "freebsd" | "android") {
+                    throw_unsup_format!(
+                        "`sched_setaffinity` is not supported on {}",
+                        this.tcx.sess.target.os
+                    );
+                }
+
+                let [pid, cpusetsize, mask] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let pid = this.read_scalar(pid)?.to_u32()?;
+                let cpusetsize = this.read_target_usize(cpusetsize)?;
+                let mask = this.read_pointer(mask)?;
+
+                let thread_id = match pid {
+                    0 => this.active_thread(),
+                    _ => ThreadId::from(pid),
+                };
+
+                #[allow(clippy::map_entry)]
+                if this.ptr_is_null(mask)? {
+                    let einval = this.eval_libc("EFAULT");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else if !this.machine.thread_cpu_affinity.contains_key(&thread_id) {
+                    // The thread whose ID is pid could not be found
+                    let einval = this.eval_libc("ESRCH");
+                    this.set_last_error(einval)?;
+                    this.write_scalar(Scalar::from_i32(-1), dest)?;
+                } else {
+                    // NOTE: cpusetsize might be smaller than `CpuAffinityMask::CPU_MASK_BYTES`
+                    let bits_slice = this.read_bytes_ptr_strip_provenance(mask, Size::from_bytes(cpusetsize))?;
+                    // This ignores the bytes beyond `CpuAffinityMask::CPU_MASK_BYTES`
+                    let bits_array = std::array::from_fn(|i| bits_slice.get(i).copied().unwrap_or(0));
+                    match CpuAffinityMask::from_array(&this.tcx.sess.target, this.machine.num_cpus, bits_array) {
+                        Some(cpuset) => {
+                            this.machine.thread_cpu_affinity.insert(thread_id, cpuset);
+                            this.write_scalar(Scalar::from_i32(0), dest)?;
+                        }
+                        None => {
+                            // The intersection between the mask and the available CPUs was empty.
+                            let einval = this.eval_libc("EINVAL");
+                            this.set_last_error(einval)?;
+                            this.write_scalar(Scalar::from_i32(-1), dest)?;
+                        }
+                    }
+                }
             }
 
             // Miscellaneous
