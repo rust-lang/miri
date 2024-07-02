@@ -1,0 +1,24 @@
+warning: reborrow of reference to `extern type`
+  --> RUSTLIB/core/src/ptr/metadata.rs:LL:CC
+   |
+LL |     ptr_metadata(ptr)
+   |     ^^^^^^^^^^^^^^^^^ reborrow of a reference to `extern type` is not properly supported
+   |
+   = help: `extern type` are not compatible with Miri's Stacked Borrows aliasing checks; Miri may miss bugs in this code
+   = help: try running with `MIRIFLAGS=-Zmiri-tree-borrows` to use the more permissive but also even more experimental Tree Borrows aliasing checks instead
+   = note: BACKTRACE:
+   = note: inside `std::ptr::metadata::<dyn std::fmt::Debug>` at RUSTLIB/core/src/ptr/metadata.rs:LL:CC
+   = note: inside `std::ptr::const_ptr::<impl *const u8>::with_metadata_of::<dyn std::fmt::Debug>` at RUSTLIB/core/src/ptr/const_ptr.rs:LL:CC
+   = note: inside `std::rc::Rc::<dyn std::fmt::Debug>::from_raw_in` at RUSTLIB/alloc/src/rc.rs:LL:CC
+   = note: inside `std::rc::Rc::<dyn std::fmt::Debug>::from_raw` at RUSTLIB/alloc/src/rc.rs:LL:CC
+note: inside `rc_fat_ptr_eq`
+  --> $DIR/rc.rs:LL:CC
+   |
+LL |     drop(unsafe { Rc::from_raw(r) });
+   |                   ^^^^^^^^^^^^^^^
+note: inside `main`
+  --> $DIR/rc.rs:LL:CC
+   |
+LL |     rc_fat_ptr_eq();
+   |     ^^^^^^^^^^^^^^^
+

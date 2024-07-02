@@ -1,0 +1,21 @@
+warning: reborrow of reference to `extern type`
+  --> RUSTLIB/core/src/ptr/metadata.rs:LL:CC
+   |
+LL |     ptr_metadata(ptr)
+   |     ^^^^^^^^^^^^^^^^^ reborrow of a reference to `extern type` is not properly supported
+   |
+   = help: `extern type` are not compatible with Miri's Stacked Borrows aliasing checks; Miri may miss bugs in this code
+   = help: try running with `MIRIFLAGS=-Zmiri-tree-borrows` to use the more permissive but also even more experimental Tree Borrows aliasing checks instead
+   = note: BACKTRACE:
+   = note: inside `std::ptr::metadata::<dyn std::fmt::Debug>` at RUSTLIB/core/src/ptr/metadata.rs:LL:CC
+note: inside `metadata_vtable`
+  --> $DIR/pointers.rs:LL:CC
+   |
+LL |     let meta: ptr::DynMetadata<_> = ptr::metadata(p as *const _);
+   |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: inside `main`
+  --> $DIR/pointers.rs:LL:CC
+   |
+LL |     metadata_vtable();
+   |     ^^^^^^^^^^^^^^^^^
+
