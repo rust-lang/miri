@@ -4,7 +4,7 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::rc::{Rc, Weak};
 
-use crate::shims::unix::linux::epoll::{EpollReturn, EpollTarget};
+use crate::shims::unix::linux::epoll::EpollReturn;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -37,14 +37,15 @@ struct Buffer {
     buf_has_writer: bool,
 }
 
-impl EpollTarget for SocketPair {
-    fn check_and_update_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) {
-        self.update_readiness(self.check_readiness(epollin, epollout, epollrdhup));
+impl FileDescription for SocketPair {
+    fn name(&self) -> &'static str {
+        "socketpair"
     }
-    // This function will check the readiness of current file description and return bitmask
-    // that can reflect the readiness.
-    // TODO: passing the flag using function parameter is quite hacky... improve this.
-    fn check_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32 {
+
+    fn check_readiness<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        let epollin = ecx.eval_libc_u32("EPOLLIN");
+        let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
         let readbuf = self.readbuf.borrow();
         // Start with complement of 0, then unset the flag if we found something is not
         // doable,
@@ -73,11 +74,10 @@ impl EpollTarget for SocketPair {
                 readiness &= epollout;
             }
         }
-        readiness
+        Ok(readiness)
     }
-    // This function will add epollreturn to ready list if there are matching events in
-    // interest list.
-    fn update_readiness(&self, flag: u32) {
+
+    fn update_readiness<'tcx>(&self, flag: u32) -> InterpResult<'tcx> {
         for event in &self.epoll_events {
             if let Some(epoll_event) = event.upgrade() {
                 // TODO: separate the check for each independent flags.
@@ -100,12 +100,7 @@ impl EpollTarget for SocketPair {
                 }
             }
         }
-    }
-}
-
-impl FileDescription for SocketPair {
-    fn name(&self) -> &'static str {
-        "socketpair"
+        Ok(())
     }
 
     fn close<'tcx>(
@@ -165,10 +160,7 @@ impl FileDescription for SocketPair {
         // Conveniently, `read` exists on `VecDeque` and has exactly the desired behavior.
         let actual_read_size = readbuf.buf.read(bytes).unwrap();
         // Set event mask.
-        let epollin = ecx.eval_libc_u32("EPOLLIN");
-        let epollout = ecx.eval_libc_u32("EPOLLOUT");
-        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-        self.check_and_update_readiness(epollin, epollout, epollrdhup);
+        self.check_and_update_readiness(ecx).unwrap();
         return Ok(Ok(actual_read_size));
     }
 
@@ -210,10 +202,7 @@ impl FileDescription for SocketPair {
         let actual_write_size = write_size.min(available_space);
         writebuf.buf.extend(&bytes[..actual_write_size]);
         // check the readiness of current file description and update it.
-        let epollin = ecx.eval_libc_u32("EPOLLIN");
-        let epollout = ecx.eval_libc_u32("EPOLLOUT");
-        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-        self.check_and_update_readiness(epollin, epollout, epollrdhup);
+        self.check_and_update_readiness(ecx).unwrap();
         return Ok(Ok(actual_write_size));
     }
 }

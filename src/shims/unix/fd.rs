@@ -60,6 +60,19 @@ pub trait FileDescription: std::fmt::Debug + Any {
         // so we use a default impl here.
         false
     }
+    // Check the readiness of the file description support to be epolled and update the ready list.
+    fn check_and_update_readiness<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx> {
+        self.check_readiness(ecx).map(|events| self.update_readiness(events))?
+    }
+
+    // Check the readiness of epoll-supported file description.
+    fn check_readiness<'tcx>(&self, _ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        throw_unsup_format!("This file description is not supported by epoll");
+    }
+    // Update the ready list based on the readiness of file description.
+    fn update_readiness<'tcx>(&self, _flag: u32) -> InterpResult<'tcx> {
+        throw_unsup_format!("This file description is not supported by epoll");
+    }
 }
 
 impl dyn FileDescription {

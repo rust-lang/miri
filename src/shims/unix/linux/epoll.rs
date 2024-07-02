@@ -48,17 +48,6 @@ pub struct EpollEvent {
     pub ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptor, i32), EpollReturn>>>,
 }
 
-// This trait is for any file description that can be monitored by epoll.
-pub trait EpollTarget {
-    fn check_and_update_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) {
-        self.update_readiness(self.check_readiness(epollin, epollout, epollrdhup));
-    }
-    fn check_readiness(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32;
-    // TODO: update_readiness should only have one implementation, but there is no access
-    // to self.epoll_events now.
-    fn update_readiness(&self, flag: u32);
-}
-
 impl FileDescription for Epoll {
     fn name(&self) -> &'static str {
         "epoll"
