@@ -87,16 +87,10 @@ impl FileDescription for SocketPair {
                     let epoll_key = (weak_file_descriptor, epoll_event.file_descriptor);
                     // Retrieve the epoll return if it is already in the return list.
                     let ready_list = &mut epoll_event.ready_list.borrow_mut();
-                    // Add a new epoll entry if it doesn't exist, or modify the event mask if it exists.
-                    match ready_list.get_mut(&epoll_key) {
-                        Some(epoll_return) => {
-                            epoll_return.events |= flag;
-                        }
-                        None => {
-                            let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
-                            ready_list.insert(epoll_key, epoll_return);
-                        }
-                    }
+                    // Add a new epoll entry if it doesn't exist, or update the event mask if it exists.
+                    let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
+                    let epoll_entry = ready_list.entry(epoll_key).or_insert(epoll_return);
+                    epoll_entry.events |= flag;
                 }
             }
         }
