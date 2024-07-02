@@ -22,12 +22,17 @@ def fail(msg):
     print("\nTEST FAIL: {}".format(msg))
     sys.exit(1)
 
-def cargo_miri(cmd, quiet = True):
+def cargo_miri(cmd, quiet = True, targets = None):
     args = ["cargo", "miri", cmd] + CARGO_EXTRA_FLAGS
     if quiet:
         args += ["-q"]
-    if ARGS.target:
+
+    if targets is not None:
+        for target in targets:
+            args.extend(("--target", target))
+    elif ARGS.target is not None:
         args += ["--target", ARGS.target]
+
     return args
 
 def normalize_stdout(str):
@@ -178,6 +183,11 @@ def test_cargo_miri_test():
     test("`cargo miri test` (custom target dir)",
         cargo_miri("test") + ["--target-dir=custom-test"],
         default_ref, "test.stderr-empty.ref",
+        env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
+    )
+    test("`cargo miri test` (multiple targets)",
+        cargo_miri("test", targets = ["aarch64-unknown-linux-gnu", "s390x-unknown-linux-gnu"]),
+        "test.multiple_targets.stdout.ref", "test.stderr-empty.ref",
         env={'MIRIFLAGS': "-Zmiri-permissive-provenance"},
     )
     del os.environ["CARGO_TARGET_DIR"] # this overrides `build.target-dir` passed by `--config`, so unset it
