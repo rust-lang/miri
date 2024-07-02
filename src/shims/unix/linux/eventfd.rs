@@ -66,15 +66,10 @@ impl EpollTarget for Event {
                         Some(epoll_return) => {
                             // Update the flag of existing epoll return entry.
                             epoll_return.events |= flag;
-                            epoll_return.should_notify = true;
                         }
                         None => {
                             // Add a new epoll return entry to the ready list.
-                            let epoll_return = EpollReturn {
-                                events: flag,
-                                data: epoll_event.data,
-                                should_notify: true,
-                            };
+                            let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
                             ready_list.insert(epoll_key, epoll_return);
                         }
                     }

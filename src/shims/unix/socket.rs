@@ -91,14 +91,9 @@ impl EpollTarget for SocketPair {
                     match ready_list.get_mut(&epoll_key) {
                         Some(epoll_return) => {
                             epoll_return.events |= flag;
-                            epoll_return.should_notify = true;
                         }
                         None => {
-                            let epoll_return = EpollReturn {
-                                events: flag,
-                                data: epoll_event.data,
-                                should_notify: true,
-                            };
+                            let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
                             ready_list.insert(epoll_key, epoll_return);
                         }
                     }

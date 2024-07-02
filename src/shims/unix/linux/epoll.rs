@@ -23,7 +23,6 @@ pub struct EpollReturn {
     pub events: u32,
     #[allow(dead_code)]
     pub data: Scalar,
-    pub should_notify: bool,
 }
 
 /// Epoll Events associate events with data.
@@ -276,7 +275,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         throw_unsup_format!("returning ready events from epoll_wait is not yet implemented");
 
         // TODO: loop through the list, return number of ready events
-        // TODO: toggle should_notify
         // TODO: return the information in epoll_return
         // to false.
     }
