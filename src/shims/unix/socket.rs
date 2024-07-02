@@ -4,10 +4,12 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::rc::{Rc, Weak};
 
+use crate::shims::unix::linux::epoll::EpollReturn;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
 use self::fd::FileDescriptor;
+use self::shims::unix::linux::epoll::EpollEvent;
 
 /// The maximum capacity of the socketpair buffer in bytes.
 /// This number is arbitrary as the value can always
@@ -22,6 +24,7 @@ struct SocketPair {
     writebuf: Weak<RefCell<Buffer>>,
     readbuf: Rc<RefCell<Buffer>>,
     is_nonblock: bool,
+    epoll_events: Vec<Weak<EpollEvent>>,
 }
 
 #[derive(Debug)]
@@ -39,6 +42,61 @@ impl FileDescription for SocketPair {
         "socketpair"
     }
 
+    fn check_readiness<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        let epollin = ecx.eval_libc_u32("EPOLLIN");
+        let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
+        let readbuf = self.readbuf.borrow();
+        // Start with complement of 0, then unset the flag if we found something is not
+        // doable,
+        let mut readiness: u32 = u32::MAX;
+        // Check if the writeend has closed.
+        if readbuf.buf_has_writer {
+            readiness &= !epollrdhup;
+        }
+
+        // Unset flag if it is unreadable.
+        if readbuf.buf.is_empty() {
+            readiness &= !epollin;
+        }
+
+        // Unset flag if it is not writable.
+        match self.writebuf.upgrade() {
+            Some(writebuf) => {
+                let writebuf = writebuf.borrow();
+                let data_size = writebuf.buf.len();
+                let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(data_size);
+                if available_space == 0 {
+                    readiness &= epollout;
+                }
+            }
+            None => {
+                readiness &= epollout;
+            }
+        }
+        Ok(readiness)
+    }
+
+    fn update_readiness<'tcx>(&self, flag: u32) -> InterpResult<'tcx> {
+        for event in &self.epoll_events {
+            if let Some(epoll_event) = event.upgrade() {
+                // TODO: separate the check for each independent flags.
+                if epoll_event.events & flag == flag {
+                    // The file description is self, so the upgrade should always suceed.
+                    let weak_file_descriptor = epoll_event.weak_file_descriptor.clone();
+                    let epoll_key = (weak_file_descriptor, epoll_event.file_descriptor);
+                    // Retrieve the epoll return if it is already in the return list.
+                    let ready_list = &mut epoll_event.ready_list.borrow_mut();
+                    // Add a new epoll entry if it doesn't exist, or update the event mask if it exists.
+                    let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
+                    let epoll_entry = ready_list.entry(epoll_key).or_insert(epoll_return);
+                    epoll_entry.events |= flag;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn close<'tcx>(
         self: Box<Self>,
         _communicate_allowed: bool,
@@ -48,6 +106,8 @@ impl FileDescription for SocketPair {
         if let Some(writebuf) = self.writebuf.upgrade() {
             writebuf.borrow_mut().buf_has_writer = false;
         };
+        // TODO: how to notify another file description from here? We only have access to
+        // current file description.
         Ok(Ok(()))
     }
 
@@ -93,6 +153,8 @@ impl FileDescription for SocketPair {
         // Do full read / partial read based on the space available.
         // Conveniently, `read` exists on `VecDeque` and has exactly the desired behavior.
         let actual_read_size = readbuf.buf.read(bytes).unwrap();
+        // Set event mask.
+        self.check_and_update_readiness(ecx).unwrap();
         return Ok(Ok(actual_read_size));
     }
 
@@ -133,6 +195,8 @@ impl FileDescription for SocketPair {
         // Do full write / partial write based on the space available.
         let actual_write_size = write_size.min(available_space);
         writebuf.buf.extend(&bytes[..actual_write_size]);
+        // check the readiness of current file description and update it.
+        self.check_and_update_readiness(ecx).unwrap();
         return Ok(Ok(actual_write_size));
     }
 }
@@ -212,12 +276,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             writebuf: Rc::downgrade(&buffer1),
             readbuf: Rc::clone(&buffer2),
             is_nonblock: is_sock_nonblock,
+            epoll_events: Vec::new(),
         };
 
         let socketpair_1 = SocketPair {
             writebuf: Rc::downgrade(&buffer2),
             readbuf: Rc::clone(&buffer1),
             is_nonblock: is_sock_nonblock,
+            epoll_events: Vec::new(),
         };
 
         let fds = &mut this.machine.fds;

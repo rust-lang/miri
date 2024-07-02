@@ -3,9 +3,11 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind, IsTerminal, Read, SeekFrom, Write};
 use std::rc::Rc;
+use std::rc::Weak;
 
 use rustc_target::abi::Size;
 
@@ -57,6 +59,19 @@ pub trait FileDescription: std::fmt::Debug + Any {
         // Most FDs are not tty's and the consequence of a wrong `false` are minor,
         // so we use a default impl here.
         false
+    }
+    // Check the readiness of the file description support to be epolled and update the ready list.
+    fn check_and_update_readiness<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx> {
+        self.check_readiness(ecx).map(|events| self.update_readiness(events))?
+    }
+
+    // Check the readiness of epoll-supported file description.
+    fn check_readiness<'tcx>(&self, _ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        throw_unsup_format!("This file description is not supported by epoll");
+    }
+    // Update the ready list based on the readiness of file description.
+    fn update_readiness<'tcx>(&self, _flag: u32) -> InterpResult<'tcx> {
+        throw_unsup_format!("This file description is not supported by epoll");
     }
 }
 
@@ -187,6 +202,43 @@ impl FileDescriptor {
             Some(fd) => RefCell::into_inner(fd).close(communicate_allowed),
             None => Ok(Ok(())),
         }
+    }
+
+    pub fn get_weak_file_descriptor(&self) -> WeakFileDescriptor {
+        WeakFileDescriptor(Rc::downgrade(&self.0))
+    }
+}
+
+// File descriptor that holds weak ref to file description so it can be used in ready_list and
+// interest list of epoll.
+// We want to prevent the list from holding strong reference to the file description so it can
+// be properly closed.
+// TODO: rephrase.
+#[derive(Clone, Debug)]
+pub struct WeakFileDescriptor(Weak<RefCell<Box<dyn FileDescription>>>);
+
+impl WeakFileDescriptor {
+    pub fn get_file_description(&self) -> Option<Rc<RefCell<Box<dyn FileDescription>>>> {
+        self.0.upgrade()
+    }
+}
+
+impl PartialOrd for WeakFileDescriptor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Eq for WeakFileDescriptor {}
+
+impl PartialEq for WeakFileDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0.as_ptr(), other.0.as_ptr())
+    }
+}
+
+impl Ord for WeakFileDescriptor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.as_ptr().cmp(&other.0.as_ptr())
     }
 }
 

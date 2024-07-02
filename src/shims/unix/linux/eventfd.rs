@@ -2,9 +2,11 @@
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::mem;
+use std::rc::Weak;
 
 use rustc_target::abi::Endian;
 
+use crate::shims::unix::linux::epoll::{EpollEvent, EpollReturn};
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -30,11 +32,53 @@ struct Event {
     counter: u64,
     is_nonblock: bool,
     clock: VClock,
+    epoll_events: Vec<Weak<EpollEvent>>,
 }
 
 impl FileDescription for Event {
     fn name(&self) -> &'static str {
         "event"
+    }
+
+    fn check_readiness<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+        let epollin = ecx.eval_libc_u32("EPOLLIN");
+        let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let mut readiness: u32 = u32::MAX;
+        // Check if it is readable.
+        if self.counter == 0 {
+            readiness &= !epollin;
+        }
+        // Check if it is writable.
+        if self.counter == MAX_COUNTER {
+            readiness &= !epollout;
+        }
+        Ok(readiness)
+    }
+    fn update_readiness<'tcx>(&self, flag: u32) -> InterpResult<'tcx> {
+        // TODO: separate the check for each independent flags.
+        for event in &self.epoll_events {
+            if let Some(epoll_event) = event.upgrade() {
+                if epoll_event.events & flag == flag {
+                    // The file description is self, so the upgrade should always suceed.
+                    let weak_file_descriptor = epoll_event.weak_file_descriptor.clone();
+                    let epoll_key = (weak_file_descriptor, epoll_event.file_descriptor);
+                    // Retrieve the epoll return if it is already in the return list.
+                    let ready_list = &mut epoll_event.ready_list.borrow_mut();
+                    match ready_list.get_mut(&epoll_key) {
+                        Some(epoll_return) => {
+                            // Update the flag of existing epoll return entry.
+                            epoll_return.events |= flag;
+                        }
+                        None => {
+                            // Add a new epoll return entry to the ready list.
+                            let epoll_return = EpollReturn { events: flag, data: epoll_event.data };
+                            ready_list.insert(epoll_key, epoll_return);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn close<'tcx>(
@@ -72,6 +116,8 @@ impl FileDescription for Event {
                 Endian::Big => self.counter.to_be_bytes(),
             };
             self.counter = 0;
+            // Set the event mask for epoll.
+            self.check_and_update_readiness(ecx).unwrap();
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -116,6 +162,8 @@ impl FileDescription for Event {
                     self.clock.join(clock);
                 }
                 self.counter = new_count;
+                // Set the event mask for epoll.
+                self.check_and_update_readiness(ecx).unwrap();
             }
             None | Some(u64::MAX) => {
                 if self.is_nonblock {
@@ -184,6 +232,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             counter: val.into(),
             is_nonblock,
             clock: VClock::default(),
+            epoll_events: Vec::new(),
         }));
         Ok(Scalar::from_i32(fd))
     }
