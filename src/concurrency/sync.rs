@@ -66,6 +66,30 @@ pub(super) use declare_id;
 
 declare_id!(MutexId);
 
+/// The mutex kind.
+#[derive(Debug, Clone, Copy)]
+pub struct MutexKind(i32);
+
+impl MutexKind {
+    pub fn new(k: i32) -> Self {
+        Self(k)
+    }
+
+    pub fn to_i32(&self) -> i32 {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+/// Additional data that may be used by shim implementations.
+pub struct AdditionalMutexData {
+    /// The mutex kind, used by some mutex implementations like pthreads mutexes.
+    pub kind: MutexKind,
+
+    /// The address of the mutex.
+    pub address: Pointer,
+}
+
 /// The mutex state.
 #[derive(Default, Debug)]
 struct Mutex {
@@ -77,6 +101,9 @@ struct Mutex {
     queue: VecDeque<ThreadId>,
     /// Mutex clock. This tracks the moment of the last unlock.
     clock: VClock,
+
+    /// Additional data that can be set by shim implementations.
+    data: Option<AdditionalMutexData>,
 }
 
 declare_id!(RwLockId);
@@ -200,9 +227,14 @@ pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Provides the closure with the next MutexId. Creates that mutex if the closure returns None,
     /// otherwise returns the value from the closure.
     #[inline]
-    fn mutex_get_or_create<F>(&mut self, existing: F) -> InterpResult<'tcx, MutexId>
+    fn mutex_get_or_create<F, I>(
+        &mut self,
+        existing: F,
+        initialize_data: I,
+    ) -> InterpResult<'tcx, MutexId>
     where
         F: FnOnce(&mut MiriInterpCx<'tcx>, MutexId) -> InterpResult<'tcx, Option<MutexId>>,
+        I: FnOnce() -> InterpResult<'tcx, Option<AdditionalMutexData>>,
     {
         let this = self.eval_context_mut();
         let next_index = this.machine.sync.mutexes.next_index();
@@ -214,6 +246,8 @@ pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         } else {
             let new_index = this.machine.sync.mutexes.push(Default::default());
             assert_eq!(next_index, new_index);
+            let data = initialize_data()?;
+            this.machine.sync.mutexes[new_index].data = data;
             Ok(new_index)
         }
     }
@@ -291,11 +325,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         lock_op: &OpTy<'tcx>,
         lock_layout: TyAndLayout<'tcx>,
         offset: u64,
+        initialize_data: impl FnOnce() -> InterpResult<'tcx, Option<AdditionalMutexData>>,
     ) -> InterpResult<'tcx, MutexId> {
         let this = self.eval_context_mut();
-        this.mutex_get_or_create(|ecx, next_id| {
-            ecx.get_or_create_id(next_id, lock_op, lock_layout, offset)
-        })
+        this.mutex_get_or_create(
+            |ecx, next_id| ecx.get_or_create_id(next_id, lock_op, lock_layout, offset),
+            initialize_data,
+        )
+    }
+
+    /// Retrieve the additional data stored for a mutex.
+    fn mutex_get_data<'a>(&'a mut self, id: MutexId) -> Option<&'a AdditionalMutexData>
+    where
+        'tcx: 'a,
+    {
+        let this = self.eval_context_ref();
+        this.machine.sync.mutexes[id].data.as_ref()
     }
 
     fn rwlock_get_or_create_id(

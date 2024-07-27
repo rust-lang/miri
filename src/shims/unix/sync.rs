@@ -118,11 +118,27 @@ fn mutex_get_id<'tcx>(
     ecx: &mut MiriInterpCx<'tcx>,
     mutex_op: &OpTy<'tcx>,
 ) -> InterpResult<'tcx, MutexId> {
+    let address = ecx.deref_pointer_as(mutex_op, ecx.libc_ty_layout("pthread_mutex_t"))?.ptr();
+    let kind = MutexKind::new(mutex_get_kind(ecx, mutex_op)?);
     ecx.mutex_get_or_create_id(
         mutex_op,
         ecx.libc_ty_layout("pthread_mutex_t"),
         mutex_id_offset(ecx)?,
+        || Ok(Some(AdditionalMutexData { kind, address })),
     )
+}
+
+fn mutex_check_moved<'tcx>(
+    ecx: &mut MiriInterpCx<'tcx>,
+    mutex_op: &OpTy<'tcx>,
+    id: MutexId,
+) -> InterpResult<'tcx, ()> {
+    let addr = ecx.deref_pointer_as(mutex_op, ecx.libc_ty_layout("pthread_mutex_t"))?.ptr().addr();
+    let data = ecx.mutex_get_data(id).expect("data should be always exist for pthreads");
+    if data.address.addr() != addr {
+        throw_ub_format!("pthread_mutex_t can't be moved after first use")
+    }
+    Ok(())
 }
 
 fn mutex_reset_id<'tcx>(
@@ -457,6 +473,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         mutex_set_kind(this, mutex_op, kind)?;
 
+        // Fetch (and ignore) the mutex's id to go through the initialization
+        // code, and thus register the mutex's address.
+        mutex_get_id(this, mutex_op)?;
+
         Ok(())
     }
 
@@ -467,8 +487,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let kind = mutex_get_kind(this, mutex_op)?;
         let id = mutex_get_id(this, mutex_op)?;
+        let kind = this
+            .mutex_get_data(id)
+            .expect("data should always exist for pthread mutexes")
+            .kind
+            .to_i32();
+
+        mutex_check_moved(this, mutex_op, id)?;
 
         let ret = if this.mutex_is_locked(id) {
             let owner_thread = this.mutex_get_owner(id);
@@ -504,8 +530,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn pthread_mutex_trylock(&mut self, mutex_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let kind = mutex_get_kind(this, mutex_op)?;
         let id = mutex_get_id(this, mutex_op)?;
+        let kind = this
+            .mutex_get_data(id)
+            .expect("data should always exist for pthread mutexes")
+            .kind
+            .to_i32();
+
+        mutex_check_moved(this, mutex_op, id)?;
 
         Ok(Scalar::from_i32(if this.mutex_is_locked(id) {
             let owner_thread = this.mutex_get_owner(id);
@@ -536,8 +568,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn pthread_mutex_unlock(&mut self, mutex_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let kind = mutex_get_kind(this, mutex_op)?;
         let id = mutex_get_id(this, mutex_op)?;
+        let kind = this
+            .mutex_get_data(id)
+            .expect("data should always exist for pthread mutexes")
+            .kind
+            .to_i32();
+
+        mutex_check_moved(this, mutex_op, id)?;
 
         if let Some(_old_locked_count) = this.mutex_unlock(id)? {
             // The mutex was locked by the current thread.
