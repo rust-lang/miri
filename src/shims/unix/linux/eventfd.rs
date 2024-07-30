@@ -3,7 +3,7 @@ use std::io;
 use std::io::{Error, ErrorKind};
 use std::mem;
 
-use fd::FdID;
+use fd::FdId;
 use rustc_target::abi::Endian;
 
 use crate::shims::unix::*;
@@ -33,7 +33,7 @@ struct Event {
     /// we are updating ourselves when writing and reading. Technically `Event` is like socketpair, but
     /// it does not create two separate file descriptors. Thus we can't re-borrow ourselves via
     /// `FileDescriptionRef::check_and_update_readiness` while already being mutably borrowed for read/write.w
-    id: FdID,
+    id: FdId,
 }
 
 impl FileDescription for Event {
@@ -211,7 +211,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             counter: val.into(),
             is_nonblock,
             clock: VClock::default(),
-            id: FdID::DUMMY,
+            id: FdId::DUMMY,
         });
 
         // Set the id of the `Event` to itself.

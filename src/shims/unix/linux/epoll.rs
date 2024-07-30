@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::rc::{Rc, Weak};
 
-use crate::shims::unix::fd::{FdID, WeakFileDescriptionRef};
+use crate::shims::unix::fd::{FdId, WeakFileDescriptionRef};
 use crate::shims::unix::*;
 use crate::*;
 
@@ -86,14 +86,14 @@ impl FileDescription for Epoll {
 }
 
 /// The table of all epoll_interests.
-pub struct EpollInterestTable(BTreeMap<FdID, Vec<Weak<RefCell<EpollInterest>>>>);
+pub struct EpollInterestTable(BTreeMap<FdId, Vec<Weak<RefCell<EpollInterest>>>>);
 
 impl EpollInterestTable {
     pub(crate) fn new() -> Self {
         EpollInterestTable(BTreeMap::new())
     }
 
-    pub fn insert_epoll_interest(&mut self, id: FdID, fd: Weak<RefCell<EpollInterest>>) {
+    pub fn insert_epoll_interest(&mut self, id: FdId, fd: Weak<RefCell<EpollInterest>>) {
         match self.0.get_mut(&id) {
             Some(fds) => {
                 fds.push(fd);
@@ -105,13 +105,13 @@ impl EpollInterestTable {
         }
     }
 
-    pub fn get_epoll_interest(&self, id: FdID) -> Option<&Vec<Weak<RefCell<EpollInterest>>>> {
+    pub fn get_epoll_interest(&self, id: FdId) -> Option<&Vec<Weak<RefCell<EpollInterest>>>> {
         Some(self.0.get(&id)?)
     }
 
     pub fn get_epoll_interest_mut(
         &mut self,
-        id: FdID,
+        id: FdId,
     ) -> Option<&mut Vec<Weak<RefCell<EpollInterest>>>> {
         Some(self.0.get_mut(&id)?)
     }
@@ -120,7 +120,7 @@ impl EpollInterestTable {
         self.0.is_empty()
     }
 
-    pub fn remove(&mut self, id: FdID) {
+    pub fn remove(&mut self, id: FdId) {
         self.0.remove(&id);
     }
 }

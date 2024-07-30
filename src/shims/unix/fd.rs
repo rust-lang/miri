@@ -215,18 +215,18 @@ impl FileDescription for NullOutput {
 }
 /// Structure contains both the file description and its unique identifier.
 #[derive(Clone, Debug)]
-pub struct FileDescWithID<T: FileDescription + ?Sized> {
-    id: FdID,
+pub struct FileDescWithId<T: FileDescription + ?Sized> {
+    id: FdId,
     file_description: RefCell<Box<T>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct FileDescriptionRef(Rc<FileDescWithID<dyn FileDescription>>);
+pub struct FileDescriptionRef(Rc<FileDescWithId<dyn FileDescription>>);
 
 impl FileDescriptionRef {
     fn new(fd: impl FileDescription, id: usize) -> Self {
-        FileDescriptionRef(Rc::new(FileDescWithID {
-            id: FdID(id),
+        FileDescriptionRef(Rc::new(FileDescWithId {
+            id: FdId(id),
             file_description: RefCell::new(Box::new(fd)),
         }))
     }
@@ -262,7 +262,7 @@ impl FileDescriptionRef {
         WeakFileDescriptionRef { weak_ref: Rc::downgrade(&self.0), id: self.get_id() }
     }
 
-    pub fn get_id(&self) -> FdID {
+    pub fn get_id(&self) -> FdId {
         self.0.id
     }
 
@@ -281,8 +281,8 @@ impl FileDescriptionRef {
 /// WeakFileDescriptorRef holds a weak reference to the actual file description.
 #[derive(Clone, Debug, Default)]
 pub struct WeakFileDescriptionRef {
-    weak_ref: Weak<FileDescWithID<dyn FileDescription>>,
-    id: FdID,
+    weak_ref: Weak<FileDescWithId<dyn FileDescription>>,
+    id: FdId,
 }
 
 impl WeakFileDescriptionRef {
@@ -317,9 +317,9 @@ impl Ord for WeakFileDescriptionRef {
 
 /// Wrapper struct for file description ID.
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct FdID(usize);
+pub struct FdId(usize);
 
-impl FdID {
+impl FdId {
     pub const DUMMY: Self = Self(usize::MAX);
 }
 
@@ -417,7 +417,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// For a specific unique file descriptor id, get its ready events and update the corresponding ready lists
     fn check_and_update_readiness(
         &self,
-        id: FdID,
+        id: FdId,
         f: impl FnOnce(&MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32>,
     ) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_ref();
