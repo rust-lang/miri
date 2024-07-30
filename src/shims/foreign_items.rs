@@ -423,6 +423,13 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                 }
             }
+            "miri_set_canonical_address" => {
+                let [old_ptr, new_ptr] = this.check_shim(abi, Abi::Rust, link_name, args)?;
+                let old_ptr = this.read_pointer(old_ptr)?;
+                let new_ptr = this.read_pointer(new_ptr)?;
+                let (alloc_id, _, _) = this.ptr_get_alloc_id(old_ptr, 0)?;
+                this.machine.set_alloc_address(alloc_id, new_ptr.addr().bytes());
+            }
 
             // Aborting the process.
             "exit" => {

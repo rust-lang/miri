@@ -147,4 +147,9 @@ extern "Rust" {
     /// "symbolic" alignment checks. Will fail if the pointer is not actually aligned or `align` is
     /// not a power of two. Has no effect when alignment checks are concrete (which is the default).
     pub fn miri_promise_symbolic_alignment(ptr: *const (), align: usize);
+
+    /// Miri-provided extern function to specify that a new address is to be considered the
+    /// canonical address, where `new` is a valid alias to the `old` allocation,
+    /// usually due to them having different values in bits that are ignored by hardware.
+    pub fn miri_set_canonical_address(old: *const (), new: *const ());
 }

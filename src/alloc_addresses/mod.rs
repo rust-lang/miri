@@ -460,6 +460,21 @@ impl<'tcx> MiriMachine<'tcx> {
             }
         })
     }
+
+    /// Updates the current canonical address for the allocation. Note that any access to this allocation *must* use this address from this point on.
+    pub fn set_alloc_address(&mut self, id: AllocId, new: u64) {
+        let global_state = self.alloc_addresses.get_mut();
+        if let Some(addr) = global_state.base_addr.insert(id, new) {
+            // Remove the old address' int->ptr mapping.
+            let pos =
+                global_state.int_to_ptr_map.binary_search_by_key(&addr, |(addr, _)| *addr).unwrap();
+            let removed = global_state.int_to_ptr_map.remove(pos);
+            assert_eq!(removed, (addr, id));
+        }
+        let new_pos =
+            global_state.int_to_ptr_map.binary_search_by_key(&new, |(addr, _)| *addr).unwrap_err();
+        global_state.int_to_ptr_map.insert(new_pos, (new, id));
+    }
 }
 
 #[cfg(test)]
