@@ -371,7 +371,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.set_last_error(einval)?;
             return Ok(Scalar::from_i32(-1));
         }
-        // FIXME: Remove this once blocking is supported.
+        // FIXME: Implement blocking support
         if timeout != 0 {
             throw_unsup_format!("epoll_wait: timeout value can only be 0");
         }
