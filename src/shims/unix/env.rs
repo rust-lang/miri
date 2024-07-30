@@ -1,7 +1,7 @@
-use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::ErrorKind;
 use std::mem;
+use std::{env, io};
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::layout::LayoutOf;
@@ -236,7 +236,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         Ok(Pointer::null())
     }
 
-    fn chdir(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+    fn chdir(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, io::Result<()>> {
         let this = self.eval_context_mut();
         this.assert_target_os_is_unix("chdir");
 
@@ -244,13 +244,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`chdir`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
-
-            return Ok(Scalar::from_i32(-1));
+            return Ok(Err(ErrorKind::PermissionDenied.into()));
         }
 
-        let result = env::set_current_dir(path).map(|()| 0);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        Ok(env::set_current_dir(path))
     }
 
     /// Updates the `environ` static.

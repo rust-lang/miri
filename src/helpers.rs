@@ -1,9 +1,9 @@
-use std::cmp;
 use std::collections::BTreeSet;
 use std::iter;
 use std::num::NonZero;
 use std::sync::Mutex;
 use std::time::Duration;
+use std::{cmp, io};
 
 use rand::RngCore;
 
@@ -868,6 +868,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 Ok((-1).into())
             }
         }
+    }
+
+    /// Write an io result to a place.
+    /// No error means writing a `0`.
+    /// Otherwise write `-1` and set the last error.
+    #[inline(always)]
+    fn write_io_result(
+        &mut self,
+        val: io::Result<()>,
+        dest: &impl Writeable<'tcx, Provenance>,
+    ) -> InterpResult<'tcx> {
+        let result = val.map(|()| 0);
+        let result = self.try_unwrap_io_result(result)?;
+        self.eval_context_mut().write_scalar(Scalar::from_i32(result), dest)
     }
 
     /// Dereference a pointer operand to a place using `layout` instead of the pointer's declared type

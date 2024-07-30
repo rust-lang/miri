@@ -78,7 +78,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "chdir" => {
                 let [path] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.chdir(path)?;
-                this.write_scalar(result, dest)?;
+                this.write_io_result(result, dest)?;
             }
             "getpid" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false}, link_name, args)?;
@@ -188,12 +188,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "unlink" => {
                 let [path] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.unlink(path)?;
-                this.write_scalar(result, dest)?;
+                this.write_io_result(result, dest)?;
             }
             "symlink" => {
                 let [target, linkpath] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.symlink(target, linkpath)?;
-                this.write_scalar(result, dest)?;
+                this.write_io_result(result, dest)?;
             }
             "rename" => {
                 let [oldpath, newpath] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;

@@ -588,7 +588,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         Ok(Scalar::from_i64(result))
     }
 
-    fn unlink(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+    fn unlink(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, io::Result<()>> {
         let this = self.eval_context_mut();
 
         let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
@@ -596,19 +596,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`unlink`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
-            return Ok(Scalar::from_i32(-1));
+            return Ok(Err(ErrorKind::PermissionDenied.into()));
         }
 
-        let result = remove_file(path).map(|_| 0);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        Ok(remove_file(path))
     }
 
     fn symlink(
         &mut self,
         target_op: &OpTy<'tcx>,
         linkpath_op: &OpTy<'tcx>,
-    ) -> InterpResult<'tcx, Scalar> {
+    ) -> InterpResult<'tcx, io::Result<()>> {
         #[cfg(unix)]
         fn create_link(src: &Path, dst: &Path) -> std::io::Result<()> {
             std::os::unix::fs::symlink(src, dst)
@@ -627,12 +625,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`symlink`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
-            return Ok(Scalar::from_i32(-1));
+            return Ok(Err(ErrorKind::PermissionDenied.into()));
         }
 
-        let result = create_link(&target, &linkpath).map(|_| 0);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        Ok(create_link(&target, &linkpath))
     }
 
     fn macos_fbsd_stat(
