@@ -315,7 +315,10 @@ impl Ord for WeakFileDescriptionRef {
     }
 }
 
-/// Wrapper struct for file description ID.
+/// A unique id for file descriptions. While we could use the address, considering that
+/// is definitely unique, the address would expose interpreter internal state when used
+/// for sorting things. So instead we generate a unique id per file description that stays
+/// the same even if a file descriptor is duplicated and gets a new integer file descriptor.
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FdId(usize);
 
