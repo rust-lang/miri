@@ -13,27 +13,27 @@ struct Epoll {
     /// A map of epoll_interests registered under this epoll instance.
     /// Each entry is differentiated using FileDescriptionRef ID and
     /// file descriptor value.
-    interest_list: BTreeMap<(WeakFileDescriptionRef, i32), Rc<RefCell<EpollInterest>>>,
+    interest_list: BTreeMap<(WeakFileDescriptionRef, i32), Rc<RefCell<EpollEventInterest>>>,
     /// A map of EpollReturn that will be returned when `epoll_wait` is called.
     /// Similar to interest_list, the entry is also differentiated using the FileDescriptionRef ID
     /// and file descriptor value.
     // This is an Rc because EpollInterest need to hold a reference to update
     // it.
-    ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollReturn>>>,
+    ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollEventInstance>>>,
 }
 
-/// EpollReturn contains information that will be returned by epoll_wait.
+/// EpollEventInstance contains information that will be returned by epoll_wait.
 #[derive(Debug)]
-pub struct EpollReturn {
+pub struct EpollEventInstance {
     /// Events that happened to the file description.
     events: u32,
     /// Original data retrieved from `epoll_event` during `epoll_ctl`.
     data: u64,
 }
 
-impl EpollReturn {
-    pub fn new(events: u32, data: u64) -> EpollReturn {
-        EpollReturn { events, data }
+impl EpollEventInstance {
+    pub fn new(events: u32, data: u64) -> EpollEventInstance {
+        EpollEventInstance { events, data }
     }
     pub fn update_events(&mut self, flag: u32) {
         self.events |= flag;
@@ -49,7 +49,7 @@ impl EpollReturn {
 ///
 /// <https://man7.org/linux/man-pages/man2/epoll_ctl.2.html>
 #[derive(Clone, Debug)]
-pub struct EpollInterest {
+pub struct EpollEventInterest {
     /// The file descriptor value of the file description registered.
     pub file_descriptor: i32,
     /// A weak reference to the file description registered.
@@ -62,11 +62,13 @@ pub struct EpollInterest {
     /// <https://man7.org/linux/man-pages/man3/epoll_event.3type.html>
     pub data: u64,
     /// Ready list of the epoll instance under which this epoll_interest is stored.
-    pub ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollReturn>>>,
+    pub ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollEventInstance>>>,
 }
 
 impl Epoll {
-    fn get_ready_list(&self) -> Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollReturn>>> {
+    fn get_ready_list(
+        &self,
+    ) -> Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollEventInstance>>> {
         Rc::clone(&self.ready_list)
     }
 }
@@ -86,14 +88,14 @@ impl FileDescription for Epoll {
 }
 
 /// The table of all epoll_interests.
-pub struct EpollInterestTable(BTreeMap<FdId, Vec<Weak<RefCell<EpollInterest>>>>);
+pub struct EpollInterestTable(BTreeMap<FdId, Vec<Weak<RefCell<EpollEventInterest>>>>);
 
 impl EpollInterestTable {
     pub(crate) fn new() -> Self {
         EpollInterestTable(BTreeMap::new())
     }
 
-    pub fn insert_epoll_interest(&mut self, id: FdId, fd: Weak<RefCell<EpollInterest>>) {
+    pub fn insert_epoll_interest(&mut self, id: FdId, fd: Weak<RefCell<EpollEventInterest>>) {
         match self.0.get_mut(&id) {
             Some(fds) => {
                 fds.push(fd);
@@ -105,14 +107,14 @@ impl EpollInterestTable {
         }
     }
 
-    pub fn get_epoll_interest(&self, id: FdId) -> Option<&Vec<Weak<RefCell<EpollInterest>>>> {
+    pub fn get_epoll_interest(&self, id: FdId) -> Option<&Vec<Weak<RefCell<EpollEventInterest>>>> {
         Some(self.0.get(&id)?)
     }
 
     pub fn get_epoll_interest_mut(
         &mut self,
         id: FdId,
-    ) -> Option<&mut Vec<Weak<RefCell<EpollInterest>>>> {
+    ) -> Option<&mut Vec<Weak<RefCell<EpollEventInterest>>>> {
         Some(self.0.get_mut(&id)?)
     }
 
@@ -263,7 +265,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             let id = file_descriptor.get_id();
             // Create an epoll_interest.
-            let interest = Rc::new(RefCell::new(EpollInterest {
+            let interest = Rc::new(RefCell::new(EpollEventInterest {
                 file_descriptor: fd,
                 weak_file_description_ref: weak_fd_ref,
                 events,

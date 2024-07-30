@@ -11,7 +11,7 @@ use std::rc::Weak;
 
 use rustc_target::abi::Size;
 
-use crate::shims::unix::linux::epoll::EpollReturn;
+use crate::shims::unix::linux::epoll::EpollEventInstance;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -438,7 +438,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         let weak_fd_ref = epoll_interest.weak_file_description_ref.clone();
                         let epoll_key = (weak_fd_ref, epoll_interest.file_descriptor);
                         let ready_list = &mut epoll_interest.ready_list.borrow_mut();
-                        let epoll_return = EpollReturn::new(flags, epoll_interest.data);
+                        let epoll_return = EpollEventInstance::new(flags, epoll_interest.data);
                         ready_list.insert(epoll_key, epoll_return);
                     }
                 }
