@@ -366,8 +366,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let result = file_descriptor.flock(this.machine.communicate(), parsed_op)?;
         drop(file_descriptor);
         // return `0` if flock is successful
-        let result = result.map(|()| 0i32);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        this.try_unwrap_io_result(result)
     }
 
     fn fcntl(&mut self, args: &[OpTy<'tcx>]) -> InterpResult<'tcx, Scalar> {
@@ -438,7 +437,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let result = file_description.close(this.machine.communicate())?;
         // return `0` if close is successful
         let result = result.map(|()| 0i32);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        this.try_unwrap_io_result(result)
     }
 
     /// Function used when a file descriptor does not exist. It returns `Ok(-1)`and sets
@@ -564,7 +563,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         drop(fd);
 
         let result = result?.map(|c| i64::try_from(c).unwrap());
-        Ok(Scalar::from_target_isize(this.try_unwrap_io_result(result)?, this))
+        match result {
+            Ok(written_bytes) => Ok(Scalar::from_target_isize(written_bytes, this)),
+            Err(e) => {
+                this.set_last_error_from_io_error(e)?;
+                Ok(Scalar::from_target_isize(-1, this))
+            }
+        }
     }
 }
 

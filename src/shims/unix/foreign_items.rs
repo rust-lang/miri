@@ -203,12 +203,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "mkdir" => {
                 let [path, mode] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.mkdir(path, mode)?;
-                this.write_scalar(result, dest)?;
+                this.write_io_result(result, dest)?;
             }
             "rmdir" => {
                 let [path] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.rmdir(path)?;
-                this.write_scalar(result, dest)?;
+                this.write_io_result(result, dest)?;
             }
             "opendir" => {
                 let [name] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;

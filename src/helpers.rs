@@ -857,31 +857,30 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ///
     /// This function uses `T: From<i32>` instead of `i32` directly because some IO related
     /// functions return different integer types (like `read`, that returns an `i64`).
-    fn try_unwrap_io_result<T: From<i32>>(
+    fn try_unwrap_io_result<T: WriteIoResult>(
         &mut self,
         result: std::io::Result<T>,
-    ) -> InterpResult<'tcx, T> {
+    ) -> InterpResult<'tcx, Scalar> {
         match result {
-            Ok(ok) => Ok(ok),
+            Ok(ok) => Ok(ok.into_scalar()),
             Err(e) => {
                 self.set_last_error_from_io_error(e)?;
-                Ok((-1).into())
+                Ok(T::neg_one())
             }
         }
     }
 
     /// Write an io result to a place.
-    /// No error means writing a `0`.
+    /// No error means writing via `WriteIoResult`
     /// Otherwise write `-1` and set the last error.
     #[inline(always)]
-    fn write_io_result(
+    fn write_io_result<T: WriteIoResult>(
         &mut self,
-        val: io::Result<()>,
+        val: io::Result<T>,
         dest: &impl Writeable<'tcx, Provenance>,
     ) -> InterpResult<'tcx> {
-        let result = val.map(|()| 0);
-        let result = self.try_unwrap_io_result(result)?;
-        self.eval_context_mut().write_scalar(Scalar::from_i32(result), dest)
+        let result = self.try_unwrap_io_result(val)?;
+        self.eval_context_mut().write_scalar(result, dest)
     }
 
     /// Dereference a pointer operand to a place using `layout` instead of the pointer's declared type
@@ -1446,5 +1445,37 @@ pub(crate) fn windows_check_buffer_size((success, len): (bool, u64)) -> u32 {
         // If the target buffer was not large enough to hold the data, the return value is the buffer size, in characters,
         // required to hold the string and its terminating null character.
         u32::try_from(len).unwrap()
+    }
+}
+
+pub trait WriteIoResult {
+    fn into_scalar(self) -> Scalar;
+    fn neg_one() -> Scalar;
+}
+
+impl WriteIoResult for () {
+    fn into_scalar(self) -> Scalar {
+        Scalar::from_i32(0)
+    }
+    fn neg_one() -> Scalar {
+        Scalar::from_i32(-1)
+    }
+}
+
+impl WriteIoResult for i32 {
+    fn into_scalar(self) -> Scalar {
+        Scalar::from_i32(self)
+    }
+    fn neg_one() -> Scalar {
+        Scalar::from_i32(-1)
+    }
+}
+
+impl WriteIoResult for i64 {
+    fn into_scalar(self) -> Scalar {
+        Scalar::from_i64(self)
+    }
+    fn neg_one() -> Scalar {
+        Scalar::from_i64(-1)
     }
 }

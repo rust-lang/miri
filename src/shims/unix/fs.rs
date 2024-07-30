@@ -547,7 +547,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .open(path)
             .map(|file| this.machine.fds.insert_fd(FileHandle { file, writable }));
 
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
+        this.try_unwrap_io_result(fd)
     }
 
     fn lseek64(&mut self, fd: i32, offset: i128, whence: i32) -> InterpResult<'tcx, Scalar> {
@@ -584,8 +584,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .map(|offset| i64::try_from(offset).unwrap());
         drop(file_description);
 
-        let result = this.try_unwrap_io_result(result)?;
-        Ok(Scalar::from_i64(result))
+        this.try_unwrap_io_result(result)
     }
 
     fn unlink(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, io::Result<()>> {
@@ -930,10 +929,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let result = rename(oldpath, newpath).map(|_| 0);
 
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        this.try_unwrap_io_result(result)
     }
 
-    fn mkdir(&mut self, path_op: &OpTy<'tcx>, mode_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+    fn mkdir(
+        &mut self,
+        path_op: &OpTy<'tcx>,
+        mode_op: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
         let this = self.eval_context_mut();
 
         #[cfg_attr(not(unix), allow(unused_variables))]
@@ -948,8 +951,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`mkdir`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
-            return Ok(Scalar::from_i32(-1));
+            return Ok(Err(ErrorKind::PermissionDenied.into()));
         }
 
         #[cfg_attr(not(unix), allow(unused_mut))]
@@ -963,12 +965,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             builder.mode(mode);
         }
 
-        let result = builder.create(path).map(|_| 0i32);
-
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        Ok(builder.create(path))
     }
 
-    fn rmdir(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+    fn rmdir(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, io::Result<()>> {
         let this = self.eval_context_mut();
 
         let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
@@ -976,13 +976,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`rmdir`", reject_with)?;
-            this.set_last_error_from_io_error(ErrorKind::PermissionDenied.into())?;
-            return Ok(Scalar::from_i32(-1));
+            return Ok(Err(ErrorKind::PermissionDenied.into()));
         }
 
-        let result = remove_dir(path).map(|_| 0i32);
-
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+        Ok(remove_dir(path))
     }
 
     fn opendir(&mut self, name_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
@@ -1276,8 +1273,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if let Ok(length) = length.try_into() {
                 let result = file.set_len(length);
                 drop(file_description);
-                let result = this.try_unwrap_io_result(result.map(|_| 0i32))?;
-                Ok(Scalar::from_i32(result))
+                this.try_unwrap_io_result(result)
             } else {
                 drop(file_description);
                 let einval = this.eval_libc("EINVAL");
@@ -1325,7 +1321,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_all);
         drop(file_description);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+        this.try_unwrap_io_result(io_result)
     }
 
     fn fdatasync(&mut self, fd_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
@@ -1350,7 +1346,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_data);
         drop(file_description);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+        this.try_unwrap_io_result(io_result)
     }
 
     fn sync_file_range(
@@ -1400,7 +1396,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_data);
         drop(file_description);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+        this.try_unwrap_io_result(io_result)
     }
 
     fn readlink(
