@@ -864,7 +864,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         match result {
             Ok(ok) => Ok(ok),
             Err(e) => {
-                self.eval_context_mut().set_last_error_from_io_error(e)?;
+                self.set_last_error_from_io_error(e)?;
                 Ok((-1).into())
             }
         }
