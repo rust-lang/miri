@@ -42,7 +42,7 @@ impl FileDescription for Event {
     }
 
     fn get_epoll_ready_events<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
-        // We only check the status of epollin and epollout flag for eventfd. If other event flags
+        // We only check the status of EPOLLIN and EPOLLOUT flags for eventfd. If other event flags
         // need to be supported in the future, the check should be added here.
 
         let epollin = ecx.eval_libc_u32("EPOLLIN");

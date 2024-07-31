@@ -453,7 +453,7 @@ pub struct MiriMachine<'tcx> {
     /// The table of directory descriptors.
     pub(crate) dirs: shims::DirTable,
 
-    /// The list of all epoll_interests.
+    /// The list of all EpollEventInterest.
     pub(crate) epoll_interests: shims::EpollInterestTable,
 
     /// This machine's monotone clock.

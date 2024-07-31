@@ -20,7 +20,7 @@ struct SocketPair {
     // gone, and trigger EPIPE as appropriate.
     writebuf: Weak<RefCell<Buffer>>,
     readbuf: Rc<RefCell<Buffer>>,
-    /// When a socketpair instance is created, two file descriptions are generated.
+    /// When a socketpair instance is created, two socketpair file descriptions are generated.
     /// The peer_fd field holds a weak reference to the file description of peer socketpair.
     peer_fd: WeakFileDescriptionRef,
     is_nonblock: bool,
@@ -43,7 +43,7 @@ impl FileDescription for SocketPair {
     }
 
     fn get_epoll_ready_events<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
-        // We only check the status of EPOLLIN, EPOLLOUT and EPOLLRDHUP flag. If other event flags
+        // We only check the status of EPOLLIN, EPOLLOUT and EPOLLRDHUP flags. If other event flags
         // need to be supported in the future, the check should be added here.
 
         let epollin = ecx.eval_libc_u32("EPOLLIN");

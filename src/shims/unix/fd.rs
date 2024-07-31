@@ -248,7 +248,7 @@ impl FileDescriptionRef {
         let id = self.get_id();
         match Rc::into_inner(self.0) {
             Some(fd) => {
-                // Remove entry from the global epoll_interest table.
+                // Remove entry from the global epoll_event_interest table.
                 ecx.machine.epoll_interests.remove(id);
 
                 RefCell::into_inner(fd.file_description).close(communicate_allowed, ecx)
@@ -265,7 +265,7 @@ impl FileDescriptionRef {
         self.0.id
     }
 
-    /// Function used to retrieve the readiness event status of a file description and insert
+    /// Function used to retrieve the readiness events of a file description and insert
     ///  an `EpollReturn` into the ready list if the file description is ready.
     pub(crate) fn check_and_update_readiness<'tcx>(
         &self,
@@ -395,26 +395,27 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn check_and_update_readiness(
         &self,
         id: FdId,
-        f: impl FnOnce(&MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32>,
+        get_ready_events: impl FnOnce(&MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32>,
     ) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_ref();
-        // Get a list of epoll_event that is associated to a specific file description.
+        // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
             // Retrieve the readiness events of the file description.
-            let ready_events = f(this)?;
+            let ready_events = get_ready_events(this)?;
 
             for weak_epoll_interest in epoll_interests {
                 if let Some(epoll_interest) = weak_epoll_interest.upgrade() {
-                    // This checks if any of the events specified in epoll_interest.events match those
-                    // in ready_events.
-                    let epoll_interest = epoll_interest.borrow();
-                    let flags = epoll_interest.events & ready_events;
+                    // This checks if any of the events specified in epoll_event_interest.events
+                    // match those in ready_events.
+                    let epoll_event_interest = epoll_interest.borrow();
+                    let flags = epoll_event_interest.events & ready_events;
                     // If there is any event that we are interested in being specified as ready,
-                    // insert a epoll_return to the ready list.
+                    // insert an epoll_return to the ready list.
                     if flags != 0 {
-                        let epoll_key = (id, epoll_interest.file_descriptor);
-                        let ready_list = &mut epoll_interest.ready_list.borrow_mut();
-                        let epoll_return = EpollEventInstance::new(flags, epoll_interest.data);
+                        let epoll_key = (id, epoll_event_interest.file_descriptor);
+                        let ready_list = &mut epoll_event_interest.ready_list.borrow_mut();
+                        let epoll_return =
+                            EpollEventInstance::new(flags, epoll_event_interest.data);
                         ready_list.insert(epoll_key, epoll_return);
                     }
                 }
