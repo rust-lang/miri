@@ -438,8 +438,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // If there is any event that we are interested in being specified as ready,
                     // insert a epoll_return to the ready list.
                     if flags != 0 {
-                        let weak_fd_ref = epoll_interest.weak_file_description_ref.clone();
-                        let epoll_key = (weak_fd_ref, epoll_interest.file_descriptor);
+                        let epoll_key = (id, epoll_interest.file_descriptor);
                         let ready_list = &mut epoll_interest.ready_list.borrow_mut();
                         let epoll_return = EpollEventInstance::new(flags, epoll_interest.data);
                         ready_list.insert(epoll_key, epoll_return);

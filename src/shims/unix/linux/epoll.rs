@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::rc::{Rc, Weak};
 
-use crate::shims::unix::fd::{FdId, WeakFileDescriptionRef};
+use crate::shims::unix::fd::FdId;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -13,13 +13,13 @@ struct Epoll {
     /// A map of epoll_interests registered under this epoll instance.
     /// Each entry is differentiated using FileDescriptionRef ID and
     /// file descriptor value.
-    interest_list: BTreeMap<(WeakFileDescriptionRef, i32), Rc<RefCell<EpollEventInterest>>>,
+    interest_list: BTreeMap<(FdId, i32), Rc<RefCell<EpollEventInterest>>>,
     /// A map of EpollReturn that will be returned when `epoll_wait` is called.
     /// Similar to interest_list, the entry is also differentiated using the FileDescriptionRef ID
     /// and file descriptor value.
     // This is an Rc because EpollInterest need to hold a reference to update
     // it.
-    ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollEventInstance>>>,
+    ready_list: Rc<RefCell<BTreeMap<(FdId, i32), EpollEventInstance>>>,
 }
 
 /// EpollEventInstance contains information that will be returned by epoll_wait.
@@ -52,8 +52,6 @@ impl EpollEventInstance {
 pub struct EpollEventInterest {
     /// The file descriptor value of the file description registered.
     pub file_descriptor: i32,
-    /// A weak reference to the file description registered.
-    pub weak_file_description_ref: WeakFileDescriptionRef,
     /// The events bitmask retrieved from `epoll_event`.
     pub events: u32,
     /// The data retrieved from `epoll_event`.
@@ -62,13 +60,11 @@ pub struct EpollEventInterest {
     /// <https://man7.org/linux/man-pages/man3/epoll_event.3type.html>
     pub data: u64,
     /// Ready list of the epoll instance under which this epoll_interest is stored.
-    pub ready_list: Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollEventInstance>>>,
+    pub ready_list: Rc<RefCell<BTreeMap<(FdId, i32), EpollEventInstance>>>,
 }
 
 impl Epoll {
-    fn get_ready_list(
-        &self,
-    ) -> Rc<RefCell<BTreeMap<(WeakFileDescriptionRef, i32), EpollEventInstance>>> {
+    fn get_ready_list(&self) -> Rc<RefCell<BTreeMap<(FdId, i32), EpollEventInstance>>> {
         Rc::clone(&self.ready_list)
     }
 }
@@ -108,14 +104,14 @@ impl EpollInterestTable {
     }
 
     pub fn get_epoll_interest(&self, id: FdId) -> Option<&Vec<Weak<RefCell<EpollEventInterest>>>> {
-        Some(self.0.get(&id)?)
+        self.0.get(&id)
     }
 
     pub fn get_epoll_interest_mut(
         &mut self,
         id: FdId,
     ) -> Option<&mut Vec<Weak<RefCell<EpollEventInterest>>>> {
-        Some(self.0.get_mut(&id)?)
+        self.0.get_mut(&id)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -214,7 +210,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let Some(file_descriptor) = this.machine.fds.get_ref(fd) else {
             return Ok(Scalar::from_i32(this.fd_not_found()?));
         };
-        let weak_fd_ref = file_descriptor.downgrade();
+        let id = file_descriptor.get_id();
 
         if op == epoll_ctl_add || op == epoll_ctl_mod {
             // Read event bitmask and data from epoll_event struct.
@@ -245,8 +241,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 );
             }
 
-            //TODO: check if it is necessary to store weak_fd_ref in epoll_interest
-            let epoll_key = (weak_fd_ref.clone(), fd);
+            let epoll_key = (id, fd);
 
             // Check the existence of fd in the interest list.
             if op == epoll_ctl_add {
@@ -267,7 +262,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Create an epoll_interest.
             let interest = Rc::new(RefCell::new(EpollEventInterest {
                 file_descriptor: fd,
-                weak_file_description_ref: weak_fd_ref,
                 events,
                 data,
                 ready_list: Rc::clone(ready_list),
@@ -290,7 +284,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             return Ok(Scalar::from_i32(0));
         } else if op == epoll_ctl_del {
-            let epoll_key = (weak_fd_ref, fd);
+            let epoll_key = (id, fd);
 
             // Remove epoll_interest from interest_list.
             let Some(epoll_interest) = interest_list.remove(&epoll_key) else {
@@ -298,7 +292,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.set_last_error(enoent)?;
                 return Ok(Scalar::from_i32(-1));
             };
-            let id = epoll_interest.borrow().weak_file_description_ref.upgrade().unwrap().get_id();
             // All related Weak<EpollInterest> will fail to upgrade after the drop.
             drop(epoll_interest);
 
@@ -390,7 +383,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let mut array_iter = this.project_array_fields(&event)?;
 
         while let Some((epoll_key, epoll_return)) = ready_list.pop_first() {
-            if epoll_key.0.upgrade().is_some() {
+            // If the file description is fully close, the entry for corresponding FdID in the
+            // global epoll event interest table would be empty.
+            if this.machine.epoll_interests.get_epoll_interest(epoll_key.0).is_some() {
                 // Return notification to the caller if the file description is not fully closed.
                 if let Some(des) = array_iter.next(this)? {
                     this.write_int_fields_named(
