@@ -282,7 +282,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         Ok(Scalar::from_u32(this.get_pid()))
     }
 
-    fn linux_gettid(&mut self) -> InterpResult<'tcx, Scalar> {
+    fn linux_gettid(&mut self, dest: &MPlaceTy<'tcx>) -> InterpResult<'tcx> {
         let this = self.eval_context_ref();
         this.assert_target_os("linux", "gettid");
 
@@ -290,7 +290,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Compute a TID for this thread, ensuring that the main thread has PID == TID.
         let tid = this.get_pid().strict_add(index);
-
-        Ok(Scalar::from_u32(tid))
+        self.eval_context_mut().write_int(tid, dest)
     }
 }

@@ -31,14 +31,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // File related shims
             "readdir64" => {
                 let [dirp] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.linux_readdir64(dirp)?;
-                this.write_scalar(result, dest)?;
+                this.linux_readdir64(dirp, dest)?;
             }
             "sync_file_range" => {
                 let [fd, offset, nbytes, flags] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.sync_file_range(fd, offset, nbytes, flags)?;
-                this.write_scalar(result, dest)?;
+                this.sync_file_range(fd, offset, nbytes, flags, dest)?;
             }
             "statx" => {
                 let [dirfd, pathname, flags, mask, statxbuf] =
@@ -95,12 +93,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "gettid" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.linux_gettid()?;
-                this.write_scalar(result, dest)?;
+                this.linux_gettid(dest)?;
             }
 
             // Dynamically invoked syscalls
             "syscall" => {
+                // TODO pull this match arm into a method
                 // We do not use `check_shim` here because `syscall` is variadic. The argument
                 // count is checked bellow.
                 this.check_abi_and_shim_symbol_clash(abi, Abi::C { unwind: false }, link_name)?;
@@ -158,19 +156,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [addr, length, prot, flags, fd, offset] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let offset = this.read_scalar(offset)?.to_i64()?;
-                let ptr = this.mmap(addr, length, prot, flags, fd, offset.into())?;
-                this.write_scalar(ptr, dest)?;
+                this.mmap(addr, length, prot, flags, fd, offset.into(), dest)?;
             }
             "mremap" => {
                 let [old_address, old_size, new_size, flags] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let ptr = this.mremap(old_address, old_size, new_size, flags)?;
-                this.write_scalar(ptr, dest)?;
+                this.mremap(old_address, old_size, new_size, flags, dest)?;
             }
             "__errno_location" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let errno_place = this.last_error_place()?;
-                this.write_scalar(errno_place.to_ref(this).to_scalar(), dest)?;
+                this.write_immediate(errno_place.to_ref(this), dest)?;
             }
             "__libc_current_sigrtmin" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;

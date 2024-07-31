@@ -27,7 +27,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         flags: &OpTy<'tcx>,
         fd: &OpTy<'tcx>,
         offset: i128,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
 
         // We do not support MAP_FIXED, so the addr argument is always ignored (except for the MacOS hack)
@@ -48,7 +49,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             && matches!(&*this.tcx.sess.target.os, "macos" | "solaris" | "illumos")
             && (flags & map_fixed) != 0
         {
-            return Ok(Scalar::from_maybe_pointer(Pointer::from_addr_invalid(addr), this));
+            this.write_pointer(Pointer::from_addr_invalid(addr), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         }
 
         let prot_read = this.eval_libc_i32("PROT_READ");
@@ -57,11 +59,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // First, we do some basic argument validation as required by mmap
         if (flags & (map_private | map_shared)).count_ones() != 1 {
             this.set_last_error(this.eval_libc("EINVAL"))?;
-            return Ok(this.eval_libc("MAP_FAILED"));
+            this.write_scalar(this.eval_libc("MAP_FAILED"), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         }
         if length == 0 {
             this.set_last_error(this.eval_libc("EINVAL"))?;
-            return Ok(this.eval_libc("MAP_FAILED"));
+            this.write_scalar(this.eval_libc("MAP_FAILED"), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         }
 
         // If a user tries to map a file, we want to loudly inform them that this is not going
@@ -103,11 +107,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let align = this.machine.page_align();
         let Some(map_length) = length.checked_next_multiple_of(this.machine.page_size) else {
             this.set_last_error(this.eval_libc("EINVAL"))?;
-            return Ok(this.eval_libc("MAP_FAILED"));
+            this.write_scalar(this.eval_libc("MAP_FAILED"), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         };
         if map_length > this.target_usize_max() {
             this.set_last_error(this.eval_libc("EINVAL"))?;
-            return Ok(this.eval_libc("MAP_FAILED"));
+            this.write_scalar(this.eval_libc("MAP_FAILED"), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         }
 
         let ptr =
@@ -120,7 +126,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         )
         .unwrap();
 
-        Ok(Scalar::from_pointer(ptr, this))
+        this.write_pointer(ptr, dest)?;
+        Ok(EmulateItemResult::NeedsReturn)
     }
 
     fn munmap(&mut self, addr: &OpTy<'tcx>, length: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {

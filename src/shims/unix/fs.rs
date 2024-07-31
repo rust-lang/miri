@@ -1038,7 +1038,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
-    fn linux_readdir64(&mut self, dirp_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+    fn linux_readdir64(
+        &mut self,
+        dirp_op: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
         this.assert_target_os("linux", "readdir64");
@@ -1050,7 +1054,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.reject_in_isolation("`readdir`", reject_with)?;
             let eacc = this.eval_libc("EBADF");
             this.set_last_error(eacc)?;
-            return Ok(Scalar::null_ptr(this));
+            return this.write_scalar(eacc, dest);
         }
 
         let open_dir = this.machine.dirs.streams.get_mut(&dirp).ok_or_else(|| {
@@ -1128,7 +1132,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.deallocate_ptr(old_entry, None, MiriMemoryKind::Runtime.into())?;
         }
 
-        Ok(Scalar::from_maybe_pointer(entry.unwrap_or_else(Pointer::null), this))
+        this.write_pointer(entry.unwrap_or_else(Pointer::null), dest)
     }
 
     fn macos_fbsd_readdir_r(
@@ -1378,7 +1382,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         offset_op: &OpTy<'tcx>,
         nbytes_op: &OpTy<'tcx>,
         flags_op: &OpTy<'tcx>,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
         let fd = this.read_scalar(fd_op)?.to_i32()?;
@@ -1389,7 +1394,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if offset < 0 || nbytes < 0 {
             let einval = this.eval_libc("EINVAL");
             this.set_last_error(einval)?;
-            return Ok(Scalar::from_i32(-1));
+            return this.write_int(-1, dest);
         }
         let allowed_flags = this.eval_libc_i32("SYNC_FILE_RANGE_WAIT_BEFORE")
             | this.eval_libc_i32("SYNC_FILE_RANGE_WRITE")
@@ -1397,18 +1402,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if flags & allowed_flags != flags {
             let einval = this.eval_libc("EINVAL");
             this.set_last_error(einval)?;
-            return Ok(Scalar::from_i32(-1));
+            return this.write_int(-1, dest);
         }
 
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`sync_file_range`", reject_with)?;
             // Set error code as "EBADF" (bad fd)
-            return Ok(Scalar::from_i32(this.fd_not_found()?));
+            let i: i32 = this.fd_not_found()?;
+            return this.write_int(i, dest);
         }
 
         let Some(fd) = this.machine.fds.get(fd) else {
-            return Ok(Scalar::from_i32(this.fd_not_found()?));
+            let i: i32 = this.fd_not_found()?;
+            return this.write_int(i, dest);
         };
         // Only regular files support synchronization.
         let FileHandle { file, writable } = fd.downcast::<FileHandle>().ok_or_else(|| {
@@ -1416,7 +1423,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_data);
         drop(fd);
-        Ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+        let i: i32 = this.try_unwrap_io_result(io_result)?;
+        this.write_int(i, dest)
     }
 
     fn readlink(
