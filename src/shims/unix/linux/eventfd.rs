@@ -95,7 +95,7 @@ impl FileDescription for Event {
                 Endian::Big => self.counter.to_be_bytes(),
             };
             self.counter = 0;
-            // When any of the event happened, we check and update the status of all supported events
+            // When any of the event happened, we check and update the status of all supported event
             // types for current file description.
             ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
             return Ok(Ok(U64_ARRAY_SIZE));
@@ -152,7 +152,7 @@ impl FileDescription for Event {
                 }
             }
         };
-        // When any of the event happened, we check and update the status of all supported events
+        // When any of the event happened, we check and update the status of all supported event
         // types for current file description.
         ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
         Ok(Ok(U64_ARRAY_SIZE))
