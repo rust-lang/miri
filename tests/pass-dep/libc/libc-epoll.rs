@@ -427,4 +427,18 @@ fn test_not_fully_closed_fd() {
     let expected_event = u32::try_from(libc::EPOLLOUT).unwrap();
     let expected_value = fd as u64;
     assert!(check_epoll_wait::<1>(epfd, vec![(expected_event, expected_value)]));
+
+    // Write to the eventfd instance to produce notification.
+    let sized_8_data: [u8; 8] = 1_u64.to_ne_bytes();
+    let res: i32 = unsafe {
+        libc::write(newfd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+    };
+    assert_eq!(res, 8);
+
+    // Close the dupped fd.
+    let res = unsafe { libc::close(newfd) };
+    assert_eq!(res, 0);
+
+    // No notification should be provided.
+    assert!(check_epoll_wait::<1>(epfd, vec![]));
 }
