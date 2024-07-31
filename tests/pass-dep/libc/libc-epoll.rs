@@ -5,6 +5,8 @@ use std::convert::TryInto;
 use std::mem::MaybeUninit;
 
 fn main() {
+    test_not_fully_closed_fd();
+    test_closed_fd();
     test_epoll_socketpair_special_case();
     test_two_epoll_instance();
     test_epoll_ctl_mod();
@@ -245,11 +247,11 @@ fn test_two_same_fd_in_same_epoll_instance() {
 }
 
 fn test_epoll_eventfd() {
-    // Create an eventfd instance and write to it.
+    // Create an eventfd instance.
     let flags = libc::EFD_NONBLOCK | libc::EFD_CLOEXEC;
     let fd = unsafe { libc::eventfd(0, flags) };
 
-    // Write to the epoll instance.
+    // Write to the eventfd instance.
     let sized_8_data: [u8; 8] = 1_u64.to_ne_bytes();
     let res: i32 = unsafe {
         libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
@@ -348,4 +350,81 @@ fn test_epoll_socketpair_special_case() {
     let expected_event = u32::try_from(libc::EPOLLOUT).unwrap();
     let expected_value = fds[1] as u64;
     assert!(check_epoll_wait::<8>(epfd, vec![(expected_event, expected_value)]));
+}
+
+// When file description is fully closed, epoll_wait should not provide any notification for
+// that file description.
+fn test_closed_fd() {
+    // Create an epoll instance.
+    let epfd = unsafe { libc::epoll_create1(0) };
+    assert_ne!(epfd, -1);
+
+    // Create an eventfd instance.
+    let flags = libc::EFD_NONBLOCK | libc::EFD_CLOEXEC;
+    let fd = unsafe { libc::eventfd(0, flags) };
+
+    // Register eventfd with EPOLLIN | EPOLLOUT | EPOLLET
+    // EPOLLET is negative number for i32 so casting is needed to do proper bitwise OR for u32.
+    let epollet = libc::EPOLLET as u32;
+    let flags = u32::try_from(libc::EPOLLIN | libc::EPOLLOUT).unwrap() | epollet;
+    let mut ev = libc::epoll_event {
+        events: u32::try_from(flags).unwrap(),
+        u64: u64::try_from(fd).unwrap(),
+    };
+    let res = unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, fd, &mut ev) };
+    assert_ne!(res, -1);
+
+    // Write to the eventfd instance.
+    let sized_8_data: [u8; 8] = 1_u64.to_ne_bytes();
+    let res: i32 = unsafe {
+        libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+    };
+    assert_eq!(res, 8);
+
+    // Close the eventfd.
+    let res = unsafe { libc::close(fd) };
+    assert_eq!(res, 0);
+
+    // No notification should be provided because the file description is closed.
+    assert!(check_epoll_wait::<8>(epfd, vec![]));
+}
+
+// When a certain file descriptor registered with epoll is closed, but the underlying file description
+// is not closed, notification should still be provided.
+//
+// This is a quirk of epoll being described in https://man7.org/linux/man-pages/man7/epoll.7.html
+// A file descriptor is removed from an interest list only after all the file descriptors
+// referring to the underlying open file description have been closed.
+fn test_not_fully_closed_fd() {
+    // Create an epoll instance.
+    let epfd = unsafe { libc::epoll_create1(0) };
+    assert_ne!(epfd, -1);
+
+    // Create an eventfd instance.
+    let flags = libc::EFD_NONBLOCK | libc::EFD_CLOEXEC;
+    let fd = unsafe { libc::eventfd(0, flags) };
+
+    // Dup the fd.
+    let newfd = unsafe { libc::dup(fd) };
+    assert_ne!(newfd, -1);
+
+    // Register eventfd with EPOLLIN | EPOLLOUT | EPOLLET
+    // EPOLLET is negative number for i32 so casting is needed to do proper bitwise OR for u32.
+    let epollet = libc::EPOLLET as u32;
+    let flags = u32::try_from(libc::EPOLLIN | libc::EPOLLOUT).unwrap() | epollet;
+    let mut ev = libc::epoll_event {
+        events: u32::try_from(flags).unwrap(),
+        u64: u64::try_from(fd).unwrap(),
+    };
+    let res = unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, fd, &mut ev) };
+    assert_ne!(res, -1);
+
+    // Close the original fd that being used to register with epoll.
+    let res = unsafe { libc::close(fd) };
+    assert_eq!(res, 0);
+
+    // Notification should still be provided because the file description is not closed.
+    let expected_event = u32::try_from(libc::EPOLLOUT).unwrap();
+    let expected_value = fd as u64;
+    assert!(check_epoll_wait::<1>(epfd, vec![(expected_event, expected_value)]));
 }
