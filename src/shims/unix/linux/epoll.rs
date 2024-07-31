@@ -200,7 +200,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
         let mut binding = epfd.borrow_mut();
         let epoll_file_description = &mut binding
-            .borrow_mut()
             .downcast_mut::<Epoll>()
             .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_ctl`"))?;
 
