@@ -3,7 +3,6 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind, IsTerminal, Read, SeekFrom, Write};
 use std::rc::Rc;
@@ -259,7 +258,7 @@ impl FileDescriptionRef {
     }
 
     pub fn downgrade(&self) -> WeakFileDescriptionRef {
-        WeakFileDescriptionRef { weak_ref: Rc::downgrade(&self.0), id: self.get_id() }
+        WeakFileDescriptionRef { weak_ref: Rc::downgrade(&self.0) }
     }
 
     pub fn get_id(&self) -> FdId {
@@ -282,36 +281,11 @@ impl FileDescriptionRef {
 #[derive(Clone, Debug, Default)]
 pub struct WeakFileDescriptionRef {
     weak_ref: Weak<FileDescWithId<dyn FileDescription>>,
-    id: FdId,
 }
 
 impl WeakFileDescriptionRef {
     pub fn upgrade(&self) -> Option<FileDescriptionRef> {
         Some(FileDescriptionRef(self.weak_ref.upgrade()?))
-    }
-}
-
-// PartialEq, Eq, PartialOrd and Ord are implemented here because WeakFileDescriptionRef
-// is used as a key in the interest_list and ready_list in Epoll. It is ordered using
-// file description ID assigned.
-
-impl PartialEq for WeakFileDescriptionRef {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
-    }
-}
-
-impl Eq for WeakFileDescriptionRef {}
-
-impl PartialOrd for WeakFileDescriptionRef {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for WeakFileDescriptionRef {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.id.cmp(&other.id)
     }
 }
 
