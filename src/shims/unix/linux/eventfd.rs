@@ -32,7 +32,7 @@ struct Event {
     /// We have to store our own FdID in contrast to every other file descriptor out there, because
     /// we are updating ourselves when writing and reading. Technically `Event` is like socketpair, but
     /// it does not create two separate file descriptors. Thus we can't re-borrow ourselves via
-    /// `FileDescriptionRef::check_and_update_readiness` while already being mutably borrowed for read/write.w
+    /// `FileDescriptionRef::check_and_update_readiness` while already being mutably borrowed for read/write.
     id: FdId,
 }
 
@@ -95,6 +95,8 @@ impl FileDescription for Event {
                 Endian::Big => self.counter.to_be_bytes(),
             };
             self.counter = 0;
+            // When any of the event happened, we check and update the status of all supported events
+            // types for current file description.
             ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
@@ -150,6 +152,8 @@ impl FileDescription for Event {
                 }
             }
         };
+        // When any of the event happened, we check and update the status of all supported events
+        // types for current file description.
         ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
