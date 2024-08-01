@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use std::mem::MaybeUninit;
 
 fn main() {
+    test_event_overwrite();
     test_not_fully_closed_fd();
     test_closed_fd();
     test_epoll_socketpair_special_case();
@@ -441,4 +442,44 @@ fn test_not_fully_closed_fd() {
 
     // No notification should be provided.
     assert!(check_epoll_wait::<1>(epfd, vec![]));
+}
+
+// Each time a notification is provided, it should reflect the file description's readiness
+// at the moment the latest event occurred.
+fn test_event_overwrite() {
+    // Create an eventfd instance.
+    let flags = libc::EFD_NONBLOCK | libc::EFD_CLOEXEC;
+    let fd = unsafe { libc::eventfd(0, flags) };
+
+    // Write to the eventfd instance.
+    let sized_8_data: [u8; 8] = 1_u64.to_ne_bytes();
+    let res: i32 = unsafe {
+        libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+    };
+    assert_eq!(res, 8);
+
+    // Create an epoll instance.
+    let epfd = unsafe { libc::epoll_create1(0) };
+    assert_ne!(epfd, -1);
+
+    // Register eventfd with EPOLLIN | EPOLLOUT | EPOLLET
+    // EPOLLET is negative number for i32 so casting is needed to do proper bitwise OR for u32.
+    let epollet = libc::EPOLLET as u32;
+    let flags = u32::try_from(libc::EPOLLIN | libc::EPOLLOUT).unwrap() | epollet;
+    let mut ev = libc::epoll_event {
+        events: u32::try_from(flags).unwrap(),
+        u64: u64::try_from(fd).unwrap(),
+    };
+    let res = unsafe { libc::epoll_ctl(epfd, libc::EPOLL_CTL_ADD, fd, &mut ev) };
+    assert_ne!(res, -1);
+
+    // Read from the eventfd instance.
+    let mut buf: [u8; 8] = [0; 8];
+    let res: i32 = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), 8).try_into().unwrap() };
+    assert_eq!(res, 8);
+
+    // Check result from epoll_wait.
+    let expected_event = u32::try_from(libc::EPOLLOUT).unwrap();
+    let expected_value = u64::try_from(fd).unwrap();
+    assert!(check_epoll_wait::<8>(epfd, vec![(expected_event, expected_value)]));
 }
