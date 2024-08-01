@@ -41,8 +41,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "statx" => {
                 let [dirfd, pathname, flags, mask, statxbuf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.linux_statx(dirfd, pathname, flags, mask, statxbuf)?;
-                this.write_scalar(result, dest)?;
+                this.linux_statx(dirfd, pathname, flags, mask, statxbuf, dest)?;
             }
 
             // epoll, eventfd
