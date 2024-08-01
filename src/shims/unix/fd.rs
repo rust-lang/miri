@@ -102,8 +102,6 @@ pub trait FileDescription: std::fmt::Debug + Any {
     }
 
     /// Check the readiness of file description.
-    /// If the file description is ready for read and write, the u32 returned will be the XOR
-    /// of both readiness events, which is (EPOLLIN | EPOLLOUT).
     fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
         throw_unsup_format!("{}: epoll does not support this file description", self.name());
     }
@@ -212,6 +210,7 @@ impl FileDescription for NullOutput {
         Ok(Ok(bytes.len()))
     }
 }
+
 /// Structure contains both the file description and its unique identifier.
 #[derive(Clone, Debug)]
 pub struct FileDescWithId<T: FileDescription + ?Sized> {
