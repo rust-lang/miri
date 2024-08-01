@@ -763,9 +763,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // If the statxbuf or pathname pointers are null, the function fails with `EFAULT`.
         if this.ptr_is_null(statxbuf_ptr)? || this.ptr_is_null(pathname_ptr)? {
-            let efault = this.eval_libc("EFAULT");
-            this.set_last_error(efault)?;
-            return this.write_int(-1, dest);
+            return this.set_libc_err_and_return_neg1("EFAULT", dest);
         }
 
         let statxbuf = this.deref_pointer_as(statxbuf_op, this.libc_ty_layout("statx"))?;
@@ -795,19 +793,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`statx`", reject_with)?;
-            let ecode = if path.is_absolute() || dirfd == this.eval_libc_i32("AT_FDCWD") {
+            let ename = if path.is_absolute() || dirfd == this.eval_libc_i32("AT_FDCWD") {
                 // since `path` is provided, either absolute or
                 // relative to CWD, `EACCES` is the most relevant.
-                this.eval_libc("EACCES")
+                "EACCES"
             } else {
                 // `dirfd` is set to target file, and `path` is empty
                 // (or we would have hit the `throw_unsup_format`
                 // above). `EACCES` would violate the spec.
                 assert!(empty_path_flag);
-                this.eval_libc("EBADF")
+                "EBADF"
             };
-            this.set_last_error(ecode)?;
-            return this.write_int(-1, dest);
+            return this.set_libc_err_and_return_neg1(ename, dest);
         }
 
         // the `_mask_op` parameter specifies the file information that the caller requested.
@@ -1393,30 +1390,23 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let flags = this.read_scalar(flags_op)?.to_i32()?;
 
         if offset < 0 || nbytes < 0 {
-            let einval = this.eval_libc("EINVAL");
-            this.set_last_error(einval)?;
-            return this.write_int(-1, dest);
+            return this.set_libc_err_and_return_neg1("EINVAL", dest);
         }
         let allowed_flags = this.eval_libc_i32("SYNC_FILE_RANGE_WAIT_BEFORE")
             | this.eval_libc_i32("SYNC_FILE_RANGE_WRITE")
             | this.eval_libc_i32("SYNC_FILE_RANGE_WAIT_AFTER");
         if flags & allowed_flags != flags {
-            let einval = this.eval_libc("EINVAL");
-            this.set_last_error(einval)?;
-            return this.write_int(-1, dest);
+            return this.set_libc_err_and_return_neg1("EINVAL", dest);
         }
 
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`sync_file_range`", reject_with)?;
-            // Set error code as "EBADF" (bad fd)
-            let i: i32 = this.fd_not_found()?;
-            return this.write_int(i, dest);
+            return this.set_libc_err_and_return_neg1("EBADF", dest);
         }
 
         let Some(fd) = this.machine.fds.get(fd) else {
-            let i: i32 = this.fd_not_found()?;
-            return this.write_int(i, dest);
+            return this.set_libc_err_and_return_neg1("EBADF", dest);
         };
         // Only regular files support synchronization.
         let FileHandle { file, writable } = fd.downcast::<FileHandle>().ok_or_else(|| {
@@ -1424,8 +1414,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_data);
         drop(fd);
-        let i: i32 = this.try_unwrap_io_result(io_result)?;
-        this.write_int(i, dest)
+        this.write_io_result(io_result, dest)
     }
 
     fn readlink(

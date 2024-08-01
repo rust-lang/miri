@@ -75,10 +75,7 @@ pub fn futex<'tcx>(
             };
 
             if bitset == 0 {
-                let einval = this.eval_libc("EINVAL");
-                this.set_last_error(einval)?;
-                this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
-                return Ok(());
+                return this.set_libc_err_and_return_neg1("EINVAL", dest);
             }
 
             let timeout = this.deref_pointer_as(&args[3], this.libc_ty_layout("timespec"))?;
@@ -88,10 +85,7 @@ pub fn futex<'tcx>(
                 let duration = match this.read_timespec(&timeout)? {
                     Some(duration) => duration,
                     None => {
-                        let einval = this.eval_libc("EINVAL");
-                        this.set_last_error(einval)?;
-                        this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
-                        return Ok(());
+                        return this.set_libc_err_and_return_neg1("EINVAL", dest);
                     }
                 };
                 let timeout_clock = if op & futex_realtime == futex_realtime {
@@ -172,9 +166,7 @@ pub fn futex<'tcx>(
             } else {
                 // The futex value doesn't match the expected value, so we return failure
                 // right away without sleeping: -1 and errno set to EAGAIN.
-                let eagain = this.eval_libc("EAGAIN");
-                this.set_last_error(eagain)?;
-                this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
+                this.set_libc_err_and_return_neg1("EAGAIN", dest)?;
             }
         }
         // FUTEX_WAKE: (int *addr, int op = FUTEX_WAKE, int val)
@@ -198,10 +190,7 @@ pub fn futex<'tcx>(
                 u32::MAX
             };
             if bitset == 0 {
-                let einval = this.eval_libc("EINVAL");
-                this.set_last_error(einval)?;
-                this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
-                return Ok(());
+                return this.set_libc_err_and_return_neg1("EINVAL", dest);
             }
             // Together with the SeqCst fence in futex_wait, this makes sure that futex_wait
             // will see the latest value on addr which could be changed by our caller
