@@ -222,9 +222,9 @@ pub struct FileDescWithId<T: FileDescription + ?Sized> {
 pub struct FileDescriptionRef(Rc<FileDescWithId<dyn FileDescription>>);
 
 impl FileDescriptionRef {
-    fn new(fd: impl FileDescription, id: usize) -> Self {
+    fn new(fd: impl FileDescription, id: FdId) -> Self {
         FileDescriptionRef(Rc::new(FileDescWithId {
-            id: FdId(id),
+            id,
             file_description: RefCell::new(Box::new(fd)),
         }))
     }
@@ -330,7 +330,7 @@ impl FdTable {
 
     /// Insert a new file description to the FdTable.
     pub fn insert_new(&mut self, fd: impl FileDescription) -> i32 {
-        let file_handle = FileDescriptionRef::new(fd, self.next_file_description_id);
+        let file_handle = FileDescriptionRef::new(fd, FdId(self.next_file_description_id));
         self.next_file_description_id = self.next_file_description_id.checked_add(1).unwrap();
         self.insert_ref_with_min_fd(file_handle, 0)
     }
