@@ -62,6 +62,37 @@ pub struct EpollEventInterest {
     pub ready_list: Rc<RefCell<BTreeMap<(FdId, i32), EpollEventInstance>>>,
 }
 
+/// EpollReadyEvents reflects the readiness of a file description.
+pub struct EpollReadyEvents {
+    /// The associated file is available for read(2) operations.
+    pub epollin: bool,
+    /// The associated file is available for write(2) operations.
+    pub epollout: bool,
+    /// Stream socket peer closed connection, or shut down writing
+    /// half of connection.
+    pub epollrdhup: bool,
+}
+
+impl EpollReadyEvents {
+    pub fn new() -> Self {
+        EpollReadyEvents { epollin: false, epollout: false, epollrdhup: false }
+    }
+
+    pub fn get_event_bitmask(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32 {
+        let mut bitmask = 0;
+        if self.epollin {
+            bitmask |= epollin;
+        }
+        if self.epollout {
+            bitmask |= epollout;
+        }
+        if self.epollrdhup {
+            bitmask |= epollrdhup;
+        }
+        bitmask
+    }
+}
+
 impl Epoll {
     fn get_ready_list(&self) -> Rc<RefCell<BTreeMap<(FdId, i32), EpollEventInstance>>> {
         Rc::clone(&self.ready_list)

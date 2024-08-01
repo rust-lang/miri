@@ -6,6 +6,7 @@ use std::mem;
 use fd::FdId;
 use rustc_target::abi::Endian;
 
+use crate::shims::unix::linux::epoll::EpollReadyEvents;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -41,22 +42,20 @@ impl FileDescription for Event {
         "event"
     }
 
-    fn get_epoll_ready_events<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+    fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
         // We only check the status of EPOLLIN and EPOLLOUT flags for eventfd. If other event flags
         // need to be supported in the future, the check should be added here.
 
-        let epollin = ecx.eval_libc_u32("EPOLLIN");
-        let epollout = ecx.eval_libc_u32("EPOLLOUT");
-        let mut ready_flags = 0;
+        let mut epoll_ready_events = EpollReadyEvents::new();
         // Check if it is readable.
         if self.counter != 0 {
-            ready_flags |= epollin;
+            epoll_ready_events.epollin = true;
         }
         // Check if it is writable.
         if self.counter != MAX_COUNTER {
-            ready_flags |= epollout;
+            epoll_ready_events.epollout = true;
         }
-        Ok(ready_flags)
+        Ok(epoll_ready_events)
     }
 
     fn close<'tcx>(
@@ -97,7 +96,7 @@ impl FileDescription for Event {
             self.counter = 0;
             // When any of the event happened, we check and update the status of all supported event
             // types for current file description.
-            ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
+            ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -154,7 +153,7 @@ impl FileDescription for Event {
         };
         // When any of the event happened, we check and update the status of all supported event
         // types for current file description.
-        ecx.check_and_update_readiness(self.id, |ecx| self.get_epoll_ready_events(ecx))?;
+        ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
 }

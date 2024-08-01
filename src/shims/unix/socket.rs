@@ -5,6 +5,7 @@ use std::io::{Error, ErrorKind, Read};
 use std::rc::{Rc, Weak};
 
 use crate::shims::unix::fd::WeakFileDescriptionRef;
+use crate::shims::unix::linux::epoll::EpollReadyEvents;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
 
@@ -42,19 +43,16 @@ impl FileDescription for SocketPair {
         "socketpair"
     }
 
-    fn get_epoll_ready_events<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+    fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
         // We only check the status of EPOLLIN, EPOLLOUT and EPOLLRDHUP flags. If other event flags
         // need to be supported in the future, the check should be added here.
 
-        let epollin = ecx.eval_libc_u32("EPOLLIN");
-        let epollout = ecx.eval_libc_u32("EPOLLOUT");
-        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
-        let mut ready_flags = 0;
+        let mut epoll_ready_events = EpollReadyEvents::new();
         let readbuf = self.readbuf.borrow();
 
         // Check if it is readable.
         if !readbuf.buf.is_empty() {
-            ready_flags |= epollin;
+            epoll_ready_events.epollin = true;
         }
 
         // Check if is writable.
@@ -63,18 +61,18 @@ impl FileDescription for SocketPair {
             let data_size = writebuf.buf.len();
             let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(data_size);
             if available_space != 0 {
-                ready_flags |= epollout;
+                epoll_ready_events.epollout = true;
             }
         }
 
         // Check if the peer_fd closed
         if self.peer_closed {
-            ready_flags |= epollrdhup;
+            epoll_ready_events.epollrdhup = true;
             // This is an edge case. Whenever epollrdhup is triggered, epollin will be added
             // even though there is no data in the buffer.
-            ready_flags |= epollin;
+            epoll_ready_events.epollin = true;
         }
-        Ok(ready_flags)
+        Ok(epoll_ready_events)
     }
 
     fn close<'tcx>(

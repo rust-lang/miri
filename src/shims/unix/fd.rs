@@ -10,7 +10,7 @@ use std::rc::Weak;
 
 use rustc_target::abi::Size;
 
-use crate::shims::unix::linux::epoll::EpollEventInstance;
+use crate::shims::unix::linux::epoll::{EpollEventInstance, EpollReadyEvents};
 use crate::shims::unix::*;
 use crate::*;
 
@@ -104,7 +104,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     /// Check the readiness of file description.
     /// If the file description is ready for read and write, the u32 returned will be the XOR
     /// of both readiness events, which is (EPOLLIN | EPOLLOUT).
-    fn get_epoll_ready_events<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32> {
+    fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
         throw_unsup_format!("{}: epoll does not support this file description", self.name());
     }
 }
@@ -271,9 +271,7 @@ impl FileDescriptionRef {
         &self,
         ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> InterpResult<'tcx, ()> {
-        ecx.check_and_update_readiness(self.get_id(), |ecx| {
-            self.borrow_mut().get_epoll_ready_events(ecx)
-        })
+        ecx.check_and_update_readiness(self.get_id(), || self.borrow_mut().get_epoll_ready_events())
     }
 }
 
@@ -395,13 +393,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn check_and_update_readiness(
         &self,
         id: FdId,
-        get_ready_events: impl FnOnce(&MiriInterpCx<'tcx>) -> InterpResult<'tcx, u32>,
+        get_ready_events: impl FnOnce() -> InterpResult<'tcx, EpollReadyEvents>,
     ) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_ref();
         // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
             // Retrieve the readiness events of the file description.
-            let ready_events = get_ready_events(this)?;
+            let epoll_ready_events = get_ready_events()?;
+
+            // Get the bitmask of ready events.
+            let epollin = this.eval_libc_u32("EPOLLIN");
+            let epollout = this.eval_libc_u32("EPOLLOUT");
+            let epollrdhup = this.eval_libc_u32("EPOLLRDHUP");
+            let ready_events = epoll_ready_events.get_event_bitmask(epollin, epollout, epollrdhup);
 
             for weak_epoll_interest in epoll_interests {
                 if let Some(epoll_interest) = weak_epoll_interest.upgrade() {
