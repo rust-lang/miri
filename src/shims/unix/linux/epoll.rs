@@ -78,7 +78,11 @@ impl EpollReadyEvents {
         EpollReadyEvents { epollin: false, epollout: false, epollrdhup: false }
     }
 
-    pub fn get_event_bitmask(&self, epollin: u32, epollout: u32, epollrdhup: u32) -> u32 {
+    pub fn get_event_bitmask<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> u32 {
+        let epollin = ecx.eval_libc_u32("EPOLLIN");
+        let epollout = ecx.eval_libc_u32("EPOLLOUT");
+        let epollrdhup = ecx.eval_libc_u32("EPOLLRDHUP");
+
         let mut bitmask = 0;
         if self.epollin {
             bitmask |= epollin;

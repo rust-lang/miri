@@ -401,10 +401,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let epoll_ready_events = get_ready_events()?;
 
             // Get the bitmask of ready events.
-            let epollin = this.eval_libc_u32("EPOLLIN");
-            let epollout = this.eval_libc_u32("EPOLLOUT");
-            let epollrdhup = this.eval_libc_u32("EPOLLRDHUP");
-            let ready_events = epoll_ready_events.get_event_bitmask(epollin, epollout, epollrdhup);
+            let ready_events = epoll_ready_events.get_event_bitmask(this);
 
             for weak_epoll_interest in epoll_interests {
                 if let Some(epoll_interest) = weak_epoll_interest.upgrade() {
