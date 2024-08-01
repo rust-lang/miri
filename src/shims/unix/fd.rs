@@ -266,7 +266,7 @@ impl FileDescriptionRef {
     }
 
     /// Function used to retrieve the readiness events of a file description and insert
-    ///  an `EpollReturn` into the ready list if the file description is ready.
+    /// an `EpollEventInstance` into the ready list if the file description is ready.
     pub(crate) fn check_and_update_readiness<'tcx>(
         &self,
         ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
