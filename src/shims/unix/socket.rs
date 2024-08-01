@@ -296,7 +296,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Update peer_fd and id field.
         fd_ref1.borrow_mut().downcast_mut::<SocketPair>().unwrap().peer_fd = weak_fd_ref0;
 
-        fd_ref0.clone().borrow_mut().downcast_mut::<SocketPair>().unwrap().peer_fd = weak_fd_ref1;
+        fd_ref0.borrow_mut().downcast_mut::<SocketPair>().unwrap().peer_fd = weak_fd_ref1;
 
         // Return socketpair file description value to the caller.
         let sv0 = Scalar::from_int(sv0, sv.layout.size);
