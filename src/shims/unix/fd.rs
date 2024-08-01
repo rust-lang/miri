@@ -420,7 +420,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         let ready_list = &mut epoll_event_interest.ready_list.borrow_mut();
                         let event_instance =
                             EpollEventInstance::new(flags, epoll_event_interest.data);
-                        ready_list.insert(epoll_key, epoll_return);
+                        ready_list.insert(epoll_key, event_instance);
                     }
                 }
             }
