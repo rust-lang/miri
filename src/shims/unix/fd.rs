@@ -418,7 +418,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     if flags != 0 {
                         let epoll_key = (id, epoll_event_interest.file_descriptor);
                         let ready_list = &mut epoll_event_interest.ready_list.borrow_mut();
-                        let epoll_return =
+                        let event_instance =
                             EpollEventInstance::new(flags, epoll_event_interest.data);
                         ready_list.insert(epoll_key, epoll_return);
                     }
