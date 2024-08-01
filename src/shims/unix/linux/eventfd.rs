@@ -46,16 +46,11 @@ impl FileDescription for Event {
         // We only check the status of EPOLLIN and EPOLLOUT flags for eventfd. If other event flags
         // need to be supported in the future, the check should be added here.
 
-        let mut epoll_ready_events = EpollReadyEvents::new();
-        // Check if it is readable.
-        if self.counter != 0 {
-            epoll_ready_events.epollin = true;
-        }
-        // Check if it is writable.
-        if self.counter != MAX_COUNTER {
-            epoll_ready_events.epollout = true;
-        }
-        Ok(epoll_ready_events)
+        Ok(EpollReadyEvents {
+            epollin: self.counter != 0,
+            epollout: self.counter != MAX_COUNTER,
+            ..EpollReadyEvents::new()
+        })
     }
 
     fn close<'tcx>(
