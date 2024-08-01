@@ -676,8 +676,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // `stat` always follows symlinks.
         let metadata = match FileMetadata::from_path(this, &path, true)? {
-            Some(metadata) => metadata,
-            None => return this.write_int(-1, dest), // `FileMetadata` has set errno
+            Ok(metadata) => metadata,
+            Err(e) => return this.set_last_err_and_return_neg1(e, dest),
         };
         let res = this.macos_stat_write_buf(metadata, buf_op)?;
         this.write_int(res, dest)
@@ -706,8 +706,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let metadata = match FileMetadata::from_path(this, &path, false)? {
-            Some(metadata) => metadata,
-            None => return this.write_int(-1, dest), // `FileMetadata` has set errno
+            Ok(metadata) => metadata,
+            Err(e) => return this.set_last_err_and_return_neg1(e, dest),
         };
         let res = this.macos_stat_write_buf(metadata, buf_op)?;
         this.write_int(res, dest)
@@ -734,8 +734,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let metadata = match FileMetadata::from_fd_num(this, fd)? {
-            Some(metadata) => metadata,
-            None => return this.write_int(-1, dest), // `FileMetadata` has set errno
+            Ok(metadata) => metadata,
+            Err(e) => return this.set_last_err_and_return_neg1(e, dest),
         };
         let res = this.macos_stat_write_buf(metadata, buf_op)?;
         this.write_int(res, dest)
@@ -824,8 +824,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             FileMetadata::from_path(this, &path, follow_symlink)?
         };
         let metadata = match metadata {
-            Some(metadata) => metadata,
-            None => return this.write_int(-1, dest),
+            Ok(metadata) => metadata,
+            Err(e) => return this.set_last_err_and_return_neg1(e, dest),
         };
 
         // The `mode` field specifies the type of the file and the permissions over the file for
@@ -1699,7 +1699,7 @@ impl FileMetadata {
         ecx: &mut MiriInterpCx<'tcx>,
         path: &Path,
         follow_symlink: bool,
-    ) -> InterpResult<'tcx, Option<FileMetadata>> {
+    ) -> InterpResult<'tcx, Result<FileMetadata, Scalar>> {
         let metadata =
             if follow_symlink { std::fs::metadata(path) } else { std::fs::symlink_metadata(path) };
 
@@ -1709,9 +1709,9 @@ impl FileMetadata {
     fn from_fd_num<'tcx>(
         ecx: &mut MiriInterpCx<'tcx>,
         fd_num: i32,
-    ) -> InterpResult<'tcx, Option<FileMetadata>> {
+    ) -> InterpResult<'tcx, Result<FileMetadata, Scalar>> {
         let Some(fd) = ecx.machine.fds.get(fd_num) else {
-            return ecx.fd_not_found().map(|_: i32| None);
+            return Ok(Err(ecx.eval_libc("EBADF")));
         };
 
         let file = &fd
@@ -1731,12 +1731,11 @@ impl FileMetadata {
     fn from_meta<'tcx>(
         ecx: &mut MiriInterpCx<'tcx>,
         metadata: Result<std::fs::Metadata, std::io::Error>,
-    ) -> InterpResult<'tcx, Option<FileMetadata>> {
+    ) -> InterpResult<'tcx, Result<FileMetadata, Scalar>> {
         let metadata = match metadata {
             Ok(metadata) => metadata,
             Err(e) => {
-                ecx.set_last_error_from_io_error(e)?;
-                return Ok(None);
+                return Ok(Err(ecx.io_error_to_errnum(e)?));
             }
         };
 
@@ -1759,6 +1758,6 @@ impl FileMetadata {
         let modified = extract_sec_and_nsec(metadata.modified())?;
 
         // FIXME: Provide more fields using platform specific methods.
-        Ok(Some(FileMetadata { mode, size, created, accessed, modified }))
+        Ok(Ok(FileMetadata { mode, size, created, accessed, modified }))
     }
 }

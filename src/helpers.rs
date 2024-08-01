@@ -781,6 +781,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx> {
         let err = self.eval_libc(err);
+        self.set_last_err_and_return_neg1(err, dest)
+    }
+
+    fn set_last_err_and_return_neg1(
+        &mut self,
+        err: Scalar,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         self.set_last_error(err)?;
         self.eval_context_mut().write_int(-1, dest)
     }
