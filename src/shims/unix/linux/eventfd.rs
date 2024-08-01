@@ -42,15 +42,15 @@ impl FileDescription for Event {
         "event"
     }
 
-    fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
+    fn get_epoll_ready_events(&self) -> EpollReadyEvents {
         // We only check the status of EPOLLIN and EPOLLOUT flags for eventfd. If other event flags
         // need to be supported in the future, the check should be added here.
 
-        Ok(EpollReadyEvents {
+        EpollReadyEvents {
             epollin: self.counter != 0,
             epollout: self.counter != MAX_COUNTER,
             ..EpollReadyEvents::new()
-        })
+        }
     }
 
     fn close<'tcx>(

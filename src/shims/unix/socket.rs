@@ -43,7 +43,7 @@ impl FileDescription for SocketPair {
         "socketpair"
     }
 
-    fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
+    fn get_epoll_ready_events(&self) -> EpollReadyEvents {
         // We only check the status of EPOLLIN, EPOLLOUT and EPOLLRDHUP flags. If other event flags
         // need to be supported in the future, the check should be added here.
 
@@ -72,7 +72,7 @@ impl FileDescription for SocketPair {
             // even though there is no data in the buffer.
             epoll_ready_events.epollin = true;
         }
-        Ok(epoll_ready_events)
+        epoll_ready_events
     }
 
     fn close<'tcx>(
