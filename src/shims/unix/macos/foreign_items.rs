@@ -39,19 +39,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "stat" | "stat64" | "stat$INODE64" => {
                 let [path, buf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_stat(path, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_stat(path, buf, dest)?;
             }
             "lstat" | "lstat64" | "lstat$INODE64" => {
                 let [path, buf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_lstat(path, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_lstat(path, buf, dest)?;
             }
             "fstat" | "fstat64" | "fstat$INODE64" => {
                 let [fd, buf] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_fstat(fd, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_fstat(fd, buf, dest)?;
             }
             "opendir$INODE64" => {
                 let [name] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
@@ -61,8 +58,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "readdir_r" | "readdir_r$INODE64" => {
                 let [dirp, entry, result] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_readdir_r(dirp, entry, result)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_readdir_r(dirp, entry, result, dest)?;
             }
             "realpath$DARWIN_EXTSN" => {
                 let [path, resolved_path] =

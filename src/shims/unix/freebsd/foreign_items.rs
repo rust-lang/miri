@@ -48,25 +48,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "stat" | "stat@FBSD_1.0" => {
                 let [path, buf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_stat(path, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_stat(path, buf, dest)?;
             }
             "lstat" | "lstat@FBSD_1.0" => {
                 let [path, buf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_lstat(path, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_lstat(path, buf, dest)?;
             }
             "fstat" | "fstat@FBSD_1.0" => {
                 let [fd, buf] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_fstat(fd, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_fstat(fd, buf, dest)?;
             }
             "readdir_r" | "readdir_r@FBSD_1.0" => {
                 let [dirp, entry, result] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_readdir_r(dirp, entry, result)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_readdir_r(dirp, entry, result, dest)?;
             }
 
             // Miscellaneous
