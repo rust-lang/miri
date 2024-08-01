@@ -275,7 +275,7 @@ impl FileDescriptionRef {
     }
 }
 
-/// WeakFileDescriptorRef holds a weak reference to the actual file description.
+/// Holds a weak reference to the actual file description.
 #[derive(Clone, Debug, Default)]
 pub struct WeakFileDescriptionRef {
     weak_ref: Weak<FileDescWithId<dyn FileDescription>>,
