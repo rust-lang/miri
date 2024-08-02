@@ -11,8 +11,8 @@ LL |         libc::pthread_mutex_unlock(&mut m2 as *mut _);
 note: inside `main`
   --> $DIR/libc_pthread_mutex_move.rs:LL:CC
    |
-LL |         check();
-   |         ^^^^^^^
+LL |     check();
+   |     ^^^^^^^
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 
