@@ -102,7 +102,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     }
 
     /// Check the readiness of file description.
-    fn get_epoll_ready_events(&self) -> EpollReadyEvents {
+    fn get_epoll_ready_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadyEvents> {
         throw_unsup_format!("{}: epoll does not support this file description", self.name());
     }
 }
@@ -392,13 +392,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn check_and_update_readiness(
         &self,
         id: FdId,
-        get_ready_events: impl FnOnce() -> EpollReadyEvents,
+        get_ready_events: impl FnOnce() -> InterpResult<'tcx, EpollReadyEvents>,
     ) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_ref();
         // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
             // Retrieve the readiness events of the file description.
-            let epoll_ready_events = get_ready_events();
+            let epoll_ready_events = get_ready_events()?;
 
             // Get the bitmask of ready events.
             let ready_events = epoll_ready_events.get_event_bitmask(this);
