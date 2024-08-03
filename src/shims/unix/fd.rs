@@ -398,7 +398,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_ref();
         // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
-
             let epoll_ready_events = get_ready_events()?;
             // Get the bitmask of ready events.
             let ready_events = epoll_ready_events.get_event_bitmask(this);
