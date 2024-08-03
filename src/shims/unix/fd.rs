@@ -388,7 +388,8 @@ impl FdTable {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    /// For a specific unique file descriptor id, get its ready events and update the corresponding ready lists
+    /// For a specific unique file descriptor id, get its ready events and update
+    /// the corresponding ready list.
     fn check_and_update_readiness(
         &self,
         id: FdId,
@@ -397,9 +398,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_ref();
         // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
-            // Retrieve the readiness events of the file description.
-            let epoll_ready_events = get_ready_events()?;
 
+            let epoll_ready_events = get_ready_events()?;
             // Get the bitmask of ready events.
             let ready_events = epoll_ready_events.get_event_bitmask(this);
 
