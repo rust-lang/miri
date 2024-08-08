@@ -302,7 +302,7 @@ impl FdId {
 pub struct FdTable {
     pub fds: BTreeMap<i32, FileDescriptionRef>,
     /// Unique identifier for file description, used to differentiate between various file description.
-    next_file_description_id: usize,
+    next_file_description_id: FdId,
 }
 
 impl VisitProvenance for FdTable {
@@ -313,7 +313,7 @@ impl VisitProvenance for FdTable {
 
 impl FdTable {
     fn new() -> Self {
-        FdTable { fds: BTreeMap::new(), next_file_description_id: 0 }
+        FdTable { fds: BTreeMap::new(), next_file_description_id: FdId(0) }
     }
     pub(crate) fn init(mute_stdout_stderr: bool) -> FdTable {
         let mut fds = FdTable::new();
@@ -330,8 +330,8 @@ impl FdTable {
 
     /// Insert a new file description to the FdTable.
     pub fn insert_new(&mut self, fd: impl FileDescription) -> i32 {
-        let file_handle = FileDescriptionRef::new(fd, FdId(self.next_file_description_id));
-        self.next_file_description_id = self.next_file_description_id.checked_add(1).unwrap();
+        let file_handle = FileDescriptionRef::new(fd, self.next_file_description_id);
+        self.next_file_description_id = FdId(self.next_file_description_id.0.strict_add(1));
         self.insert_ref_with_min_fd(file_handle, 0)
     }
 
