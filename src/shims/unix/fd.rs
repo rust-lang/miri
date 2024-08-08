@@ -282,7 +282,10 @@ pub struct WeakFileDescriptionRef {
 
 impl WeakFileDescriptionRef {
     pub fn upgrade(&self) -> Option<FileDescriptionRef> {
-        Some(FileDescriptionRef(self.weak_ref.upgrade()?))
+        if let Some(file_desc_with_id) = self.weak_ref.upgrade() {
+            return Some(FileDescriptionRef(file_desc_with_id));
+        }
+        None
     }
 }
 

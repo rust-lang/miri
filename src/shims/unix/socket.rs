@@ -25,7 +25,6 @@ struct SocketPair {
     /// The peer_fd field holds a weak reference to the file description of peer socketpair.
     peer_fd: WeakFileDescriptionRef,
     is_nonblock: bool,
-    peer_closed: bool,
 }
 
 #[derive(Debug)]
@@ -66,7 +65,7 @@ impl FileDescription for SocketPair {
         }
 
         // Check if the peer_fd closed
-        if self.peer_closed {
+        if self.peer_fd.upgrade().is_none() {
             epoll_ready_events.epollrdhup = true;
             // This is an edge case. Whenever epollrdhup is triggered, epollin will be added
             // even though there is no data in the buffer.
@@ -88,7 +87,6 @@ impl FileDescription for SocketPair {
 
         // Notify peer fd that closed has happened.
         if let Some(peer_fd) = self.peer_fd.upgrade() {
-            peer_fd.borrow_mut().downcast_mut::<SocketPair>().unwrap().peer_closed = true;
             // When any of the event happened, we check and update the status of all supported events
             // types of peer fd.
             peer_fd.check_and_update_readiness(ecx)?;
@@ -271,14 +269,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             writebuf: Rc::downgrade(&buffer1),
             readbuf: Rc::clone(&buffer2),
             peer_fd: WeakFileDescriptionRef::default(),
-            peer_closed: false,
             is_nonblock: is_sock_nonblock,
         };
         let socketpair_1 = SocketPair {
             writebuf: Rc::downgrade(&buffer2),
             readbuf: Rc::clone(&buffer1),
             peer_fd: WeakFileDescriptionRef::default(),
-            peer_closed: false,
             is_nonblock: is_sock_nonblock,
         };
 
