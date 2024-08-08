@@ -23,6 +23,8 @@ struct SocketPair {
     readbuf: Rc<RefCell<Buffer>>,
     /// When a socketpair instance is created, two socketpair file descriptions are generated.
     /// The peer_fd field holds a weak reference to the file description of peer socketpair.
+    // TODO: It might be possible to retrieve writebuf from peer_fd and remove the writebuf
+    // field above.
     peer_fd: WeakFileDescriptionRef,
     is_nonblock: bool,
 }
