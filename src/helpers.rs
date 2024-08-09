@@ -771,6 +771,41 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_scalar(scalar, &errno_place)
     }
 
+    fn set_einval_and_return_neg1(
+        &mut self,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
+        self.set_libc_err_and_return_neg1("EINVAL", dest)
+    }
+
+    fn set_fd_not_found_and_return_neg1(
+        &mut self,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
+        self.set_libc_err_and_return_neg1("EBADF", dest)
+    }
+
+    fn set_libc_err_and_return_neg1(
+        &mut self,
+        err: &str,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
+        let err = self.eval_libc(err);
+        self.set_last_error(err)?;
+        self.eval_context_mut().write_int(-1, dest)?;
+        Ok(EmulateItemResult::NeedsReturn)
+    }
+
+    fn set_io_err_and_return_neg1(
+        &mut self,
+        err: std::io::Error,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
+        self.set_last_error_from_io_error(err)?;
+        self.eval_context_mut().write_int(-1, dest)?;
+        Ok(EmulateItemResult::NeedsReturn)
+    }
+
     /// Gets the last error variable.
     fn get_last_error(&mut self) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
@@ -840,6 +875,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Sets the last OS error using a `std::io::ErrorKind`.
     fn set_last_error_from_io_error(&mut self, err: std::io::Error) -> InterpResult<'tcx> {
         self.set_last_error(self.io_error_to_errnum(err)?)
+    }
+
+    /// Helper function that consumes an `std::io::Result<i32>` and writes the `Ok` integer
+    /// to the destination. In case the result is an error, this function writes
+    /// `-1` and sets the last OS error accordingly.
+    fn write_io_result(
+        &mut self,
+        result: std::io::Result<i32>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
+        let res = self.try_unwrap_io_result(result)?;
+        self.eval_context_mut().write_int(res, dest)?;
+        Ok(EmulateItemResult::NeedsReturn)
     }
 
     /// Helper function that consumes an `std::io::Result<T>` and returns an

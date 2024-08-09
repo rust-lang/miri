@@ -6,7 +6,7 @@ pub fn futex<'tcx>(
     this: &mut MiriInterpCx<'tcx>,
     args: &[OpTy<'tcx>],
     dest: &MPlaceTy<'tcx>,
-) -> InterpResult<'tcx> {
+) -> InterpResult<'tcx, EmulateItemResult> {
     // The amount of arguments used depends on the type of futex operation.
     // The full futex syscall takes six arguments (excluding the syscall
     // number), which is also the maximum amount of arguments a linux syscall
@@ -75,10 +75,7 @@ pub fn futex<'tcx>(
             };
 
             if bitset == 0 {
-                let einval = this.eval_libc("EINVAL");
-                this.set_last_error(einval)?;
-                this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
-                return Ok(());
+                return this.set_einval_and_return_neg1(dest);
             }
 
             let timeout = this.deref_pointer_as(&args[3], this.libc_ty_layout("timespec"))?;
@@ -88,10 +85,7 @@ pub fn futex<'tcx>(
                 let duration = match this.read_timespec(&timeout)? {
                     Some(duration) => duration,
                     None => {
-                        let einval = this.eval_libc("EINVAL");
-                        this.set_last_error(einval)?;
-                        this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
-                        return Ok(());
+                        return this.set_einval_and_return_neg1(dest);
                     }
                 };
                 let timeout_clock = if op & futex_realtime == futex_realtime {
@@ -169,12 +163,11 @@ pub fn futex<'tcx>(
                     dest.clone(),
                     this.eval_libc("ETIMEDOUT"),
                 );
+                Ok(EmulateItemResult::NeedsReturn)
             } else {
                 // The futex value doesn't match the expected value, so we return failure
                 // right away without sleeping: -1 and errno set to EAGAIN.
-                let eagain = this.eval_libc("EAGAIN");
-                this.set_last_error(eagain)?;
-                this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
+                this.set_libc_err_and_return_neg1("EAGAIN", dest)
             }
         }
         // FUTEX_WAKE: (int *addr, int op = FUTEX_WAKE, int val)
@@ -198,10 +191,7 @@ pub fn futex<'tcx>(
                 u32::MAX
             };
             if bitset == 0 {
-                let einval = this.eval_libc("EINVAL");
-                this.set_last_error(einval)?;
-                this.write_scalar(Scalar::from_target_isize(-1, this), dest)?;
-                return Ok(());
+                return this.set_einval_and_return_neg1(dest);
             }
             // Together with the SeqCst fence in futex_wait, this makes sure that futex_wait
             // will see the latest value on addr which could be changed by our caller
@@ -216,10 +206,9 @@ pub fn futex<'tcx>(
                     break;
                 }
             }
-            this.write_scalar(Scalar::from_target_isize(n, this), dest)?;
+            this.write_int(n, dest)?;
+            Ok(EmulateItemResult::NeedsReturn)
         }
         op => throw_unsup_format!("Miri does not support `futex` syscall with op={}", op),
     }
-
-    Ok(())
 }

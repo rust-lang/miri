@@ -45,7 +45,10 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Handles the special `miri_start_unwind` intrinsic, which is called
     /// by libpanic_unwind to delegate the actual unwinding process to Miri.
-    fn handle_miri_start_unwind(&mut self, payload: &OpTy<'tcx>) -> InterpResult<'tcx> {
+    fn handle_miri_start_unwind(
+        &mut self,
+        payload: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
 
         trace!("miri_start_unwind: {:?}", this.frame().instance());
@@ -54,7 +57,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let thread = this.active_thread_mut();
         thread.panic_payloads.push(payload);
 
-        Ok(())
+        Ok(EmulateItemResult::NeedsUnwind)
     }
 
     /// Handles the `try` intrinsic, the underlying implementation of `std::panicking::try`.

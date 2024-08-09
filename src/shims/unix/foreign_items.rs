@@ -325,8 +325,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "mmap" => {
                 let [addr, length, prot, flags, fd, offset] = this.check_shim(abi, Abi::C {unwind: false}, link_name, args)?;
                 let offset = this.read_scalar(offset)?.to_int(this.libc_ty_layout("off_t").size)?;
-                let ptr = this.mmap(addr, length, prot, flags, fd, offset)?;
-                this.write_scalar(ptr, dest)?;
+                return this.mmap(addr, length, prot, flags, fd, offset, dest);
             }
             "munmap" => {
                 let [addr, length] = this.check_shim(abi, Abi::C {unwind: false}, link_name, args)?;
@@ -812,8 +811,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
                 // This function looks and behaves excatly like miri_start_unwind.
                 let [payload] = this.check_shim(abi, Abi::C { unwind: true }, link_name, args)?;
-                this.handle_miri_start_unwind(payload)?;
-                return Ok(EmulateItemResult::NeedsUnwind);
+                return this.handle_miri_start_unwind(payload);
             }
             "getuid" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;

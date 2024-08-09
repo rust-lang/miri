@@ -12,7 +12,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         old_size: &OpTy<'tcx>,
         new_size: &OpTy<'tcx>,
         flags: &OpTy<'tcx>,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
 
         let old_address = this.read_pointer(old_address)?;
@@ -24,7 +25,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         #[allow(clippy::arithmetic_side_effects)] // PAGE_SIZE is nonzero
         if old_address.addr().bytes() % this.machine.page_size != 0 || new_size == 0 {
             this.set_last_error(this.eval_libc("EINVAL"))?;
-            return Ok(this.eval_libc("MAP_FAILED"));
+            this.write_scalar(this.eval_libc("MAP_FAILED"), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         }
 
         if flags & this.eval_libc_i32("MREMAP_FIXED") != 0 {
@@ -38,7 +40,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if flags & this.eval_libc_i32("MREMAP_MAYMOVE") == 0 {
             // We only support MREMAP_MAYMOVE, so not passing the flag is just a failure
             this.set_last_error(this.eval_libc("EINVAL"))?;
-            return Ok(this.eval_libc("MAP_FAILED"));
+            this.write_scalar(this.eval_libc("MAP_FAILED"), dest)?;
+            return Ok(EmulateItemResult::NeedsReturn);
         }
 
         let align = this.machine.page_align();
@@ -59,6 +62,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .unwrap();
         }
 
-        Ok(Scalar::from_pointer(ptr, this))
+        this.write_pointer(ptr, dest)?;
+        Ok(EmulateItemResult::NeedsReturn)
     }
 }

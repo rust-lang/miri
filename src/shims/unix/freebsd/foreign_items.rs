@@ -30,6 +30,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(name)?,
                     max_len,
                 )?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "pthread_get_name_np" => {
                 let [thread, name, len] =
@@ -40,6 +41,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
                 )?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
 
             // File related shims
@@ -48,25 +50,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "stat" | "stat@FBSD_1.0" => {
                 let [path, buf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_stat(path, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_stat(path, buf, dest)
             }
             "lstat" | "lstat@FBSD_1.0" => {
                 let [path, buf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_lstat(path, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_lstat(path, buf, dest)
             }
             "fstat" | "fstat@FBSD_1.0" => {
                 let [fd, buf] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_fstat(fd, buf)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_fstat(fd, buf, dest)
             }
             "readdir_r" | "readdir_r@FBSD_1.0" => {
                 let [dirp, entry, result] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.macos_fbsd_readdir_r(dirp, entry, result)?;
-                this.write_scalar(result, dest)?;
+                this.macos_fbsd_readdir_r(dirp, entry, result, dest)
             }
 
             // Miscellaneous
@@ -74,6 +72,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let errno_place = this.last_error_place()?;
                 this.write_scalar(errno_place.to_ref(this).to_scalar(), dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
 
             // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
@@ -82,10 +81,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [_thread, _attr] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 this.write_null(dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
 
-            _ => return Ok(EmulateItemResult::NotSupported),
+            _ => Ok(EmulateItemResult::NotSupported),
         }
-        Ok(EmulateItemResult::NeedsReturn)
     }
 }

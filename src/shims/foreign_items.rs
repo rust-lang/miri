@@ -268,8 +268,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Miri-specific extern functions
             "miri_start_unwind" => {
                 let [payload] = this.check_shim(abi, Abi::Rust, link_name, args)?;
-                this.handle_miri_start_unwind(payload)?;
-                return Ok(EmulateItemResult::NeedsUnwind);
+                return this.handle_miri_start_unwind(payload);
             }
             "miri_run_provenance_gc" => {
                 let [] = this.check_shim(abi, Abi::Rust, link_name, args)?;

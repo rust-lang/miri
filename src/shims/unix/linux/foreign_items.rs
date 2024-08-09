@@ -31,20 +31,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // File related shims
             "readdir64" => {
                 let [dirp] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.linux_readdir64(dirp)?;
-                this.write_scalar(result, dest)?;
+                this.linux_readdir64(dirp, dest)
             }
             "sync_file_range" => {
                 let [fd, offset, nbytes, flags] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.sync_file_range(fd, offset, nbytes, flags)?;
-                this.write_scalar(result, dest)?;
+                this.sync_file_range(fd, offset, nbytes, flags, dest)
             }
             "statx" => {
                 let [dirfd, pathname, flags, mask, statxbuf] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.linux_statx(dirfd, pathname, flags, mask, statxbuf)?;
-                this.write_scalar(result, dest)?;
+                this.linux_statx(dirfd, pathname, flags, mask, statxbuf, dest)
             }
 
             // epoll, eventfd
@@ -52,24 +49,28 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [flag] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.epoll_create1(flag)?;
                 this.write_scalar(result, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "epoll_ctl" => {
                 let [epfd, op, fd, event] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.epoll_ctl(epfd, op, fd, event)?;
                 this.write_scalar(result, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "epoll_wait" => {
                 let [epfd, events, maxevents, timeout] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.epoll_wait(epfd, events, maxevents, timeout)?;
                 this.write_scalar(result, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "eventfd" => {
                 let [val, flag] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.eventfd(val, flag)?;
                 this.write_scalar(result, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
 
             // Threading
@@ -83,6 +84,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     max_len,
                 )?;
                 this.write_scalar(res, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "pthread_getname_np" => {
                 let [thread, name, len] =
@@ -93,15 +95,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(len)?,
                 )?;
                 this.write_scalar(res, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "gettid" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let result = this.linux_gettid()?;
-                this.write_scalar(result, dest)?;
+                this.linux_gettid(dest)
             }
 
             // Dynamically invoked syscalls
             "syscall" => {
+                // TODO pull this match arm into a method
                 // We do not use `check_shim` here because `syscall` is variadic. The argument
                 // count is checked bellow.
                 this.check_abi_and_shim_symbol_clash(abi, Abi::C { unwind: false }, link_name)?;
@@ -139,17 +142,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         let _flags = this.read_scalar(&args[3])?.to_i32();
 
                         this.gen_random(ptr, len)?;
-                        this.write_scalar(Scalar::from_target_usize(len, this), dest)?;
+                        this.write_int(len, dest)?;
+                        Ok(EmulateItemResult::NeedsReturn)
                     }
                     // `futex` is used by some synchronization primitives.
-                    id if id == sys_futex => {
-                        futex(this, &args[1..], dest)?;
-                    }
+                    id if id == sys_futex => futex(this, &args[1..], dest),
                     id => {
                         this.handle_unsupported_foreign_item(format!(
                             "can't execute syscall with ID {id}"
                         ))?;
-                        return Ok(EmulateItemResult::AlreadyJumped);
+                        Ok(EmulateItemResult::AlreadyJumped)
                     }
                 }
             }
@@ -159,29 +161,30 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [addr, length, prot, flags, fd, offset] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let offset = this.read_scalar(offset)?.to_i64()?;
-                let ptr = this.mmap(addr, length, prot, flags, fd, offset.into())?;
-                this.write_scalar(ptr, dest)?;
+                this.mmap(addr, length, prot, flags, fd, offset.into(), dest)
             }
             "mremap" => {
                 let [old_address, old_size, new_size, flags] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let ptr = this.mremap(old_address, old_size, new_size, flags)?;
-                this.write_scalar(ptr, dest)?;
+                this.mremap(old_address, old_size, new_size, flags, dest)
             }
             "__errno_location" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let errno_place = this.last_error_place()?;
-                this.write_scalar(errno_place.to_ref(this).to_scalar(), dest)?;
+                this.write_immediate(errno_place.to_ref(this), dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "__libc_current_sigrtmin" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
 
                 this.write_int(SIGRTMIN, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
             "__libc_current_sigrtmax" => {
                 let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
 
                 this.write_int(SIGRTMAX, dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
 
             // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
@@ -190,11 +193,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [_thread, _attr] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 this.write_null(dest)?;
+                Ok(EmulateItemResult::NeedsReturn)
             }
 
-            _ => return Ok(EmulateItemResult::NotSupported),
-        };
-
-        Ok(EmulateItemResult::NeedsReturn)
+            _ => Ok(EmulateItemResult::NotSupported),
+        }
     }
 }
