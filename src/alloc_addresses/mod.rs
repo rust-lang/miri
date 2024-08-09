@@ -42,6 +42,9 @@ pub struct GlobalStateInner {
     /// they do not have an `AllocExtra`.
     /// This is the inverse of `int_to_ptr_map`.
     base_addr: FxHashMap<AllocId, u64>,
+    /// An optional alias for the allocation, where features such as TBI have been used to modify
+    /// unused bits in a pointer.
+    alias_addr: FxHashMap<AllocId, u64>,
     /// A pool of addresses we can reuse for future allocations.
     reuse: ReusePool,
     /// Whether an allocation has been exposed or not. This cannot be put
@@ -59,6 +62,7 @@ impl VisitProvenance for GlobalStateInner {
         let GlobalStateInner {
             int_to_ptr_map: _,
             base_addr: _,
+            alias_addr: _,
             reuse: _,
             exposed: _,
             next_base_addr: _,
@@ -78,6 +82,7 @@ impl GlobalStateInner {
         GlobalStateInner {
             int_to_ptr_map: Vec::default(),
             base_addr: FxHashMap::default(),
+            alias_addr: FxHashMap::default(),
             reuse: ReusePool::new(config),
             exposed: FxHashSet::default(),
             next_base_addr: stack_addr,
@@ -339,10 +344,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // This cannot fail: since we already have a pointer with that provenance, adjust_alloc_root_pointer
         // must have been called in the past, so we can just look up the address in the map.
         let base_addr = *ecx.machine.alloc_addresses.borrow().base_addr.get(&alloc_id).unwrap();
-
         // Wrapping "addr - base_addr"
-        let rel_offset = ecx.truncate_to_target_usize(addr.bytes().wrapping_sub(base_addr));
-        Some((alloc_id, Size::from_bytes(rel_offset)))
+        let base_offset = ecx.truncate_to_target_usize(addr.bytes().wrapping_sub(base_addr));
+
+        // If there's an alias, then `offset` should be the offset from the closest out of `base_addr` or the
+        // alias' address. Generally, any interaction in user code should use the alias (if one's been set), but
+        // cleaning up the stack frame may still use the base address.
+        let offset =
+            if let Some(alias) = ecx.machine.alloc_addresses.borrow().alias_addr.get(&alloc_id) {
+                let alias_offset = ecx.truncate_to_target_usize(addr.bytes().wrapping_sub(*alias));
+                base_offset.min(alias_offset)
+            } else {
+                base_offset
+            };
+
+        Some((alloc_id, Size::from_bytes(offset)))
     }
 }
 
@@ -368,6 +384,13 @@ impl<'tcx> MiriMachine<'tcx> {
             global_state.int_to_ptr_map.binary_search_by_key(&addr, |(addr, _)| *addr).unwrap();
         let removed = global_state.int_to_ptr_map.remove(pos);
         assert_eq!(removed, (addr, dead_id)); // double-check that we removed the right thing
+        // Remove the alias for this allocation, if there is one.
+        if let Some(alias) = global_state.alias_addr.get(&dead_id) {
+            let pos =
+                global_state.int_to_ptr_map.binary_search_by_key(alias, |(addr, _)| *addr).unwrap();
+            let removed = global_state.int_to_ptr_map.remove(pos);
+            assert_eq!(removed, (*alias, dead_id));
+        }
         // We can also remove it from `exposed`, since this allocation can anyway not be returned by
         // `alloc_id_from_addr` any more.
         global_state.exposed.remove(&dead_id);
@@ -380,6 +403,25 @@ impl<'tcx> MiriMachine<'tcx> {
                 VClock::default()
             }
         })
+    }
+
+    /// Set the active alias for the allocation. Note that any dereference of a pointer to this allocation *must* use this alias,
+    /// and the alias *must* be valid at the architectural level (eg, TBI on AArch64). Any prior aliases will be invalidated, though
+    /// the original `base_addr` will remain valid for cleaning up allocations later.
+    pub fn set_alloc_alias(&mut self, id: AllocId, new: u64) {
+        let global_state = self.alloc_addresses.get_mut();
+        if let Some(alias) = global_state.alias_addr.insert(id, new) {
+            // Remove the old alias' int->ptr mapping.
+            let pos = global_state
+                .int_to_ptr_map
+                .binary_search_by_key(&alias, |(addr, _)| *addr)
+                .unwrap();
+            let removed = global_state.int_to_ptr_map.remove(pos);
+            assert_eq!(removed, (alias, id));
+        }
+        let new_pos =
+            global_state.int_to_ptr_map.binary_search_by_key(&new, |(addr, _)| *addr).unwrap_err();
+        global_state.int_to_ptr_map.insert(new_pos, (new, id));
     }
 }
 
