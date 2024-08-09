@@ -34,9 +34,6 @@ impl EpollEventInstance {
     pub fn new(events: u32, data: u64) -> EpollEventInstance {
         EpollEventInstance { events, data }
     }
-    pub fn update_events(&mut self, flag: u32) {
-        self.events |= flag;
-    }
 }
 /// EpollEventInterest registers the file description information to an epoll
 /// instance during a successful `epoll_ctl` call. It also stores additional
@@ -146,10 +143,6 @@ impl EpollInterestTable {
         id: FdId,
     ) -> Option<&mut Vec<Weak<RefCell<EpollEventInterest>>>> {
         self.0.get_mut(&id)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 
     pub fn remove(&mut self, id: FdId) {
@@ -445,7 +438,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let id = fd_ref.get_id();
         // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
-            // TODO: this second borrow will panic
             let epoll_ready_events = fd_ref.borrow_mut().get_epoll_ready_events()?;
             // Get the bitmask of ready events.
             let ready_events = epoll_ready_events.get_event_bitmask(this);
