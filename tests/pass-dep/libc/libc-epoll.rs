@@ -5,17 +5,17 @@ use std::convert::TryInto;
 use std::mem::MaybeUninit;
 
 fn main() {
-    //test_event_overwrite();
-    //test_not_fully_closed_fd();
-    //test_closed_fd();
+    test_event_overwrite();
+    test_not_fully_closed_fd();
+    test_closed_fd();
     test_epoll_socketpair_special_case();
-    //test_two_epoll_instance();
-    //test_epoll_ctl_mod();
-    //test_epoll_socketpair();
-    //test_epoll_eventfd();
-    //test_epoll_ctl_del();
-    //test_pointer();
-    //test_two_same_fd_in_same_epoll_instance();
+    test_two_epoll_instance();
+    test_epoll_ctl_mod();
+    test_epoll_socketpair();
+    test_epoll_eventfd();
+    test_epoll_ctl_del();
+    test_pointer();
+    test_two_same_fd_in_same_epoll_instance();
 }
 
 fn check_epoll_wait<const N: usize>(
