@@ -139,12 +139,6 @@ impl FileDescription for SocketPair {
         // Do full read / partial read based on the space available.
         // Conveniently, `read` exists on `VecDeque` and has exactly the desired behavior.
         let actual_read_size = readbuf.buf.read(bytes).unwrap();
-        // The readbuf needs to be explicitly dropped because it will cause panic when
-        // check_and_update_readiness borrows it again.
-        drop(readbuf);
-        if let Some(peer_fd) = self.peer_fd.upgrade() {
-            peer_fd.check_and_update_readiness(ecx)?;
-        }
         return Ok(Ok(actual_read_size));
     }
 
