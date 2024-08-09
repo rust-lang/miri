@@ -430,11 +430,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         Ok(Scalar::from_i32(num_of_events))
     }
-
     /// For a specific unique file descriptor id, get its ready events and update
-    /// the corresponding ready list.
-    /// This is invoked whenever a file description is registered with epoll,
-    /// or when read/write/close is called, even if there is no change in readiness.
+    /// the corresponding ready list. This function is called whenever a file description
+    /// is registered with epoll, or when read, write, or close operations are performed,
+    /// regardless of any changes in readiness.
+    ///
+    /// This is an internal helper function and is typically not meant to be used directly.
+    /// In most cases, `FileDescriptionRef::check_and_update_readiness` should be preferred.
     fn check_and_update_readiness(
         &self,
         id: FdId,

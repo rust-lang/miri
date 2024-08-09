@@ -152,6 +152,9 @@ impl FileDescription for Event {
         // When any of the event happened, we check and update the status of all supported event
         // types for current file description.
         use crate::shims::unix::linux::epoll::EvalContextExt;
+        // Just like read() above, we use this internal method to not get the second borrow of the
+        // RefCell of this FileDescription. This is a special case, we should only use
+        // FileDescriptionRef::check_and_update_readiness in normal case.
         ecx.check_and_update_readiness(fd_id, || self.get_epoll_ready_events())?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
