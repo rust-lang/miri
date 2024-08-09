@@ -29,6 +29,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     fn read<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_id: FdId,
         _bytes: &mut [u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -39,6 +40,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_id: FdId,
         _bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -127,6 +129,7 @@ impl FileDescription for io::Stdin {
     fn read<'tcx>(
         &mut self,
         communicate_allowed: bool,
+        _fd_id: FdId,
         bytes: &mut [u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -150,6 +153,7 @@ impl FileDescription for io::Stdout {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_id: FdId,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -178,6 +182,7 @@ impl FileDescription for io::Stderr {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_id: FdId,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -203,6 +208,7 @@ impl FileDescription for NullOutput {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_id: FdId,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -296,10 +302,6 @@ impl WeakFileDescriptionRef {
 /// the same even if a file descriptor is duplicated and gets a new integer file descriptor.
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FdId(usize);
-
-impl FdId {
-    pub const DUMMY: Self = Self(usize::MAX);
-}
 
 /// The file descriptor table
 #[derive(Debug)]
@@ -574,7 +576,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // `usize::MAX` because it is bounded by the host's `isize`.
         let mut bytes = vec![0; usize::try_from(count).unwrap()];
         let result = match offset {
-            None => fd.borrow_mut().read(communicate, &mut bytes, this),
+            None => fd.borrow_mut().read(communicate, fd.get_id(), &mut bytes, this),
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     let einval = this.eval_libc("EINVAL");
@@ -632,7 +634,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         let result = match offset {
-            None => fd.borrow_mut().write(communicate, &bytes, this),
+            None => fd.borrow_mut().write(communicate, fd.get_id(), &bytes, this),
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     let einval = this.eval_libc("EINVAL");

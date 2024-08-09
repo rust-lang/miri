@@ -30,11 +30,6 @@ struct Event {
     counter: u64,
     is_nonblock: bool,
     clock: VClock,
-    /// We have to store our own FdID in contrast to every other file descriptor out there, because
-    /// we are updating ourselves when writing and reading. Technically `Event` is like socketpair, but
-    /// it does not create two separate file descriptors. Thus we can't re-borrow ourselves via
-    /// `FileDescriptionRef::check_and_update_readiness` while already being mutably borrowed for read/write.
-    id: FdId,
 }
 
 impl FileDescription for Event {
@@ -65,6 +60,7 @@ impl FileDescription for Event {
     fn read<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        fd_id: FdId,
         bytes: &mut [u8],
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -91,8 +87,13 @@ impl FileDescription for Event {
             self.counter = 0;
             // When any of the event happened, we check and update the status of all supported event
             // types for current file description.
+
+            // We have to use our own FdID in contrast to every other file descriptor out there, because
+            // we are updating ourselves when writing and reading. Technically `Event` is like socketpair, but
+            // it does not create two separate file descriptors. Thus we can't re-borrow ourselves via
+            // `FileDescriptionRef::check_and_update_readiness` while already being mutably borrowed for read/write.
             use crate::shims::unix::linux::epoll::EvalContextExt;
-            ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
+            ecx.check_and_update_readiness(fd_id, || self.get_epoll_ready_events())?;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -112,6 +113,7 @@ impl FileDescription for Event {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        fd_id: FdId,
         bytes: &[u8],
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -150,7 +152,7 @@ impl FileDescription for Event {
         // When any of the event happened, we check and update the status of all supported event
         // types for current file description.
         use crate::shims::unix::linux::epoll::EvalContextExt;
-        ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
+        ecx.check_and_update_readiness(fd_id, || self.get_epoll_ready_events())?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
 }
@@ -207,17 +209,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let fds = &mut this.machine.fds;
 
-        let fd_value = fds.insert_new(Event {
-            counter: val.into(),
-            is_nonblock,
-            clock: VClock::default(),
-            id: FdId::DUMMY,
-        });
-
-        // Set the id of the `Event` to itself.
-        let fd = fds.get_ref(fd_value).unwrap();
-        let id = fd.get_id();
-        fd.borrow_mut().downcast_mut::<Event>().unwrap().id = id;
+        let fd_value =
+            fds.insert_new(Event { counter: val.into(), is_nonblock, clock: VClock::default() });
 
         Ok(Scalar::from_i32(fd_value))
     }
