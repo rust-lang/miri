@@ -6,7 +6,6 @@ use std::mem;
 use fd::FdId;
 use rustc_target::abi::Endian;
 
-use crate::shims::unix::fd::FileDescriptionRef;
 use crate::shims::unix::linux::epoll::EpollReadyEvents;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
@@ -66,7 +65,6 @@ impl FileDescription for Event {
     fn read<'tcx>(
         &mut self,
         _communicate_allowed: bool,
-        fd_ref: &FileDescriptionRef,
         bytes: &mut [u8],
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -94,7 +92,7 @@ impl FileDescription for Event {
             // When any of the event happened, we check and update the status of all supported event
             // types for current file description.
             use crate::shims::unix::linux::epoll::EvalContextExt;
-            ecx.check_and_update_readiness(fd_ref)?;
+            ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
     }
@@ -114,7 +112,6 @@ impl FileDescription for Event {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
-        fd_ref: &FileDescriptionRef,
         bytes: &[u8],
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -153,7 +150,7 @@ impl FileDescription for Event {
         // When any of the event happened, we check and update the status of all supported event
         // types for current file description.
         use crate::shims::unix::linux::epoll::EvalContextExt;
-        ecx.check_and_update_readiness(fd_ref)?;
+        ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
 }

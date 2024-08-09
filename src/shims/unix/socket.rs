@@ -4,7 +4,7 @@ use std::io;
 use std::io::{Error, ErrorKind, Read};
 use std::rc::{Rc, Weak};
 
-use crate::shims::unix::fd::{FileDescriptionRef, WeakFileDescriptionRef};
+use crate::shims::unix::fd::WeakFileDescriptionRef;
 use crate::shims::unix::linux::epoll::EpollReadyEvents;
 use crate::shims::unix::*;
 use crate::{concurrency::VClock, *};
@@ -99,7 +99,6 @@ impl FileDescription for SocketPair {
     fn read<'tcx>(
         &mut self,
         _communicate_allowed: bool,
-        _fd_ref: &FileDescriptionRef,
         bytes: &mut [u8],
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -151,7 +150,6 @@ impl FileDescription for SocketPair {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
-        _fd_ref: &FileDescriptionRef,
         bytes: &[u8],
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
