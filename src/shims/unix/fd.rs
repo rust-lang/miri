@@ -10,7 +10,7 @@ use std::rc::Weak;
 
 use rustc_target::abi::Size;
 
-use crate::shims::unix::linux::epoll::{EpollEventInstance, EpollReadyEvents};
+use crate::shims::unix::linux::epoll::EpollReadyEvents;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -270,6 +270,7 @@ impl FileDescriptionRef {
         &self,
         ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> InterpResult<'tcx, ()> {
+        use crate::shims::unix::linux::epoll::EvalContextExt;
         ecx.check_and_update_readiness(self.get_id(), || self.borrow_mut().get_epoll_ready_events())
     }
 }
@@ -391,41 +392,6 @@ impl FdTable {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    /// For a specific unique file descriptor id, get its ready events and update
-    /// the corresponding ready list.
-    fn check_and_update_readiness(
-        &self,
-        id: FdId,
-        get_ready_events: impl FnOnce() -> InterpResult<'tcx, EpollReadyEvents>,
-    ) -> InterpResult<'tcx, ()> {
-        let this = self.eval_context_ref();
-        // Get a list of EpollEventInterest that is associated to a specific file description.
-        if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
-            let epoll_ready_events = get_ready_events()?;
-            // Get the bitmask of ready events.
-            let ready_events = epoll_ready_events.get_event_bitmask(this);
-
-            for weak_epoll_interest in epoll_interests {
-                if let Some(epoll_interest) = weak_epoll_interest.upgrade() {
-                    // This checks if any of the events specified in epoll_event_interest.events
-                    // match those in ready_events.
-                    let epoll_event_interest = epoll_interest.borrow();
-                    let flags = epoll_event_interest.events & ready_events;
-                    // If there is any event that we are interested in being specified as ready,
-                    // insert an epoll_return to the ready list.
-                    if flags != 0 {
-                        let epoll_key = (id, epoll_event_interest.file_descriptor);
-                        let ready_list = &mut epoll_event_interest.ready_list.borrow_mut();
-                        let event_instance =
-                            EpollEventInstance::new(flags, epoll_event_interest.data);
-                        ready_list.insert(epoll_key, event_instance);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn dup(&mut self, old_fd: i32) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 

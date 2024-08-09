@@ -91,6 +91,7 @@ impl FileDescription for Event {
             self.counter = 0;
             // When any of the event happened, we check and update the status of all supported event
             // types for current file description.
+            use crate::shims::unix::linux::epoll::EvalContextExt;
             ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
             return Ok(Ok(U64_ARRAY_SIZE));
         }
@@ -148,6 +149,7 @@ impl FileDescription for Event {
         };
         // When any of the event happened, we check and update the status of all supported event
         // types for current file description.
+        use crate::shims::unix::linux::epoll::EvalContextExt;
         ecx.check_and_update_readiness(self.id, || self.get_epoll_ready_events())?;
         Ok(Ok(U64_ARRAY_SIZE))
     }
