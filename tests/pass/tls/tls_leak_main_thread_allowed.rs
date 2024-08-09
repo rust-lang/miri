@@ -1,4 +1,6 @@
 //@ignore-target-windows: Windows uses a different mechanism for `thread_local!`
+//@revisions: default tls
+//@[tls]compile-flags: -Zmiri-ignore-leaks
 #![feature(thread_local)]
 
 use std::cell::Cell;
