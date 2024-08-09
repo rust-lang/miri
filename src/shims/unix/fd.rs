@@ -29,6 +29,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     fn read<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         _bytes: &mut [u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -39,6 +40,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         _bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -127,6 +129,7 @@ impl FileDescription for io::Stdin {
     fn read<'tcx>(
         &mut self,
         communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         bytes: &mut [u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -150,6 +153,7 @@ impl FileDescription for io::Stdout {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -178,6 +182,7 @@ impl FileDescription for io::Stderr {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -203,6 +208,7 @@ impl FileDescription for NullOutput {
     fn write<'tcx>(
         &mut self,
         _communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -271,7 +277,7 @@ impl FileDescriptionRef {
         ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> InterpResult<'tcx, ()> {
         use crate::shims::unix::linux::epoll::EvalContextExt;
-        ecx.check_and_update_readiness(self.get_id(), || self.borrow_mut().get_epoll_ready_events())
+        ecx.check_and_update_readiness(self)
     }
 }
 
@@ -574,7 +580,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // `usize::MAX` because it is bounded by the host's `isize`.
         let mut bytes = vec![0; usize::try_from(count).unwrap()];
         let result = match offset {
-            None => fd.borrow_mut().read(communicate, &mut bytes, this),
+            None => fd.borrow_mut().read(communicate, &fd, &mut bytes, this),
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     let einval = this.eval_libc("EINVAL");
@@ -632,7 +638,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         let result = match offset {
-            None => fd.borrow_mut().write(communicate, &bytes, this),
+            None => fd.borrow_mut().write(communicate, &fd, &bytes, this),
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     let einval = this.eval_libc("EINVAL");

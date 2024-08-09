@@ -12,6 +12,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_target::abi::Size;
 
 use crate::shims::os_str::bytes_to_os_str;
+use crate::shims::unix::fd::FileDescriptionRef;
 use crate::shims::unix::*;
 use crate::*;
 use shims::time::system_time_to_duration;
@@ -32,6 +33,7 @@ impl FileDescription for FileHandle {
     fn read<'tcx>(
         &mut self,
         communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         bytes: &mut [u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {
@@ -42,6 +44,7 @@ impl FileDescription for FileHandle {
     fn write<'tcx>(
         &mut self,
         communicate_allowed: bool,
+        _fd_ref: &FileDescriptionRef,
         bytes: &[u8],
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<usize>> {

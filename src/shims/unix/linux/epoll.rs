@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::rc::{Rc, Weak};
 
-use crate::shims::unix::fd::FdId;
+use crate::shims::unix::fd::{FdId, FileDescriptionRef};
 use crate::shims::unix::*;
 use crate::*;
 
@@ -440,15 +440,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// For a specific unique file descriptor id, get its ready events and update
     /// the corresponding ready list.
-    fn check_and_update_readiness(
-        &self,
-        id: FdId,
-        get_ready_events: impl FnOnce() -> InterpResult<'tcx, EpollReadyEvents>,
-    ) -> InterpResult<'tcx, ()> {
+    fn check_and_update_readiness(&self, fd_ref: &FileDescriptionRef) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_ref();
+        let id = fd_ref.get_id();
         // Get a list of EpollEventInterest that is associated to a specific file description.
         if let Some(epoll_interests) = this.machine.epoll_interests.get_epoll_interest(id) {
-            let epoll_ready_events = get_ready_events()?;
+            // TODO: this second borrow will panic
+            let epoll_ready_events = fd_ref.borrow_mut().get_epoll_ready_events()?;
             // Get the bitmask of ready events.
             let ready_events = epoll_ready_events.get_event_bitmask(this);
 
