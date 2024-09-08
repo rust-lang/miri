@@ -641,9 +641,7 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
             }
         }
         // Respect miriflags.
-        if let Some(flags) = get_miriflags() {
-            cmd.args(flags);
-        }
+        cmd.args(get_miriflags());
         // Set the current seed.
         if let Some(seed) = seed {
             eprintln!("Trying seed: {seed}");
