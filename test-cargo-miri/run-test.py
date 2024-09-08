@@ -141,9 +141,9 @@ def test_cargo_miri_run():
         },
     )
 
-    # Create an empty config
+    # Create an invalid config
     with open(".cargo/config.toml", "w") as f:
-        f.write('[miri]\nflags = [""]')
+        f.write('[miri]\nflags = ["-Zmiri-there-is-no-such-flag"]')
 
     # Check that MIRIFLAGS envar has higher precedence tha cargo config
     test("`cargo miri run` (no isolation, ignoring cargo config)",
