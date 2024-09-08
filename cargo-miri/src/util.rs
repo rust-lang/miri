@@ -88,6 +88,29 @@ pub fn escape_for_toml(s: &str) -> String {
     format!("\"{s}\"")
 }
 
+pub fn get_miriflags() -> Vec<String> {
+    // TODO: I quite not understand what Carl Jung means by Oh and please add a link to https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags.
+    // I guess we don't support the target.rustflags part yet? (That's okay but should be mentioned in a comment.)
+    //
+    // Fetch miri flags from cargo config.
+    let mut cmd = cargo();
+    cmd.args(["-Zunstable-options", "config", "get", "miri.flags", "--format=json-value"]);
+    let output = cmd.output().expect("failed to run `cargo config`");
+    let config_miriflags =
+        std::str::from_utf8(&output.stdout).expect("failed to get `cargo config` output");
+
+    // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
+    // If MIRIFLAGS is present, flags from cargo config are ignored.
+    // This matches cargo behavior for RUSTFLAGS.
+    if let Ok(a) = env::var("MIRIFLAGS") {
+        // This code is taken from `RUSTFLAGS` handling in cargo.
+        a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
+    } else if let Ok(args) = serde_json::from_str::<Vec<String>>(config_miriflags) {
+        args
+    } else {
+        Vec::default()
+    }
+}
 /// Returns the path to the `miri` binary
 pub fn find_miri() -> PathBuf {
     if let Some(path) = env::var_os("MIRI") {
