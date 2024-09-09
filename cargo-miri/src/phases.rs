@@ -650,6 +650,15 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
             eprintln!("Trying seed: {seed}");
             cmd.arg(format!("-Zmiri-seed={seed}"));
         }
+<<<<<<< HEAD
+=======
+    }
+
+    // Respect flags.
+    if let Some(flags) = get_miriflags() {
+        cmd.args(flags);
+    }
+>>>>>>> 7e32c0f90 (Fetch miri flags from cargo config)
 
         // Then pass binary arguments.
         cmd.arg("--");
@@ -689,6 +698,27 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
             }
         }
     });
+}
+
+fn get_miriflags() -> Option<Vec<String>> {
+    // Fetch miri flags from cargo config.
+    let mut cmd = cargo();
+    cmd.args(["-Zunstable-options", "config", "get", "miri.flags", "--format=json-value"]);
+    let output = cmd.output().expect("failed to run `cargo config`");
+    let config_miriflags =
+        str::from_utf8(&output.stdout).expect("failed to get `cargo config` output");
+
+    // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
+    // If MIRIFLAGS is present, flags from cargo config are ignored.
+    // This matches cargo behavior for RUSTFLAGS.
+    if let Ok(a) = env::var("MIRIFLAGS") {
+        // This code is taken from `RUSTFLAGS` handling in cargo.
+        Some(a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
+    } else if let Ok(args) = serde_json::from_str::<Vec<String>>(config_miriflags) {
+        Some(args)
+    } else {
+        None
+    }
 }
 
 pub fn phase_rustdoc(mut args: impl Iterator<Item = String>) {
