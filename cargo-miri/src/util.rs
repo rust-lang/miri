@@ -105,10 +105,8 @@ pub fn get_miriflags() -> Vec<String> {
     if let Ok(a) = env::var("MIRIFLAGS") {
         // This code is taken from `RUSTFLAGS` handling in cargo.
         a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
-    } else if let Ok(args) = serde_json::from_str::<Vec<String>>(config_miriflags) {
-        args
     } else {
-        Vec::default()
+        serde_json::from_str::<Vec<String>>(config_miriflags).unwrap_or_default()
     }
 }
 /// Returns the path to the `miri` binary
