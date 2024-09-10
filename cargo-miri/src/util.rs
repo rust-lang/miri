@@ -94,17 +94,7 @@ pub fn flagsplit(flags: &str) -> Vec<String> {
     flags.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
 }
 
-pub fn get_miriflags() -> Vec<String> {
-    // TODO: I quite not understand what Carl Jung means by Oh and please add a link to https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags.
-    // I guess we don't support the target.rustflags part yet? (That's okay but should be mentioned in a comment.)
-    //
-    // Fetch miri flags from cargo config.
-    let mut cmd = cargo();
-    cmd.args(["-Zunstable-options", "config", "get", "miri.flags", "--format=json-value"]);
-    let output = cmd.output().expect("failed to run `cargo config`");
-    let config_miriflags =
-        std::str::from_utf8(&output.stdout).expect("failed to get `cargo config` output");
-
+pub fn get_miriflags_cargo_mini() -> Vec<String> {
     // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
     // If MIRIFLAGS is present, flags from cargo config are ignored.
     // This matches cargo behavior for RUSTFLAGS.
@@ -131,7 +121,33 @@ pub fn get_miriflags() -> Vec<String> {
         let miri_flags_string = miri_flags_vec.join(" ");
         env::set_var("CARGO_ENCODED_MIRIFLAGS", miri_flags_string);
         miri_flags_vec
-    } else if let Ok(a) = env::var("MIRIFLAGS") {
+    } else {
+        Vec::default()
+    }
+}
+pub fn get_miriflags_runner() -> Vec<String> {
+    // TODO: I quite not understand what Carl Jung means by Oh and please add a link to https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags.
+    // I guess we don't support the target.rustflags part yet? (That's okay but should be mentioned in a comment.)
+    //
+    // Fetch miri flags from cargo config.
+    let mut cmd = cargo();
+    cmd.args(["-Zunstable-options", "config", "get", "miri.flags", "--format=json-value"]);
+    let output = cmd.output().expect("failed to run `cargo config`");
+    let config_miriflags =
+        std::str::from_utf8(&output.stdout).expect("failed to get `cargo config` output");
+
+    // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
+    // If MIRIFLAGS is present, flags from cargo config are ignored.
+    // This matches cargo behavior for RUSTFLAGS.
+    //
+    // Strategy: (1) check pseudo var CARGO_ENCODED_MIRIFLAGS first (this is only set after we check for --config
+    // in the cargo_dash_dash in the if else)
+    //
+    // if CARGO_ENCODED_MIRIFLAGS doesn't exist, we check in --config (2)
+    // if --config doesn't exist, we check offical env var MIRIFLAGS (3)
+    //
+    // if MIRIFLAGS is non-existent, we then check for toml (4)
+    if let Ok(a) = env::var("MIRIFLAGS") {
         // (3)
         // This code is taken from `RUSTFLAGS` handling in cargo.
         eprintln!("Choice 3");

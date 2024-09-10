@@ -182,7 +182,7 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     cmd.arg("--target-dir").arg(target_dir);
 
     eprintln!("Getting miri flags in phase_cargo_miri");
-    cmd.args(get_miriflags());
+    cmd.args(get_miriflags_cargo_mini());
     // Store many-seeds argument.
     let mut many_seeds = None;
     // *After* we set all the flags that need setting, forward everything else. Make sure to skip
@@ -644,7 +644,7 @@ pub fn phase_runner(mut binary_args: impl Iterator<Item = String>, phase: Runner
         }
         // Respect miriflags.
         eprintln!("Get miri flags in phase_runner");
-        cmd.args(get_miriflags());
+        cmd.args(get_miriflags_runner());
         // Set the current seed.
         if let Some(seed) = seed {
             eprintln!("Trying seed: {seed}");
