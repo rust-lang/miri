@@ -181,6 +181,7 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
     let target_dir = get_target_dir(&metadata);
     cmd.arg("--target-dir").arg(target_dir);
 
+    cmd.args(get_miriflags());
     // Store many-seeds argument.
     let mut many_seeds = None;
     // *After* we set all the flags that need setting, forward everything else. Make sure to skip
