@@ -108,11 +108,11 @@ pub fn get_miriflags_cargo_mini() -> Vec<String> {
     // if MIRIFLAGS is non-existent, we then check for toml (4)
     if let Ok(cargo_encoded_miri_flags) = env::var("CARGO_ENCODED_MIRIFLAGS") {
         // (1)
-        eprintln!("Choice 1");
+        // eprintln!("Choice 1");
         flagsplit(cargo_encoded_miri_flags.as_str())
     } else if cargo_extra_flags().iter().any(|s| s.contains(&"-Zmiri".to_string())) {
         // (2)
-        eprintln!("Choice 2");
+        // eprintln!("Choice 2");
         let cargo_dash_dash_config = cargo_extra_flags();
         let miri_flags_vec = cargo_dash_dash_config
             .into_iter()
@@ -150,12 +150,12 @@ pub fn get_miriflags_runner() -> Vec<String> {
     if let Ok(a) = env::var("MIRIFLAGS") {
         // (3)
         // This code is taken from `RUSTFLAGS` handling in cargo.
-        eprintln!("Choice 3");
-        eprintln!("{}", a);
+        // eprintln!("Choice 3");
+        // eprintln!("{}", a);
         a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
     } else {
         // (4)
-        eprintln!("Choice 4");
+        // eprintln!("Choice 4");
         serde_json::from_str::<Vec<String>>(config_miriflags).unwrap_or_default()
     }
 }
