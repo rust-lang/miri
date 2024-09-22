@@ -1,6 +1,7 @@
 //@only-target: android # prctl is currently supported for Android only
 use std::ffi::CStr;
 use std::ffi::CString;
+use libc::c_char;
 
 fn main() {
     let long_name = CString::new(
@@ -24,7 +25,7 @@ fn main() {
 fn set_thread_name(name: &CStr) -> i32 {
     cfg_if::cfg_if! {
         if #[cfg(any(target_os = "android"))] {
-            unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr().cast()) }
+            unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr().cast::<*const c_char>()) }
         } else {
             compile_error!("set_thread_name not supported for this OS")
         }
@@ -37,7 +38,7 @@ fn get_thread_name(name: &mut [u8]) -> i32 {
             target_os = "android",
         ))] {
             unsafe {
-                libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr().cast())
+                libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr().cast::<*mut c_char>())
             }
         } else {
             compile_error!("get_thread_name not supported for this OS")
