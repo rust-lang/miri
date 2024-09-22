@@ -24,7 +24,7 @@ fn main() {
 fn set_thread_name(name: &CStr) -> i32 {
     cfg_if::cfg_if! {
         if #[cfg(any(target_os = "android"))] {
-            unsafe { libc::prctl(libs::PR_SET_NAME, name.as_ptr().cast()) }
+            unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr().cast()) }
         } else {
             compile_error!("set_thread_name not supported for this OS")
         }
