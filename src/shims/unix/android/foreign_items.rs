@@ -1,6 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
+use crate::shims::unix::*;
 use crate::*;
 
 pub fn is_dyn_sym(_name: &str) -> bool {
@@ -25,8 +26,63 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(errno_place.to_ref(this).to_scalar(), dest)?;
             }
 
+            // Threading
+            "prctl" => {
+                // We do not use `check_shim` here because `prctl` is variadic. The argument
+                // count is checked bellow.
+                this.check_abi_and_shim_symbol_clash(abi, Abi::C { unwind: false }, link_name)?;
+
+                check_args_len("prctl", args, 1)?;
+
+                let id = this.read_scalar(&args[0])?.to_i32()?;
+                let pr_set_name = this.eval_libc_i32("PR_SET_NAME");
+                let pr_get_name = this.eval_libc_i32("PR_GET_NAME");
+
+                let res = match id {
+                    id if id == pr_set_name => {
+                        check_args_len("'PR_SET_NAME' prctl", args, 2)?;
+
+                        let tid = this.linux_gettid()?;
+                        let name = this.read_scalar(&args[1])?;
+                        let name_len = 16;
+
+                        this.pthread_setname_np(tid, name, name_len)?
+                    }
+                    id if id == pr_get_name => {
+                        check_args_len("'PR_GET_NAME' prctl", args, 2)?;
+
+                        let tid = this.linux_gettid()?;
+                        let name = this.read_scalar(&args[1])?;
+                        let name_len = Scalar::from_target_usize(16, this);
+
+                        this.pthread_getname_np(tid, name, name_len)?
+                    }
+                    id => {
+                        this.handle_unsupported_foreign_item(format!(
+                            "can't execute prctl with ID {id}"
+                        ))?;
+                        return interp_ok(EmulateItemResult::AlreadyJumped);
+                    }
+                };
+                this.write_scalar(res, dest)?;
+            }
+
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
     }
+}
+
+fn check_args_len<'tcx>(
+    link_name: &str,
+    args: &[OpTy<'tcx>],
+    args_expected: usize,
+) -> InterpResult<'tcx, ()> {
+    let args_actual = args.len();
+    if args_actual < args_expected {
+        throw_ub_format!(
+            "incorrect number of arguments for {link_name}: got {args_actual}, expected at least {args_expected}"
+        );
+    }
+    interp_ok(())
 }

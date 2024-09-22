@@ -71,60 +71,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             // Threading
-            "prctl" => {
-                // We do not use `check_shim` here because `syscall` is variadic. The argument
-                // count is checked bellow.
-                this.check_abi_and_shim_symbol_clash(abi, Abi::C { unwind: false }, link_name)?;
-
-                if args.is_empty() {
-                    throw_ub_format!(
-                        "incorrect number of arguments for prctl: got 0, expected at least 1"
-                    );
-                }
-
-                // Since only two prctl calls are currently handled, and both expext just two arguments,
-                // it makes sense to handle validation here, outside of the match block below.
-                if args.len() < 2 {
-                    throw_ub_format!(
-                        "incorrect number of arguments for `PR_SET_NAME` prctl: got {}, expected at least 2",
-                        args.len()
-                    );
-                }
-
-                for (i, arg) in args.iter().enumerate() {
-                    let val = this.read_scalar(arg)?.to_i32()?;
-                    if val != 0 {
-                        throw_ub_format!(
-                            "incorrect value of {}th argument for 'PR_SET_NAME' prctl: got {}, expected 0L",
-                            i,
-                            val
-                        );
-                    }
-                }
-
-                let op = this.read_scalar(&args[0])?.to_i32()?;
-                let pr_set_name = this.eval_libc_i32("PR_SET_NAME");
-                let pr_get_name = this.eval_libc_i32("PR_GET_NAME");
-
-                let res = match op {
-                    op if op == pr_set_name => {
-                        let tid = this.linux_gettid()?;
-                        let name = this.read_scalar(&args[1])?;
-                        let name_len = 16;
-
-                        this.pthread_setname_np(tid, name, name_len)?
-                    }
-                    op if op == pr_get_name => {
-                        let tid = this.linux_gettid()?;
-                        let name = this.read_scalar(&args[1])?;
-                        let name_len = Scalar::from_target_usize(16, this);
-
-                        this.pthread_getname_np(tid, name, name_len)?
-                    }
-                    _ => return Ok(EmulateItemResult::NotSupported),
-                };
-                this.write_scalar(res, dest)?;
-            }
             "pthread_setname_np" => {
                 let [thread, name] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
