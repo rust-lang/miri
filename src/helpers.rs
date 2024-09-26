@@ -676,6 +676,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     /// Helper function used inside the shims of foreign functions to assert that the target OS
+    /// is one of `target_oses`. It panics showing a message with the `name` of the foreign function
+    /// if this is not the case.
+    fn assert_target_os_is_one_of(&self, target_oses: &[&str], name: &str) {
+        assert!(
+            target_oses.contains(&self.eval_context_ref().tcx.sess.target.os.as_ref()),
+            "`{name}` is only available on the {} target OS's",
+                 target_oses.iter().enumerate().map(|(i, t)| match i {
+                     0 => format!("`{t}`"),
+                     _ => format!(", `{t}`"),
+                 }).collect::<String>()
+        )
+    }
+
+    /// Helper function used inside the shims of foreign functions to assert that the target OS
     /// is part of the UNIX family. It panics showing a message with the `name` of the foreign function
     /// if this is not the case.
     fn assert_target_os_is_unix(&self, name: &str) {
