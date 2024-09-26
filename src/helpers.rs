@@ -682,10 +682,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         assert!(
             target_oses.contains(&self.eval_context_ref().tcx.sess.target.os.as_ref()),
             "`{name}` is only available on the {} target OS's",
-                 target_oses.iter().enumerate().map(|(i, t)| match i {
-                     0 => format!("`{t}`"),
-                     _ => format!(", `{t}`"),
-                 }).collect::<String>()
+            target_oses
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    match i {
+                        0 => format!("`{t}`"),
+                        _ => format!(", `{t}`"),
+                    }
+                })
+                .collect::<String>()
         )
     }
 
