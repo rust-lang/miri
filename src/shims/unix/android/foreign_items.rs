@@ -35,8 +35,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 check_args_len("prctl", args, 1)?;
 
                 let id = this.read_scalar(&args[0])?.to_i32()?;
-                let pr_set_name = this.eval_libc_i32("PR_SET_NAME");
-                let pr_get_name = this.eval_libc_i32("PR_GET_NAME");
+                // FIXME: Use PR_SET_NAME and PR_GET_NAME constants when
+                // https://github.com/rust-lang/libc/pull/3941 lands.
+                let pr_set_name = 15_i32;
+                let pr_get_name = 16_i32;
 
                 let res = match id {
                     id if id == pr_set_name => {
