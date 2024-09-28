@@ -135,7 +135,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         let _flags = this.read_scalar(&args[3])?.to_i32();
 
                         this.gen_random(ptr, len)?;
-                        this.write_scalar(Scalar::from_target_usize(len, this), dest)?;
+                        this.write_int(len, dest)?;
                     }
                     // `futex` is used by some synchronization primitives.
                     id if id == sys_futex => {

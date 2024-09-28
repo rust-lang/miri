@@ -205,7 +205,7 @@ pub fn futex<'tcx>(
                     break;
                 }
             }
-            this.write_scalar(Scalar::from_target_isize(n, this), dest)?;
+            this.write_int(n, dest)?;
         }
         op => throw_unsup_format!("Miri does not support `futex` syscall with op={}", op),
     }
