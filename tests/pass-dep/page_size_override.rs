@@ -1,4 +1,5 @@
 //@compile-flags: -Zmiri-force-page-size=8
+//@only-miri: fake page size
 
 fn main() {
     let page_size = page_size::get();

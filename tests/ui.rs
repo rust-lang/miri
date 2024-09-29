@@ -9,15 +9,22 @@ use colored::*;
 use regex::bytes::Regex;
 use ui_test::build_manager::BuildManager;
 use ui_test::color_eyre::eyre::{Context, Result};
+use ui_test::custom_flags::Flag;
 use ui_test::custom_flags::edition::Edition;
+use ui_test::custom_flags::run::Run;
 use ui_test::dependencies::DependencyBuilder;
-use ui_test::per_test_config::TestConfig;
+use ui_test::per_test_config::{Comments, Condition, TestConfig};
 use ui_test::spanned::Spanned;
-use ui_test::{CommandBuilder, Config, Format, Match, ignore_output_conflict, status_emitter};
+use ui_test::{
+    CommandBuilder, Config, Errored, Format, Match, ignore_output_conflict, status_emitter,
+};
 
 #[derive(Copy, Clone, Debug)]
 enum Mode {
-    Pass,
+    Pass {
+        /// Whether to compile and run with rustc instead of miri
+        rustc: bool,
+    },
     /// Requires annotations
     Fail,
     /// Not used for tests, but for `miri run --dep`
@@ -107,8 +114,89 @@ fn miri_config(
         ..Config::rustc(path)
     };
 
+    if let Mode::Pass { rustc: true } = mode {
+        config.comment_defaults.base().add_custom("run", Run {
+            exit_code: 0,
+            output_conflict_handling: Some(|path, actual, errors, config| {
+                let path = path.with_file_name(
+                    path.file_name().unwrap().to_str().unwrap().replace(".run.", "."),
+                );
+                // Blessing is only allowed in miri mode, rustc mode must match
+                ui_test::error_on_output_conflict(&path, actual, errors, config);
+            }),
+        });
+        config.program.envs.push(("MIRI_BE_RUSTC".into(), Some("host".into())));
+
+        #[derive(Debug)]
+        struct Strip;
+
+        impl Flag for Strip {
+            fn clone_inner(&self) -> Box<dyn Flag> {
+                Box::new(Strip)
+            }
+
+            fn must_be_unique(&self) -> bool {
+                true
+            }
+
+            fn apply(
+                &self,
+                cmd: &mut Command,
+                _config: &TestConfig,
+                _build_manager: &BuildManager,
+            ) -> Result<(), Errored> {
+                let mut c = Command::new(cmd.get_program());
+                for (k, v) in cmd.get_envs() {
+                    match v {
+                        Some(v) => c.env(k, v),
+                        None => c.env_remove(k),
+                    };
+                }
+                if let Some(dir) = cmd.get_current_dir() {
+                    c.current_dir(dir);
+                }
+                c.args(
+                    cmd.get_args().filter(|arg| !arg.as_encoded_bytes().starts_with(b"-Zmiri-")),
+                );
+                *cmd = c;
+                Ok(())
+            }
+
+            fn test_condition(
+                &self,
+                _config: &Config,
+                comments: &Comments,
+                revision: &str,
+            ) -> bool {
+                for rev in comments.for_revision(revision) {
+                    for arg in &rev.compile_flags {
+                        // A real execution will preempt, and thus behave differently
+                        if arg.starts_with("-Zmiri-preemption-rate") {
+                            return true;
+                        }
+                        // FIXME: can probably support these somehow
+                        if arg.starts_with("-Zmiri-env") {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+        }
+
+        config.comment_defaults.base().add_custom("strip_dash_z_miri", Strip);
+
+        // Only run on no target if `only-miri` is passed.
+        config
+            .custom_comments
+            .insert("only-miri", |parser, _, _| parser.only.push(Condition::Target(vec![])));
+    } else {
+        // Nop, we are in miri mode
+        config.custom_comments.insert("only-miri", |_, _, _| {});
+    }
+
     config.comment_defaults.base().exit_status = match mode {
-        Mode::Pass => Some(0),
+        Mode::Pass { .. } => Some(0),
         Mode::Fail => Some(1),
         Mode::RunDep => None,
         Mode::Panic => Some(101),
@@ -128,18 +216,23 @@ fn miri_config(
     config.comment_defaults.base().add_custom("edition", Edition("2021".into()));
 
     if let Some(WithDependencies { bless }) = with_dependencies {
+        let program = match mode {
+            Mode::Pass { rustc: true } => CommandBuilder::cargo(),
+            _ =>
+                CommandBuilder {
+                    // Set the `cargo-miri` binary, which we expect to be in the same folder as the `miri` binary.
+                    // (It's a separate crate, so we don't get an env var from cargo.)
+                    program: miri_path()
+                        .with_file_name(format!("cargo-miri{}", env::consts::EXE_SUFFIX)),
+                    // There is no `cargo miri build` so we just use `cargo miri run`.
+                    args: ["miri", "run"].into_iter().map(Into::into).collect(),
+                    // Reset `RUSTFLAGS` to work around <https://github.com/rust-lang/rust/pull/119574#issuecomment-1876878344>.
+                    envs: vec![("RUSTFLAGS".into(), None)],
+                    ..CommandBuilder::cargo()
+                },
+        };
         config.comment_defaults.base().set_custom("dependencies", DependencyBuilder {
-            program: CommandBuilder {
-                // Set the `cargo-miri` binary, which we expect to be in the same folder as the `miri` binary.
-                // (It's a separate crate, so we don't get an env var from cargo.)
-                program: miri_path()
-                    .with_file_name(format!("cargo-miri{}", env::consts::EXE_SUFFIX)),
-                // There is no `cargo miri build` so we just use `cargo miri run`.
-                args: ["miri", "run"].into_iter().map(Into::into).collect(),
-                // Reset `RUSTFLAGS` to work around <https://github.com/rust-lang/rust/pull/119574#issuecomment-1876878344>.
-                envs: vec![("RUSTFLAGS".into(), None)],
-                ..CommandBuilder::cargo()
-            },
+            program,
             crate_manifest_path: Path::new("test_dependencies").join("Cargo.toml"),
             build_std: None,
             bless_lockfile: bless,
@@ -163,7 +256,19 @@ fn run_tests(
 
     let mut config = miri_config(target, path, mode, with_dependencies);
     config.with_args(&args);
-    config.bless_command = Some("./miri test --bless".into());
+    if let Mode::Pass { rustc: true } = mode {
+        config.fill_host_and_target()?;
+        // Rustc mode only works on the host
+        if !config.host_matches_target() {
+            return Ok(());
+        }
+        config.output_conflict_handling = ui_test::ignore_output_conflict;
+
+        config.bless_command =
+            Some("add `//@only-miri:` to the test if it cannot be run on the host directly".into());
+    } else {
+        config.bless_command = Some("./miri test --bless".into());
+    }
 
     if env::var_os("MIRI_SKIP_UI_CHECKS").is_some() {
         assert!(!args.bless, "cannot use RUSTC_BLESS and MIRI_SKIP_UI_CHECKS at the same time");
@@ -174,17 +279,25 @@ fn run_tests(
     config.program.envs.push(("MIRI_ENV_VAR_TEST".into(), Some("0".into())));
     // Let the tests know where to store temp files (they might run for a different target, which can make this hard to find).
     config.program.envs.push(("MIRI_TEMP".into(), Some(tmpdir.to_owned().into())));
-    // If a test ICEs, we want to see a backtrace.
-    config.program.envs.push(("RUST_BACKTRACE".into(), Some("1".into())));
 
     // Add some flags we always want.
-    config.program.args.push(
-        format!(
-            "--sysroot={}",
-            env::var("MIRI_SYSROOT").expect("MIRI_SYSROOT must be set to run the ui test suite")
-        )
-        .into(),
-    );
+    match mode {
+        // rustc mode doesn't want miri specific flags
+        Mode::Pass { rustc: true } => {}
+        _ => {
+            // If a test ICEs, we want to see a backtrace.
+            config.program.envs.push(("RUST_BACKTRACE".into(), Some("1".into())));
+            config.program.args.push(
+                format!(
+                    "--sysroot={}",
+                    env::var("MIRI_SYSROOT")
+                        .expect("MIRI_SYSROOT must be set to run the ui test suite")
+                )
+                .into(),
+            );
+        }
+    }
+
     config.program.args.push("-Dwarnings".into());
     config.program.args.push("-Dunused".into());
     config.program.args.push("-Ainternal_features".into());
@@ -274,7 +387,7 @@ regexes! {
     // Windows file paths
     r"\\"                           => "/",
     // erase Rust stdlib path
-    "[^ \n`]*/(rust[^/]*|checkout)/library/" => "RUSTLIB/",
+    "[^ \n`]*/(rust[^/]*|checkout|rustc/[0-9a-f]+)/library/" => "RUSTLIB/",
     // erase platform file paths
     "sys/pal/[a-z]+/"                    => "sys/pal/PLATFORM/",
     // erase paths into the crate registry
@@ -327,13 +440,21 @@ fn main() -> Result<()> {
         }
     }
 
-    ui(Mode::Pass, "tests/pass", &target, WithoutDependencies, tmpdir.path())?;
-    ui(Mode::Pass, "tests/pass-dep", &target, WithDependencies, tmpdir.path())?;
+    ui(Mode::Pass { rustc: false }, "tests/pass", &target, WithoutDependencies, tmpdir.path())?;
+    for rustc in [false, true] {
+        ui(Mode::Pass { rustc }, "tests/pass-dep", &target, WithDependencies, tmpdir.path())?;
+    }
     ui(Mode::Panic, "tests/panic", &target, WithDependencies, tmpdir.path())?;
     ui(Mode::Fail, "tests/fail", &target, WithoutDependencies, tmpdir.path())?;
     ui(Mode::Fail, "tests/fail-dep", &target, WithDependencies, tmpdir.path())?;
     if cfg!(unix) {
-        ui(Mode::Pass, "tests/native-lib/pass", &target, WithoutDependencies, tmpdir.path())?;
+        ui(
+            Mode::Pass { rustc: false },
+            "tests/native-lib/pass",
+            &target,
+            WithoutDependencies,
+            tmpdir.path(),
+        )?;
         ui(Mode::Fail, "tests/native-lib/fail", &target, WithoutDependencies, tmpdir.path())?;
     }
 
