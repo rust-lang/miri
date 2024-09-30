@@ -12,7 +12,7 @@ fn main() {
     .unwrap();
 
     // prctl supports thread names up to 16 characters includding nul.
-    // And since the input string is longer it should fail.
+    // Since the input string is longer, it should fail.
     assert_ne!(set_thread_name(&long_name), 0);
 
     let cstr = CString::new(&long_name.as_bytes()[..15]).unwrap();
@@ -23,25 +23,11 @@ fn main() {
 }
 
 fn set_thread_name(name: &CStr) -> i32 {
-    cfg_if::cfg_if! {
-        if #[cfg(any(target_os = "android"))] {
-            unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr().cast::<*const c_char>()) }
-        } else {
-            compile_error!("set_thread_name not supported for this OS")
-        }
-    }
+    const PR_SET_NAME: i32 = 15;
+    unsafe { libc::prctl(PR_SET_NAME, name.as_ptr().cast::<*const c_char>()) }
 }
 
 fn get_thread_name(name: &mut [u8]) -> i32 {
-    cfg_if::cfg_if! {
-        if #[cfg(any(
-            target_os = "android",
-        ))] {
-            unsafe {
-                libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr().cast::<*mut c_char>())
-            }
-        } else {
-            compile_error!("get_thread_name not supported for this OS")
-        }
-    }
+    const PR_GET_NAME: i32 = 16;
+    unsafe { libc::prctl(PR_GET_NAME, name.as_mut_ptr().cast::<*mut c_char>()) }
 }
