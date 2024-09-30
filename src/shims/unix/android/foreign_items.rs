@@ -44,7 +44,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     PR_SET_NAME => {
                         check_args_len("'PR_SET_NAME' prctl", args, 2)?;
 
-                        let tid = this.linux_gettid()?;
+                        let tid = this.pthread_self()?;
                         let name = this.read_scalar(&args[1])?;
                         let name_len = 16;
 
@@ -53,7 +53,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     PR_GET_NAME => {
                         check_args_len("'PR_GET_NAME' prctl", args, 2)?;
 
-                        let tid = this.linux_gettid()?;
+                        let tid = this.pthread_self()?;
                         let name = this.read_scalar(&args[1])?;
                         let name_len = Scalar::from_target_usize(16, this);
 
