@@ -1,7 +1,7 @@
 //@only-target: android # prctl is currently supported for Android only
+use std::ffi::{CStr, CString};
+
 use libc::c_char;
-use std::ffi::CStr;
-use std::ffi::CString;
 
 fn main() {
     let long_name = CString::new(
