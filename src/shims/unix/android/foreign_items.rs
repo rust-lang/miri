@@ -82,7 +82,7 @@ fn check_args_len<'tcx>(
 ) -> InterpResult<'tcx, ()> {
     let args_actual = args.len();
     if args_actual < args_expected {
-        throw_unsup_format!(
+        throw_ub_format!(
             "incorrect number of arguments for {link_name}: got {args_actual}, expected at least {args_expected}"
         );
     }
