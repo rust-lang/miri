@@ -11,7 +11,7 @@ fn main() {
     )
     .unwrap();
 
-    // prctl supports thread names up to 16 characters includding nul.
+    // prctl supports thread names up to 16 characters including nul.
     // Since the input string is longer, it should fail.
     assert_ne!(set_thread_name(&long_name), 0);
 
