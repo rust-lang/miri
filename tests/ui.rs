@@ -276,6 +276,8 @@ regexes! {
     "sys/pal/[a-z]+/"                    => "sys/pal/PLATFORM/",
     // erase paths into the crate registry
     r"[^ ]*/\.?cargo/registry/.*/(.*\.rs)"  => "CARGO_REGISTRY/.../$1",
+    // erase extra panic message that actual runtime code doesn't have
+    "note: in Miri, you may have to set `MIRIFLAGS=-Zmiri-env-forward=RUST_BACKTRACE` for the environment variable to have an effect\n" => "",
 }
 
 enum Dependencies {
