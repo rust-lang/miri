@@ -1216,6 +1216,19 @@ where
     throw_ub_format!("incorrect number of arguments: got {}, expected {}", args.len(), N)
 }
 
+/// Check that the number of args is at least the minumim what we expect
+pub fn check_min_arg_count<'a, 'tcx, const N: usize>(
+    name: &'a str,
+    args: &[OpTy<'tcx>],
+) -> InterpResult<'tcx, &'a [OpTy<'tcx>; N]> {
+    if args.len() >= N {
+        let ptr = args.as_ptr() as *const [OpTy<'tcx>; N];
+        // SAFETY: ok because we just checked that the length fits
+        return interp_ok(unsafe { &*ptr });
+    }
+    throw_ub_format!("incorrect number of arguments for {name}: got {}, expected {}", args.len(), N)
+}
+
 pub fn isolation_abort_error<'tcx>(name: &str) -> InterpResult<'tcx> {
     throw_machine_stop!(TerminationInfo::UnsupportedInIsolation(format!(
         "{name} not available when isolation is enabled",

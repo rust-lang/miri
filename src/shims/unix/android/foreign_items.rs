@@ -1,6 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
+use crate::helpers::check_min_arg_count;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -32,36 +33,34 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // count is checked bellow.
                 this.check_abi_and_shim_symbol_clash(abi, Abi::C { unwind: false }, link_name)?;
 
-                check_args_len("prctl", args, 1)?;
-
-                let id = this.read_scalar(&args[0])?.to_i32()?;
                 // FIXME: Use PR_SET_NAME and PR_GET_NAME constants when
                 // https://github.com/rust-lang/libc/pull/3941 lands.
                 const PR_SET_NAME: i32 = 15;
                 const PR_GET_NAME: i32 = 16;
 
-                let res = match id {
+                let [op] = check_min_arg_count("prctl", args)?;
+                let res = match this.read_scalar(op)?.to_i32()? {
                     PR_SET_NAME => {
-                        check_args_len("'PR_SET_NAME' prctl", args, 2)?;
+                        let [_, name] = check_min_arg_count("prctl(PR_SET_NAME, ...)", args)?;
 
                         let tid = this.pthread_self()?;
-                        let name = this.read_scalar(&args[1])?;
+                        let name = this.read_scalar(name)?;
                         let name_len = 16;
 
                         this.pthread_setname_np(tid, name, name_len)?
                     }
                     PR_GET_NAME => {
-                        check_args_len("'PR_GET_NAME' prctl", args, 2)?;
+                        let [_, name] = check_min_arg_count("prctl(PR_GET_NAME, ...)", args)?;
 
                         let tid = this.pthread_self()?;
-                        let name = this.read_scalar(&args[1])?;
+                        let name = this.read_scalar(name)?;
                         let name_len = Scalar::from_target_usize(16, this);
 
                         this.pthread_getname_np(tid, name, name_len)?
                     }
-                    _ => {
+                    op => {
                         this.handle_unsupported_foreign_item(format!(
-                            "can't execute prctl with ID {id}"
+                            "can't execute prctl with ID {op}"
                         ))?;
                         return interp_ok(EmulateItemResult::AlreadyJumped);
                     }
@@ -73,18 +72,4 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         interp_ok(EmulateItemResult::NeedsReturn)
     }
-}
-
-fn check_args_len<'tcx>(
-    link_name: &str,
-    args: &[OpTy<'tcx>],
-    args_expected: usize,
-) -> InterpResult<'tcx, ()> {
-    let args_actual = args.len();
-    if args_actual < args_expected {
-        throw_ub_format!(
-            "incorrect number of arguments for {link_name}: got {args_actual}, expected at least {args_expected}"
-        );
-    }
-    interp_ok(())
 }
