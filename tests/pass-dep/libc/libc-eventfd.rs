@@ -12,6 +12,7 @@ fn main() {
     test_race();
     test_syscall();
     test_blocking_read();
+    test_blocking_write();
 }
 
 fn read_bytes<const N: usize>(fd: i32, buf: &mut [u8; N]) -> i32 {
@@ -135,10 +136,43 @@ fn test_blocking_read() {
         assert_eq!(counter, 1);
     });
     let sized_8_data: [u8; 8] = 1_u64.to_ne_bytes();
-    // Pass control to thread1 so it can block on eventfd.
+    // Pass control to thread1 so it can block on eventfd `read`.
     thread::yield_now();
     // Write 1 to the counter to unblock thread1.
     let res = write_bytes(fd, sized_8_data);
     assert_eq!(res, 8);
     thread1.join().unwrap();
+}
+
+// This test will block on eventfd `write` then get unblocked by `read`.
+fn test_blocking_write() {
+    // eventfd write will block when EFD_NONBLOCK flag is clear
+    // and the addition caused counter to exceed u64::MAX - 1.
+    let flags = libc::EFD_CLOEXEC;
+    let fd = unsafe { libc::eventfd(0, flags) };
+    // Write u64 - 1.
+    let mut sized_8_data: [u8; 8] = (u64::MAX - 1).to_ne_bytes();
+    let res: i64 = unsafe {
+        libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+    };
+    assert_eq!(res, 8);
+
+    let thread1 = thread::spawn(move || {
+        sized_8_data = 1_u64.to_ne_bytes();
+        // Write 1 to the counter, this will block.
+        let res: i64 = unsafe {
+            libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap() //~ERROR: blocking is unsupported
+        };
+        // Make sure that write is successful.
+        assert_eq!(res, 8);
+    });
+    let mut buf: [u8; 8] = [0; 8];
+    // Pass control to thread1 so it can block on eventfd `write`.
+    thread::yield_now();
+    // This will unblock previously blocked eventfd read.
+    let res = read_bytes(fd, &mut buf);
+    // read returns number of bytes has been read, which is always 8.
+    assert_eq!(res, 8);
+    let counter = u64::from_ne_bytes(buf);
+    assert_eq!(counter, (u64::MAX - 1));
 }
