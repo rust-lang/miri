@@ -554,8 +554,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn fd_not_found<T: From<i32>>(&mut self) -> InterpResult<'tcx, T> {
         let this = self.eval_context_mut();
         let ebadf = this.eval_libc("EBADF");
-        this.set_last_error(ebadf)?;
-        Ok((-1).into())
+        return this.set_last_error_and_return_i32(ebadf);
     }
 
     /// Read data from `fd` into buffer specified by `buf` and `count`.
