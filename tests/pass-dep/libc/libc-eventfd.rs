@@ -10,6 +10,7 @@ use std::thread;
 fn main() {
     test_read_write();
     test_race();
+    test_blocking_read();
 }
 
 fn read_bytes<const N: usize>(fd: i32, buf: &mut [u8; N]) -> i32 {
@@ -107,5 +108,28 @@ fn test_race() {
     // write returns number of bytes written, which is always 8.
     assert_eq!(res, 8);
     thread::yield_now();
+    thread1.join().unwrap();
+}
+
+// This test will block on eventfd read then get unblocked by `write`.
+fn test_blocking_read() {
+    // eventfd read will block when EFD_NONBLOCK flag is clear and counter = 0.
+    let flags = libc::EFD_CLOEXEC;
+    let fd = unsafe { libc::eventfd(0, flags) };
+    let thread1 = thread::spawn(move || {
+        let mut buf: [u8; 8] = [0; 8];
+        // This will block.
+        let res = read_bytes(fd, &mut buf);
+        // read returns number of bytes has been read, which is always 8.
+        assert_eq!(res, 8);
+        let counter = u64::from_ne_bytes(buf);
+        assert_eq!(counter, 1);
+    });
+    let sized_8_data: [u8; 8] = 1_u64.to_ne_bytes();
+    // Pass control to thread1 so it can block on eventfd.
+    thread::yield_now();
+    // Write 1 to the counter to unblock thread1.
+    let res = write_bytes(fd, sized_8_data);
+    assert_eq!(res, 8);
     thread1.join().unwrap();
 }
