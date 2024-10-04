@@ -1,4 +1,4 @@
-//@ignore-target: windows # No pthreads on Windows
+//@ignore-target: windows # No pthreads and prctl on Windows
 use std::ffi::CStr;
 #[cfg(not(target_os = "freebsd"))]
 use std::ffi::CString;
@@ -19,6 +19,10 @@ fn main() {
                 0
             } else if #[cfg(target_os = "macos")] {
                 unsafe { libc::pthread_setname_np(name.as_ptr().cast()) }
+            } else if #[cfg(target_os = "android")] {
+                // FIXME: Use PR_SET_NAME constant when https://github.com/rust-lang/libc/pull/3941 lands.
+                const PR_SET_NAME: i32 = 15;
+                unsafe { libc::prctl(PR_SET_NAME, name.as_ptr().cast::<*const c_char>()) }
             } else {
                 compile_error!("set_thread_name not supported for this OS")
             }
@@ -42,6 +46,10 @@ fn main() {
                     libc::pthread_get_name_np(libc::pthread_self(), name.as_mut_ptr().cast(), name.len())
                 };
                 0
+            } else if #[cfg(target_os = "android")] {
+                // FIXME: Use PR_GET_NAME constant when https://github.com/rust-lang/libc/pull/3941 lands.
+                const PR_GET_NAME: i32 = 16;
+                unsafe { libc::prctl(PR_GET_NAME, name.as_mut_ptr().cast::<*mut c_char>()) }
             } else {
                 compile_error!("get_thread_name not supported for this OS")
             }
