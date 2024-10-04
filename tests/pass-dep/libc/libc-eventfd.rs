@@ -152,7 +152,7 @@ fn test_blocking_write() {
         sized_8_data = 1_u64.to_ne_bytes();
         // Write 1 to the counter, this will block.
         let res: i64 = unsafe {
-            libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap() //~ERROR: blocking is unsupported
+            libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
         };
         // Make sure that write is successful.
         assert_eq!(res, 8);
