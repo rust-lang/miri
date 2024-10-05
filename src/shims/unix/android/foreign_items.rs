@@ -1,7 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
-use crate::shims::unix::linux::thread::prctl;
+use crate::shims::unix::android::thread::prctl;
 use crate::*;
 
 pub fn is_dyn_sym(_name: &str) -> bool {
