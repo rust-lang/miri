@@ -1219,12 +1219,10 @@ where
 /// Check that the number of args is at least the minumim what we expect
 pub fn check_min_arg_count<'a, 'tcx, const N: usize>(
     name: &'a str,
-    args: &[OpTy<'tcx>],
+    args: &'a [OpTy<'tcx>],
 ) -> InterpResult<'tcx, &'a [OpTy<'tcx>; N]> {
-    if args.len() >= N {
-        let ptr = args.as_ptr() as *const [OpTy<'tcx>; N];
-        // SAFETY: ok because we just checked that the length fits
-        return interp_ok(unsafe { &*ptr });
+    if let Some((ops, _)) = args.split_first_chunk() {
+        return interp_ok(ops);
     }
     throw_ub_format!(
         "incorrect number of arguments for {name}: got {}, expected at least {}",
