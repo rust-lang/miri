@@ -1,5 +1,5 @@
 //@only-target: linux
-// test_race depends on a deterministic schedule.
+// test_race, test_blocking_read and test_blocking_write depend on a deterministic schedule.
 //@compile-flags: -Zmiri-preemption-rate=0
 
 // FIXME(static_mut_refs): Do not allow `static_mut_refs` lint
@@ -142,14 +142,14 @@ fn test_blocking_write() {
     let flags = libc::EFD_CLOEXEC;
     let fd = unsafe { libc::eventfd(0, flags) };
     // Write u64 - 1.
-    let mut sized_8_data: [u8; 8] = (u64::MAX - 1).to_ne_bytes();
+    let sized_8_data: [u8; 8] = (u64::MAX - 1).to_ne_bytes();
     let res: i64 = unsafe {
         libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
     };
     assert_eq!(res, 8);
 
     let thread1 = thread::spawn(move || {
-        sized_8_data = 1_u64.to_ne_bytes();
+        let sized_8_data = 1_u64.to_ne_bytes();
         // Write 1 to the counter, this will block.
         let res: i64 = unsafe {
             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
@@ -166,4 +166,5 @@ fn test_blocking_write() {
     assert_eq!(res, 8);
     let counter = u64::from_ne_bytes(buf);
     assert_eq!(counter, (u64::MAX - 1));
+    thread1.join().unwrap();
 }
