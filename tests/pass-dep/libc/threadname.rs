@@ -1,7 +1,5 @@
 //@ignore-target: windows # No pthreads and prctl on Windows
 use std::ffi::CStr;
-#[cfg(not(target_os = "freebsd"))]
-use std::ffi::CString;
 use std::thread;
 
 fn main() {
@@ -69,10 +67,11 @@ fn main() {
 
         // Also test directly calling pthread_setname to check its return value.
         assert_eq!(set_thread_name(&cstr), 0);
-        // But with a too long name it should fail (except on FreeBSD where the
-        // function has no return, hence cannot indicate failure).
-        #[cfg(not(target_os = "freebsd"))]
-        assert_ne!(set_thread_name(&CString::new(long_name).unwrap()), 0);
+        // But with a too long name it should fail except:
+        // * on FreeBSD where the function has no return, hence cannot indicate failure,
+        // * on Android where prctl silently truncates the string.
+        #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+        assert_ne!(set_thread_name(&std::ffi::CString::new(long_name).unwrap()), 0);
     });
     result.unwrap().join().unwrap();
 }
