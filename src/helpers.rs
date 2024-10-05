@@ -1226,7 +1226,11 @@ pub fn check_min_arg_count<'a, 'tcx, const N: usize>(
         // SAFETY: ok because we just checked that the length fits
         return interp_ok(unsafe { &*ptr });
     }
-    throw_ub_format!("incorrect number of arguments for {name}: got {}, expected at least {}", args.len(), N)
+    throw_ub_format!(
+        "incorrect number of arguments for {name}: got {}, expected at least {}",
+        args.len(),
+        N
+    )
 }
 
 pub fn isolation_abort_error<'tcx>(name: &str) -> InterpResult<'tcx> {
