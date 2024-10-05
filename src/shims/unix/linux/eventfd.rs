@@ -103,7 +103,6 @@ impl FileDescription for Event {
                 ),
             );
         } else {
-            // TODO: why the compiler suggested not to use &dest??
             blocking_eventfd_read_callback(&buf_place, dest, weak_eventfd, ecx)?;
         }
         interp_ok(())
@@ -247,6 +246,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 }
 
+/// Callback function after eventfd read unblocks.
 fn blocking_eventfd_read_callback<'tcx>(
     buf_place: &MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
@@ -281,6 +281,9 @@ fn blocking_eventfd_read_callback<'tcx>(
     // Tell userspace how many bytes we wrote.
     ecx.write_int(buf_place.layout.size.bytes(), dest)
 }
+
+
+/// Callback function after eventfd write unblocks.
 fn blocking_eventfd_write_callback<'tcx>(
     num: u64,
     buf_place: &MPlaceTy<'tcx>,
