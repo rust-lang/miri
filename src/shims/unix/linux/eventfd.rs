@@ -282,7 +282,6 @@ fn blocking_eventfd_read_callback<'tcx>(
     ecx.write_int(buf_place.layout.size.bytes(), dest)
 }
 
-
 /// Callback function after eventfd write unblocks.
 fn blocking_eventfd_write_callback<'tcx>(
     num: u64,
