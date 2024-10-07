@@ -1,8 +1,10 @@
+use std::iter;
+
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
 use crate::helpers::check_min_arg_count;
-use crate::shims::unix::thread::EvalContextExt as _;
+use crate::shims::unix::thread::{DEFAULT_THREAD_NAME, EvalContextExt as _};
 use crate::*;
 
 pub fn prctl<'tcx>(
@@ -40,11 +42,25 @@ pub fn prctl<'tcx>(
         PR_GET_NAME => {
             let [_, name] = check_min_arg_count("prctl(PR_GET_NAME, ...)", args)?;
 
-            let thread = this.pthread_self()?;
-            let name = this.read_scalar(name)?;
-            let name_len = Scalar::from_target_usize(TASK_COMM_LEN as u64, this);
+            let name_out = this.read_scalar(name)?;
+            let name_out = name_out.to_pointer(this)?;
 
-            this.pthread_getname_np(thread, name, name_len)?
+            let thread = this.pthread_self()?.to_int(this.libc_ty_layout("pthread_t").size)?;
+            let thread = ThreadId::try_from(thread).unwrap();
+
+            // FIXME: we should use the program name if the thread name is not set
+            let name = this.get_thread_name(thread).unwrap_or(DEFAULT_THREAD_NAME).to_owned();
+            let name_len = name.len().max(TASK_COMM_LEN - 1);
+
+            this.eval_context_mut().write_bytes_ptr(
+                name_out,
+                name.iter()
+                    .take(name_len)
+                    .copied()
+                    .chain(iter::repeat_n(0u8, TASK_COMM_LEN.strict_sub(name_len))),
+            )?;
+
+            Scalar::from_u32(0)
         }
         op => {
             this.handle_unsupported_foreign_item(format!("can't execute prctl with OP {op}"))?;

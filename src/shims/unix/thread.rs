@@ -2,6 +2,8 @@ use rustc_target::spec::abi::Abi;
 
 use crate::*;
 
+pub const DEFAULT_THREAD_NAME: &[u8] = b"<unnamed>";
+
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn pthread_create(
@@ -103,7 +105,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let len = len.to_target_usize(this)?;
 
         // FIXME: we should use the program name if the thread name is not set
-        let name = this.get_thread_name(thread).unwrap_or(b"<unnamed>").to_owned();
+        let name = this.get_thread_name(thread).unwrap_or(DEFAULT_THREAD_NAME).to_owned();
         let (success, _written) = this.write_c_str(&name, name_out, len)?;
 
         interp_ok(if success { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })
