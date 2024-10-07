@@ -75,11 +75,14 @@ fn main() {
 
             // Also test directly calling pthread_setname to check its return value.
             assert_eq!(set_thread_name(&cstr), 0);
-            // But with a too long name it should fail except:
-            // * on FreeBSD where the function has no return, hence cannot indicate failure,
-            // * on Android where prctl silently truncates the string.
-            #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-            assert_ne!(set_thread_name(&std::ffi::CString::new(name).unwrap()), 0);
+
+            if name.len() >= 15 {
+                // But with a too long name it should fail except:
+                // * on FreeBSD where the function has no return, hence cannot indicate failure,
+                // * on Android where prctl silently truncates the string.
+                #[cfg(not(all(target_os = "freebsd", target_os = "android")))]
+                assert_ne!(set_thread_name(&std::ffi::CString::new(name).unwrap()), 0);
+            }
         });
         result.unwrap().join().unwrap();
     }
