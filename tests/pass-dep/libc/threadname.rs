@@ -59,7 +59,8 @@ fn main() {
         let result = thread::Builder::new().name(name.clone()).spawn(move || {
             assert_eq!(thread::current().name(), Some(name.as_str()));
 
-            let mut buf = vec![0u8; name.len() + 1];
+            // POSIX seems to promise at least 15 chars excluding a null terminator.
+            let mut buf = vec![0u8; 16];
             assert_eq!(get_thread_name(&mut buf), 0);
             let cstr = CStr::from_bytes_until_nul(&buf).unwrap();
             if name.len() >= 15 {
@@ -67,7 +68,7 @@ fn main() {
                     cstr.to_bytes().len() >= 15,
                     "name is too short: len={}",
                     cstr.to_bytes().len()
-                ); // POSIX seems to promise at least 15 chars
+                );
                 assert!(name.as_bytes().starts_with(cstr.to_bytes()));
             } else {
                 assert_eq!(name.as_bytes(), cstr.to_bytes());
@@ -80,7 +81,7 @@ fn main() {
                 // But with a too long name it should fail except:
                 // * on FreeBSD where the function has no return, hence cannot indicate failure,
                 // * on Android where prctl silently truncates the string.
-                #[cfg(not(all(target_os = "freebsd", target_os = "android")))]
+                #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
                 assert_ne!(set_thread_name(&std::ffi::CString::new(name).unwrap()), 0);
             }
         });

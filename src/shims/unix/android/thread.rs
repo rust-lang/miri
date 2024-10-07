@@ -1,5 +1,3 @@
-use std::iter;
-
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
@@ -49,17 +47,16 @@ pub fn prctl<'tcx>(
             let thread = ThreadId::try_from(thread).unwrap();
 
             // FIXME: we should use the program name if the thread name is not set
-            let name = this.get_thread_name(thread).unwrap_or(DEFAULT_THREAD_NAME).to_owned();
-            let name_len = name.len().max(TASK_COMM_LEN - 1);
+            let mut name = this.get_thread_name(thread).unwrap_or(DEFAULT_THREAD_NAME).to_owned();
+            let name_len = TASK_COMM_LEN - 1;
 
-            this.eval_context_mut().write_bytes_ptr(
-                name_out,
-                name.iter()
-                    .take(name_len)
-                    .copied()
-                    .chain(iter::repeat_n(0u8, TASK_COMM_LEN.strict_sub(name_len))),
-            )?;
+            if name.len() >= name_len {
+                name.drain(name_len..);
+            } else {
+                name.resize(name_len, 0);
+            }
 
+            this.write_c_str(&name, name_out, TASK_COMM_LEN as u64)?;
             Scalar::from_u32(0)
         }
         op => {
