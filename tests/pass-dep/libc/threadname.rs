@@ -3,6 +3,7 @@ use std::ffi::CStr;
 use std::thread;
 
 fn main() {
+    let short_name = "test_named".to_owned();
     let long_name = std::iter::once("test_named_thread_truncation")
         .chain(std::iter::repeat(" yada").take(100))
         .collect::<String>();
@@ -54,24 +55,37 @@ fn main() {
         }
     }
 
-    let result = thread::Builder::new().name(long_name.clone()).spawn(move || {
-        // Rust remembers the full thread name itself.
-        assert_eq!(thread::current().name(), Some(long_name.as_str()));
+    fn test_using(name: String) {
+        let result = thread::Builder::new().name(name.clone()).spawn(move || {
+            assert_eq!(thread::current().name(), Some(name.as_str()));
 
-        // But the system is limited -- make sure we successfully set a truncation.
-        let mut buf = vec![0u8; long_name.len() + 1];
-        assert_eq!(get_thread_name(&mut buf), 0);
-        let cstr = CStr::from_bytes_until_nul(&buf).unwrap();
-        assert!(cstr.to_bytes().len() >= 15, "name is too short: len={}", cstr.to_bytes().len()); // POSIX seems to promise at least 15 chars
-        assert!(long_name.as_bytes().starts_with(cstr.to_bytes()));
+            let mut buf = vec![0u8; name.len() + 1];
+            assert_eq!(get_thread_name(&mut buf), 0);
+            let cstr = CStr::from_bytes_until_nul(&buf).unwrap();
+            if name.len() >= 15 {
+                assert!(
+                    cstr.to_bytes().len() >= 15,
+                    "name is too short: len={}",
+                    cstr.to_bytes().len()
+                ); // POSIX seems to promise at least 15 chars
+                assert!(name.as_bytes().starts_with(cstr.to_bytes()));
+            } else {
+                assert_eq!(name.as_bytes(), cstr.to_bytes());
+            }
 
-        // Also test directly calling pthread_setname to check its return value.
-        assert_eq!(set_thread_name(&cstr), 0);
-        // But with a too long name it should fail except:
-        // * on FreeBSD where the function has no return, hence cannot indicate failure,
-        // * on Android where prctl silently truncates the string.
-        #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-        assert_ne!(set_thread_name(&std::ffi::CString::new(long_name).unwrap()), 0);
-    });
-    result.unwrap().join().unwrap();
+            // Also test directly calling pthread_setname to check its return value.
+            assert_eq!(set_thread_name(&cstr), 0);
+            // But with a too long name it should fail except:
+            // * on FreeBSD where the function has no return, hence cannot indicate failure,
+            // * on Android where prctl silently truncates the string.
+            #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+            assert_ne!(set_thread_name(&std::ffi::CString::new(name).unwrap()), 0);
+        });
+        result.unwrap().join().unwrap();
+    }
+
+    test_using(short_name);
+    // Rust remembers the full thread name itself.
+    // But the system is limited -- make sure we successfully set a truncation.
+    test_using(long_name);
 }
