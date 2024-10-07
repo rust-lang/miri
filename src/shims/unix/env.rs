@@ -276,7 +276,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     fn linux_gettid(&mut self) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_ref();
-        this.assert_target_os_is_one_of(&["linux", "android"], "gettid");
+        this.assert_target_os("linux", "gettid");
 
         let index = this.machine.threads.active_thread().to_u32();
 
