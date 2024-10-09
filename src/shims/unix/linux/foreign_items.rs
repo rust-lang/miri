@@ -79,7 +79,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "pthread_setname_np" => {
                 let [thread, name] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let res = this.pthread_setname_np(
+                let res = this.pthread_setname_np_or_erange(
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     TASK_COMM_LEN,
@@ -96,11 +96,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let res = if len.to_target_usize(this)? < TASK_COMM_LEN as u64 {
                     this.eval_libc("ERANGE")
                 } else {
-                    this.pthread_getname_np(
+                    this.pthread_getname_np_or_erange(
                         this.read_scalar(thread)?,
                         this.read_scalar(name)?,
                         len,
-                        false,
                     )?
                 };
                 this.write_scalar(res, dest)?;

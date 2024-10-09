@@ -63,39 +63,66 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_uint(thread_id.to_u32(), this.libc_ty_layout("pthread_t").size))
     }
 
-    /// Set the name of the current thread. `max_name_len` is the maximal length of the name
-    /// including the null terminator.
+    /// Set the name of the specified thread. If the name including the null terminator
+    // is longer than `name_max_len`, then `ERANGE` is returned.
+    fn pthread_setname_np_or_erange(
+        &mut self,
+        thread: Scalar,
+        name: Scalar,
+        name_max_len: usize,
+    ) -> InterpResult<'tcx, Scalar> {
+        self.pthread_setname_np(thread, name, name_max_len).map(|res| {
+            if res { Scalar::from_u32(0) } else { self.eval_context_ref().eval_libc("ERANGE") }
+        })
+    }
+
+    /// Set the name of the specified thread. If the name including the null terminator
+    // is longer than `name_max_len`, then `false` is returned.
     fn pthread_setname_np(
         &mut self,
         thread: Scalar,
         name: Scalar,
-        max_name_len: usize,
-    ) -> InterpResult<'tcx, Scalar> {
+        name_max_len: usize,
+    ) -> InterpResult<'tcx, bool> {
         let this = self.eval_context_mut();
 
         let thread = thread.to_int(this.libc_ty_layout("pthread_t").size)?;
         let thread = ThreadId::try_from(thread).unwrap();
         let name = name.to_pointer(this)?;
-
         let name = this.read_c_str(name)?.to_owned();
 
         // Comparing with `>=` to account for null terminator.
-        if name.len() >= max_name_len {
-            return interp_ok(this.eval_libc("ERANGE"));
+        if name.len() >= name_max_len {
+            return interp_ok(false);
         }
 
         this.set_thread_name(thread, name);
 
-        interp_ok(Scalar::from_u32(0))
+        interp_ok(true)
     }
 
+    // Get the name of the specified thread. If the thread name doesn't fit
+    // the buffer, `ERANGE` is returned.
+    fn pthread_getname_np_or_erange(
+        &mut self,
+        thread: Scalar,
+        name_out: Scalar,
+        len: Scalar,
+    ) -> InterpResult<'tcx, Scalar> {
+        self.pthread_getname_np(thread, name_out, len, false).map(|res| {
+            if res { Scalar::from_u32(0) } else { self.eval_context_ref().eval_libc("ERANGE") }
+        })
+    }
+
+    // Get the name of the specified thread. If the thread name doesn't fit
+    // the buffer and trimming isn't allowed, `false` is returned.
     fn pthread_getname_np(
         &mut self,
         thread: Scalar,
         name_out: Scalar,
         len: Scalar,
         trim: bool,
-    ) -> InterpResult<'tcx, Scalar> {
+    ) -> InterpResult<'tcx, bool> {
         let this = self.eval_context_mut();
 
         let thread = thread.to_int(this.libc_ty_layout("pthread_t").size)?;
@@ -112,7 +139,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let (success, _written) = this.write_c_str(name, name_out, len)?;
 
-        interp_ok(if success { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })
+        interp_ok(success)
     }
 
     fn sched_yield(&mut self) -> InterpResult<'tcx, ()> {

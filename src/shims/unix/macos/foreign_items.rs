@@ -166,11 +166,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [name] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let thread = this.pthread_self()?;
                 let max_len = this.eval_libc("MAXTHREADNAMESIZE").to_target_usize(this)?;
-                let res = this.pthread_setname_np(
+                let res = if this.pthread_setname_np(
                     thread,
                     this.read_scalar(name)?,
                     max_len.try_into().unwrap(),
-                )?;
+                )? {
+                    Scalar::from_u32(0)
+                } else {
+                    this.eval_libc("ENAMETOOLONG")
+                };
                 // Contrary to the manpage, `pthread_setname_np` on macOS still
                 // returns an integer indicating success.
                 this.write_scalar(res, dest)?;
@@ -188,14 +192,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Since all other function implementations don't validate
                 // the provided thread at all, it's not happening here too.
                 let res = Scalar::from_u32(0);
-
                 this.pthread_getname_np(
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
                     true,
                 )?;
-
                 this.write_scalar(res, dest)?;
             }
 
