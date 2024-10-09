@@ -94,6 +94,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         thread: Scalar,
         name_out: Scalar,
         len: Scalar,
+        trim: bool,
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
@@ -104,7 +105,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // FIXME: we should use the program name if the thread name is not set
         let name = this.get_thread_name(thread).unwrap_or(b"<unnamed>").to_owned();
-        let (success, _written) = this.write_c_str(&name, name_out, len)?;
+        let name = match trim {
+            true => &name[..name.len().min(len.try_into().unwrap_or(usize::MAX).saturating_sub(1))],
+            false => &name,
+        };
+
+        let (success, _written) = this.write_c_str(name, name_out, len)?;
 
         interp_ok(if success { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })
     }

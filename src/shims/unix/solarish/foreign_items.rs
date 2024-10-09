@@ -40,6 +40,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
+                    false,
                 )?;
                 this.write_scalar(res, dest)?;
             }

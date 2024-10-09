@@ -74,6 +74,19 @@ fn main() {
             // large enough for the thread name.
             #[cfg(target_os = "linux")]
             assert_eq!(get_thread_name(&mut buf[..15]), libc::ERANGE);
+
+            // For libc implementation for macOS it's not an error
+            // for a buffer being too short for the thread name.
+            #[cfg(target_os = "macos")]
+            {
+                assert_eq!(get_thread_name(&mut buf[..0]), 0);
+                assert_eq!(get_thread_name(&mut buf[..4]), 0);
+
+                let cstr = CStr::from_bytes_until_nul(&buf).unwrap();
+
+                assert_eq!(cstr.to_bytes_with_nul().len(), 4);
+                assert!(short_name.as_bytes().starts_with(cstr.to_bytes()));
+            }
         })
         .unwrap()
         .join()

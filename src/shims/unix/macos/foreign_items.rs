@@ -178,11 +178,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "pthread_getname_np" => {
                 let [thread, name, len] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let res = this.pthread_getname_np(
+
+                // The function's behavior isn't portable between platforms.
+                // In case of macOS, the result doesn't depend on the output
+                // bufer length. It inherits implementation from FreeBSD, but
+                // on top of it adds the thread pointer validation which can
+                // result in `ESRCH` error code.
+                //
+                // Since all other function implementations don't validate
+                // the provided thread at all, it's not happening here too.
+                let res = Scalar::from_u32(0);
+
+                this.pthread_getname_np(
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
+                    true,
                 )?;
+
                 this.write_scalar(res, dest)?;
             }
 
