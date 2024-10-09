@@ -58,8 +58,17 @@ jobs:
       - name: rustdoc
         run: RUSTDOCFLAGS="-Dwarnings" ./miri doc --document-private-items
 
+  coverage:
+    name: Coverage report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/workflows/setup
+      - name: coverage
+        run: ./miri test --coverage
+
   conclusion:
-    needs: [build, style]
+    needs: [build, style, coverage]
     # We need to ensure this job does *not* get skipped if its dependencies fail,
     # because a skipped job is considered a success by GitHub. So we have to
     # overwrite `if:`. We use `!cancelled()` to ensure the job does still not get run
@@ -85,7 +94,7 @@ jobs:
         contents: write
         # ... and create a PR.
         pull-requests: write
-    needs: [build, style]
+    needs: [build, style, coverage]
     if: github.event_name == 'schedule' && failure()
     steps:
       # Send a Zulip notification
