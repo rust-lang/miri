@@ -62,7 +62,15 @@ jobs:
       - name: rustdoc
         run: RUSTDOCFLAGS="-Dwarnings" ./miri doc --document-private-items
 
-  # These jobs doesn't actually test anything, but they're only used to tell
+  coverage:
+    name: Coverage report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/workflows/setup
+      - name: coverage
+        run: ./miri test --coverage
+  # These jobs don't actually test anything, but they're only used to tell
   # bors the build completed, as there is no practical way to detect when a
   # workflow is successful listening to webhooks only.
   #
@@ -92,7 +100,7 @@ jobs:
         contents: write
         # ... and create a PR.
         pull-requests: write
-    needs: [build, style]
+    needs: [build, style, coverage]
     if: github.event_name == 'schedule' && failure()
     steps:
       # Send a Zulip notification
