@@ -31,6 +31,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(name)?,
                     max_len,
                 )?;
+                let res = if res { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") };
                 this.write_scalar(res, dest)?;
             }
             "pthread_getname_np" => {
@@ -40,7 +41,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
+                    /* truncate */ false,
                 )?;
+                let res = if res { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") };
                 this.write_scalar(res, dest)?;
             }
 
