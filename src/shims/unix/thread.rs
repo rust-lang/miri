@@ -89,7 +89,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     // Get the name of the specified thread. If the thread name doesn't fit
-    // the buffer and trimming isn't allowed, `false` is returned.
+    // the buffer, then if `truncate` is set the truncated name is written out,
     fn pthread_getname_np(
         &mut self,
         thread: Scalar,

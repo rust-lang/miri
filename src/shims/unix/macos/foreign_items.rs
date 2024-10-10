@@ -166,6 +166,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [name] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let thread = this.pthread_self()?;
                 let max_len = this.eval_libc("MAXTHREADNAMESIZE").to_target_usize(this)?;
+                // The real implementation has logic in two places:
+                // * in userland at https://github.com/apple-oss-distributions/libpthread/blob/c032e0b076700a0a47db75528a282b8d3a06531a/src/pthread.c#L1178-L1200,
+                // * in kernel at https://github.com/apple-oss-distributions/xnu/blob/8d741a5de7ff4191bf97d57b9f54c2f6d4a15585/bsd/kern/proc_info.c#L3218-L3227.
+                //
+                // The function in libc calls the kernel to validate
+                // the security policies and the input. If all of the requirements
+                // are met, then the name is set and 0 is returned. Otherwise, if
+                // the specified name is lomnger than MAXTHREADNAMESIZE, then
+                // ENAMETOOLONG is returned.
+                //
+                // FIXME: the real implementation maybe returns ESRCH if the thread ID is invalid.
+                // Perhaps due to the fact, that there's no man page for that function by Apple,
+                // and not all the kernel code is open sourced.
                 let res = if this.pthread_setname_np(
                     thread,
                     this.read_scalar(name)?,
@@ -184,19 +197,25 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
 
                 // The function's behavior isn't portable between platforms.
-                // In case of macOS, the result doesn't depend on the output
-                // bufer length. It inherits implementation from FreeBSD, but
-                // on top of it adds the thread pointer validation which can
-                // result in `ESRCH` error code.
+                // In case of macOS, a truncated name (due to a too small buffer)
+                // does not lead to an error.
                 //
-                // Since all other function implementations don't validate
-                // the provided thread at all, it's not happening here too.
+                // Implemented purely in the userland at
+                // https://github.com/apple-oss-distributions/libpthread/blob/c032e0b076700a0a47db75528a282b8d3a06531a/src/pthread.c#L1160-L1175.
+                //
+                // The function verifies the thread ID, and if it's valid,
+                // it fills the buffer using strlcpy which truncates the resulting value,
+                // but always null terminates (except zero sized buffers). Therefore,
+                // the result is always 0 for any valid thread ID. If the thread doesn't
+                // exist, then the fucntion returns ESRCH.
+                //
+                // FIXME: the real implementation returns ESRCH if the thread ID is invalid.
                 let res = Scalar::from_u32(0);
                 this.pthread_getname_np(
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
-                    true,
+                    /* truncate */ true,
                 )?;
                 this.write_scalar(res, dest)?;
             }
