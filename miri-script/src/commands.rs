@@ -172,7 +172,7 @@ impl Command {
             Command::Install { flags } => Self::install(flags),
             Command::Build { flags } => Self::build(flags),
             Command::Check { flags } => Self::check(flags),
-            Command::Test { bless, flags, target } => Self::test(bless, flags, target),
+            Command::Test { bless, flags, target, coverage } => Self::test(bless, flags, target, coverage),
             Command::Run { dep, verbose, many_seeds, target, edition, flags } =>
                 Self::run(dep, verbose, many_seeds, target, edition, flags),
             Command::Doc { flags } => Self::doc(flags),
@@ -458,7 +458,7 @@ impl Command {
         Ok(())
     }
 
-    fn test(bless: bool, mut flags: Vec<String>, target: Option<String>) -> Result<()> {
+    fn test(bless: bool, mut flags: Vec<String>, target: Option<String>, coverage: bool) -> Result<()> {
         let mut e = MiriEnv::new()?;
 
         // Prepare a sysroot. (Also builds cargo-miri, which we need.)
@@ -467,6 +467,9 @@ impl Command {
         // Forward information to test harness.
         if bless {
             e.sh.set_var("RUSTC_BLESS", "Gesundheit");
+        }
+        if coverage {
+            e.sh.set_var("RUSTFLAGS", "-C instrument-coverage");
         }
         if let Some(target) = target {
             // Tell the harness which target to test.
@@ -479,6 +482,41 @@ impl Command {
         // Then test, and let caller control flags.
         // Only in root project as `cargo-miri` has no tests.
         e.test(".", &flags)?;
+
+        if coverage {
+            Self::show_coverage_report(&e)?;
+        }
+        Ok(())
+    }
+
+    fn show_coverage_report(e: &MiriEnv) -> Result<()> {
+        let profraw_files: Vec<_> = std::fs::read_dir(".")?
+        .filter_map(|r| r.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|e| e == "profraw").unwrap_or(false))
+        .map(|p| p.as_os_str().to_os_string())
+        .collect();
+
+        // Merge the profraw files
+        let profraw_files_cloned= profraw_files.iter();
+        cmd!(
+            e.sh,
+            "cargo-profdata -- merge -sparse {profraw_files_cloned...} -o merged.profdata"
+        ).quiet().run()?;
+
+        // Create the coverage report.
+        let home = std::env::var("HOME")?;
+        let ignored = format!("{home}/*|miri/target/*|target/debug/*|rust/deps/*");
+        cmd!(
+            e.sh,
+            "cargo-cov -- report --instr-profile=merged.profdata --object target/debug/miri  -ignore-filename-regex={ignored}"
+        ).run()?;
+
+        // Delete artifacts.
+        cmd!(
+            e.sh,
+            "rm {profraw_files...} merged.profdata"
+        ).quiet().run()?;
         Ok(())
     }
 
