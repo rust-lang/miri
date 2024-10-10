@@ -200,14 +200,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // In case of macOS, a truncated name (due to a too small buffer)
                 // does not lead to an error.
                 //
-                // Implemented purely in the userland at
+                // For details, see the implementation at
                 // https://github.com/apple-oss-distributions/libpthread/blob/c032e0b076700a0a47db75528a282b8d3a06531a/src/pthread.c#L1160-L1175.
-                //
-                // The function verifies the thread ID, and if it's valid,
-                // it fills the buffer using strlcpy which truncates the resulting value,
-                // but always null terminates (except zero sized buffers). Therefore,
-                // the result is always 0 for any valid thread ID. If the thread doesn't
-                // exist, then the fucntion returns ESRCH.
+                // The key part is the strlcpy, which truncates the resulting value,
+                // but always null terminates (except for zero sized buffers).
                 //
                 // FIXME: the real implementation returns ESRCH if the thread ID is invalid.
                 let res = Scalar::from_u32(0);
