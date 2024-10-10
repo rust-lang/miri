@@ -79,13 +79,17 @@ fn test_strcpy() {
 }
 
 fn test_malloc() {
-    // Test that small allocations sometimes *are* not very aligned.
-    let saw_unaligned = (0..64).any(|_| unsafe {
-        let p = libc::malloc(3);
-        libc::free(p);
-        (p as usize) % 4 != 0 // find any that this is *not* 4-aligned
-    });
-    assert!(saw_unaligned);
+    // Real systems may always align to at least a specific power of 2 (like 4 or 8).
+    #[cfg(miri)]
+    {
+        // Test that small allocations sometimes *are* not very aligned.
+        let saw_unaligned = (0..64).any(|_| unsafe {
+            let p = libc::malloc(3);
+            libc::free(p);
+            (p as usize) % 4 != 0 // find any that this is *not* 4-aligned
+        });
+        assert!(saw_unaligned);
+    }
 
     unsafe {
         let p1 = libc::malloc(20);
