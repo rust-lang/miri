@@ -176,8 +176,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // ENAMETOOLONG is returned.
                 //
                 // FIXME: the real implementation maybe returns ESRCH if the thread ID is invalid.
-                // Perhaps due to the fact, that there's no man page for that function by Apple,
-                // and not all the kernel code is open sourced.
                 let thread = this.pthread_self()?;
                 let res = if this.pthread_setname_np(
                     thread,
