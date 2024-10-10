@@ -164,8 +164,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Threading
             "pthread_setname_np" => {
                 let [name] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let thread = this.pthread_self()?;
-                let max_len = this.eval_libc("MAXTHREADNAMESIZE").to_target_usize(this)?;
+
                 // The real implementation has logic in two places:
                 // * in userland at https://github.com/apple-oss-distributions/libpthread/blob/c032e0b076700a0a47db75528a282b8d3a06531a/src/pthread.c#L1178-L1200,
                 // * in kernel at https://github.com/apple-oss-distributions/xnu/blob/8d741a5de7ff4191bf97d57b9f54c2f6d4a15585/bsd/kern/proc_info.c#L3218-L3227.
@@ -179,10 +178,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // FIXME: the real implementation maybe returns ESRCH if the thread ID is invalid.
                 // Perhaps due to the fact, that there's no man page for that function by Apple,
                 // and not all the kernel code is open sourced.
+                let thread = this.pthread_self()?;
                 let res = if this.pthread_setname_np(
                     thread,
                     this.read_scalar(name)?,
-                    max_len.try_into().unwrap(),
+                    this.eval_libc("MAXTHREADNAMESIZE").to_target_usize(this)?.try_into().unwrap(),
                 )? {
                     Scalar::from_u32(0)
                 } else {
