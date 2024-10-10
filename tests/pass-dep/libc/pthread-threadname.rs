@@ -119,7 +119,7 @@ fn main() {
             // But with a too long name it should fail (except on FreeBSD where the
             // function has no return, hence cannot indicate failure).
             // On macOS, the error code is different.
-            #[cfg(any(target_os = "linux", target_os = "illumos", target_os = "solaris"))]
+            #[cfg(not(any(target_os = "freebsd", target_os = "macos")))]
             assert_eq!(set_thread_name(&CString::new(long_name).unwrap()), libc::ERANGE);
 
             #[cfg(any(target_os = "macos"))]
