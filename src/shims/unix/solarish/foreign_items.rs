@@ -26,21 +26,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // THREAD_NAME_MAX allows a thread name of 31+1 length
                 // https://github.com/illumos/illumos-gate/blob/7671517e13b8123748eda4ef1ee165c6d9dba7fe/usr/src/uts/common/sys/thread.h#L613
                 let max_len = 32;
-                let res = this.pthread_setname_np_or_erange(
-                    this.read_scalar(thread)?,
-                    this.read_scalar(name)?,
-                    max_len,
-                )?;
+                let res = this
+                    .pthread_setname_np(this.read_scalar(thread)?, this.read_scalar(name)?, max_len)
+                    .map(|r| if r { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })?;
                 this.write_scalar(res, dest)?;
             }
             "pthread_getname_np" => {
                 let [thread, name, len] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let res = this.pthread_getname_np_or_erange(
-                    this.read_scalar(thread)?,
-                    this.read_scalar(name)?,
-                    this.read_scalar(len)?,
-                )?;
+                let res = this
+                    .pthread_getname_np(
+                        this.read_scalar(thread)?,
+                        this.read_scalar(name)?,
+                        this.read_scalar(len)?,
+                        /* truncate */ false,
+                    )
+                    .map(|r| if r { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })?;
                 this.write_scalar(res, dest)?;
             }
 

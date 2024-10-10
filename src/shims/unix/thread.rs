@@ -64,19 +64,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     /// Set the name of the specified thread. If the name including the null terminator
-    // is longer than `name_max_len`, then `ERANGE` is returned.
-    fn pthread_setname_np_or_erange(
-        &mut self,
-        thread: Scalar,
-        name: Scalar,
-        name_max_len: usize,
-    ) -> InterpResult<'tcx, Scalar> {
-        self.pthread_setname_np(thread, name, name_max_len).map(|res| {
-            if res { Scalar::from_u32(0) } else { self.eval_context_ref().eval_libc("ERANGE") }
-        })
-    }
-
-    /// Set the name of the specified thread. If the name including the null terminator
     // is longer than `name_max_len`, then `false` is returned.
     fn pthread_setname_np(
         &mut self,
@@ -102,26 +89,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     // Get the name of the specified thread. If the thread name doesn't fit
-    // the buffer, `ERANGE` is returned.
-    fn pthread_getname_np_or_erange(
-        &mut self,
-        thread: Scalar,
-        name_out: Scalar,
-        len: Scalar,
-    ) -> InterpResult<'tcx, Scalar> {
-        self.pthread_getname_np(thread, name_out, len, false).map(|res| {
-            if res { Scalar::from_u32(0) } else { self.eval_context_ref().eval_libc("ERANGE") }
-        })
-    }
-
-    // Get the name of the specified thread. If the thread name doesn't fit
     // the buffer and trimming isn't allowed, `false` is returned.
     fn pthread_getname_np(
         &mut self,
         thread: Scalar,
         name_out: Scalar,
         len: Scalar,
-        trim: bool,
+        truncate: bool,
     ) -> InterpResult<'tcx, bool> {
         let this = self.eval_context_mut();
 
@@ -132,7 +106,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // FIXME: we should use the program name if the thread name is not set
         let name = this.get_thread_name(thread).unwrap_or(b"<unnamed>").to_owned();
-        let name = match trim {
+        let name = match truncate {
             true => &name[..name.len().min(len.try_into().unwrap_or(usize::MAX).saturating_sub(1))],
             false => &name,
         };

@@ -79,11 +79,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "pthread_setname_np" => {
                 let [thread, name] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                let res = this.pthread_setname_np_or_erange(
-                    this.read_scalar(thread)?,
-                    this.read_scalar(name)?,
-                    TASK_COMM_LEN,
-                )?;
+                let res = this
+                    .pthread_setname_np(
+                        this.read_scalar(thread)?,
+                        this.read_scalar(name)?,
+                        TASK_COMM_LEN,
+                    )
+                    .map(|r| if r { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })?;
                 this.write_scalar(res, dest)?;
             }
             "pthread_getname_np" => {
@@ -93,14 +95,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // In case of glibc, the length of the output buffer must
                 // be not shorter than TASK_COMM_LEN.
                 let len = this.read_scalar(len)?;
-                let res = if len.to_target_usize(this)? < TASK_COMM_LEN as u64 {
-                    this.eval_libc("ERANGE")
-                } else {
-                    this.pthread_getname_np_or_erange(
+                let res = if len.to_target_usize(this)? >= TASK_COMM_LEN as u64
+                    && this.pthread_getname_np(
                         this.read_scalar(thread)?,
                         this.read_scalar(name)?,
                         len,
-                    )?
+                        /* truncate*/ false,
+                    )? {
+                    Scalar::from_u32(0)
+                } else {
+                    this.eval_libc("ERRANGE")
                 };
                 this.write_scalar(res, dest)?;
             }
