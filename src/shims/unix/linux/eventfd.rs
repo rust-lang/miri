@@ -26,10 +26,10 @@ struct Event {
     counter: Cell<u64>,
     is_nonblock: bool,
     clock: RefCell<VClock>,
-    /// A thread blocked on read.
-    blocked_read_tid: RefCell<Option<ThreadId>>,
-    /// A thread blocked on write.
-    blocked_write_tid: RefCell<Option<ThreadId>>,
+    /// A list of thread ids blocked on eventfd::read.
+    blocked_read_tid: RefCell<Vec<ThreadId>>,
+    /// A list of thread ids blocked on eventfd::write.
+    blocked_write_tid: RefCell<Vec<ThreadId>>,
 }
 
 impl FileDescription for Event {
@@ -181,8 +181,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             counter: Cell::new(val.into()),
             is_nonblock,
             clock: RefCell::new(VClock::default()),
-            blocked_read_tid: RefCell::new(None),
-            blocked_write_tid: RefCell::new(None),
+            blocked_read_tid: RefCell::new(Vec::new()),
+            blocked_write_tid: RefCell::new(Vec::new()),
         });
 
         interp_ok(Scalar::from_i32(fd_value))
@@ -216,8 +216,9 @@ fn blocking_eventfd_read_callback<'tcx>(
     // types for current file description.
     ecx.check_and_update_readiness(&eventfd_ref)?;
 
-    // Unblock thread previously blocked on `write`.
-    if let Some(tid) = *eventfd.blocked_write_tid.borrow_mut() {
+    // Unblock *all* threads previously blocked on `write`.
+    let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
+    while let Some(tid) = blocked_write_tid.pop() {
         ecx.unblock_thread(tid, BlockReason::Eventfd)?;
     }
 
@@ -256,8 +257,9 @@ fn blocking_eventfd_write_callback<'tcx>(
     // types for current file description.
     ecx.check_and_update_readiness(&eventfd_ref)?;
 
-    // Unblock thread previously blocked on `read`.
-    if let Some(tid) = *eventfd.blocked_read_tid.borrow_mut() {
+    // Unblock *all* threads previously blocked on `read`.
+    let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
+    while let Some(tid) = blocked_read_tid.pop() {
         ecx.unblock_thread(tid, BlockReason::Eventfd)?;
     }
 
@@ -292,7 +294,7 @@ fn check_write_value_and_block_thread<'tcx>(
 
             let dest = dest.clone();
             let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
-            *blocked_write_tid = Some(ecx.active_thread());
+            blocked_write_tid.push(ecx.active_thread());
 
             ecx.block_thread(
                 BlockReason::Eventfd,
@@ -337,7 +339,7 @@ fn check_read_value_and_block_thread<'tcx>(
         }
         let dest = dest.clone();
         let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
-        *blocked_read_tid = Some(ecx.active_thread());
+        blocked_read_tid.push(ecx.active_thread());
 
         ecx.block_thread(
             BlockReason::Eventfd,

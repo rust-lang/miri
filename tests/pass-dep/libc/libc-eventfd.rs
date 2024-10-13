@@ -223,4 +223,5 @@ fn test_two_threads_blocked_on_eventfd() {
     let counter = u64::from_ne_bytes(buf);
     assert_eq!(counter, (u64::MAX - 1));
     thread1.join().unwrap();
+    thread2.join().unwrap();
 }
