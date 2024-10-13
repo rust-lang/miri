@@ -79,33 +79,7 @@ impl FileDescription for Event {
         // Block when counter == 0.
         let counter = self.counter.get();
         let weak_eventfd = self_ref.downgrade();
-        if counter == 0 {
-            if self.is_nonblock {
-                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
-            }
-            let dest = dest.clone();
-            let mut blocked_read_tid = self.blocked_read_tid.borrow_mut();
-            *blocked_read_tid = Some(ecx.active_thread());
-
-            ecx.block_thread(
-                BlockReason::Eventfd,
-                None,
-                callback!(
-                    @capture<'tcx> {
-                        buf_place: MPlaceTy<'tcx>,
-                        dest: MPlaceTy<'tcx>,
-                        weak_eventfd: WeakFileDescriptionRef,
-                    }
-                    @unblock = |this| {
-                        blocking_eventfd_read_callback(&buf_place, &dest, weak_eventfd, this)?;
-                        interp_ok(())
-                    }
-                ),
-            );
-        } else {
-            blocking_eventfd_read_callback(&buf_place, dest, weak_eventfd, ecx)?;
-        }
-        interp_ok(())
+        check_read_value_and_block_thread(counter, buf_place, dest, weak_eventfd, ecx)
     }
 
     /// A write call adds the 8-byte integer value supplied in
@@ -338,5 +312,50 @@ fn check_write_value_and_block_thread<'tcx>(
             );
         }
     };
+    interp_ok(())
+}
+
+/// Check the value in read then block thread if necessary.
+fn check_read_value_and_block_thread<'tcx>(
+    counter: u64,
+    buf_place: MPlaceTy<'tcx>,
+    dest: &MPlaceTy<'tcx>,
+    weak_eventfd: WeakFileDescriptionRef,
+    ecx: &mut MiriInterpCx<'tcx>,
+) -> InterpResult<'tcx> {
+    let Some(eventfd_ref) = weak_eventfd.upgrade() else {
+        throw_unsup_format!("eventfd FD got closed while blocking.")
+    };
+
+    // Since we pass the weak file description ref to the callback function, it is guaranteed to be
+    // an eventfd file description.
+    let eventfd = eventfd_ref.downcast::<Event>().unwrap();
+
+    if counter == 0 {
+        if eventfd.is_nonblock {
+            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+        }
+        let dest = dest.clone();
+        let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
+        *blocked_read_tid = Some(ecx.active_thread());
+
+        ecx.block_thread(
+            BlockReason::Eventfd,
+            None,
+            callback!(
+                @capture<'tcx> {
+                    buf_place: MPlaceTy<'tcx>,
+                    dest: MPlaceTy<'tcx>,
+                    weak_eventfd: WeakFileDescriptionRef,
+                }
+                @unblock = |this| {
+                    blocking_eventfd_read_callback(&buf_place, &dest, weak_eventfd, this)?;
+                    interp_ok(())
+                }
+            ),
+        );
+    } else {
+        blocking_eventfd_read_callback(&buf_place, dest, weak_eventfd, ecx)?;
+    }
     interp_ok(())
 }
