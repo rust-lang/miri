@@ -299,9 +299,9 @@ fn blocking_eventfd_write_callback<'tcx>(
     let eventfd = eventfd_ref.downcast::<Event>().unwrap();
 
     // Future `read` calls will synchronize with this write, so update the FD clock.
-    if let Some(clock) = &ecx.release_clock() {
+    ecx.release_clock(|clock| {
         eventfd.clock.borrow_mut().join(clock);
-    }
+    });
 
     // In the happy case, the new_count is checked before executing this callback.
     // In the case where the counter previously overflows or has the value u64::MAX,
