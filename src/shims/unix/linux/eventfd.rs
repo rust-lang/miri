@@ -293,8 +293,7 @@ fn check_write_value_and_block_thread<'tcx>(
             }
 
             let dest = dest.clone();
-            let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
-            blocked_write_tid.push(ecx.active_thread());
+            eventfd.blocked_write_tid.borrow_mut().push(ecx.active_thread());
 
             ecx.block_thread(
                 BlockReason::Eventfd,
@@ -338,8 +337,7 @@ fn check_read_value_and_block_thread<'tcx>(
             return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
         }
         let dest = dest.clone();
-        let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
-        blocked_read_tid.push(ecx.active_thread());
+        eventfd.blocked_read_tid.borrow_mut().push(ecx.active_thread());
 
         ecx.block_thread(
             BlockReason::Eventfd,
