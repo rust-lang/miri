@@ -147,38 +147,7 @@ impl FileDescription for Event {
         // If the addition does not let the counter to exceed the maximum value, update the counter.
         // Else, block.
         let weak_eventfd = self_ref.downgrade();
-        match self.counter.get().checked_add(num) {
-            Some(_new_count @ 0..=MAX_COUNTER) => {
-                return blocking_eventfd_write_callback(num, &buf_place, dest, weak_eventfd, ecx);
-            }
-            None | Some(u64::MAX) => {
-                if self.is_nonblock {
-                    return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
-                }
-
-                let dest = dest.clone();
-                let mut blocked_write_tid = self.blocked_write_tid.borrow_mut();
-                *blocked_write_tid = Some(ecx.active_thread());
-
-                ecx.block_thread(
-                    BlockReason::Eventfd,
-                    None,
-                    callback!(
-                        @capture<'tcx> {
-                            num: u64,
-                            buf_place: MPlaceTy<'tcx>,
-                            dest: MPlaceTy<'tcx>,
-                            weak_eventfd: WeakFileDescriptionRef,
-                        }
-                        @unblock = |this| {
-                            blocking_eventfd_write_callback(num, &buf_place, &dest, weak_eventfd, this)?;
-                            interp_ok(())
-                        }
-                    ),
-                );
-            }
-        };
-        interp_ok(())
+        check_write_value_and_block_thread(num, buf_place, dest, weak_eventfd, ecx)
     }
 }
 
@@ -320,4 +289,54 @@ fn blocking_eventfd_write_callback<'tcx>(
 
     // Return how many bytes we read.
     ecx.write_int(buf_place.layout.size.bytes(), dest)
+}
+
+/// Check the value in write then block thread if necessary.
+fn check_write_value_and_block_thread<'tcx>(
+    num: u64,
+    buf_place: MPlaceTy<'tcx>,
+    dest: &MPlaceTy<'tcx>,
+    weak_eventfd: WeakFileDescriptionRef,
+    ecx: &mut MiriInterpCx<'tcx>,
+) -> InterpResult<'tcx> {
+    let Some(eventfd_ref) = weak_eventfd.upgrade() else {
+        throw_unsup_format!("eventfd FD got closed while blocking.")
+    };
+
+    // Since we pass the weak file description ref, it is guaranteed to be
+    // an eventfd file description.
+    let eventfd = eventfd_ref.downcast::<Event>().unwrap();
+
+    match eventfd.counter.get().checked_add(num) {
+        Some(_new_count @ 0..=MAX_COUNTER) => {
+            return blocking_eventfd_write_callback(num, &buf_place, dest, weak_eventfd, ecx);
+        }
+        None | Some(u64::MAX) => {
+            if eventfd.is_nonblock {
+                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+            }
+
+            let dest = dest.clone();
+            let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
+            *blocked_write_tid = Some(ecx.active_thread());
+
+            ecx.block_thread(
+                BlockReason::Eventfd,
+                None,
+                callback!(
+                        @capture<'tcx> {
+                            num: u64,
+                            buf_place: MPlaceTy<'tcx>,
+                            dest: MPlaceTy<'tcx>,
+                            weak_eventfd: WeakFileDescriptionRef,
+                        }
+                        @unblock = |this| {
+                            blocking_eventfd_write_callback(num, &buf_place, &dest, weak_eventfd, this)?;
+                            interp_ok(())
+                        }
+                    ),
+            );
+        }
+    };
+    interp_ok(())
 }
