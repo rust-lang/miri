@@ -145,7 +145,8 @@ fn test_blocking_read() {
     thread1.join().unwrap();
 }
 
-// This test will block on eventfd `write` then get unblocked by `read`.
+/// This test will block on eventfd `write` then get unblocked by `read`.
+
 fn test_blocking_write() {
     // eventfd write will block when EFD_NONBLOCK flag is clear
     // and the addition caused counter to exceed u64::MAX - 1.
@@ -180,6 +181,10 @@ fn test_blocking_write() {
 }
 
 // Test two threads blocked on eventfd.
+// Expected behaviour:
+// 1. thread1 and thread2 both blocked on `write`.
+// 2. thread3 unblocks both thread1 and thread2
+// 3. The write in thread1 and thread2 return successfully.
 fn test_two_threads_blocked_on_eventfd() {
     // eventfd write will block when EFD_NONBLOCK flag is clear
     // and the addition caused counter to exceed u64::MAX - 1.
@@ -193,8 +198,8 @@ fn test_two_threads_blocked_on_eventfd() {
     assert_eq!(res, 8);
 
     let thread1 = thread::spawn(move || {
+        thread::park();
         let sized_8_data = 1_u64.to_ne_bytes();
-        // Write 1 to the counter, this will block.
         let res: i64 = unsafe {
             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
         };
@@ -203,25 +208,31 @@ fn test_two_threads_blocked_on_eventfd() {
     });
 
     let thread2 = thread::spawn(move || {
+        thread::park();
         let sized_8_data = 1_u64.to_ne_bytes();
-        // Write 1 to the counter, this will block.
         let res: i64 = unsafe {
             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
         };
         // Make sure that write is successful.
         assert_eq!(res, 8);
     });
-    let mut buf: [u8; 8] = [0; 8];
-    thread::yield_now();
-    // TODO: will this always work? I am trying to ensure the two write above is execute before the
-    // read_bytes below.
-    thread::yield_now();
-    // This will unblock previously blocked eventfd read.
-    let res = read_bytes(fd, &mut buf);
-    // read returns number of bytes has been read, which is always 8.
-    assert_eq!(res, 8);
-    let counter = u64::from_ne_bytes(buf);
-    assert_eq!(counter, (u64::MAX - 1));
+
+    let thread3 = thread::spawn(move || {
+        thread::park();
+        let mut buf: [u8; 8] = [0; 8];
+        // This will unblock previously blocked eventfd read.
+        let res = read_bytes(fd, &mut buf);
+        // read returns number of bytes has been read, which is always 8.
+        assert_eq!(res, 8);
+        let counter = u64::from_ne_bytes(buf);
+        assert_eq!(counter, (u64::MAX - 1));
+    });
+
+    thread1.thread().unpark();
+    thread2.thread().unpark();
+    thread3.thread().unpark();
+
     thread1.join().unwrap();
     thread2.join().unwrap();
+    thread3.join().unwrap();
 }

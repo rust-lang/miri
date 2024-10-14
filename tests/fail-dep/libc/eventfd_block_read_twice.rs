@@ -6,8 +6,8 @@
 
 use std::thread;
 
-/// Test the behaviour of a thread being blocked on an eventfd, unblocked, and then
-/// get blocked again.
+// Test the behaviour of a thread being blocked on an eventfd read, get unblocked, and then
+// get blocked again.
 
 // The expected execution is
 // 1. Thread 1 blocks.
