@@ -146,7 +146,6 @@ fn test_blocking_read() {
 }
 
 /// This test will block on eventfd `write` then get unblocked by `read`.
-
 fn test_blocking_write() {
     // eventfd write will block when EFD_NONBLOCK flag is clear
     // and the addition caused counter to exceed u64::MAX - 1.
