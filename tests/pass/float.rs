@@ -12,10 +12,23 @@ use std::fmt::{Debug, Display, LowerHex};
 use std::hint::black_box;
 use std::{f32, f64};
 
+trait MathPrec {
+    const MAX_ERR: Self;
+}
+
+impl MathPrec for f32 {
+    const MAX_ERR: Self = 1.0e-5;
+}
+
+impl MathPrec for f64 {
+    const MAX_ERR: Self = 1.0e-14;
+}
+
 macro_rules! assert_approx_eq {
     ($a:expr, $b:expr) => {{
         let (a, b) = (&$a, &$b);
-        assert!((*a - *b).abs() < 1.0e-6, "{} is not approximately equal to {}", *a, *b);
+        let err = if *b == 0.0 { (*a - *b).abs() } else { ((*a - *b) / *b).abs() };
+        assert!(err < MathPrec::MAX_ERR, "{a} is not approximately equal to {b}");
     }};
 }
 
@@ -870,8 +883,8 @@ pub fn libm() {
         unsafe { ldexp(a, b) }
     }
 
-    assert_approx_eq!(64f32.sqrt(), 8f32);
-    assert_approx_eq!(64f64.sqrt(), 8f64);
+    assert_eq!(64f32.sqrt(), 8f32);
+    assert_eq!(64f64.sqrt(), 8f64);
     assert!((-5.0_f32).sqrt().is_nan());
     assert!((-5.0_f64).sqrt().is_nan());
 
@@ -928,7 +941,7 @@ pub fn libm() {
     assert_approx_eq!(f64::consts::FRAC_PI_4.sin().asin(), f64::consts::FRAC_PI_4);
 
     assert_approx_eq!(1.0f32.sinh(), 1.1752012f32);
-    assert_approx_eq!(1.0f64.sinh(), 1.1752012f64);
+    assert_approx_eq!(1.0f64.sinh(), 1.1752011936438014f64);
     assert_approx_eq!(2.0f32.asinh(), 1.443635475178810342493276740273105f32);
     assert_approx_eq!((-2.0f64).asinh(), -1.443635475178810342493276740273105f64);
 
@@ -940,12 +953,12 @@ pub fn libm() {
     assert_approx_eq!(f64::consts::FRAC_PI_4.cos().acos(), f64::consts::FRAC_PI_4);
 
     assert_approx_eq!(1.0f32.cosh(), 1.54308f32);
-    assert_approx_eq!(1.0f64.cosh(), 1.54308f64);
+    assert_approx_eq!(1.0f64.cosh(), 1.5430806348152437f64);
     assert_approx_eq!(2.0f32.acosh(), 1.31695789692481670862504634730796844f32);
     assert_approx_eq!(3.0f64.acosh(), 1.76274717403908605046521864995958461f64);
 
     assert_approx_eq!(1.0f32.tan(), 1.557408f32);
-    assert_approx_eq!(1.0f64.tan(), 1.557408f64);
+    assert_approx_eq!(1.0f64.tan(), 1.5574077246549023f64);
     assert_approx_eq!(1.0_f32, 1.0_f32.tan().atan());
     assert_approx_eq!(1.0_f64, 1.0_f64.tan().atan());
     assert_approx_eq!(1.0f32.atan2(2.0f32), 0.46364761f32);

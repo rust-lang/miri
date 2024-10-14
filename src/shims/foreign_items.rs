@@ -13,7 +13,6 @@ use rustc_span::Symbol;
 use rustc_target::abi::{Align, AlignFromBytesError, Size};
 use rustc_target::spec::abi::Abi;
 
-use self::helpers::{ToHost, ToSoft};
 use super::alloc::EvalContextExt as _;
 use super::backtrace::EvalContextExt as _;
 use crate::*;
@@ -760,24 +759,21 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             => {
                 let [f] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let f = this.read_scalar(f)?.to_f32()?;
-                // Using host floats (but it's fine, these operations do not have guaranteed precision).
-                let f_host = f.to_host();
-                let res = match link_name.as_str() {
-                    "cbrtf" => f_host.cbrt(),
-                    "coshf" => f_host.cosh(),
-                    "sinhf" => f_host.sinh(),
-                    "tanf" => f_host.tan(),
-                    "tanhf" => f_host.tanh(),
-                    "acosf" => f_host.acos(),
-                    "asinf" => f_host.asin(),
-                    "atanf" => f_host.atan(),
-                    "log1pf" => f_host.ln_1p(),
-                    "expm1f" => f_host.exp_m1(),
-                    "tgammaf" => f_host.gamma(),
+                let op = match link_name.as_str() {
+                    "cbrtf" => math::UnaryOp::Cbrt,
+                    "coshf" => math::UnaryOp::Cosh,
+                    "sinhf" => math::UnaryOp::Sinh,
+                    "tanf" => math::UnaryOp::Tan,
+                    "tanhf" => math::UnaryOp::Tanh,
+                    "acosf" => math::UnaryOp::Acos,
+                    "asinf" => math::UnaryOp::Asin,
+                    "atanf" => math::UnaryOp::Atan,
+                    "log1pf" => math::UnaryOp::Ln1p,
+                    "expm1f" => math::UnaryOp::Expm1,
+                    "tgammaf" => math::UnaryOp::Gamma,
                     _ => bug!(),
                 };
-                let res = res.to_soft();
-                let res = this.adjust_nan(res, &[f]);
+                let res = math::unary_op(this, op, f);
                 this.write_scalar(res, dest)?;
             }
             #[rustfmt::skip]
@@ -791,15 +787,13 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let f2 = this.read_scalar(f2)?.to_f32()?;
                 // underscore case for windows, here and below
                 // (see https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/floating-point-primitives?view=vs-2019)
-                // Using host floats (but it's fine, these operations do not have guaranteed precision).
-                let res = match link_name.as_str() {
-                    "_hypotf" | "hypotf" => f1.to_host().hypot(f2.to_host()).to_soft(),
-                    "atan2f" => f1.to_host().atan2(f2.to_host()).to_soft(),
-                    #[allow(deprecated)]
-                    "fdimf" => f1.to_host().abs_sub(f2.to_host()).to_soft(),
+                let op = match link_name.as_str() {
+                    "_hypotf" | "hypotf" => math::BinaryOp::Hypot,
+                    "atan2f" => math::BinaryOp::Atan2,
+                    "fdimf" => math::BinaryOp::Fdim,
                     _ => bug!(),
                 };
-                let res = this.adjust_nan(res, &[f1, f2]);
+                let res = math::binary_op(this, op, f1, f2);
                 this.write_scalar(res, dest)?;
             }
             #[rustfmt::skip]
@@ -817,24 +811,21 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             => {
                 let [f] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let f = this.read_scalar(f)?.to_f64()?;
-                // Using host floats (but it's fine, these operations do not have guaranteed precision).
-                let f_host = f.to_host();
-                let res = match link_name.as_str() {
-                    "cbrt" => f_host.cbrt(),
-                    "cosh" => f_host.cosh(),
-                    "sinh" => f_host.sinh(),
-                    "tan" => f_host.tan(),
-                    "tanh" => f_host.tanh(),
-                    "acos" => f_host.acos(),
-                    "asin" => f_host.asin(),
-                    "atan" => f_host.atan(),
-                    "log1p" => f_host.ln_1p(),
-                    "expm1" => f_host.exp_m1(),
-                    "tgamma" => f_host.gamma(),
+                let op = match link_name.as_str() {
+                    "cbrt" => math::UnaryOp::Cbrt,
+                    "cosh" => math::UnaryOp::Cosh,
+                    "sinh" => math::UnaryOp::Sinh,
+                    "tan" => math::UnaryOp::Tan,
+                    "tanh" => math::UnaryOp::Tanh,
+                    "acos" => math::UnaryOp::Acos,
+                    "asin" => math::UnaryOp::Asin,
+                    "atan" => math::UnaryOp::Atan,
+                    "log1p" => math::UnaryOp::Ln1p,
+                    "expm1" => math::UnaryOp::Expm1,
+                    "tgamma" => math::UnaryOp::Gamma,
                     _ => bug!(),
                 };
-                let res = res.to_soft();
-                let res = this.adjust_nan(res, &[f]);
+                let res = math::unary_op(this, op, f);
                 this.write_scalar(res, dest)?;
             }
             #[rustfmt::skip]
@@ -848,15 +839,13 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let f2 = this.read_scalar(f2)?.to_f64()?;
                 // underscore case for windows, here and below
                 // (see https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/floating-point-primitives?view=vs-2019)
-                // Using host floats (but it's fine, these operations do not have guaranteed precision).
-                let res = match link_name.as_str() {
-                    "_hypot" | "hypot" => f1.to_host().hypot(f2.to_host()).to_soft(),
-                    "atan2" => f1.to_host().atan2(f2.to_host()).to_soft(),
-                    #[allow(deprecated)]
-                    "fdim" => f1.to_host().abs_sub(f2.to_host()).to_soft(),
+                let op = match link_name.as_str() {
+                    "_hypot" | "hypot" => math::BinaryOp::Hypot,
+                    "atan2" => math::BinaryOp::Atan2,
+                    "fdim" => math::BinaryOp::Fdim,
                     _ => bug!(),
                 };
-                let res = this.adjust_nan(res, &[f1, f2]);
+                let res = math::binary_op(this, op, f1, f2);
                 this.write_scalar(res, dest)?;
             }
             #[rustfmt::skip]
@@ -878,10 +867,8 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let x = this.read_scalar(x)?.to_f32()?;
                 let signp = this.deref_pointer(signp)?;
 
-                // Using host floats (but it's fine, these operations do not have guaranteed precision).
-                let (res, sign) = x.to_host().ln_gamma();
+                let (res, sign) = math::ln_gamma(this, x);
                 this.write_int(sign, &signp)?;
-                let res = this.adjust_nan(res.to_soft(), &[x]);
                 this.write_scalar(res, dest)?;
             }
             "lgamma_r" => {
@@ -889,10 +876,8 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let x = this.read_scalar(x)?.to_f64()?;
                 let signp = this.deref_pointer(signp)?;
 
-                // Using host floats (but it's fine, these operations do not have guaranteed precision).
-                let (res, sign) = x.to_host().ln_gamma();
+                let (res, sign) = math::ln_gamma(this, x);
                 this.write_int(sign, &signp)?;
-                let res = this.adjust_nan(res.to_soft(), &[x]);
                 this.write_scalar(res, dest)?;
             }
 
