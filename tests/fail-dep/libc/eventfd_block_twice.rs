@@ -32,6 +32,7 @@ fn main() {
         // Write u64::MAX - 1, so the all subsequent write will block.
         let res: i64 = unsafe {
             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+            //~^ERROR: deadlocked
         };
         // Make sure that write is successful.
         assert_eq!(res, 8);

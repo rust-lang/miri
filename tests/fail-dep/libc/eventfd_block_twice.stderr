@@ -1,104 +1,35 @@
-thread 'rustc' panicked at src/shims/unix/linux/eventfd.rs:LL:CC:
-called `Option::unwrap()` on a `None` value
-stack backtrace:
-   0: rust_begin_unwind
-   1: core::panicking::panic_fmt
-   2: core::panicking::panic
-   3: core::option::unwrap_failed
-   4: miri::shims::unix::linux::eventfd::blocking_eventfd_write_callback
-   5: <miri::shims::unix::linux::eventfd::check_write_value_and_block_thread::Callback as miri::concurrency::thread::UnblockCallback>::unblock
- at ./src/shims/unix/linux/eventfd.rs:LL:CC
-   6: miri::concurrency::thread::EvalContextExt::unblock_thread
- at ./src/concurrency/thread.rs:LL:CC
-   7: miri::shims::unix::linux::eventfd::blocking_eventfd_read_callback
- at ./src/shims/unix/linux/eventfd.rs:LL:CC
-   8: miri::shims::unix::linux::eventfd::check_read_value_and_block_thread
- at ./src/shims/unix/linux/eventfd.rs:LL:CC
-   9: <miri::shims::unix::linux::eventfd::Event as miri::shims::unix::fd::FileDescription>::read
- at ./src/shims/unix/linux/eventfd.rs:LL:CC
-  10: miri::shims::unix::fd::EvalContextExt::read
- at ./src/shims/unix/fd.rs:LL:CC
-  11: miri::shims::unix::foreign_items::EvalContextExt::emulate_foreign_item_inner
-  12: miri::shims::foreign_items::EvalContextExtPriv::emulate_foreign_item_inner
- at ./src/shims/foreign_items.rs:LL:CC
-  13: miri::shims::foreign_items::EvalContextExt::emulate_foreign_item
- at ./src/shims/foreign_items.rs:LL:CC
-  14: <miri::machine::MiriMachine as rustc_const_eval::interpret::machine::Machine>::find_mir_or_eval_fn
- at ./src/machine.rs:LL:CC
-  15: rustc_const_eval::interpret::call::init_fn_call
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_const_eval/src/interpret/call.rs:LL:CC
-  16: rustc_const_eval::interpret::step::eval_terminator
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_const_eval/src/interpret/step.rs:LL:CC
-  17: rustc_const_eval::interpret::step::step
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_const_eval/src/interpret/step.rs:LL:CC
-  18: miri::concurrency::thread::EvalContextExt::run_threads
- at ./src/concurrency/thread.rs:LL:CC
-  19: miri::eval::eval_entry::{{closure}}
- at ./src/eval.rs:LL:CC
-  20: core::ops::function::FnOnce::call_once
- at RUSTLIB/core/src/ops/function.rs:LL:CC
-  21: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
- at RUSTLIB/core/src/panic/unwind_safe.rs:LL:CC
-  22: std::panicking::try::do_call
- at RUSTLIB/std/src/panicking.rs:LL:CC
-  23: std::panicking::try
- at RUSTLIB/std/src/panicking.rs:LL:CC
-  24: std::panic::catch_unwind
- at RUSTLIB/std/src/panic.rs:LL:CC
-  25: miri::eval::eval_entry
- at ./src/eval.rs:LL:CC
-  26: <miri::MiriCompilerCalls as rustc_driver_impl::Callbacks>::after_analysis::{{closure}}
- at ./src/bin/miri.rs:LL:CC
-  27: rustc_middle::ty::context::GlobalCtxt::enter::{{closure}}
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_middle/src/ty/context.rs:LL:CC
-  28: rustc_middle::ty::context::tls::enter_context::{{closure}}
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_middle/src/ty/context/tls.rs:LL:CC
-  29: std::thread::local::LocalKey<T>::try_with
- at RUSTLIB/std/src/thread/local.rs:LL:CC
-  30: std::thread::local::LocalKey<T>::with
- at RUSTLIB/std/src/thread/local.rs:LL:CC
-  31: rustc_middle::ty::context::tls::enter_context
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_middle/src/ty/context/tls.rs:LL:CC
-  32: rustc_middle::ty::context::GlobalCtxt::enter
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_middle/src/ty/context.rs:LL:CC
-  33: rustc_interface::queries::QueryResult<&rustc_middle::ty::context::GlobalCtxt>::enter
- at /home/byt/.rustup/toolchains/miri/lib/rustlib/src/rust/compiler/rustc_interface/src/queries.rs:LL:CC
-  34: <miri::MiriCompilerCalls as rustc_driver_impl::Callbacks>::after_analysis
- at ./src/bin/miri.rs:LL:CC
-  35: rustc_interface::interface::run_compiler::{closure#1}
-note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+error: deadlock: the evaluated program deadlocked
+   |
+   = note: the evaluated program deadlocked
+   = note: (no span available)
+   = note: BACKTRACE on thread `unnamed-ID`:
 
-error: the compiler unexpectedly panicked. this is a bug.
+error: deadlock: the evaluated program deadlocked
+  --> RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   |
+LL |         let ret = unsafe { libc::pthread_join(id, ptr::null_mut()) };
+   |                                                                  ^ the evaluated program deadlocked
+   |
+   = note: BACKTRACE:
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::join` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::JoinInner::<'_, ()>::join` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::JoinHandle::<()>::join` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC
+   |
+LL |     thread1.join().unwrap();
+   |     ^^^^^^^^^^^^^^
 
-note: we would appreciate a bug report: https://github.com/rust-lang/miri/issues/new
-
-note: please make sure that you have updated to the latest nightly
-
-note: please attach the file at `/home/byt/Documents/miri/rustc-ice-2024-10-13T17_30_56-361354.txt` to your bug report
-
-note: compiler flags: -Z ui-testing -Z miri-preemption-rate=0
-
-query stack during panic:
-end of query stack
-
-Miri caused an ICE during evaluation. Here's the interpreter backtrace at the time of the panic:
-note: the place in the program where the ICE was triggered
+error: deadlock: the evaluated program deadlocked
   --> tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC
    |
 LL |             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
-   |                                                                            ^
+   |                                                                            ^ the evaluated program deadlocked
    |
    = note: BACKTRACE on thread `unnamed-ID`:
    = note: inside closure at tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC
-   = note: inside `std::sys::backtrace::__rust_begin_short_backtrace::<{closure@tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/sys/backtrace.rs:LL:CC
-   = note: inside closure at RUSTLIB/std/src/thread/mod.rs:LL:CC
-   = note: inside `<std::panic::AssertUnwindSafe<{closure@std::thread::Builder::spawn_unchecked_<'_, {closure@tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC}, ()>::{closure#1}::{closure#0}}> as std::ops::FnOnce<()>>::call_once` at RUSTLIB/core/src/panic/unwind_safe.rs:LL:CC
-   = note: inside `std::panicking::r#try::do_call::<std::panic::AssertUnwindSafe<{closure@std::thread::Builder::spawn_unchecked_<'_, {closure@tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC}, ()>::{closure#1}::{closure#0}}>, ()>` at RUSTLIB/std/src/panicking.rs:LL:CC
-   = note: inside `std::panicking::r#try::<(), std::panic::AssertUnwindSafe<{closure@std::thread::Builder::spawn_unchecked_<'_, {closure@tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC}, ()>::{closure#1}::{closure#0}}>>` at RUSTLIB/std/src/panicking.rs:LL:CC
-   = note: inside `std::panic::catch_unwind::<std::panic::AssertUnwindSafe<{closure@std::thread::Builder::spawn_unchecked_<'_, {closure@tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC}, ()>::{closure#1}::{closure#0}}>, ()>` at RUSTLIB/std/src/panic.rs:LL:CC
-   = note: inside closure at RUSTLIB/std/src/thread/mod.rs:LL:CC
-   = note: inside `<{closure@std::thread::Builder::spawn_unchecked_<'_, {closure@tests/fail-dep/libc/eventfd_block_twice.rs:LL:CC}, ()>::{closure#1}} as std::ops::FnOnce<()>>::call_once - shim(vtable)` at RUSTLIB/core/src/ops/function.rs:LL:CC
-   = note: inside `<std::boxed::Box<dyn std::ops::FnOnce()> as std::ops::FnOnce<()>>::call_once` at RUSTLIB/alloc/src/boxed.rs:LL:CC
-   = note: inside `<std::boxed::Box<std::boxed::Box<dyn std::ops::FnOnce()>> as std::ops::FnOnce<()>>::call_once` at RUSTLIB/alloc/src/boxed.rs:LL:CC
-   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new::thread_start` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 3 previous errors
 
