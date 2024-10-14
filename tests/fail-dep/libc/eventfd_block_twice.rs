@@ -1,5 +1,7 @@
 //@only-target: linux
+//~^ERROR: deadlocked
 //@compile-flags: -Zmiri-preemption-rate=0
+//@error-in-other-file: deadlock
 
 use std::thread;
 
