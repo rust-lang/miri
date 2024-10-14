@@ -187,8 +187,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 }
 
-/// Callback function after eventfd read unblocks.
-fn blocking_eventfd_read_callback<'tcx>(
+/// The function that does the actual read operation for eventfd.
+fn eventfd_read<'tcx>(
     buf_place: &MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
     weak_eventfd: WeakFileDescriptionRef,
@@ -224,8 +224,8 @@ fn blocking_eventfd_read_callback<'tcx>(
     ecx.write_int(buf_place.layout.size.bytes(), dest)
 }
 
-/// Callback function after eventfd write unblocks.
-fn blocking_eventfd_write_callback<'tcx>(
+/// The function that does the actual write operation for eventfd.
+fn eventfd_write<'tcx>(
     num: u64,
     buf_place: &MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
@@ -285,7 +285,7 @@ fn check_write_value_and_block_thread<'tcx>(
 
     match eventfd.counter.get().checked_add(num) {
         Some(_new_count @ 0..=MAX_COUNTER) => {
-            return blocking_eventfd_write_callback(num, &buf_place, dest, weak_eventfd, ecx);
+            return eventfd_write(num, &buf_place, dest, weak_eventfd, ecx);
         }
         None | Some(u64::MAX) => {
             if eventfd.is_nonblock {
@@ -367,7 +367,7 @@ fn check_read_value_and_block_thread<'tcx>(
             ),
         );
     } else {
-        blocking_eventfd_read_callback(&buf_place, dest, weak_eventfd, ecx)?;
+        eventfd_read(&buf_place, dest, weak_eventfd, ecx)?;
     }
     interp_ok(())
 }
