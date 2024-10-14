@@ -295,14 +295,9 @@ fn check_write_value_and_block_thread<'tcx>(
             let dest = dest.clone();
 
             // We don't want to record the same thread if the current thread is still blocked.
-            //if !reblock {
-            //    eventfd.blocked_write_tid.borrow_mut().push(ecx.active_thread());
-            //}
-
-            let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
-            blocked_write_tid.push(ecx.active_thread());
-            drop(blocked_write_tid);
-            drop(eventfd_ref);
+            if !reblock {
+                eventfd.blocked_write_tid.borrow_mut().push(ecx.active_thread());
+            }
 
             ecx.block_thread(
                 BlockReason::Eventfd,
