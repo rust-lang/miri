@@ -371,11 +371,3 @@ fn check_read_value_and_block_thread<'tcx>(
     }
     interp_ok(())
 }
-
-// TODO: If the value is something, block thread, then during unblock thread, check the value again, either
-// block thread or actually write
-
-// In callback, check the value again, if cannot, just block thread again
-// 1. the value doesn't match
-// 2. block_thread
-// 3. when callback, check the value again

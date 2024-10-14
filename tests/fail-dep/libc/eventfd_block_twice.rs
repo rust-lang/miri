@@ -14,6 +14,7 @@ use std::thread;
 // 5. The next `write` deadlock.
 
 // TODO: better synchronisation instead of depending on thread::yield now.
+// TODO: write similar test for eventfd read block.
 fn main() {
     // eventfd write will block when EFD_NONBLOCK flag is clear
     // and the addition caused counter to exceed u64::MAX - 1.
