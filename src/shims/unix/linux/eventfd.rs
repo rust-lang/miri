@@ -76,10 +76,8 @@ impl FileDescription for Event {
         // eventfd read at the size of u64.
         let buf_place = ecx.ptr_to_mplace_unaligned(ptr, ty);
 
-        // Block when counter == 0.
-        let counter = self.counter.get();
         let weak_eventfd = self_ref.downgrade();
-        check_read_value_and_block_thread(counter, buf_place, dest, weak_eventfd, ecx)
+        check_read_value_and_block_thread(buf_place, dest, weak_eventfd, false, ecx)
     }
 
     /// A write call adds the 8-byte integer value supplied in
@@ -121,7 +119,7 @@ impl FileDescription for Event {
         // If the addition does not let the counter to exceed the maximum value, update the counter.
         // Else, block.
         let weak_eventfd = self_ref.downgrade();
-        check_write_value_and_block_thread(num, buf_place, dest, weak_eventfd, ecx)
+        check_write_value_and_block_thread(num, buf_place, dest, weak_eventfd, false, ecx)
     }
 }
 
@@ -268,11 +266,13 @@ fn blocking_eventfd_write_callback<'tcx>(
 }
 
 /// Check the value in write then block thread if necessary.
+/// `reblock` records if this thread is blocked for the first time.
 fn check_write_value_and_block_thread<'tcx>(
     num: u64,
     buf_place: MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
     weak_eventfd: WeakFileDescriptionRef,
+    reblock: bool,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
     let Some(eventfd_ref) = weak_eventfd.upgrade() else {
@@ -293,23 +293,26 @@ fn check_write_value_and_block_thread<'tcx>(
             }
 
             let dest = dest.clone();
-            eventfd.blocked_write_tid.borrow_mut().push(ecx.active_thread());
+
+            // We don't want to record the same thread if the current thread is still blocked.
+            if !reblock {
+                eventfd.blocked_write_tid.borrow_mut().push(ecx.active_thread());
+            }
 
             ecx.block_thread(
                 BlockReason::Eventfd,
                 None,
                 callback!(
-                        @capture<'tcx> {
-                            num: u64,
-                            buf_place: MPlaceTy<'tcx>,
-                            dest: MPlaceTy<'tcx>,
-                            weak_eventfd: WeakFileDescriptionRef,
-                        }
-                        @unblock = |this| {
-                            blocking_eventfd_write_callback(num, &buf_place, &dest, weak_eventfd, this)?;
-                            interp_ok(())
-                        }
-                    ),
+                    @capture<'tcx> {
+                        num: u64,
+                        buf_place: MPlaceTy<'tcx>,
+                        dest: MPlaceTy<'tcx>,
+                        weak_eventfd: WeakFileDescriptionRef,
+                    }
+                    @unblock = |this| {
+                        check_write_value_and_block_thread(num, buf_place, &dest, weak_eventfd, true, this)
+                    }
+                ),
             );
         }
     };
@@ -317,11 +320,12 @@ fn check_write_value_and_block_thread<'tcx>(
 }
 
 /// Check the value in read then block thread if necessary.
+/// `reblock` records if this thread is blocked for the first time.
 fn check_read_value_and_block_thread<'tcx>(
-    counter: u64,
     buf_place: MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
     weak_eventfd: WeakFileDescriptionRef,
+    reblock: bool,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
     let Some(eventfd_ref) = weak_eventfd.upgrade() else {
@@ -332,12 +336,20 @@ fn check_read_value_and_block_thread<'tcx>(
     // an eventfd file description.
     let eventfd = eventfd_ref.downcast::<Event>().unwrap();
 
+    // Block when counter == 0.
+    let counter = eventfd.counter.get();
+
     if counter == 0 {
         if eventfd.is_nonblock {
             return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
         }
         let dest = dest.clone();
-        eventfd.blocked_read_tid.borrow_mut().push(ecx.active_thread());
+
+        // We don't want to record the same thread if the current thread is still blocked.
+        if !reblock {
+            let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
+            blocked_read_tid.push(ecx.active_thread());
+        }
 
         ecx.block_thread(
             BlockReason::Eventfd,
@@ -347,10 +359,10 @@ fn check_read_value_and_block_thread<'tcx>(
                     buf_place: MPlaceTy<'tcx>,
                     dest: MPlaceTy<'tcx>,
                     weak_eventfd: WeakFileDescriptionRef,
+                    counter: u64,
                 }
                 @unblock = |this| {
-                    blocking_eventfd_read_callback(&buf_place, &dest, weak_eventfd, this)?;
-                    interp_ok(())
+                    check_read_value_and_block_thread(buf_place, &dest, weak_eventfd, true, this)
                 }
             ),
         );
@@ -359,3 +371,11 @@ fn check_read_value_and_block_thread<'tcx>(
     }
     interp_ok(())
 }
+
+// TODO: If the value is something, block thread, then during unblock thread, check the value again, either
+// block thread or actually write
+
+// In callback, check the value again, if cannot, just block thread again
+// 1. the value doesn't match
+// 2. block_thread
+// 3. when callback, check the value again
