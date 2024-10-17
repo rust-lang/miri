@@ -83,7 +83,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Comparing with `>=` to account for null terminator.
         if name.len() >= name_max_len {
             if truncate {
-                name.drain(name_max_len - 1..);
+                name.drain(name_max_len.saturating_sub(1)..);
             } else {
                 return interp_ok(false);
             }

@@ -38,14 +38,14 @@ pub fn prctl<'tcx>(
             let name = this.read_scalar(name)?;
             let thread = this.pthread_self()?;
             let len = Scalar::from_target_usize(TASK_COMM_LEN as u64, this);
-            let res = if this.pthread_getname_np(thread, name, len, /* truncate*/ false)? {
+            if this.pthread_getname_np(thread, name, len, /* truncate*/ false)? {
                 Scalar::from_u32(0)
             } else {
                 throw_ub_format!(
-                    "`prctl(PR_GET_NAME, name)` requires the `name` argument to be at least {TASK_COMM_LEN} bytes long"
+                    "`prctl(PR_GET_NAME, name)` requires the `name` argument to be at least {} bytes long",
+                    TASK_COMM_LEN
                 );
-            };
-            res
+            }
         }
         op => throw_unsup_format!("Miri does not support `prctl` syscall with op={}", op),
     };
