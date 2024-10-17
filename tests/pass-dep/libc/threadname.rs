@@ -146,6 +146,9 @@ fn main() {
                     // Names of all size are supported.
                     assert!(cstr.to_bytes_with_nul().len() <= MAX_THREAD_NAME_LEN);
                     assert_eq!(res, 0);
+                } else if #[cfg(target_os = "macos")] {
+                    // Name is too long.
+                    assert_eq!(res, libc::ENAMETOOLONG);
                 } else if #[cfg(target_os = "android")] {
                     // Names are truncated by the Linux kernel.
                     assert!(cstr.to_bytes_with_nul().len() > MAX_THREAD_NAME_LEN);
