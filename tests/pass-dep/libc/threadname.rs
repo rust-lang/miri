@@ -37,9 +37,7 @@ fn main() {
             } else if #[cfg(target_os = "macos")] {
                 unsafe { libc::pthread_setname_np(name.as_ptr().cast()) }
             } else if #[cfg(target_os = "android")] {
-                // FIXME: Use PR_SET_NAME constant when https://github.com/rust-lang/libc/pull/3941 lands.
-                const PR_SET_NAME: i32 = 15;
-                unsafe { libc::prctl(PR_SET_NAME, name.as_ptr().cast::<libc::c_char>()) }
+                unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr().cast::<libc::c_char>()) }
             } else {
                 compile_error!("set_thread_name not supported for this OS")
             }
@@ -64,9 +62,7 @@ fn main() {
                 };
                 0
             } else if #[cfg(target_os = "android")] {
-                // FIXME: Use PR_GET_NAME constant when https://github.com/rust-lang/libc/pull/3941 lands.
-                const PR_GET_NAME: i32 = 16;
-                unsafe { libc::prctl(PR_GET_NAME, name.as_mut_ptr().cast::<libc::c_char>()) }
+                unsafe { libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr().cast::<libc::c_char>()) }
             } else {
                 compile_error!("get_thread_name not supported for this OS")
             }
