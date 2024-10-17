@@ -215,9 +215,20 @@ fn eventfd_read<'tcx>(
     ecx.check_and_update_readiness(&eventfd_ref)?;
 
     // Unblock *all* threads previously blocked on `write`.
+    // We need to store the blocked thread ids and unblock them together to prevent BorrowMutError
+    // panic because blocked_write_tid will be used when unblock_thread is called.
+    let mut waiter = Vec::new();
     let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
     while let Some(tid) = blocked_write_tid.pop() {
-        ecx.unblock_thread(tid, BlockReason::Eventfd)?;
+        waiter.push(tid);
+    }
+    drop(blocked_write_tid);
+
+    // TODO: Is there any case that it can contain duplicate?
+    waiter.sort();
+    waiter.dedup();
+    for thread_id in waiter {
+        ecx.unblock_thread(thread_id, BlockReason::Eventfd)?;
     }
 
     // Tell userspace how many bytes we wrote.
@@ -256,9 +267,20 @@ fn eventfd_write<'tcx>(
     ecx.check_and_update_readiness(&eventfd_ref)?;
 
     // Unblock *all* threads previously blocked on `read`.
+    // We need to store the blocked thread ids and unblock them together to prevent BorrowMutError
+    // panic because blocked_read_tid will be used when unblock_thread is called.
+    let mut waiter = Vec::new();
     let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
     while let Some(tid) = blocked_read_tid.pop() {
-        ecx.unblock_thread(tid, BlockReason::Eventfd)?;
+        waiter.push(tid);
+    }
+    drop(blocked_read_tid);
+
+    // TODO: Is there any case that it can contain duplicate?
+    waiter.sort();
+    waiter.dedup();
+    for thread_id in waiter {
+        ecx.unblock_thread(thread_id, BlockReason::Eventfd)?;
     }
 
     // Return how many bytes we read.
@@ -340,8 +362,7 @@ fn check_read_value_and_block_thread<'tcx>(
         }
         let dest = dest.clone();
 
-        let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
-        blocked_read_tid.push(ecx.active_thread());
+        eventfd.blocked_read_tid.borrow_mut().push(ecx.active_thread());
 
         ecx.block_thread(
             BlockReason::Eventfd,
