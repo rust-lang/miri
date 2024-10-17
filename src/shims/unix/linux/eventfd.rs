@@ -224,7 +224,6 @@ fn eventfd_read<'tcx>(
     }
     drop(blocked_write_tid);
 
-    // TODO: Is there any case that it can contain duplicate?
     waiter.sort();
     waiter.dedup();
     for thread_id in waiter {
@@ -276,7 +275,6 @@ fn eventfd_write<'tcx>(
     }
     drop(blocked_read_tid);
 
-    // TODO: Is there any case that it can contain duplicate?
     waiter.sort();
     waiter.dedup();
     for thread_id in waiter {
