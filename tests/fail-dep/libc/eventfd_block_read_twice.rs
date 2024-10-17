@@ -14,7 +14,7 @@ use std::thread;
 // 2. Thread 2 blocks.
 // 3. Thread 3 unblocks both thread 1 and thread 2.
 // 4. Either thread 1 or thread 2 reads.
-// 5. The next `read` deadlock.
+// 5. The next `read` deadlocked.
 
 fn main() {
     // eventfd write will block when EFD_NONBLOCK flag is clear
@@ -25,10 +25,8 @@ fn main() {
     let thread1 = thread::spawn(move || {
         thread::park();
         let mut buf: [u8; 8] = [0; 8];
-        // This read will block initially, then get unblocked by thread3, then get blocked again
-        // because the `read` in thread2 happens first, and set the counter to 0 again.
+        // This read will block initially.
         let res: i64 = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), 8).try_into().unwrap() };
-        //~^ERROR: deadlocked
         assert_eq!(res, 8);
         let counter = u64::from_ne_bytes(buf);
         assert_eq!(counter, 1_u64);
@@ -37,8 +35,10 @@ fn main() {
     let thread2 = thread::spawn(move || {
         thread::park();
         let mut buf: [u8; 8] = [0; 8];
-        // This read will block initially.
+        // This read will block initially, then get unblocked by thread3, then get blocked again
+        // because the `read` in thread1 executes first and set the counter to 0 again.
         let res: i64 = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), 8).try_into().unwrap() };
+        //~^ERROR: deadlocked
         assert_eq!(res, 8);
         let counter = u64::from_ne_bytes(buf);
         assert_eq!(counter, 1_u64);

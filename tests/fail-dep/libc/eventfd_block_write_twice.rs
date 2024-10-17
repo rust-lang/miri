@@ -14,7 +14,7 @@ use std::thread;
 // 2. Thread 2 blocks.
 // 3. Thread 3 unblocks both thread 1 and thread 2.
 // 4. Either thread 1 or thread 2 writes u64::MAX.
-// 5. The next `write` deadlock.
+// 5. The next `write` deadlocked.
 fn main() {
     // eventfd write will block when EFD_NONBLOCK flag is clear
     // and the addition caused counter to exceed u64::MAX - 1.
@@ -30,11 +30,8 @@ fn main() {
     let thread1 = thread::spawn(move || {
         thread::park();
         let sized_8_data = (u64::MAX - 1).to_ne_bytes();
-        // This `write` will initially blocked, then get unblocked by thread3, then get blocked again
-        // because the `write` in thread2 executes first.
         let res: i64 = unsafe {
             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
-            //~^ERROR: deadlocked
         };
         // Make sure that write is successful.
         assert_eq!(res, 8);
@@ -45,7 +42,10 @@ fn main() {
         let sized_8_data = (u64::MAX - 1).to_ne_bytes();
         // Write u64::MAX - 1, so the all subsequent write will block.
         let res: i64 = unsafe {
+            // This `write` will initially blocked, then get unblocked by thread3, then get blocked again
+            // because the `write` in thread1 executes first.
             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+            //~^ERROR: deadlocked
         };
         // Make sure that write is successful.
         assert_eq!(res, 8);
