@@ -36,7 +36,7 @@ fn main() {
         .join()
         .unwrap();
 
-    // Set name via pthread and get it again (short name).
+    // Set name via prctl and get it again (short name).
     thread::Builder::new()
         .spawn(move || {
             // Set short thread name.
@@ -53,7 +53,7 @@ fn main() {
         .join()
         .unwrap();
 
-    // Set name via pthread and get it again (long name).
+    // Set name via prctl and get it again (long name).
     thread::Builder::new()
         .spawn(move || {
             // Set full thread name.
