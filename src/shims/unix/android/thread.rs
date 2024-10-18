@@ -1,4 +1,5 @@
 use rustc_span::Symbol;
+use rustc_target::abi::Size;
 use rustc_target::spec::abi::Abi;
 
 use crate::helpers::check_min_arg_count;
@@ -18,11 +19,12 @@ pub fn prctl<'tcx>(
     // count is checked bellow.
     this.check_abi_and_shim_symbol_clash(abi, Abi::C { unwind: false }, link_name)?;
 
-    let pr_set_name = this.eval_libc("PR_SET_NAME");
-    let pr_get_name = this.eval_libc("PR_GET_NAME");
+    // FIXME: Use constants once https://github.com/rust-lang/libc/pull/3941 backported to the 0.2 branch.
+    let pr_set_name = 15;
+    let pr_get_name = 16;
 
     let [op] = check_min_arg_count("prctl", args)?;
-    let res = match this.read_scalar(op)? {
+    let res = match this.read_scalar(op)?.to_i32()? {
         op if op == pr_set_name => {
             let [_, name] = check_min_arg_count("prctl(PR_SET_NAME, ...)", args)?;
             let name = this.read_scalar(name)?;
@@ -39,14 +41,23 @@ pub fn prctl<'tcx>(
             let name = this.read_scalar(name)?;
             let thread = this.pthread_self()?;
             let len = Scalar::from_target_usize(TASK_COMM_LEN as u64, this);
-            if this.pthread_getname_np(thread, name, len, /* truncate*/ false)? {
-                Scalar::from_u32(0)
-            } else {
+            if this
+                .check_ptr_access(
+                    name.to_pointer(this)?,
+                    Size::from_bytes(TASK_COMM_LEN),
+                    CheckInAllocMsg::MemoryAccessTest,
+                )
+                .report_err()
+                .is_err()
+            {
                 throw_ub_format!(
                     "`prctl(PR_GET_NAME, name)` requires the `name` argument to be at least {} bytes long",
                     TASK_COMM_LEN
                 );
-            }
+            };
+            let res = this.pthread_getname_np(thread, name, len, /* truncate*/ false)?;
+            assert!(res);
+            Scalar::from_u32(0)
         }
         op => throw_unsup_format!("Miri does not support `prctl` syscall with op={}", op),
     };
