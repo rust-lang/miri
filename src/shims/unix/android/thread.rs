@@ -41,20 +41,11 @@ pub fn prctl<'tcx>(
             let name = this.read_scalar(name)?;
             let thread = this.pthread_self()?;
             let len = Scalar::from_target_usize(TASK_COMM_LEN as u64, this);
-            if this
-                .check_ptr_access(
-                    name.to_pointer(this)?,
-                    Size::from_bytes(TASK_COMM_LEN),
-                    CheckInAllocMsg::MemoryAccessTest,
-                )
-                .report_err()
-                .is_err()
-            {
-                throw_ub_format!(
-                    "`prctl(PR_GET_NAME, name)` requires the `name` argument to be at least {} bytes long",
-                    TASK_COMM_LEN
-                );
-            };
+            this.check_ptr_access(
+                name.to_pointer(this)?,
+                Size::from_bytes(TASK_COMM_LEN),
+                CheckInAllocMsg::MemoryAccessTest,
+            )?;
             let res = this.pthread_getname_np(thread, name, len, /* truncate*/ false)?;
             assert!(res);
             Scalar::from_u32(0)

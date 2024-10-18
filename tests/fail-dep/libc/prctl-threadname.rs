@@ -3,6 +3,6 @@
 fn main() {
     let mut buf = vec![0u8; 15];
     unsafe {
-        libc::prctl(libc::PR_GET_NAME, buf.as_mut_ptr().cast::<libc::c_char>()); //~ ERROR: Undefined Behavior: `prctl(PR_GET_NAME, name)` requires the `name` argument to be at least 16 bytes long
+        libc::prctl(libc::PR_GET_NAME, buf.as_mut_ptr().cast::<libc::c_char>()); //~ ERROR: memory access failed: expected a pointer to 16 bytes of memory, but got alloc952 which is only 15 bytes from the end of the allocation
     }
 }
