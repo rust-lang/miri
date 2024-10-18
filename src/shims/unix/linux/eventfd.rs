@@ -108,7 +108,7 @@ impl FileDescription for Event {
             return ecx.set_last_error_and_return(ErrorKind::InvalidInput, dest);
         }
 
-        // Read the user supplied value from the pointer.
+        // Read the user-supplied value from the pointer.
         let buf_place = ecx.ptr_to_mplace_unaligned(ptr, ty);
         let num = ecx.read_scalar(&buf_place)?.to_u64()?;
 
@@ -187,7 +187,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 }
 
-/// The function that does the actual read operation for eventfd.
+/// The function returns the current counter value to the caller, and set the counter value to 0.
 fn eventfd_read<'tcx>(
     buf_place: &MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
@@ -198,7 +198,7 @@ fn eventfd_read<'tcx>(
         throw_unsup_format!("eventfd FD got closed while blocking.")
     };
 
-    // Since we pass the weak file description ref to the callback function, it is guaranteed to be
+    // Since we pass the weak file description ref to the function, it is guaranteed to be
     // an eventfd file description.
     let eventfd = eventfd_ref.downcast::<Event>().unwrap();
 
@@ -207,6 +207,8 @@ fn eventfd_read<'tcx>(
 
     // Give old counter value to userspace, and set counter value to 0.
     let counter = eventfd.counter.get();
+    // When the counter value is 0, the read either blocks, or fails with error.
+    assert_ne!(counter, 0);
     ecx.write_int(counter, buf_place)?;
     eventfd.counter.set(0);
 
@@ -216,7 +218,7 @@ fn eventfd_read<'tcx>(
 
     // Unblock *all* threads previously blocked on `write`.
     // We need to store the blocked thread ids and unblock them together to prevent BorrowMutError
-    // panic because blocked_write_tid will be used when unblock_thread is called.
+    // panic because when unblock_thread is called, blocked_write_tid will be mutably borrowed again.
     let mut waiter = Vec::new();
     let mut blocked_write_tid = eventfd.blocked_write_tid.borrow_mut();
     while let Some(tid) = blocked_write_tid.pop() {
@@ -230,11 +232,11 @@ fn eventfd_read<'tcx>(
         ecx.unblock_thread(thread_id, BlockReason::Eventfd)?;
     }
 
-    // Tell userspace how many bytes we wrote.
+    // Tell userspace how many bytes we read.
     ecx.write_int(buf_place.layout.size.bytes(), dest)
 }
 
-/// The function that does the actual write operation for eventfd.
+/// Add the user-supplied value to the current counter.
 fn eventfd_write<'tcx>(
     num: u64,
     buf_place: &MPlaceTy<'tcx>,
@@ -246,7 +248,7 @@ fn eventfd_write<'tcx>(
         throw_unsup_format!("eventfd FD got closed while blocking.")
     };
 
-    // Since we pass the weak file description ref to the callback function, it is guaranteed to be
+    // Since we pass the weak file description ref to the function, it is guaranteed to be
     // an eventfd file description.
     let eventfd = eventfd_ref.downcast::<Event>().unwrap();
 
@@ -255,9 +257,7 @@ fn eventfd_write<'tcx>(
         eventfd.clock.borrow_mut().join(clock);
     });
 
-    // In the happy case, the new_count is checked before executing this callback.
-    // In the case where the counter previously overflows or has the value u64::MAX,
-    // the counter will be set to 0 before the callback is executed.
+    // When this function is called, the addition is guaranteed to not exceed u64::MAX - 1.
     let new_count = eventfd.counter.get().checked_add(num).unwrap();
     eventfd.counter.set(new_count);
 
@@ -267,7 +267,7 @@ fn eventfd_write<'tcx>(
 
     // Unblock *all* threads previously blocked on `read`.
     // We need to store the blocked thread ids and unblock them together to prevent BorrowMutError
-    // panic because blocked_read_tid will be used when unblock_thread is called.
+    // panic because when unblock_thread is called, blocked_read_tid will be mutably borrowed again.
     let mut waiter = Vec::new();
     let mut blocked_read_tid = eventfd.blocked_read_tid.borrow_mut();
     while let Some(tid) = blocked_read_tid.pop() {
@@ -281,12 +281,12 @@ fn eventfd_write<'tcx>(
         ecx.unblock_thread(thread_id, BlockReason::Eventfd)?;
     }
 
-    // Return how many bytes we read.
+    // Return how many bytes we wrote.
     ecx.write_int(buf_place.layout.size.bytes(), dest)
 }
 
-/// Check the value in write then block thread if necessary.
-/// `reblock` records if this thread is blocked for the first time.
+/// Block thread if the value addition will exceed u64::MAX -1,
+/// else just add the user-supplied value to current counter.
 fn check_write_value_and_block_thread<'tcx>(
     num: u64,
     buf_place: MPlaceTy<'tcx>,
@@ -335,8 +335,8 @@ fn check_write_value_and_block_thread<'tcx>(
     interp_ok(())
 }
 
-/// Check the value in read then block thread if necessary.
-/// `reblock` records if this thread is blocked for the first time.
+/// Block thread if the current counter is 0,
+/// else just return the current counter value to the caller and set the counter to 0.
 fn check_read_value_and_block_thread<'tcx>(
     buf_place: MPlaceTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
