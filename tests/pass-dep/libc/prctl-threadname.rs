@@ -18,6 +18,7 @@ fn main() {
     }
 
     fn get_thread_name(name: &mut [u8]) -> i32 {
+        assert!(name.len() >= MAX_THREAD_NAME_LEN);
         unsafe { libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr().cast::<libc::c_char>()) }
     }
 
