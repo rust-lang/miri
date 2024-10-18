@@ -56,12 +56,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 assert_eq!(dest_len, op_len);
 
                 #[derive(Copy, Clone)]
-                enum Op<'a> {
+                enum Op {
                     MirOp(mir::UnOp),
                     Abs,
                     Round(rustc_apfloat::Round),
                     Numeric(Symbol),
-                    HostOp(&'a str),
+                    Math(math::UnaryOp),
                 }
                 let which = match intrinsic_name {
                     "neg" => Op::MirOp(mir::UnOp::Neg),
@@ -75,7 +75,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     "cttz" => Op::Numeric(sym::cttz),
                     "bswap" => Op::Numeric(sym::bswap),
                     "bitreverse" => Op::Numeric(sym::bitreverse),
-                    _ => Op::HostOp(intrinsic_name),
+                    "fsqrt" => Op::Math(math::UnaryOp::Sqrt),
+                    "fsin" => Op::Math(math::UnaryOp::Sin),
+                    "fcos" => Op::Math(math::UnaryOp::Cos),
+                    "fexp" => Op::Math(math::UnaryOp::Exp),
+                    "fexp2" => Op::Math(math::UnaryOp::Exp2),
+                    "flog" => Op::Math(math::UnaryOp::Ln),
+                    "flog2" => Op::Math(math::UnaryOp::Log2),
+                    "flog10" => Op::Math(math::UnaryOp::Log10),
+                    _ => bug!(),
                 };
 
                 for i in 0..dest_len {
@@ -100,47 +108,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 FloatTy::F128 => unimplemented!("f16_f128"),
                             }
                         }
-                        Op::HostOp(host_op) => {
+                        Op::Math(math_op) => {
                             let ty::Float(float_ty) = op.layout.ty.kind() else {
                                 span_bug!(this.cur_span(), "{} operand is not a float", intrinsic_name)
                             };
-                            // Using host floats (but it's fine, these operations do not have guaranteed precision).
                             match float_ty {
                                 FloatTy::F16 => unimplemented!("f16_f128"),
                                 FloatTy::F32 => {
                                     let f = op.to_scalar().to_f32()?;
-                                    let f_host = f.to_host();
-                                    let res = match host_op {
-                                        "fsqrt" => f_host.sqrt(), // FIXME Using host floats, this should use full-precision soft-floats
-                                        "fsin" => f_host.sin(),
-                                        "fcos" => f_host.cos(),
-                                        "fexp" => f_host.exp(),
-                                        "fexp2" => f_host.exp2(),
-                                        "flog" => f_host.ln(),
-                                        "flog2" => f_host.log2(),
-                                        "flog10" => f_host.log10(),
-                                        _ => bug!(),
-                                    };
-                                    let res = res.to_soft();
-                                    let res = this.adjust_nan(res, &[f]);
+                                    let res = math::unary_op(this, math_op, f);
                                     Scalar::from(res)
                                 }
                                 FloatTy::F64 => {
                                     let f = op.to_scalar().to_f64()?;
-                                    let f_host = f.to_host();
-                                    let res = match host_op {
-                                        "fsqrt" => f_host.sqrt(),
-                                        "fsin" => f_host.sin(),
-                                        "fcos" => f_host.cos(),
-                                        "fexp" => f_host.exp(),
-                                        "fexp2" => f_host.exp2(),
-                                        "flog" => f_host.ln(),
-                                        "flog2" => f_host.log2(),
-                                        "flog10" => f_host.log10(),
-                                        _ => bug!(),
-                                    };
-                                    let res = res.to_soft();
-                                    let res = this.adjust_nan(res, &[f]);
+                                    let res = math::unary_op(this, math_op, f);
                                     Scalar::from(res)
                                 }
                                 FloatTy::F128 => unimplemented!("f16_f128"),
