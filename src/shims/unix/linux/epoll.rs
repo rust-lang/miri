@@ -261,7 +261,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Throw EINVAL if epfd and fd have the same value.
         if epfd_value == fd {
-            this.set_last_error_and_return_i32(LibcError("EINVAL"))
+            return this.set_last_error_and_return_i32(LibcError("EINVAL"));
         }
 
         // Check if epfd is a valid epoll file descriptor.

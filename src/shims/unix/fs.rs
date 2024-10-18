@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 use std::fs::{
-    read_dir, remove_dir, remove_file, rename, DirBuilder, File, FileType, OpenOptions, ReadDir,
+    DirBuilder, File, FileType, OpenOptions, ReadDir, read_dir, remove_dir, remove_file, rename,
 };
 use std::io::{self, ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -202,7 +202,7 @@ impl FileDescription for FileHandle {
                 ERROR_IO_PENDING, ERROR_LOCK_VIOLATION, FALSE, HANDLE, TRUE,
             };
             use windows_sys::Win32::Storage::FileSystem::{
-                LockFileEx, UnlockFile, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
+                LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx, UnlockFile,
             };
 
             let fh = self.file.as_raw_handle() as HANDLE;
@@ -320,9 +320,8 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ if file_type.is_symlink() => Ok(this.eval_libc("DT_LNK").to_u8()?.into()),
                     // Certain file types are only supported when the host is a Unix system.
                     #[cfg(unix)]
-                    _ if file_type.is_block_device() => {
-                        Ok(this.eval_libc("DT_BLK").to_u8()?.into())
-                    }
+                    _ if file_type.is_block_device() =>
+                        Ok(this.eval_libc("DT_BLK").to_u8()?.into()),
                     #[cfg(unix)]
                     _ if file_type.is_char_device() => Ok(this.eval_libc("DT_CHR").to_u8()?.into()),
                     #[cfg(unix)]
@@ -333,12 +332,16 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     _ => Ok(this.eval_libc("DT_UNKNOWN").to_u8()?.into()),
                 }
             }
-            Err(e) => match e.raw_os_error() {
-                Some(error) => Ok(error),
-                None => {
-                    throw_unsup_format!("the error {} couldn't be converted to a return value", e)
-                }
-            },
+            Err(e) =>
+                match e.raw_os_error() {
+                    Some(error) => Ok(error),
+                    None => {
+                        throw_unsup_format!(
+                            "the error {} couldn't be converted to a return value",
+                            e
+                        )
+                    }
+                },
         }
     }
 }
@@ -585,7 +588,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let seek_from = if whence == this.eval_libc_i32("SEEK_SET") {
             if offset < 0 {
                 // Negative offsets return `EINVAL`.
-                return this.set_last_error_and_return_i32(LibcError("EINVAL"));
+                return this.set_last_error_and_return_i64(LibcError("EINVAL"));
             } else {
                 SeekFrom::Start(u64::try_from(offset).unwrap())
             }
@@ -594,7 +597,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         } else if whence == this.eval_libc_i32("SEEK_END") {
             SeekFrom::End(i64::try_from(offset).unwrap())
         } else {
-            return this.set_last_error_and_return_i32(LibcError("EINVAL"));
+            return this.set_last_error_and_return_i64(LibcError("EINVAL"));
         };
 
         let communicate = this.machine.communicate();
@@ -637,11 +640,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         #[cfg(windows)]
         fn create_link(src: &Path, dst: &Path) -> std::io::Result<()> {
             use std::os::windows::fs;
-            if src.is_dir() {
-                fs::symlink_dir(src, dst)
-            } else {
-                fs::symlink_file(src, dst)
-            }
+            if src.is_dir() { fs::symlink_dir(src, dst) } else { fs::symlink_file(src, dst) }
         }
 
         let this = self.eval_context_mut();
@@ -1013,7 +1012,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`opendir`", reject_with)?;
             let eacc = this.eval_libc("EACCES");
-            return this.set_last_error_and_return_i32(eacc);
+            this.set_last_error(eacc)?;
+            return Ok(Scalar::null_ptr(this));
         }
 
         let result = read_dir(name);
@@ -1236,13 +1236,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(&this.deref_pointer(result_op)?)?;
                 0
             }
-            Some(Err(e)) => match e.raw_os_error() {
-                // return positive error number on error
-                Some(error) => error,
-                None => {
-                    throw_unsup_format!("the error {} couldn't be converted to a return value", e)
-                }
-            },
+            Some(Err(e)) =>
+                match e.raw_os_error() {
+                    // return positive error number on error
+                    Some(error) => error,
+                    None => {
+                        throw_unsup_format!(
+                            "the error {} couldn't be converted to a return value",
+                            e
+                        )
+                    }
+                },
         }))
     }
 
@@ -1418,8 +1422,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`readlink`", reject_with)?;
-            let eacc = this.eval_libc("EACCES");
-            return Ok(this.set_last_error_and_return_i32(eacc));
+            this.set_last_error(LibcError("EACCES"))?;
+            return Ok(-1);
         }
 
         let result = std::fs::read_link(pathname);
@@ -1440,7 +1444,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_bytes_ptr(buf, path_bytes.iter().copied())?;
                 Ok(path_bytes.len().try_into().unwrap())
             }
-            Err(e) => Ok(this.set_last_error_and_return_i32(e)),
+            Err(e) => {
+                this.set_last_error(e)?;
+                Ok(-1)
+            }
         }
     }
 
@@ -1626,16 +1633,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let fd = this.machine.fds.insert_new(FileHandle { file: f, writable: true });
                     return Ok(Scalar::from_i32(fd));
                 }
-                Err(e) => match e.kind() {
-                    // If the random file already exists, keep trying.
-                    ErrorKind::AlreadyExists => continue,
-                    // Any other errors are returned to the caller.
-                    _ => {
-                        // "On error, -1 is returned, and errno is set to
-                        // indicate the error"
-                        return this.set_last_error_and_return_i32(e);
-                    }
-                },
+                Err(e) =>
+                    match e.kind() {
+                        // If the random file already exists, keep trying.
+                        ErrorKind::AlreadyExists => continue,
+                        // Any other errors are returned to the caller.
+                        _ => {
+                            // "On error, -1 is returned, and errno is set to
+                            // indicate the error"
+                            return this.set_last_error_and_return_i32(e);
+                        }
+                    },
             }
         }
 
