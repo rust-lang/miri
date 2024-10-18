@@ -1,5 +1,10 @@
+use crate::concurrency::sync::FutexRef;
 use crate::helpers::check_min_arg_count;
 use crate::*;
+
+struct LinuxFutex {
+    futex: FutexRef,
+}
 
 /// Implementation of the SYS_futex syscall.
 /// `args` is the arguments *including* the syscall number.
@@ -25,9 +30,15 @@ pub fn futex<'tcx>(
     let op = this.read_scalar(op)?.to_i32()?;
     let val = this.read_scalar(val)?.to_i32()?;
 
+    // Storing this inside the allocation means that if an address gets reused by a new allocation,
+    // we'll use an independent futex queue for this... that seems acceptable.
+    let futex_ref = this
+        .get_sync_or_init(addr, |_| interp_ok(LinuxFutex { futex: Default::default() }))?
+        .futex
+        .clone();
+
     // This is a vararg function so we have to bring our own type for this pointer.
     let addr = this.ptr_to_mplace(addr, this.machine.layouts.i32);
-    let addr_usize = addr.ptr().addr().bytes();
 
     let futex_private = this.eval_libc_i32("FUTEX_PRIVATE_FLAG");
     let futex_wait = this.eval_libc_i32("FUTEX_WAIT");
@@ -147,7 +158,7 @@ pub fn futex<'tcx>(
             if val == futex_val {
                 // The value still matches, so we block the thread and make it wait for FUTEX_WAKE.
                 this.futex_wait(
-                    addr_usize,
+                    futex_ref,
                     bitset,
                     timeout,
                     Scalar::from_target_isize(0, this), // retval_succ
@@ -191,7 +202,7 @@ pub fn futex<'tcx>(
             let mut n = 0;
             #[allow(clippy::arithmetic_side_effects)]
             for _ in 0..val {
-                if this.futex_wake(addr_usize, bitset)? {
+                if this.futex_wake(&futex_ref, bitset)? {
                     n += 1;
                 } else {
                     break;

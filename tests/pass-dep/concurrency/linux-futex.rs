@@ -35,17 +35,6 @@ fn wake_nobody() {
     }
 }
 
-fn wake_dangling() {
-    let futex = Box::new(0);
-    let ptr: *const i32 = &*futex;
-    drop(futex);
-
-    // Wake 1 waiter. Expect zero waiters woken up, as nobody is waiting.
-    unsafe {
-        assert_eq!(libc::syscall(libc::SYS_futex, ptr, libc::FUTEX_WAKE, 1), 0);
-    }
-}
-
 fn wait_wrong_val() {
     let futex: i32 = 123;
 
@@ -286,7 +275,6 @@ fn concurrent_wait_wake() {
 
 fn main() {
     wake_nobody();
-    wake_dangling();
     wait_wrong_val();
     wait_timeout();
     wait_absolute_timeout();
