@@ -1,5 +1,5 @@
 //@ignore-target: windows # No pthreads on Windows
-//@ignore-target: android # No pthreads to get/set name on Android
+//@ignore-target: android # No pthread_{get,set}_name on Android
 use std::ffi::{CStr, CString};
 use std::thread;
 
