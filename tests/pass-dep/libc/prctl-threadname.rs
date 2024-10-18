@@ -21,6 +21,22 @@ fn main() {
         unsafe { libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr().cast::<libc::c_char>()) }
     }
 
+    // Set name via Rust API, get it via prctl.
+    let long_name2 = long_name.clone();
+    thread::Builder::new()
+        .name(long_name.clone())
+        .spawn(move || {
+            let mut buf = vec![0u8; long_name2.len() + 1];
+            assert_eq!(get_thread_name(&mut buf), 0);
+            let cstr = CStr::from_bytes_until_nul(&buf).unwrap();
+            let truncated_name = &long_name2[..long_name2.len().min(MAX_THREAD_NAME_LEN - 1)];
+            assert_eq!(cstr.to_bytes(), truncated_name.as_bytes());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+
+    // Set name via pthread and get it again (short name).
     thread::Builder::new()
         .spawn(move || {
             // Set short thread name.
@@ -37,6 +53,7 @@ fn main() {
         .join()
         .unwrap();
 
+    // Set name via pthread and get it again (long name).
     thread::Builder::new()
         .spawn(move || {
             // Set full thread name.
