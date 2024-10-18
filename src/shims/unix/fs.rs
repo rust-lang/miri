@@ -335,12 +335,11 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(e) =>
                 match e.raw_os_error() {
                     Some(error) => Ok(error),
-                    None => {
+                    None =>
                         throw_unsup_format!(
                             "the error {} couldn't be converted to a return value",
                             e
-                        )
-                    }
+                        ),
                 },
         }
     }
