@@ -27,6 +27,8 @@ pub fn prctl<'tcx>(
             let [_, name] = check_min_arg_count("prctl(PR_SET_NAME, ...)", args)?;
             let name = this.read_scalar(name)?;
             let thread = this.pthread_self()?;
+            // The Linux kernel silently truncates long names.
+            // https://www.man7.org/linux/man-pages/man2/PR_SET_NAME.2const.html
             let res =
                 this.pthread_setname_np(thread, name, TASK_COMM_LEN, /* truncate */ true)?;
             assert!(res);
