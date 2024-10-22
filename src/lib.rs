@@ -82,6 +82,7 @@ mod eval;
 mod helpers;
 mod intrinsics;
 mod machine;
+mod math;
 mod mono_hash_map;
 mod operator;
 mod provenance_gc;
