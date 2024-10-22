@@ -95,11 +95,22 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
 
-            "pclmulqdq" => {
+            "pclmulqdq" | "pclmulqdq.256" | "pclmulqdq.512" => {
+                let mut width = 2;
+                this.expect_target_feature_for_intrinsic(link_name, "pclmulqdq")?;
+                if unprefixed_name.ends_with(".256") {
+                    this.expect_target_feature_for_intrinsic(link_name, "vpclmulqdq")?;
+                    width = 4;
+                } else if unprefixed_name.ends_with(".512") {
+                    this.expect_target_feature_for_intrinsic(link_name, "vpclmulqdq")?;
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512f")?;
+                    width = 8;
+                }
+
                 let [left, right, imm] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
 
-                pclmulqdq(this, left, right, imm, dest)?;
+                pclmulqdq(this, left, right, imm, dest, width)?;
             }
 
             name if name.starts_with("bmi.") => {
@@ -1144,51 +1155,55 @@ fn pclmulqdq<'tcx>(
     right: &OpTy<'tcx>,
     imm8: &OpTy<'tcx>,
     dest: &MPlaceTy<'tcx>,
+    width: u64,
 ) -> InterpResult<'tcx, ()> {
     assert_eq!(left.layout, right.layout);
     assert_eq!(left.layout.size, dest.layout.size);
+    assert!([2u64, 4, 8].contains(&width));
 
-    // Transmute to `[u64; 2]`
+    // Transmute the input into arrays of `u64`.
+    // Transmute the output into an array of `u128`.
 
-    let array_layout = this.layout_of(Ty::new_array(this.tcx.tcx, this.tcx.types.u64, 2))?;
-    let left = left.transmute(array_layout, this)?;
-    let right = right.transmute(array_layout, this)?;
-    let dest = dest.transmute(array_layout, this)?;
+    let src_layout = this.layout_of(Ty::new_array(this.tcx.tcx, this.tcx.types.u64, width))?;
+    let dest_layout =
+        this.layout_of(Ty::new_array(this.tcx.tcx, this.tcx.types.u128, width / 2))?;
+
+    let left = left.transmute(src_layout, this)?;
+    let right = right.transmute(src_layout, this)?;
+    let dest = dest.transmute(dest_layout, this)?;
 
     let imm8 = this.read_scalar(imm8)?.to_u8()?;
 
-    // select the 64-bit integer from left that the user specified (low or high)
-    let index = if (imm8 & 0x01) == 0 { 0 } else { 1 };
-    let left = this.read_scalar(&this.project_index(&left, index)?)?.to_u64()?;
+    for i in 0..(width / 2) {
+        // select the 64-bit integer from left that the user specified (low or high)
+        let index =
+            if (imm8 & 0x01) == 0 { i.wrapping_mul(2) } else { i.wrapping_mul(2).wrapping_add(1) };
+        let left = this.read_scalar(&this.project_index(&left, index)?)?.to_u64()?;
 
-    // select the 64-bit integer from right that the user specified (low or high)
-    let index = if (imm8 & 0x10) == 0 { 0 } else { 1 };
-    let right = this.read_scalar(&this.project_index(&right, index)?)?.to_u64()?;
+        // select the 64-bit integer from right that the user specified (low or high)
+        let index =
+            if (imm8 & 0x10) == 0 { i.wrapping_mul(2) } else { i.wrapping_mul(2).wrapping_add(1) };
+        let right = this.read_scalar(&this.project_index(&right, index)?)?.to_u64()?;
 
-    // Perform carry-less multiplication
-    //
-    // This operation is like long multiplication, but ignores all carries.
-    // That idea corresponds to the xor operator, which is used in the implementation.
-    //
-    // Wikipedia has an example https://en.wikipedia.org/wiki/Carry-less_product#Example
-    let mut result: u128 = 0;
+        // Perform carry-less multiplication.
+        //
+        // This operation is like long multiplication, but ignores all carries.
+        // That idea corresponds to the xor operator, which is used in the implementation.
+        //
+        // Wikipedia has an example https://en.wikipedia.org/wiki/Carry-less_product#Example
+        let mut result: u128 = 0;
 
-    for i in 0..64 {
-        // if the i-th bit in right is set
-        if (right & (1 << i)) != 0 {
-            // xor result with `left` shifted to the left by i positions
-            result ^= u128::from(left) << i;
+        for i in 0..64 {
+            // if the i-th bit in right is set
+            if (right & (1 << i)) != 0 {
+                // xor result with `left` shifted to the left by i positions
+                result ^= u128::from(left) << i;
+            }
         }
+
+        let dest = this.project_index(&dest, i)?;
+        this.write_scalar(Scalar::from_u128(result), &dest)?;
     }
-
-    let result_low = (result & 0xFFFF_FFFF_FFFF_FFFF) as u64;
-    let result_high = (result >> 64) as u64;
-
-    let dest_low = this.project_index(&dest, 0)?;
-    this.write_scalar(Scalar::from_u64(result_low), &dest_low)?;
-
-    let dest_high = this.project_index(&dest, 1)?;
-    this.write_scalar(Scalar::from_u64(result_high), &dest_high)?;
 
     interp_ok(())
 }
