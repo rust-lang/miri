@@ -731,9 +731,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let futex = this.machine.sync.futexes.get_mut(&addr).unwrap();
                     futex.waiters.retain(|waiter| waiter.thread != thread);
                     // Set errno and write return value.
-                    this.set_last_error(errno_timeout)?;
-                    this.write_scalar(retval_timeout, &dest)?;
-                    interp_ok(())
+                    this.set_last_error_and_return(errno_timeout, &dest)
                 }
             ),
         );
