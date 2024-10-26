@@ -89,6 +89,18 @@ pub enum ValidationMode {
     Deep,
 }
 
+/// Settings for the provenance GC
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ProvenanceGcSettings {
+    /// The GC is disabled
+    Disabled,
+    /// The GC is to run regularly, every `inverval` basic blocks
+    Regularly { interval: u32 },
+    /// The GC runs as needed, determined by heuristics.
+    /// See `should_run_provenance_gc`
+    Heuristically,
+}
+
 /// Configuration needed to spawn a Miri instance.
 #[derive(Clone)]
 pub struct MiriConfig {
@@ -151,8 +163,8 @@ pub struct MiriConfig {
     /// The location of a shared object file to load when calling external functions
     /// FIXME! consider allowing users to specify paths to multiple files, or to a directory
     pub native_lib: Option<PathBuf>,
-    /// Run a garbage collector for BorTags every N basic blocks.
-    pub gc_interval: u32,
+    /// Settings for the provenance GC (e.g. how often it runs)
+    pub gc_settings: ProvenanceGcSettings,
     /// The number of CPUs to be reported by miri.
     pub num_cpus: u32,
     /// Requires Miri to emulate pages of a certain size
@@ -194,7 +206,7 @@ impl Default for MiriConfig {
             report_progress: None,
             retag_fields: RetagFields::Yes,
             native_lib: None,
-            gc_interval: 10_000,
+            gc_settings: ProvenanceGcSettings::Heuristically,
             num_cpus: 1,
             page_size: None,
             collect_leak_backtraces: true,

@@ -249,6 +249,8 @@ pub struct Tree {
     pub(super) rperms: RangeMap<UniValMap<LocationState>>,
     /// The index of the root node.
     pub(super) root: UniIndex,
+    /// The number of nodes when we last ran the Garbage Collector
+    nodes_at_last_gc: usize,
 }
 
 /// A node in the borrow tree. Each node is uniquely identified by a tag via
@@ -607,7 +609,7 @@ impl Tree {
             );
             RangeMap::new(size, perms)
         };
-        Self { root: root_idx, nodes, rperms, tag_mapping }
+        Self { root: root_idx, nodes, rperms, tag_mapping, nodes_at_last_gc: 1 }
     }
 }
 
@@ -886,6 +888,22 @@ impl<'tcx> Tree {
 
 /// Integration with the BorTag garbage collector
 impl Tree {
+    /// The number of nodes in this tree
+    pub fn nodes_count(&self) -> usize {
+        self.tag_mapping.len()
+    }
+
+    /// Whether the tree grew significantly since the last provenance GC run
+    pub fn tree_grew_significantly_since_last_gc(&self) -> bool {
+        let current = self.nodes_count();
+        // do not trigger the GC for small nodes
+        let last = self.nodes_at_last_gc.max(50);
+        // trigger the GC if the tree doubled since the last run,
+        // or otherwise got "significantly" larger.
+        // Note that for trees < 100 nodes, nothing happens.
+        current > 2 * last || current > last + 1500
+    }
+
     pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
         self.remove_useless_children(self.root, live_tags);
         // Right after the GC runs is a good moment to check if we can
@@ -893,6 +911,7 @@ impl Tree {
         // tags (this does not necessarily mean that they have identical internal representations,
         // see the `PartialEq` impl for `UniValMap`)
         self.rperms.merge_adjacent_thorough();
+        self.nodes_at_last_gc = self.nodes_count();
     }
 
     /// Checks if a node is useless and should be GC'ed.
