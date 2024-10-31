@@ -3,7 +3,7 @@
 
 use std::any::Any;
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map::Entry;
 use std::path::Path;
 use std::{fmt, process};
@@ -556,9 +556,10 @@ pub struct MiriMachine<'tcx> {
     pub native_lib: Option<!>,
 
     /// Run a garbage collector for BorTags every N basic blocks.
-    pub(crate) gc_interval: u32,
+    pub(crate) gc_settings: ProvenanceGcSettings,
     /// The number of blocks that passed since the last BorTag GC pass.
     pub(crate) since_gc: u32,
+    pub(crate) gc_requested: Cell<bool>,
 
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
@@ -716,8 +717,9 @@ impl<'tcx> MiriMachine<'tcx> {
             native_lib: config.native_lib.as_ref().map(|_| {
                 panic!("calling functions from native libraries via FFI is only supported on Unix")
             }),
-            gc_interval: config.gc_interval,
+            gc_settings: config.gc_settings,
             since_gc: 0,
+            gc_requested: Cell::new(false),
             num_cpus: config.num_cpus,
             page_size,
             stack_addr,
@@ -784,6 +786,10 @@ impl<'tcx> MiriMachine<'tcx> {
             .and_then(|(_allocated, deallocated)| *deallocated)
             .map(Span::data)
     }
+
+    pub(crate) fn request_gc(&self) {
+        self.gc_requested.set(true)
+    }
 }
 
 impl VisitProvenance for MiriMachine<'_> {
@@ -828,8 +834,9 @@ impl VisitProvenance for MiriMachine<'_> {
             report_progress: _,
             basic_block_count: _,
             native_lib: _,
-            gc_interval: _,
+            gc_settings: _,
             since_gc: _,
+            gc_requested: _,
             num_cpus: _,
             page_size: _,
             stack_addr: _,
@@ -1491,8 +1498,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         // stacks.
         // When debug assertions are enabled, run the GC as often as possible so that any cases
         // where it mistakenly removes an important tag become visible.
-        if ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval {
-            ecx.machine.since_gc = 0;
+        if ecx.should_run_provenance_gc() {
             ecx.run_provenance_gc();
         }
 

@@ -28,7 +28,10 @@ use std::num::NonZero;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use miri::{BacktraceStyle, BorrowTrackerMethod, ProvenanceMode, RetagFields, ValidationMode};
+use miri::{
+    BacktraceStyle, BorrowTrackerMethod, ProvenanceGcSettings, ProvenanceMode, RetagFields,
+    ValidationMode,
+};
 use rustc_data_structures::sync::Lrc;
 use rustc_driver::Compilation;
 use rustc_hir::def_id::LOCAL_CRATE;
@@ -607,7 +610,10 @@ fn main() {
             let interval = param.parse::<u32>().unwrap_or_else(|err| {
                 show_error!("-Zmiri-provenance-gc requires a `u32`: {}", err)
             });
-            miri_config.gc_interval = interval;
+            miri_config.gc_settings = match interval {
+                0 => ProvenanceGcSettings::Disabled,
+                interval => ProvenanceGcSettings::Regularly { interval },
+            };
         } else if let Some(param) = arg.strip_prefix("-Zmiri-measureme=") {
             miri_config.measureme_out = Some(param.to_string());
         } else if let Some(param) = arg.strip_prefix("-Zmiri-backtrace=") {
