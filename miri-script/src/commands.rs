@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::io::Write;
-use std::ops::{Not, Range};
+use std::ops::Not;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{env, net, process};
@@ -502,7 +502,7 @@ impl Command {
     fn run(
         dep: bool,
         verbose: bool,
-        many_seeds: Option<Range<u32>>,
+        many_seeds: Option<crate::MiriScriptRange>,
         target: Option<String>,
         edition: Option<String>,
         flags: Vec<String>,
@@ -562,7 +562,7 @@ impl Command {
         };
         // Run the closure once or many times.
         if let Some(seed_range) = many_seeds {
-            e.run_many_times(seed_range, |e, seed| {
+            e.run_many_times(seed_range.0, |e, seed| {
                 eprintln!("Trying seed: {seed}");
                 run_miri(e, Some(format!("-Zmiri-seed={seed}"))).inspect_err(|_| {
                     eprintln!("FAILING SEED: {seed}");
