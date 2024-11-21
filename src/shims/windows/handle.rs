@@ -9,6 +9,10 @@ use crate::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PseudoHandle {
     CurrentThread,
+    CurrentProcess,
+    Stdin,
+    Stdout,
+    Stderr,
 }
 
 /// Miri representation of a Windows `HANDLE`
@@ -23,16 +27,28 @@ pub enum Handle {
 
 impl PseudoHandle {
     const CURRENT_THREAD_VALUE: u32 = 0;
+    const STDIN_VALUE: u32 = 1;
+    const STDOUT_VALUE: u32 = 2;
+    const STDERR_VALUE: u32 = 3;
+    const CURRENT_PROCESS_VALUE: u32 = 4;
 
     fn value(self) -> u32 {
         match self {
             Self::CurrentThread => Self::CURRENT_THREAD_VALUE,
+            Self::CurrentProcess => Self::CURRENT_PROCESS_VALUE,
+            Self::Stdin => Self::STDIN_VALUE,
+            Self::Stdout => Self::STDOUT_VALUE,
+            Self::Stderr => Self::STDERR_VALUE,
         }
     }
 
     fn from_value(value: u32) -> Option<Self> {
         match value {
             Self::CURRENT_THREAD_VALUE => Some(Self::CurrentThread),
+            Self::CURRENT_PROCESS_VALUE => Some(Self::CurrentProcess),
+            Self::STDIN_VALUE => Some(Self::Stdin),
+            Self::STDOUT_VALUE => Some(Self::Stdout),
+            Self::STDERR_VALUE => Some(Self::Stderr),
             _ => None,
         }
     }
@@ -210,6 +226,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         throw_machine_stop!(TerminationInfo::Abort(format!(
             "invalid handle passed to `{function_name}`"
         )))
+    }
+
+    fn GetStdHandle(&mut self, which: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        let which = this.read_scalar(which)?.to_i32()?;
+
+        let stdin = this.eval_windows("c", "STD_INPUT_HANDLE").to_i32()?;
+        let stdout = this.eval_windows("c", "STD_OUTPUT_HANDLE").to_i32()?;
+        let stderr = this.eval_windows("c", "STD_ERROR_HANDLE").to_i32()?;
+
+        let handle = if which == stdin {
+            Handle::Pseudo(PseudoHandle::Stdin)
+        } else if which == stdout {
+            Handle::Pseudo(PseudoHandle::Stdout)
+        } else if which == stderr {
+            Handle::Pseudo(PseudoHandle::Stderr)
+        } else {
+            throw_unsup_format!("Invalid argument to `GetStdHandle`: {which}")
+        };
+        interp_ok(handle.to_scalar(this))
     }
 
     fn CloseHandle(&mut self, handle_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {

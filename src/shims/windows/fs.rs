@@ -9,7 +9,7 @@ use rustc_abi::Size;
 
 use crate::shims::files::{EvalContextExt as _, FileDescription, FileDescriptionRef};
 use crate::shims::time::system_time_to_duration;
-use crate::shims::windows::handle::{EvalContextExt as _, Handle};
+use crate::shims::windows::handle::{EvalContextExt as _, Handle, PseudoHandle};
 use crate::*;
 
 #[derive(Debug)]
@@ -358,6 +358,261 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         )?;
 
         interp_ok(this.eval_windows("c", "TRUE"))
+    }
+
+    fn DeleteFileW(
+        &mut self,
+        file_name: &OpTy<'tcx>, // LPCWSTR
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns BOOL (i32 on Windows)
+        let this = self.eval_context_mut();
+        this.assert_target_os("windows", "DeleteFileW");
+        this.check_no_isolation("`DeleteFileW`")?;
+        let file_name =
+            String::from_utf16_lossy(&this.read_wide_str(this.read_pointer(file_name)?)?);
+        let file_name = Path::new(&file_name);
+        match std::fs::remove_file(file_name) {
+            Ok(_) => interp_ok(this.eval_windows("c", "TRUE")),
+            Err(e) => {
+                this.set_last_error(e)?;
+                interp_ok(this.eval_windows("c", "FALSE"))
+            }
+        }
+    }
+
+    fn NtWriteFile(
+        &mut self,
+        handle: &OpTy<'tcx>,          // HANDLE
+        event: &OpTy<'tcx>,           // HANDLE
+        apc_routine: &OpTy<'tcx>,     // PIO_APC_ROUTINE
+        apc_ctx: &OpTy<'tcx>,         // PVOID
+        io_status_block: &OpTy<'tcx>, // PIO_STATUS_BLOCK
+        buf: &OpTy<'tcx>,             // PVOID
+        n: &OpTy<'tcx>,               // ULONG
+        byte_offset: &OpTy<'tcx>,     // PLARGE_INTEGER
+        key: &OpTy<'tcx>,             // PULONG
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns NTSTATUS (u32 on Windows)
+        let this = self.eval_context_mut();
+        let handle = this.read_handle(handle)?;
+        let event = this.read_handle(event)?;
+        let apc_routine = this.read_pointer(apc_routine)?;
+        let apc_ctx = this.read_pointer(apc_ctx)?;
+        let buf = this.read_pointer(buf)?;
+        let n = this.read_scalar(n)?.to_u32()?;
+        let byte_offset = this.read_target_usize(byte_offset)?; // is actually a pointer
+        let key = this.read_pointer(key)?;
+        let io_status_block =
+            this.deref_pointer_as(io_status_block, this.windows_ty_layout("IO_STATUS_BLOCK"))?;
+
+        if event != Handle::Null {
+            throw_unsup_format!(
+                "`NtWriteFile` `Event` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_routine)? {
+            throw_unsup_format!(
+                "`NtWriteFile` `ApcRoutine` parameter is not null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_ctx)? {
+            throw_unsup_format!(
+                "`NtWriteFile` `ApcContext` parameter is not null, which is unsupported"
+            );
+        }
+
+        if byte_offset != 0 {
+            throw_unsup_format!(
+                "`NtWriteFile` `ByteOffset` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(key)? {
+            throw_unsup_format!("`NtWriteFile` `Key` parameter is not null, which is unsupported");
+        }
+
+        let written = match handle {
+            Handle::Pseudo(pseudo @ (PseudoHandle::Stdout | PseudoHandle::Stderr)) => {
+                // stdout/stderr
+                let buf_cont =
+                    this.read_bytes_ptr_strip_provenance(buf, Size::from_bytes(u64::from(n)))?;
+                let res = if this.machine.mute_stdout_stderr {
+                    Ok(buf_cont.len())
+                } else if pseudo == PseudoHandle::Stdout {
+                    io::Write::write(&mut io::stdout(), buf_cont)
+                } else {
+                    io::Write::write(&mut io::stderr(), buf_cont)
+                };
+                // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
+                res.ok().map(|n| u32::try_from(n).unwrap())
+            }
+            Handle::File(fd) => {
+                let Some(desc) = this.machine.fds.get(fd) else {
+                    this.invalid_handle("NtWriteFile")?
+                };
+
+                let errno_layout = this.machine.layouts.u32;
+                let out_place = this.allocate(errno_layout, MiriMemoryKind::Machine.into())?;
+                desc.write(&desc, this.machine.communicate(), buf, n as usize, &out_place, this)?;
+                let written = this.read_scalar(&out_place)?.to_u32()?;
+                this.deallocate_ptr(out_place.ptr(), None, MiriMemoryKind::Machine.into())?;
+                Some(written)
+            }
+            _ => this.invalid_handle("NtWriteFile")?,
+        };
+
+        // We have to put the result into io_status_block.
+        if let Some(n) = written {
+            let io_status_information =
+                this.project_field_named(&io_status_block, "Information")?;
+            this.write_scalar(Scalar::from_target_usize(n.into(), this), &io_status_information)?;
+        }
+
+        // Return whether this was a success. >= 0 is success.
+        // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
+        interp_ok(Scalar::from_u32(if written.is_some() { 0 } else { 0xC0000185u32 }))
+    }
+
+    fn NtReadFile(
+        &mut self,
+        handle: &OpTy<'tcx>,          // HANDLE
+        event: &OpTy<'tcx>,           // HANDLE
+        apc_routine: &OpTy<'tcx>,     // PIO_APC_ROUTINE
+        apc_ctx: &OpTy<'tcx>,         // PVOID
+        io_status_block: &OpTy<'tcx>, // PIO_STATUS_BLOCK
+        buf: &OpTy<'tcx>,             // PVOID
+        n: &OpTy<'tcx>,               // ULONG
+        byte_offset: &OpTy<'tcx>,     // PLARGE_INTEGER
+        key: &OpTy<'tcx>,             // PULONG
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns NTSTATUS (u32 on Windows)
+        let this = self.eval_context_mut();
+        let handle = this.read_handle(handle)?;
+        let event = this.read_handle(event)?;
+        let apc_routine = this.read_pointer(apc_routine)?;
+        let apc_ctx = this.read_pointer(apc_ctx)?;
+        let buf = this.read_pointer(buf)?;
+        let n = this.read_scalar(n)?.to_u32()?;
+        let byte_offset = this.read_target_usize(byte_offset)?; // is actually a pointer
+        let key = this.read_pointer(key)?;
+        let io_status_block =
+            this.deref_pointer_as(io_status_block, this.windows_ty_layout("IO_STATUS_BLOCK"))?;
+
+        if event != Handle::Null {
+            throw_unsup_format!(
+                "`NtWriteFile` `Event` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_routine)? {
+            throw_unsup_format!(
+                "`NtWriteFile` `ApcRoutine` parameter is not null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_ctx)? {
+            throw_unsup_format!(
+                "`NtWriteFile` `ApcContext` parameter is not null, which is unsupported"
+            );
+        }
+
+        if byte_offset != 0 {
+            throw_unsup_format!(
+                "`NtWriteFile` `ByteOffset` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(key)? {
+            throw_unsup_format!("`NtWriteFile` `Key` parameter is not null, which is unsupported");
+        }
+
+        let read = match handle {
+            Handle::Pseudo(PseudoHandle::Stdin) => {
+                // stdout/stderr
+                let mut buf_cont = vec![0u8; n as usize];
+                let res = io::Read::read(&mut io::stdin(), &mut buf_cont);
+                this.write_bytes_ptr(buf, buf_cont)?;
+                // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
+                res.ok().map(|n| u32::try_from(n).unwrap())
+            }
+            Handle::File(fd) => {
+                let Some(desc) = this.machine.fds.get(fd) else {
+                    this.invalid_handle("NtReadFile")?
+                };
+
+                let errno_layout = this.machine.layouts.u32;
+                let out_place = this.allocate(errno_layout, MiriMemoryKind::Machine.into())?;
+                desc.read(&desc, this.machine.communicate(), buf, n as usize, &out_place, this)?;
+                let read = this.read_scalar(&out_place)?.to_u32()?;
+                this.deallocate_ptr(out_place.ptr(), None, MiriMemoryKind::Machine.into())?;
+                Some(read)
+            }
+            _ => this.invalid_handle("NtReadFile")?,
+        };
+
+        // We have to put the result into io_status_block.
+        if let Some(n) = read {
+            let io_status_information =
+                this.project_field_named(&io_status_block, "Information")?;
+            this.write_scalar(Scalar::from_target_usize(n.into(), this), &io_status_information)?;
+        }
+
+        // Return whether this was a success. >= 0 is success.
+        // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
+        interp_ok(Scalar::from_u32(if read.is_some() { 0 } else { 0xC0000185u32 }))
+    }
+
+    fn SetFilePointerEx(
+        &mut self,
+        file: &OpTy<'tcx>,         // HANDLE
+        dist_to_move: &OpTy<'tcx>, // LARGE_INTEGER
+        new_fp: &OpTy<'tcx>,       // PLARGE_INTEGER
+        move_method: &OpTy<'tcx>,  // DWORD
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns BOOL (i32 on Windows)
+        let this = self.eval_context_mut();
+        let file = this.read_handle(file)?;
+        let dist_to_move = this.read_scalar(dist_to_move)?.to_i64()?;
+        let move_method = this.read_scalar(move_method)?.to_u32()?;
+
+        let fd = match file {
+            Handle::File(fd) => fd,
+            _ => this.invalid_handle("SetFilePointerEx")?,
+        };
+
+        let Some(desc) = this.machine.fds.get(fd) else {
+            throw_unsup_format!("`SetFilePointerEx` is only supported on file backed handles");
+        };
+
+        let file_begin = this.eval_windows_u32("c", "FILE_BEGIN");
+        let file_current = this.eval_windows_u32("c", "FILE_CURRENT");
+        let file_end = this.eval_windows_u32("c", "FILE_END");
+
+        let seek = if move_method == file_begin {
+            SeekFrom::Start(dist_to_move.try_into().unwrap())
+        } else if move_method == file_current {
+            SeekFrom::Current(dist_to_move)
+        } else if move_method == file_end {
+            SeekFrom::End(dist_to_move)
+        } else {
+            throw_unsup_format!("Invalid move method: {move_method}")
+        };
+
+        match desc.seek(this.machine.communicate(), seek)? {
+            Ok(n) => {
+                this.write_scalar(
+                    Scalar::from_i64(n.try_into().unwrap()),
+                    &this.deref_pointer(new_fp)?,
+                )?;
+                interp_ok(this.eval_windows("c", "TRUE"))
+            }
+            Err(e) => {
+                this.set_last_error(e)?;
+                interp_ok(this.eval_windows("c", "FALSE"))
+            }
+        }
     }
 }
 

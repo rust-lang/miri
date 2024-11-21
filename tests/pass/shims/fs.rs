@@ -17,10 +17,10 @@ mod utils;
 
 fn main() {
     test_path_conversion();
+    test_file();
+    test_file_create_new();
+    test_seek();
     if cfg!(not(windows)) {
-        test_file();
-        test_file_create_new();
-        test_seek();
         test_file_clone();
         test_metadata();
         test_file_set_len();
