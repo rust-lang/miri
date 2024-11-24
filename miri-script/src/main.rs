@@ -137,7 +137,8 @@ fn build_cli() -> ClapCommand {
                 Arg::new("flags")
                     .help("Flags that are passed through to `cargo install`.")
                     .action(ArgAction::Append)
-                    .trailing_var_arg(true),
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             ),
         )
         .subcommand(
@@ -145,7 +146,8 @@ fn build_cli() -> ClapCommand {
                 Arg::new("flags")
                     .help("Flags that are passed through to `cargo build`.")
                     .action(ArgAction::Append)
-                    .trailing_var_arg(true),
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             ),
         )
         .subcommand(
@@ -153,7 +155,8 @@ fn build_cli() -> ClapCommand {
                 Arg::new("flags")
                     .help("Flags that are passed through to `cargo check`.")
                     .action(ArgAction::Append)
-                    .trailing_var_arg(true),
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             ),
         )
         .subcommand(
@@ -175,7 +178,8 @@ fn build_cli() -> ClapCommand {
                     Arg::new("flags")
                         .help("Flags that are passed through to the test harness.")
                         .action(ArgAction::Append)
-                        .trailing_var_arg(true),
+                        .trailing_var_arg(true)
+                        .allow_hyphen_values(true),
                 ),
         )
         .subcommand(
@@ -195,7 +199,8 @@ fn build_cli() -> ClapCommand {
                     Arg::new("flags")
                         .help("Flags that are passed through to `miri`.")
                         .action(ArgAction::Append)
-                        .trailing_var_arg(true),
+                        .trailing_var_arg(true)
+                        .allow_hyphen_values(true),
                 ),
         )
         .subcommand(
@@ -203,7 +208,8 @@ fn build_cli() -> ClapCommand {
                 Arg::new("flags")
                     .help("Flags that are passed through to `cargo doc`.")
                     .action(ArgAction::Append)
-                    .trailing_var_arg(true),
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             ),
         )
         .subcommand(
@@ -211,7 +217,8 @@ fn build_cli() -> ClapCommand {
                 Arg::new("flags")
                     .help("Flags that are passed through to `rustfmt`.")
                     .action(ArgAction::Append)
-                    .trailing_var_arg(true),
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             ),
         )
         .subcommand(
@@ -219,7 +226,8 @@ fn build_cli() -> ClapCommand {
                 Arg::new("flags")
                     .help("Flags that are passed through to `cargo clippy`.")
                     .action(ArgAction::Append)
-                    .trailing_var_arg(true),
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             ),
         )
         .subcommand(
@@ -235,7 +243,8 @@ fn build_cli() -> ClapCommand {
         .subcommand(
             ClapCommand::new("toolchain")
                 .about("Update and activate the rustup toolchain 'miri'.")
-                .arg(Arg::new("flags").action(ArgAction::Append).trailing_var_arg(true)),
+                .arg(Arg::new("flags").action(ArgAction::Append).trailing_var_arg(true))
+                .allow_hyphen_values(true),
         )
         .subcommand(
             ClapCommand::new("rustc-pull")
