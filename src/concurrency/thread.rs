@@ -159,6 +159,9 @@ pub enum BlockReason {
     Epoll,
     /// Blocked on eventfd.
     Eventfd,
+    /// Blocked on unnamed_socket.
+    UnnamedSocket,
+
 }
 
 /// The state of a thread.
