@@ -433,6 +433,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("`NtWriteFile` `Key` parameter is not null, which is unsupported");
         }
 
+        // We have to put the result into io_status_block.
+        let io_status_information = this.project_field_named(&io_status_block, "Information")?;
+
         let written = match handle {
             Handle::Pseudo(pseudo @ (PseudoHandle::Stdout | PseudoHandle::Stderr)) => {
                 // stdout/stderr
@@ -446,33 +449,39 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     io::Write::write(&mut io::stderr(), buf_cont)
                 };
                 // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
-                res.ok().map(|n| u32::try_from(n).unwrap())
+                if let Ok(n) = res {
+                    this.write_scalar(
+                        Scalar::from_target_usize(n.try_into().unwrap(), this),
+                        &io_status_information,
+                    )?;
+                    true
+                } else {
+                    false
+                }
             }
             Handle::File(fd) => {
                 let Some(desc) = this.machine.fds.get(fd) else {
                     this.invalid_handle("NtWriteFile")?
                 };
 
-                let errno_layout = this.machine.layouts.u32;
-                let out_place = this.allocate(errno_layout, MiriMemoryKind::Machine.into())?;
-                desc.write(&desc, this.machine.communicate(), buf, n as usize, &out_place, this)?;
-                let written = this.read_scalar(&out_place)?.to_u32()?;
-                this.deallocate_ptr(out_place.ptr(), None, MiriMemoryKind::Machine.into())?;
-                Some(written)
+                // TODO: Windows expects this function to return its error, not set the global one
+                desc.write(
+                    &desc,
+                    this.machine.communicate(),
+                    buf,
+                    n as usize,
+                    &io_status_information,
+                    this,
+                )?;
+                let written = this.read_scalar(&io_status_information)?.to_i64()?;
+                written != -1
             }
             _ => this.invalid_handle("NtWriteFile")?,
         };
 
-        // We have to put the result into io_status_block.
-        if let Some(n) = written {
-            let io_status_information =
-                this.project_field_named(&io_status_block, "Information")?;
-            this.write_scalar(Scalar::from_target_usize(n.into(), this), &io_status_information)?;
-        }
-
         // Return whether this was a success. >= 0 is success.
         // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
-        interp_ok(Scalar::from_u32(if written.is_some() { 0 } else { 0xC0000185u32 }))
+        interp_ok(Scalar::from_u32(if written { 0 } else { 0xC0000185u32 }))
     }
 
     fn NtReadFile(
@@ -528,6 +537,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("`NtWriteFile` `Key` parameter is not null, which is unsupported");
         }
 
+        let io_status_information = this.project_field_named(&io_status_block, "Information")?;
+
         let read = match handle {
             Handle::Pseudo(PseudoHandle::Stdin) => {
                 // stdout/stderr
@@ -535,33 +546,39 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let res = io::Read::read(&mut io::stdin(), &mut buf_cont);
                 this.write_bytes_ptr(buf, buf_cont)?;
                 // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
-                res.ok().map(|n| u32::try_from(n).unwrap())
+                if let Ok(n) = res {
+                    this.write_scalar(
+                        Scalar::from_target_usize(n.try_into().unwrap(), this),
+                        &io_status_information,
+                    )?;
+                    true
+                } else {
+                    false
+                }
             }
             Handle::File(fd) => {
                 let Some(desc) = this.machine.fds.get(fd) else {
                     this.invalid_handle("NtReadFile")?
                 };
 
-                let errno_layout = this.machine.layouts.u32;
-                let out_place = this.allocate(errno_layout, MiriMemoryKind::Machine.into())?;
-                desc.read(&desc, this.machine.communicate(), buf, n as usize, &out_place, this)?;
-                let read = this.read_scalar(&out_place)?.to_u32()?;
-                this.deallocate_ptr(out_place.ptr(), None, MiriMemoryKind::Machine.into())?;
-                Some(read)
+                // TODO: Windows expects this function to return its error, not set the global one
+                desc.read(
+                    &desc,
+                    this.machine.communicate(),
+                    buf,
+                    n as usize,
+                    &io_status_information,
+                    this,
+                )?;
+                let read = this.read_scalar(&io_status_information)?.to_i64()?;
+                read != -1
             }
             _ => this.invalid_handle("NtReadFile")?,
         };
 
-        // We have to put the result into io_status_block.
-        if let Some(n) = read {
-            let io_status_information =
-                this.project_field_named(&io_status_block, "Information")?;
-            this.write_scalar(Scalar::from_target_usize(n.into(), this), &io_status_information)?;
-        }
-
         // Return whether this was a success. >= 0 is success.
         // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
-        interp_ok(Scalar::from_u32(if read.is_some() { 0 } else { 0xC0000185u32 }))
+        interp_ok(Scalar::from_u32(if read { 0 } else { 0xC0000185u32 }))
     }
 
     fn SetFilePointerEx(
