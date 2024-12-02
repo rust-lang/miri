@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
 use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
@@ -152,7 +153,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let file_name =
             String::from_utf16_lossy(&this.read_wide_str(this.read_pointer(file_name)?)?);
-        let file_name = Path::new(&file_name);
+        let file_name = local_path(&file_name);
         let desired_access = this.read_scalar(desired_access)?.to_u32()?;
         let share_mode = this.read_scalar(share_mode)?.to_u32()?;
         let security_attributes = this.read_pointer(security_attributes)?;
@@ -389,4 +390,14 @@ fn write_filetime_field<'tcx>(
         &[("dwLowDateTime", low.into()), ("dwHighDateTime", high.into())],
         &cx.project_field_named(val, name)?,
     )
+}
+
+fn local_path(path: &str) -> Cow<'_, Path> {
+    if cfg!(windows) {
+        Cow::Borrowed(path.as_ref())
+    } else {
+        let stripped = if path.starts_with(r"\\?\") { &path[3..] } else { path };
+        let path = PathBuf::from(stripped.replace("\\", "/"));
+        Cow::Owned(path)
+    }
 }
