@@ -241,6 +241,33 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
                 this.write_scalar(result, dest)?;
             }
+            "CreateFileW" => {
+                let [
+                    file_name,
+                    desired_access,
+                    share_mode,
+                    security_attributes,
+                    creation_disposition,
+                    flags_and_attributes,
+                    template_file,
+                ] = this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let handle = this.CreateFileW(
+                    file_name,
+                    desired_access,
+                    share_mode,
+                    security_attributes,
+                    creation_disposition,
+                    flags_and_attributes,
+                    template_file,
+                )?;
+                this.write_scalar(handle.to_scalar(this), dest)?;
+            }
+            "GetFileInformationByHandle" => {
+                let [handle, info] =
+                    this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let res = this.GetFileInformationByHandle(handle, info)?;
+                this.write_scalar(res, dest)?;
+            }
 
             // Allocation
             "HeapAlloc" => {
