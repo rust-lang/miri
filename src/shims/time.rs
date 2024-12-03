@@ -1,10 +1,13 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt::Write;
 use std::str::FromStr;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Datelike, Offset, Timelike, Utc};
 use chrono_tz::Tz;
+use rustc_middle::ty::Ty;
+use rustc_middle::ty::layout::LayoutOf;
 
 use crate::*;
 
@@ -180,6 +183,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if !matches!(&*this.tcx.sess.target.os, "solaris" | "illumos") {
             // tm_zone represents the timezone value in the form of: +0730, +08, -0730 or -08.
             // This may not be consistent with libc::localtime_r's result.
+            const TZ_MAX_LEN: u64 = 6; // 5 chars max + null terminator
+            static TIMEZONE_PTR: OnceLock<Pointer> = OnceLock::new();
+
             let offset_in_seconds = dt.offset().fix().local_minus_utc();
             let tm_gmtoff = offset_in_seconds;
             let mut tm_zone = String::new();
@@ -195,12 +201,23 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 write!(tm_zone, "{:02}", offset_min).unwrap();
             }
 
-            // FIXME: String de-duplication is needed so that we only allocate this string only once
-            // even when there are multiple calls to this function.
-            let tm_zone_ptr = this
-                .alloc_os_str_as_c_str(&OsString::from(tm_zone), MiriMemoryKind::Machine.into())?;
+            // Ensure string deduplication by allocating the buffer only once,
+            // even if the function is called multiple times.
+            let tm_zone_ptr = TIMEZONE_PTR.get_or_init(|| {
+                let arg_type = Ty::new_array(this.tcx.tcx, this.tcx.types.u8, TZ_MAX_LEN);
+                let arg_place = this
+                    .allocate(this.layout_of(arg_type).unwrap(), MiriMemoryKind::Machine.into())
+                    .expect("timezone buffer allocation failed");
+                arg_place.ptr()
+            });
 
-            this.write_pointer(tm_zone_ptr, &this.project_field_named(&result, "tm_zone")?)?;
+            // Write the `tm_zone` string into the allocated buffer.
+            let (written, _) =
+                this.write_os_str_to_c_str(&OsString::from(tm_zone), *tm_zone_ptr, TZ_MAX_LEN)?;
+            assert!(written);
+
+            // Write the timezone pointer and offset into the result structure.
+            this.write_pointer(*tm_zone_ptr, &this.project_field_named(&result, "tm_zone")?)?;
             this.write_int_fields_named(&[("tm_gmtoff", tm_gmtoff.into())], &result)?;
         }
         interp_ok(result.ptr())
