@@ -8,7 +8,11 @@ fn main() {
     test_localtime_r_gmt();
     test_localtime_r_pst();
     test_localtime_r_epoch();
-    test_localtime_r_future();
+    // Architecture-specific tests
+    #[cfg(target_pointer_width = "32")]
+    test_localtime_r_future_32b();
+    #[cfg(target_pointer_width = "64")]
+    test_localtime_r_future_64b();
 }
 
 /// Tests whether clock support exists at all
@@ -192,10 +196,14 @@ fn test_localtime_r_epoch() {
 }
 
 // Future date test (testing large values)
-fn test_localtime_r_future() {
+#[cfg(target_pointer_width = "64")]
+fn test_localtime_r_future_64b() {
     let key = "TZ";
     env::set_var(key, "GMT");
-    const TIME_SINCE_EPOCH: libc::time_t = 2524608000; // 2050-01-01 00:00:00
+
+    // Using 2050-01-01 00:00:00 for 64-bit systems
+    // value that's safe for 64-bit time_t
+    const TIME_SINCE_EPOCH: libc::time_t = 2524608000;
     let custom_time_ptr = &TIME_SINCE_EPOCH;
     let mut tm = create_empty_tm();
 
@@ -206,8 +214,49 @@ fn test_localtime_r_future() {
     assert_eq!(tm.tm_hour, 0);
     assert_eq!(tm.tm_mday, 1);
     assert_eq!(tm.tm_mon, 0);
-    assert_eq!(tm.tm_year, 150);
+    assert_eq!(tm.tm_year, 150); // 2050 - 1900
     assert_eq!(tm.tm_wday, 6); // Saturday
+    assert_eq!(tm.tm_yday, 0);
+    assert_eq!(tm.tm_isdst, -1);
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "android"
+    ))]
+    {
+        assert_eq!(tm.tm_gmtoff, 0);
+        unsafe {
+            assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "+00");
+        }
+    }
+
+    assert!(ptr::eq(res, &mut tm));
+    env::remove_var(key);
+}
+
+#[cfg(target_pointer_width = "32")]
+fn test_localtime_r_future_32b() {
+    let key = "TZ";
+    env::set_var(key, "GMT");
+
+    // Using 2030-01-01 00:00:00 for 32-bit systems
+    // Safe value within i32 range
+    const TIME_SINCE_EPOCH: libc::time_t = 1893456000;
+    let custom_time_ptr = &TIME_SINCE_EPOCH;
+    let mut tm = create_empty_tm();
+
+    let res = unsafe { libc::localtime_r(custom_time_ptr, &mut tm) };
+
+    // Verify 2030-01-01 00:00:00
+    assert_eq!(tm.tm_sec, 0);
+    assert_eq!(tm.tm_min, 0);
+    assert_eq!(tm.tm_hour, 0);
+    assert_eq!(tm.tm_mday, 1);
+    assert_eq!(tm.tm_mon, 0);
+    assert_eq!(tm.tm_year, 130); // 2030 - 1900
+    assert_eq!(tm.tm_wday, 2); // Tuesday
     assert_eq!(tm.tm_yday, 0);
     assert_eq!(tm.tm_isdst, -1);
 
