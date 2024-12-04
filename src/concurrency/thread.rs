@@ -161,7 +161,6 @@ pub enum BlockReason {
     Eventfd,
     /// Blocked on unnamed_socket.
     UnnamedSocket,
-
 }
 
 /// The state of a thread.

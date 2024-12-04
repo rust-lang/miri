@@ -317,7 +317,7 @@ impl UnixFileDescription for AnonSocket {
 
     fn read<'tcx>(
         &self,
-        _self_ref: &FileDescriptionRef,
+        self_ref: &FileDescriptionRef,
         _communicate_allowed: bool,
         ptr: Pointer,
         len: usize,
@@ -352,28 +352,30 @@ impl UnixFileDescription for AnonSocket {
                 } else {
                     // TODO: move this to helper
                     // Blocking socketpair with writer and empty buffer.
-                    let peer_fd = self.peer_fd().upgrade().unwrap();
-                    bytes = bytes.clone();
+                    let peer_fd = self.peer_fd().clone();
+                    let dest = dest.clone();
+                    let weak_self_ref = self_ref.downgrade();
                     ecx.block_thread(
                         BlockReason::UnnamedSocket,
                         None,
                         callback!(
-                    @capture<'tcx> {
-                        self_ref: FileDescriptionRef,
-                        peer_fd: Option<FileDescriptionRef>,
-                        bytes: [u8],
-                        ptr: Pointer,
-                        dest: MPlaceTy<'tcx>,
-                    }
-                    @unblock = |this| {
-                        // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
-                        anonsocket_read(self_ref, peer_fd, &bytes, ptr, dest, ecx)
-                    }
-                ),
+                            @capture<'tcx> {
+                                weak_self_ref: WeakFileDescriptionRef,
+                                peer_fd: WeakFileDescriptionRef,
+                                bytes: Vec<u8>,
+                                ptr: Pointer,
+                                dest: MPlaceTy<'tcx>,
+                            }
+                            @unblock = |this| {
+                                // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
+                                anonsocket_read(weak_self_ref, peer_fd, &mut bytes[..], ptr, &dest, this)
+                            }
+                        ),
                     );
                 }
             }
         }
+        interp_ok(())
     }
 
     fn write<'tcx>(
@@ -455,13 +457,14 @@ fn anonsocket_write<'tcx>(
 
 /// Read from AnonSocket and return the number of bytes read.
 fn anonsocket_read<'tcx>(
-    self_ref: FileDescriptionRef,
-    peer_fd: Option<FileDescriptionRef>,
-    bytes: &[u8],
+    self_ref: WeakFileDescriptionRef,
+    peer_fd: WeakFileDescriptionRef,
+    bytes: &mut [u8],
     ptr: Pointer,
     dest: &MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
+    let self_ref = self_ref.upgrade().unwrap(); // TODO: handle this later
     let anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
     let Some(readbuf) = &anonsocket.readbuf else {
         // FIXME: This should return EBADF, but there's no nice way to do that as there's no
@@ -489,6 +492,7 @@ fn anonsocket_read<'tcx>(
     // don't know what that *certain number* is, we will provide a notification every time
     // a read is successful. This might result in our epoll emulation providing more
     // notifications than the real system.
+    let peer_fd = peer_fd.upgrade(); // TODO: handle unwrap
     if let Some(peer_fd) = peer_fd {
         ecx.check_and_update_readiness(&peer_fd)?;
     }
