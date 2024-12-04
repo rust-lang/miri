@@ -153,8 +153,32 @@ impl LocationState {
     ) -> ContinueTraversal {
         if rel_pos.is_foreign() {
             let happening_now = IdempotentForeignAccess::from_foreign(access_kind);
-            let new_access_noop =
+            let mut new_access_noop =
                 self.idempotent_foreign_access.can_skip_foreign_access(happening_now);
+            if self.permission.is_disabled() {
+                // A foreign access to a `Disabled` tag will have almost no observable effect.
+                // It's a theorem that `Disabled` node have no protected initialized children,
+                // and so this foreign access will never trigger any protector.
+                // Further, the children will never be able to read or write again, since they
+                // have a `Disabled` parents. Even further, all children of `Disabled` are one
+                // of `ReservedIM`, `Disabled`, or a not-yet-accessed "lazy" permission thing.
+                // The two former are already invariant under all foreign accesses, and for
+                // the latter it does not really matter, since they can not be used/initialized
+                // due to having a protected parent. So this only affects diagnostics, but the
+                // blocking write will still be identified directly, just at a different tag.
+                new_access_noop = true;
+            }
+            if self.permission.is_frozen() && access_kind == AccessKind::Read {
+                // A foreign read to a `Frozen` tag will have almost no observable effect.
+                // It's a theorem that `Frozen` nodes have no active children, so all children
+                // already survive foreign reads. Foreign reads in general have almost no
+                // effect, the only further thing they could do is make protected `Reserved`
+                // nodes become conflicted, i.e. make them reject child writes for the further
+                // duration of their protector. But such a child write is already rejected
+                // because this node is frozen. So this only affects diagnostics, but the
+                // blocking read will still be identified directly, just at a different tag.
+                new_access_noop = true;
+            }
             if new_access_noop {
                 // Abort traversal if the new access is indeed guaranteed
                 // to be noop.
