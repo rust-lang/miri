@@ -1,13 +1,12 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt::Write;
 use std::str::FromStr;
-use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Datelike, Offset, Timelike, Utc};
 use chrono_tz::Tz;
-use rustc_middle::ty::Ty;
-use rustc_middle::ty::layout::LayoutOf;
+use rustc_abi::Align;
+use rustc_ast::ast::Mutability;
 
 use crate::*;
 
