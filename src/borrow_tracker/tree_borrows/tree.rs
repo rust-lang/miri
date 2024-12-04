@@ -159,12 +159,11 @@ impl LocationState {
                 // A foreign access to a `Disabled` tag will have almost no observable effect.
                 // It's a theorem that `Disabled` node have no protected initialized children,
                 // and so this foreign access will never trigger any protector.
+                // (Intuition: You're either protected initialized, and thus can't become Disabled,
+                // or you're already Disabled protected, but not initialized, and then can't become
+                // initialized since that requires a child access, which Disabled blocks.)
                 // Further, the children will never be able to read or write again, since they
-                // have a `Disabled` parents. Even further, all children of `Disabled` are one
-                // of `ReservedIM`, `Disabled`, or a not-yet-accessed "lazy" permission thing.
-                // The two former are already invariant under all foreign accesses, and for
-                // the latter it does not really matter, since they can not be used/initialized
-                // due to having a protected parent. So this only affects diagnostics, but the
+                // have a `Disabled` parents. So this only affects diagnostics, but the
                 // blocking write will still be identified directly, just at a different tag.
                 new_access_noop = true;
             }
