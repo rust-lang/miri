@@ -7,13 +7,8 @@ use rustc_span::Symbol;
 
 use self::shims::windows::handle::{Handle, PseudoHandle};
 use crate::shims::os_str::bytes_to_os_str;
-use crate::shims::windows::handle::HandleError;
 use crate::shims::windows::*;
 use crate::*;
-
-// The NTSTATUS STATUS_INVALID_HANDLE (0xC0000008) encoded as a HRESULT by setting the N bit.
-// (https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a)
-const STATUS_INVALID_HANDLE: u32 = 0xD0000008;
 
 pub fn is_dyn_sym(name: &str) -> bool {
     // std does dynamic detection for these symbols
@@ -141,6 +136,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.GetUserProfileDirectoryW(token, buf, size)?;
                 this.write_scalar(result, dest)?;
             }
+            "GetCurrentProcess" => {
+                let [] =
+                    this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                this.write_scalar(
+                    Handle::Pseudo(PseudoHandle::CurrentProcess).to_scalar(this),
+                    dest,
+                )?;
+            }
             "GetCurrentProcessId" => {
                 let [] =
                     this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
@@ -150,71 +153,54 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // File related shims
             "NtWriteFile" => {
-                if !this.frame_in_std() {
-                    throw_unsup_format!(
-                        "`NtWriteFile` support is crude and just enough for stdout to work"
-                    );
-                }
-
                 let [
                     handle,
-                    _event,
-                    _apc_routine,
-                    _apc_context,
+                    event,
+                    apc_routine,
+                    apc_context,
                     io_status_block,
                     buf,
                     n,
                     byte_offset,
-                    _key,
+                    key,
                 ] = this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
-                let handle = this.read_target_isize(handle)?;
-                let buf = this.read_pointer(buf)?;
-                let n = this.read_scalar(n)?.to_u32()?;
-                let byte_offset = this.read_target_usize(byte_offset)?; // is actually a pointer
-                let io_status_block = this
-                    .deref_pointer_as(io_status_block, this.windows_ty_layout("IO_STATUS_BLOCK"))?;
-
-                if byte_offset != 0 {
-                    throw_unsup_format!(
-                        "`NtWriteFile` `ByteOffset` parameter is non-null, which is unsupported"
-                    );
-                }
-
-                let written = if handle == -11 || handle == -12 {
-                    // stdout/stderr
-                    use io::Write;
-
-                    let buf_cont =
-                        this.read_bytes_ptr_strip_provenance(buf, Size::from_bytes(u64::from(n)))?;
-                    let res = if this.machine.mute_stdout_stderr {
-                        Ok(buf_cont.len())
-                    } else if handle == -11 {
-                        io::stdout().write(buf_cont)
-                    } else {
-                        io::stderr().write(buf_cont)
-                    };
-                    // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
-                    res.ok().map(|n| u32::try_from(n).unwrap())
-                } else {
-                    throw_unsup_format!(
-                        "on Windows, writing to anything except stdout/stderr is not supported"
-                    )
-                };
-                // We have to put the result into io_status_block.
-                if let Some(n) = written {
-                    let io_status_information =
-                        this.project_field_named(&io_status_block, "Information")?;
-                    this.write_scalar(
-                        Scalar::from_target_usize(n.into(), this),
-                        &io_status_information,
-                    )?;
-                }
-                // Return whether this was a success. >= 0 is success.
-                // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
-                this.write_scalar(
-                    Scalar::from_u32(if written.is_some() { 0 } else { 0xC0000185u32 }),
-                    dest,
+                let res = this.NtWriteFile(
+                    handle,
+                    event,
+                    apc_routine,
+                    apc_context,
+                    io_status_block,
+                    buf,
+                    n,
+                    byte_offset,
+                    key,
                 )?;
+                this.write_scalar(res, dest)?;
+            }
+            "NtReadFile" => {
+                let [
+                    handle,
+                    event,
+                    apc_routine,
+                    apc_context,
+                    io_status_block,
+                    buf,
+                    n,
+                    byte_offset,
+                    key,
+                ] = this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let res = this.NtReadFile(
+                    handle,
+                    event,
+                    apc_routine,
+                    apc_context,
+                    io_status_block,
+                    buf,
+                    n,
+                    byte_offset,
+                    key,
+                )?;
+                this.write_scalar(res, dest)?;
             }
             "GetFullPathNameW" => {
                 let [filename, size, buffer, filepart] =
@@ -245,6 +231,46 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                 };
                 this.write_scalar(result, dest)?;
+            }
+            "CreateFileW" => {
+                let [
+                    file_name,
+                    desired_access,
+                    share_mode,
+                    security_attributes,
+                    creation_disposition,
+                    flags_and_attributes,
+                    template_file,
+                ] = this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let handle = this.CreateFileW(
+                    file_name,
+                    desired_access,
+                    share_mode,
+                    security_attributes,
+                    creation_disposition,
+                    flags_and_attributes,
+                    template_file,
+                )?;
+                this.write_scalar(handle.to_scalar(this), dest)?;
+            }
+            "GetFileInformationByHandle" => {
+                let [handle, info] =
+                    this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let res = this.GetFileInformationByHandle(handle, info)?;
+                this.write_scalar(res, dest)?;
+            }
+            "DeleteFileW" => {
+                let [file_name] =
+                    this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let res = this.DeleteFileW(file_name)?;
+                this.write_scalar(res, dest)?;
+            }
+            "SetFilePointerEx" => {
+                let [file, distance_to_move, new_file_pointer, move_method] =
+                    this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let res =
+                    this.SetFilePointerEx(file, distance_to_move, new_file_pointer, move_method)?;
+                this.write_scalar(res, dest)?;
             }
 
             // Allocation
@@ -520,53 +546,38 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [handle, name] =
                     this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
 
-                let handle = this.read_scalar(handle)?;
+                let handle = this.read_handle(handle)?;
                 let name = this.read_wide_str(this.read_pointer(name)?)?;
 
-                let thread = match Handle::try_from_scalar(handle, this)? {
-                    Ok(Handle::Thread(thread)) => Ok(thread),
-                    Ok(Handle::Pseudo(PseudoHandle::CurrentThread)) => Ok(this.active_thread()),
-                    Ok(_) | Err(HandleError::InvalidHandle) =>
-                        this.invalid_handle("SetThreadDescription")?,
-                    Err(HandleError::ThreadNotFound(e)) => Err(e),
+                let thread = match handle {
+                    Handle::Thread(thread) => thread,
+                    Handle::Pseudo(PseudoHandle::CurrentThread) => this.active_thread(),
+                    _ => this.invalid_handle("SetThreadDescription")?,
                 };
-                let res = match thread {
-                    Ok(thread) => {
-                        // FIXME: use non-lossy conversion
-                        this.set_thread_name(thread, String::from_utf16_lossy(&name).into_bytes());
-                        Scalar::from_u32(0)
-                    }
-                    Err(_) => Scalar::from_u32(STATUS_INVALID_HANDLE),
-                };
-
-                this.write_scalar(res, dest)?;
+                // FIXME: use non-lossy conversion
+                this.set_thread_name(thread, String::from_utf16_lossy(&name).into_bytes());
+                this.write_scalar(Scalar::from_u32(0), dest)?;
             }
             "GetThreadDescription" => {
                 let [handle, name_ptr] =
                     this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
 
-                let handle = this.read_scalar(handle)?;
+                let handle = this.read_handle(handle)?;
                 let name_ptr = this.deref_pointer(name_ptr)?; // the pointer where we should store the ptr to the name
 
-                let thread = match Handle::try_from_scalar(handle, this)? {
-                    Ok(Handle::Thread(thread)) => Ok(thread),
-                    Ok(Handle::Pseudo(PseudoHandle::CurrentThread)) => Ok(this.active_thread()),
-                    Ok(_) | Err(HandleError::InvalidHandle) =>
-                        this.invalid_handle("GetThreadDescription")?,
-                    Err(HandleError::ThreadNotFound(e)) => Err(e),
+                let thread = match handle {
+                    Handle::Thread(thread) => thread,
+                    Handle::Pseudo(PseudoHandle::CurrentThread) => this.active_thread(),
+                    _ => this.invalid_handle("GetThreadDescription")?,
                 };
-                let (name, res) = match thread {
-                    Ok(thread) => {
-                        // Looks like the default thread name is empty.
-                        let name = this.get_thread_name(thread).unwrap_or(b"").to_owned();
-                        let name = this.alloc_os_str_as_wide_str(
-                            bytes_to_os_str(&name)?,
-                            MiriMemoryKind::WinLocal.into(),
-                        )?;
-                        (Scalar::from_maybe_pointer(name, this), Scalar::from_u32(0))
-                    }
-                    Err(_) => (Scalar::null_ptr(this), Scalar::from_u32(STATUS_INVALID_HANDLE)),
-                };
+                // Looks like the default thread name is empty.
+                let name = this.get_thread_name(thread).unwrap_or(b"").to_owned();
+                let name = this.alloc_os_str_as_wide_str(
+                    bytes_to_os_str(&name)?,
+                    MiriMemoryKind::WinLocal.into(),
+                )?;
+                let name = Scalar::from_maybe_pointer(name, this);
+                let res = Scalar::from_u32(0);
 
                 this.write_scalar(name, &name_ptr)?;
                 this.write_scalar(res, dest)?;
@@ -647,12 +658,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "GetStdHandle" => {
                 let [which] =
                     this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
-                let which = this.read_scalar(which)?.to_i32()?;
-                // We just make this the identity function, so we know later in `NtWriteFile` which
-                // one it is. This is very fake, but libtest needs it so we cannot make it a
-                // std-only shim.
-                // FIXME: this should return real HANDLEs when io support is added
-                this.write_scalar(Scalar::from_target_isize(which.into(), this), dest)?;
+                let res = this.GetStdHandle(which)?;
+                this.write_scalar(res, dest)?;
             }
             "CloseHandle" => {
                 let [handle] =
@@ -667,11 +674,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
                 this.check_no_isolation("`GetModuleFileNameW`")?;
 
-                let handle = this.read_target_usize(handle)?;
+                let handle = this.read_handle(handle)?;
                 let filename = this.read_pointer(filename)?;
                 let size = this.read_scalar(size)?.to_u32()?;
 
-                if handle != 0 {
+                if handle != Handle::Null {
                     throw_unsup_format!("`GetModuleFileNameW` only supports the NULL handle");
                 }
 

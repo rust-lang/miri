@@ -1,4 +1,5 @@
 use std::mem::variant_count;
+use std::panic::Location;
 
 use rustc_abi::HasDataLayout;
 
@@ -8,6 +9,10 @@ use crate::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PseudoHandle {
     CurrentThread,
+    CurrentProcess,
+    Stdin,
+    Stdout,
+    Stderr,
 }
 
 /// Miri representation of a Windows `HANDLE`
@@ -16,20 +21,34 @@ pub enum Handle {
     Null,
     Pseudo(PseudoHandle),
     Thread(ThreadId),
+    File(i32),
+    Invalid,
 }
 
 impl PseudoHandle {
     const CURRENT_THREAD_VALUE: u32 = 0;
+    const STDIN_VALUE: u32 = 1;
+    const STDOUT_VALUE: u32 = 2;
+    const STDERR_VALUE: u32 = 3;
+    const CURRENT_PROCESS_VALUE: u32 = 4;
 
     fn value(self) -> u32 {
         match self {
             Self::CurrentThread => Self::CURRENT_THREAD_VALUE,
+            Self::CurrentProcess => Self::CURRENT_PROCESS_VALUE,
+            Self::Stdin => Self::STDIN_VALUE,
+            Self::Stdout => Self::STDOUT_VALUE,
+            Self::Stderr => Self::STDERR_VALUE,
         }
     }
 
     fn from_value(value: u32) -> Option<Self> {
         match value {
             Self::CURRENT_THREAD_VALUE => Some(Self::CurrentThread),
+            Self::CURRENT_PROCESS_VALUE => Some(Self::CurrentProcess),
+            Self::STDIN_VALUE => Some(Self::Stdin),
+            Self::STDOUT_VALUE => Some(Self::Stdout),
+            Self::STDERR_VALUE => Some(Self::Stderr),
             _ => None,
         }
     }
@@ -47,12 +66,16 @@ impl Handle {
     const NULL_DISCRIMINANT: u32 = 0;
     const PSEUDO_DISCRIMINANT: u32 = 1;
     const THREAD_DISCRIMINANT: u32 = 2;
+    const FILE_DISCRIMINANT: u32 = 3;
+    const INVALID_DISCRIMINANT: u32 = 7;
 
     fn discriminant(self) -> u32 {
         match self {
             Self::Null => Self::NULL_DISCRIMINANT,
             Self::Pseudo(_) => Self::PSEUDO_DISCRIMINANT,
             Self::Thread(_) => Self::THREAD_DISCRIMINANT,
+            Self::File(_) => Self::FILE_DISCRIMINANT,
+            Self::Invalid => Self::INVALID_DISCRIMINANT,
         }
     }
 
@@ -61,11 +84,16 @@ impl Handle {
             Self::Null => 0,
             Self::Pseudo(pseudo_handle) => pseudo_handle.value(),
             Self::Thread(thread) => thread.to_u32(),
+            #[expect(clippy::cast_sign_loss)]
+            Self::File(fd) => fd as u32,
+            Self::Invalid => 0x1FFFFFFF,
         }
     }
 
     fn packed_disc_size() -> u32 {
         // ceil(log2(x)) is how many bits it takes to store x numbers
+        // We ensure that INVALID_HANDLE_VALUE (0xFFFFFFFF) decodes to Handle::Invalid
+        // see https://devblogs.microsoft.com/oldnewthing/20230914-00/?p=108766
         let variant_count = variant_count::<Self>();
 
         // however, std's ilog2 is floor(log2(x))
@@ -93,7 +121,7 @@ impl Handle {
         assert!(discriminant < 2u32.pow(disc_size));
 
         // make sure the data fits into `data_size` bits
-        assert!(data < 2u32.pow(data_size));
+        assert!(data <= 2u32.pow(data_size));
 
         // packs the data into the lower `data_size` bits
         // and packs the discriminant right above the data
@@ -105,6 +133,9 @@ impl Handle {
             Self::NULL_DISCRIMINANT if data == 0 => Some(Self::Null),
             Self::PSEUDO_DISCRIMINANT => Some(Self::Pseudo(PseudoHandle::from_value(data)?)),
             Self::THREAD_DISCRIMINANT => Some(Self::Thread(ThreadId::new_unchecked(data))),
+            #[expect(clippy::cast_possible_wrap)]
+            Self::FILE_DISCRIMINANT => Some(Self::File(data as i32)),
+            Self::INVALID_DISCRIMINANT => Some(Self::Invalid),
             _ => None,
         }
     }
@@ -171,21 +202,73 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 
 #[allow(non_snake_case)]
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    #[track_caller]
+    fn read_handle(&self, handle: &OpTy<'tcx>) -> InterpResult<'tcx, Handle> {
+        let this = self.eval_context_ref();
+        let handle = this.read_scalar(handle)?;
+        match Handle::try_from_scalar(handle, this)? {
+            Ok(handle) => interp_ok(handle),
+            Err(HandleError::InvalidHandle) =>
+                throw_machine_stop!(TerminationInfo::Abort(format!(
+                    "invalid handle {} at {}",
+                    handle.to_target_isize(this)?,
+                    Location::caller(),
+                ))),
+            Err(HandleError::ThreadNotFound(_)) =>
+                throw_machine_stop!(TerminationInfo::Abort(format!(
+                    "invalid thread ID: {}",
+                    Location::caller()
+                ))),
+        }
+    }
+
     fn invalid_handle(&mut self, function_name: &str) -> InterpResult<'tcx, !> {
         throw_machine_stop!(TerminationInfo::Abort(format!(
             "invalid handle passed to `{function_name}`"
         )))
     }
 
+    fn GetStdHandle(&mut self, which: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        let which = this.read_scalar(which)?.to_i32()?;
+
+        let stdin = this.eval_windows("c", "STD_INPUT_HANDLE").to_i32()?;
+        let stdout = this.eval_windows("c", "STD_OUTPUT_HANDLE").to_i32()?;
+        let stderr = this.eval_windows("c", "STD_ERROR_HANDLE").to_i32()?;
+
+        let handle = if which == stdin {
+            Handle::Pseudo(PseudoHandle::Stdin)
+        } else if which == stdout {
+            Handle::Pseudo(PseudoHandle::Stdout)
+        } else if which == stderr {
+            Handle::Pseudo(PseudoHandle::Stderr)
+        } else {
+            throw_unsup_format!("Invalid argument to `GetStdHandle`: {which}")
+        };
+        interp_ok(handle.to_scalar(this))
+    }
+
     fn CloseHandle(&mut self, handle_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let handle = this.read_scalar(handle_op)?;
-        let ret = match Handle::try_from_scalar(handle, this)? {
-            Ok(Handle::Thread(thread)) => {
+        let handle = this.read_handle(handle_op)?;
+        let ret = match handle {
+            Handle::Thread(thread) => {
                 this.detach_thread(thread, /*allow_terminated_joined*/ true)?;
                 this.eval_windows("c", "TRUE")
             }
+            Handle::File(fd) =>
+                if let Some(file) = this.machine.fds.get(fd) {
+                    let err = file.close(this.machine.communicate(), this)?;
+                    if let Err(e) = err {
+                        this.set_last_error(e)?;
+                        this.eval_windows("c", "FALSE")
+                    } else {
+                        this.eval_windows("c", "TRUE")
+                    }
+                } else {
+                    this.invalid_handle("CloseHandle")?
+                },
             _ => this.invalid_handle("CloseHandle")?,
         };
 
