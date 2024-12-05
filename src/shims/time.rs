@@ -198,7 +198,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 write!(tm_zone, "{:02}", offset_min).unwrap();
             }
 
-            // Add null terminator for C string compatibility
+            // Add null terminator for C string compatibility.
             tm_zone.push('\0');
 
             // Deduplicate and allocate the string.
@@ -208,9 +208,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 MiriMemoryKind::Machine.into(),
                 Mutability::Not,
             )?;
-            
+
             // Write the timezone pointer and offset into the result structure.
-            this.write_pointer(*tm_zone_ptr, &this.project_field_named(&result, "tm_zone")?)?;
+            this.write_pointer(tm_zone_ptr, &this.project_field_named(&result, "tm_zone")?)?;
             this.write_int_fields_named(&[("tm_gmtoff", tm_gmtoff.into())], &result)?;
         }
         interp_ok(result.ptr())

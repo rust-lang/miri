@@ -8,7 +8,7 @@ fn main() {
     test_localtime_r_gmt();
     test_localtime_r_pst();
     test_localtime_r_epoch();
-    // Architecture-specific tests
+    // Architecture-specific tests.
     #[cfg(target_pointer_width = "32")]
     test_localtime_r_future_32b();
     #[cfg(target_pointer_width = "64")]
@@ -53,7 +53,7 @@ fn test_posix_gettimeofday() {
     assert_eq!(is_error, -1);
 }
 
-// Helper function to create an empty tm struct
+// Helper function to create an empty tm struct.
 fn create_empty_tm() -> libc::tm {
     libc::tm {
         tm_sec: 0,
@@ -121,7 +121,7 @@ fn test_localtime_r_gmt() {
     env::remove_var(key);
 }
 
-// PST timezone test (testing different timezone handling)
+// PST timezone test (testing different timezone handling).
 fn test_localtime_r_pst() {
     let key = "TZ";
     env::set_var(key, "PST8PDT");
@@ -158,7 +158,7 @@ fn test_localtime_r_pst() {
     env::remove_var(key);
 }
 
-// Unix epoch test (edge case testing)
+// Unix epoch test (edge case testing).
 fn test_localtime_r_epoch() {
     let key = "TZ";
     env::set_var(key, "GMT");
@@ -195,7 +195,7 @@ fn test_localtime_r_epoch() {
     env::remove_var(key);
 }
 
-// Future date test (testing large values)
+// Future date test (testing large values).
 #[cfg(target_pointer_width = "64")]
 fn test_localtime_r_future_64b() {
     let key = "TZ";
