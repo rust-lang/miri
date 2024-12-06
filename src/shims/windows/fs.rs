@@ -315,7 +315,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.assert_target_os("windows", "GetFileInformationByHandle");
         this.check_no_isolation("`GetFileInformationByHandle`")?;
 
-        let file = this.read_handle(file)?;
+        let file = this.read_handle(file, "GetFileInformationByHandle")?;
         let file_information = this.deref_pointer_as(
             file_information,
             this.windows_ty_layout("BY_HANDLE_FILE_INFORMATION"),

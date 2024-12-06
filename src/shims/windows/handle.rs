@@ -1,5 +1,4 @@
 use std::mem::variant_count;
-use std::panic::Location;
 
 use rustc_abi::HasDataLayout;
 
@@ -201,21 +200,20 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 #[allow(non_snake_case)]
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     #[track_caller]
-    fn read_handle(&self, handle: &OpTy<'tcx>) -> InterpResult<'tcx, Handle> {
+    fn read_handle(&self, handle: &OpTy<'tcx>, function_name: &str) -> InterpResult<'tcx, Handle> {
         let this = self.eval_context_ref();
         let handle = this.read_scalar(handle)?;
         match Handle::try_from_scalar(handle, this)? {
             Ok(handle) => interp_ok(handle),
             Err(HandleError::InvalidHandle) =>
                 throw_machine_stop!(TerminationInfo::Abort(format!(
-                    "invalid handle {} at {}",
+                    "invalid handle {} passed to {function_name}",
                     handle.to_target_isize(this)?,
-                    Location::caller(),
                 ))),
             Err(HandleError::ThreadNotFound(_)) =>
                 throw_machine_stop!(TerminationInfo::Abort(format!(
-                    "invalid thread ID: {}",
-                    Location::caller()
+                    "invalid thread ID {} passed to {function_name}",
+                    handle.to_target_isize(this)?,
                 ))),
         }
     }
@@ -229,7 +227,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn CloseHandle(&mut self, handle_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let handle = this.read_handle(handle_op)?;
+        let handle = this.read_handle(handle_op, "CloseHandle")?;
         let ret = match handle {
             Handle::Thread(thread) => {
                 this.detach_thread(thread, /*allow_terminated_joined*/ true)?;
