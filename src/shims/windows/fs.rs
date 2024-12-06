@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
-use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
+use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -31,13 +31,16 @@ impl FileDescription for FileHandle {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
         let mut bytes = vec![0; len];
         let result = (&mut &self.file).read(&mut bytes);
         match result {
             Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.write_int(0, dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -49,13 +52,16 @@ impl FileDescription for FileHandle {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
         let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
         let result = (&mut &self.file).write(bytes);
         match result {
             Ok(write_size) => ecx.return_write_success(write_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.write_int(0, dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -449,14 +455,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     io::Write::write(&mut io::stderr(), buf_cont)
                 };
                 // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
-                if let Ok(n) = res {
-                    this.write_scalar(
-                        Scalar::from_target_usize(n.try_into().unwrap(), this),
-                        &io_status_information,
-                    )?;
-                    true
-                } else {
-                    false
+                match res {
+                    Ok(n) => {
+                        this.write_scalar(
+                            Scalar::from_target_usize(n.try_into().unwrap(), this),
+                            &io_status_information,
+                        )?;
+                        Ok(())
+                    }
+                    Err(e) => Err(e.kind()),
                 }
             }
             Handle::File(fd) => {
@@ -465,7 +472,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
 
                 // TODO: Windows expects this function to return its error, not set the global one
-                desc.write(
+                let err = desc.write(
                     &desc,
                     this.machine.communicate(),
                     buf,
@@ -473,15 +480,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &io_status_information,
                     this,
                 )?;
-                let written = this.read_scalar(&io_status_information)?.to_i64()?;
-                written != -1
+                err
             }
             _ => this.invalid_handle("NtWriteFile")?,
         };
 
         // Return whether this was a success. >= 0 is success.
-        // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
-        interp_ok(Scalar::from_u32(if written { 0 } else { 0xC0000185u32 }))
+        interp_ok(Scalar::from_u32(match written {
+            Ok(_) => 0,
+            Err(e) => error_kind_to_ntstatus(e),
+        }))
     }
 
     fn NtReadFile(
@@ -546,14 +554,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let res = io::Read::read(&mut io::stdin(), &mut buf_cont);
                 this.write_bytes_ptr(buf, buf_cont)?;
                 // We write at most `n` bytes, which is a `u32`, so we cannot have written more than that.
-                if let Ok(n) = res {
-                    this.write_scalar(
-                        Scalar::from_target_usize(n.try_into().unwrap(), this),
-                        &io_status_information,
-                    )?;
-                    true
-                } else {
-                    false
+                match res {
+                    Ok(n) => {
+                        this.write_scalar(
+                            Scalar::from_target_usize(n.try_into().unwrap(), this),
+                            &io_status_information,
+                        )?;
+                        Ok(())
+                    }
+                    Err(e) => Err(e.kind()),
                 }
             }
             Handle::File(fd) => {
@@ -562,7 +571,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
 
                 // TODO: Windows expects this function to return its error, not set the global one
-                desc.read(
+                let err = desc.read(
                     &desc,
                     this.machine.communicate(),
                     buf,
@@ -570,15 +579,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &io_status_information,
                     this,
                 )?;
-                let read = this.read_scalar(&io_status_information)?.to_i64()?;
-                read != -1
+                err
             }
             _ => this.invalid_handle("NtReadFile")?,
         };
 
         // Return whether this was a success. >= 0 is success.
-        // For the error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
-        interp_ok(Scalar::from_u32(if read { 0 } else { 0xC0000185u32 }))
+        interp_ok(Scalar::from_u32(match read {
+            Ok(_) => 0,
+            Err(e) => error_kind_to_ntstatus(e),
+        }))
     }
 
     fn SetFilePointerEx(
@@ -664,12 +674,15 @@ fn write_filetime_field<'tcx>(
     )
 }
 
-fn local_path(path: &str) -> Cow<'_, Path> {
-    if cfg!(windows) {
-        Cow::Borrowed(path.as_ref())
-    } else {
-        let stripped = if path.starts_with(r"\\?\") { &path[3..] } else { path };
-        let path = PathBuf::from(stripped.replace("\\", "/"));
-        Cow::Owned(path)
+fn error_kind_to_ntstatus(e: ErrorKind) -> u32 {
+    match e {
+        // STATUS_MEDIA_WRITE_PROTECTED
+        ErrorKind::ReadOnlyFilesystem => 0xC00000A2,
+        // STATUS_FILE_INVALID
+        ErrorKind::InvalidInput => 0xC0000098,
+        // STATUS_DISK_FULL
+        ErrorKind::FilesystemQuotaExceeded => 0xC000007F,
+        // For the default error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
+        _ => 0xC0000185,
     }
 }

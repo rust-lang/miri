@@ -38,13 +38,16 @@ impl FileDescription for FileHandle {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), ErrorKind>> {
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
         let mut bytes = vec![0; len];
         let result = (&mut &self.file).read(&mut bytes);
         match result {
             Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.set_last_error_and_return(e.kind(), dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -56,13 +59,16 @@ impl FileDescription for FileHandle {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
         let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
         let result = (&mut &self.file).write(bytes);
         match result {
             Ok(write_size) => ecx.return_write_success(write_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.set_last_error_and_return(e.kind(), dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -141,7 +147,7 @@ impl UnixFileDescription for FileHandle {
         };
         let result = f();
         match result {
-            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
+            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest).map(|_| ()),
             Err(e) => ecx.set_last_error_and_return(e, dest),
         }
     }
@@ -172,7 +178,7 @@ impl UnixFileDescription for FileHandle {
         };
         let result = f();
         match result {
-            Ok(write_size) => ecx.return_write_success(write_size, dest),
+            Ok(write_size) => ecx.return_write_success(write_size, dest).map(|_| ()),
             Err(e) => ecx.set_last_error_and_return(e, dest),
         }
     }

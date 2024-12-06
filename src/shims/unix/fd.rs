@@ -246,7 +246,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // `usize::MAX` because it is bounded by the host's `isize`.
 
         match offset {
-            None => fd.read(&fd, communicate, buf, count, dest, this)?,
+            None =>
+                match fd.read(&fd, communicate, buf, count, dest, this)? {
+                    Ok(_) => (),
+                    Err(e) => this.set_last_error(e)?,
+                },
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     return this.set_last_error_and_return(LibcError("EINVAL"), dest);
@@ -286,7 +290,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         match offset {
-            None => fd.write(&fd, communicate, buf, count, dest, this)?,
+            None =>
+                match fd.write(&fd, communicate, buf, count, dest, this)? {
+                    Ok(_) => (),
+                    Err(e) => this.set_last_error(e)?,
+                },
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     return this.set_last_error_and_return(LibcError("EINVAL"), dest);

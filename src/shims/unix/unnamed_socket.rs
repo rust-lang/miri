@@ -89,7 +89,7 @@ impl FileDescription for AnonSocket {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         let mut bytes = vec![0; len];
 
         // Always succeed on read size 0.
@@ -114,7 +114,7 @@ impl FileDescription for AnonSocket {
                     // EAGAIN or EWOULDBLOCK can be returned for socket,
                     // POSIX.1-2001 allows either error to be returned for this case.
                     // Since there is no ErrorKind for EAGAIN, WouldBlock is used.
-                    return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+                    return ecx.return_io_error(ErrorKind::WouldBlock, dest);
                 } else {
                     // Blocking socketpair with writer and empty buffer.
                     // FIXME: blocking is currently not supported
@@ -134,7 +134,7 @@ impl FileDescription for AnonSocket {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         // Always succeed on write size 0.
         // ("If count is zero and fd refers to a file other than a regular file, the results are not specified.")
         if len == 0 {
@@ -145,7 +145,7 @@ impl FileDescription for AnonSocket {
         let Some(peer_fd) = self.peer_fd().upgrade() else {
             // If the upgrade from Weak to Rc fails, it indicates that all read ends have been
             // closed.
-            return ecx.set_last_error_and_return(ErrorKind::BrokenPipe, dest);
+            return ecx.return_io_error(ErrorKind::BrokenPipe, dest);
         };
 
         let Some(writebuf) = &peer_fd.downcast::<AnonSocket>().unwrap().readbuf else {
@@ -158,7 +158,7 @@ impl FileDescription for AnonSocket {
         if available_space == 0 {
             if self.is_nonblock {
                 // Non-blocking socketpair with a full buffer.
-                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+                return ecx.return_io_error(ErrorKind::WouldBlock, dest);
             } else {
                 // Blocking socketpair with a full buffer.
                 throw_unsup_format!("socketpair/pipe/pipe2 write: blocking isn't supported yet");
@@ -180,7 +180,7 @@ fn anonsocket_write<'tcx>(
     len: usize,
     dest: &MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
-) -> InterpResult<'tcx> {
+) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
     let Some(writebuf) = &peer_fd.downcast::<AnonSocket>().unwrap().readbuf else {
         // FIXME: This should return EBADF, but there's no nice way to do that as there's no
         // corresponding ErrorKind variant.
@@ -215,7 +215,7 @@ fn anonsocket_read<'tcx>(
     ptr: Pointer,
     dest: &MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
-) -> InterpResult<'tcx> {
+) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
     let Some(readbuf) = &anonsocket.readbuf else {
         // FIXME: This should return EBADF, but there's no nice way to do that as there's no
         // corresponding ErrorKind variant.

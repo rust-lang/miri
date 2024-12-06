@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::io::{IsTerminal, Read, SeekFrom, Write};
+use std::io::{ErrorKind, IsTerminal, Read, SeekFrom, Write};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
 use std::{fs, io};
@@ -25,7 +25,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
         _len: usize,
         _dest: &MPlaceTy<'tcx>,
         _ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         throw_unsup_format!("cannot read from {}", self.name());
     }
 
@@ -40,7 +40,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
         _len: usize,
         _dest: &MPlaceTy<'tcx>,
         _ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         throw_unsup_format!("cannot write to {}", self.name());
     }
 
@@ -97,7 +97,7 @@ impl FileDescription for io::Stdin {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         let mut bytes = vec![0; len];
         if !communicate_allowed {
             // We want isolation mode to be deterministic, so we have to disallow all reads, even stdin.
@@ -106,7 +106,10 @@ impl FileDescription for io::Stdin {
         let result = Read::read(&mut { self }, &mut bytes);
         match result {
             Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.write_int(-1, dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -128,7 +131,7 @@ impl FileDescription for io::Stdout {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
         // We allow writing to stderr even with isolation enabled.
         let result = Write::write(&mut { self }, bytes);
@@ -140,7 +143,10 @@ impl FileDescription for io::Stdout {
         io::stdout().flush().unwrap();
         match result {
             Ok(write_size) => ecx.return_write_success(write_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.write_int(-1, dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -162,14 +168,17 @@ impl FileDescription for io::Stderr {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
         // We allow writing to stderr even with isolation enabled.
         // No need to flush, stderr is not buffered.
         let result = Write::write(&mut { self }, bytes);
         match result {
             Ok(write_size) => ecx.return_write_success(write_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+            Err(e) => {
+                ecx.write_int(-1, dest)?;
+                interp_ok(Err(e.kind()))
+            }
         }
     }
 
@@ -195,7 +204,7 @@ impl FileDescription for NullOutput {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         // We just don't write anything, but report to the user that we did.
         ecx.return_write_success(len, dest)
     }
@@ -384,7 +393,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         bytes: &[u8],
         actual_read_size: usize,
         dest: &MPlaceTy<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         let this = self.eval_context_mut();
         // If reading to `bytes` did not fail, we write those bytes to the buffer.
         // Crucially, if fewer than `bytes.len()` bytes were read, only write
@@ -393,7 +402,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // The actual read size is always less than what got originally requested so this cannot fail.
         this.write_int(u64::try_from(actual_read_size).unwrap(), dest)?;
-        interp_ok(())
+        interp_ok(Ok(()))
     }
 
     /// Helper to implement `FileDescription::write`:
@@ -402,10 +411,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         &mut self,
         actual_write_size: usize,
         dest: &MPlaceTy<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         let this = self.eval_context_mut();
         // The actual write size is always less than what got originally requested so this cannot fail.
         this.write_int(u64::try_from(actual_write_size).unwrap(), dest)?;
-        interp_ok(())
+        interp_ok(Ok(()))
+    }
+
+    fn return_io_error(
+        &mut self,
+        error: ErrorKind,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
+        let this = self.eval_context_mut();
+        this.set_last_error(error)?;
+        this.write_int(-1, dest)?;
+        interp_ok(Err(error))
     }
 }

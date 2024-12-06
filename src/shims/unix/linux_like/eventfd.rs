@@ -4,7 +4,9 @@ use std::io;
 use std::io::ErrorKind;
 
 use crate::concurrency::VClock;
-use crate::shims::files::{FileDescription, FileDescriptionRef, WeakFileDescriptionRef};
+use crate::shims::files::{
+    EvalContextExt as _, FileDescription, FileDescriptionRef, WeakFileDescriptionRef,
+};
 use crate::shims::unix::UnixFileDescription;
 use crate::shims::unix::linux_like::epoll::{EpollReadyEvents, EvalContextExt as _};
 use crate::*;
@@ -54,12 +56,12 @@ impl FileDescription for Event {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         // We're treating the buffer as a `u64`.
         let ty = ecx.machine.layouts.u64;
         // Check the size of slice, and return error only if the size of the slice < 8.
         if len < ty.size.bytes_usize() {
-            return ecx.set_last_error_and_return(ErrorKind::InvalidInput, dest);
+            return ecx.return_io_error(ErrorKind::InvalidInput, dest);
         }
 
         // eventfd read at the size of u64.
@@ -89,12 +91,12 @@ impl FileDescription for Event {
         len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
         // We're treating the buffer as a `u64`.
         let ty = ecx.machine.layouts.u64;
         // Check the size of slice, and return error only if the size of the slice < 8.
         if len < ty.layout.size.bytes_usize() {
-            return ecx.set_last_error_and_return(ErrorKind::InvalidInput, dest);
+            return ecx.return_io_error(ErrorKind::InvalidInput, dest);
         }
 
         // Read the user-supplied value from the pointer.
@@ -103,7 +105,7 @@ impl FileDescription for Event {
 
         // u64::MAX as input is invalid because the maximum value of counter is u64::MAX - 1.
         if num == u64::MAX {
-            return ecx.set_last_error_and_return(ErrorKind::InvalidInput, dest);
+            return ecx.return_io_error(ErrorKind::InvalidInput, dest);
         }
         // If the addition does not let the counter to exceed the maximum value, update the counter.
         // Else, block.
@@ -198,7 +200,7 @@ fn eventfd_write<'tcx>(
     dest: &MPlaceTy<'tcx>,
     weak_eventfd: WeakFileDescriptionRef,
     ecx: &mut MiriInterpCx<'tcx>,
-) -> InterpResult<'tcx> {
+) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
     let Some(eventfd_ref) = weak_eventfd.upgrade() else {
         throw_unsup_format!("eventfd FD got closed while blocking.")
     };
@@ -232,12 +234,13 @@ fn eventfd_write<'tcx>(
             }
 
             // Return how many bytes we consumed from the user-provided buffer.
-            return ecx.write_int(buf_place.layout.size.bytes(), dest);
+            ecx.write_int(buf_place.layout.size.bytes(), dest)?;
+            return interp_ok(Ok(()));
         }
         None | Some(u64::MAX) => {
             // We can't update the state, so we have to block.
             if eventfd.is_nonblock {
-                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+                return ecx.return_io_error(ErrorKind::WouldBlock, dest);
             }
 
             let dest = dest.clone();
@@ -256,13 +259,16 @@ fn eventfd_write<'tcx>(
                     }
                     @unblock = |this| {
                         // When we get unblocked, try again.
-                        eventfd_write(num, buf_place, &dest, weak_eventfd, this)
+                        match eventfd_write(num, buf_place, &dest, weak_eventfd, this)? {
+                            Ok(_) => interp_ok(()),
+                            Err(e) => this.set_last_error(e),
+                        }
                     }
                 ),
             );
         }
     };
-    interp_ok(())
+    interp_ok(Ok(()))
 }
 
 /// Block thread if the current counter is 0,
@@ -272,7 +278,7 @@ fn eventfd_read<'tcx>(
     dest: &MPlaceTy<'tcx>,
     weak_eventfd: WeakFileDescriptionRef,
     ecx: &mut MiriInterpCx<'tcx>,
-) -> InterpResult<'tcx> {
+) -> InterpResult<'tcx, Result<(), io::ErrorKind>> {
     let Some(eventfd_ref) = weak_eventfd.upgrade() else {
         throw_unsup_format!("eventfd FD got closed while blocking.")
     };
@@ -287,7 +293,7 @@ fn eventfd_read<'tcx>(
     // Block when counter == 0.
     if counter == 0 {
         if eventfd.is_nonblock {
-            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+            return ecx.return_io_error(ErrorKind::WouldBlock, dest);
         }
         let dest = dest.clone();
 
@@ -304,7 +310,10 @@ fn eventfd_read<'tcx>(
                 }
                 @unblock = |this| {
                     // When we get unblocked, try again.
-                    eventfd_read(buf_place, &dest, weak_eventfd, this)
+                    match eventfd_read(buf_place, &dest, weak_eventfd, this)? {
+                        Ok(_) => interp_ok(()),
+                        Err(e) => this.set_last_error(e),
+                    }
                 }
             ),
         );
@@ -330,7 +339,8 @@ fn eventfd_read<'tcx>(
         }
 
         // Tell userspace how many bytes we put into the buffer.
-        return ecx.write_int(buf_place.layout.size.bytes(), dest);
+        ecx.write_int(buf_place.layout.size.bytes(), dest)?;
+        return interp_ok(Ok(()));
     }
-    interp_ok(())
+    interp_ok(Ok(()))
 }
