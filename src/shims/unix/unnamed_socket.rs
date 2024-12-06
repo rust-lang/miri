@@ -177,10 +177,28 @@ impl FileDescription for AnonSocket {
                 return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
             } else {
                 // Blocking socketpair with a full buffer.
-                throw_unsup_format!("socketpair/pipe/pipe2 write: blocking isn't supported yet");
+                let peer_fd = peer_fd.downgrade();
+                let dest = dest.clone();
+                ecx.block_thread(
+                    BlockReason::UnnamedSocket,
+                    None,
+                    callback!(
+                        @capture<'tcx> {
+                            available_space: usize,
+                            peer_fd: WeakFileDescriptionRef,
+                            ptr: Pointer,
+                            len: usize,
+                            dest: MPlaceTy<'tcx>,
+                        }
+                        @unblock = |this| {
+                            // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
+                            anonsocket_write(available_space, peer_fd, ptr, len, dest, this)
+                        }
+                    ),
+                );
             }
         }
-        anonsocket_write(available_space, &peer_fd, ptr, len, dest, ecx)
+        interp_ok(())
     }
 
     fn as_unix(&self) -> &dyn UnixFileDescription {
@@ -191,12 +209,13 @@ impl FileDescription for AnonSocket {
 /// Write to AnonSocket based on the space available and return the written byte size.
 fn anonsocket_write<'tcx>(
     available_space: usize,
-    peer_fd: &FileDescriptionRef,
+    peer_fd: WeakFileDescriptionRef,
     ptr: Pointer,
     len: usize,
-    dest: &MPlaceTy<'tcx>,
+    dest: MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
+    let peer_fd = peer_fd.upgrade().unwrap(); // TODO: handle unwrap
     let Some(writebuf) = &peer_fd.downcast::<AnonSocket>().unwrap().readbuf else {
         // FIXME: This should return EBADF, but there's no nice way to do that as there's no
         // corresponding ErrorKind variant.
@@ -218,9 +237,9 @@ fn anonsocket_write<'tcx>(
 
     // Notification should be provided for peer fd as it became readable.
     // The kernel does this even if the fd was already readable before, so we follow suit.
-    ecx.check_and_update_readiness(peer_fd)?;
+    ecx.check_and_update_readiness(&peer_fd)?;
 
-    ecx.return_write_success(actual_write_size, dest)
+    ecx.return_write_success(actual_write_size, &dest)
 }
 
 /// Read from AnonSocket and return the number of bytes read.
