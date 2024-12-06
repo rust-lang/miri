@@ -132,7 +132,7 @@ impl FileDescription for AnonSocket {
                             }
                             @unblock = |this| {
                                 // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
-                                anonsocket_read(weak_self_ref, peer_fd, len, ptr, &dest, this)
+                                anonsocket_read(weak_self_ref, peer_fd, len, ptr, dest, this)
                             }
                         ),
                     );
@@ -248,7 +248,7 @@ fn anonsocket_read<'tcx>(
     peer_fd: WeakFileDescriptionRef,
     len: usize,
     ptr: Pointer,
-    dest: &MPlaceTy<'tcx>,
+    dest: MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
     let mut bytes = vec![0; len];
@@ -285,7 +285,7 @@ fn anonsocket_read<'tcx>(
         ecx.check_and_update_readiness(&peer_fd)?;
     }
 
-    ecx.return_read_success(ptr, &bytes, actual_read_size, dest)
+    ecx.return_read_success(ptr, &bytes, actual_read_size, &dest)
 }
 
 impl UnixFileDescription for AnonSocket {
