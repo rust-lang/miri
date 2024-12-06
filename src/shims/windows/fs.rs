@@ -1,8 +1,7 @@
-use std::borrow::Cow;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
 use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use rustc_abi::Size;
@@ -116,6 +115,14 @@ impl FileDescription for DirHandle {
     fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
         interp_ok(self.path.metadata())
     }
+
+    fn close<'tcx>(
+        self: Box<Self>,
+        _communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
+        interp_ok(Ok(()))
+    }
 }
 
 #[derive(Debug)]
@@ -130,6 +137,14 @@ impl FileDescription for MetadataHandle {
 
     fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
         interp_ok(self.path.metadata())
+    }
+
+    fn close<'tcx>(
+        self: Box<Self>,
+        _communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
+        interp_ok(Ok(()))
     }
 }
 
@@ -151,9 +166,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.assert_target_os("windows", "CreateFileW");
         this.check_no_isolation("`CreateFileW`")?;
 
-        let file_name =
-            String::from_utf16_lossy(&this.read_wide_str(this.read_pointer(file_name)?)?);
-        let file_name = local_path(&file_name);
+        let file_name = this.read_path_from_wide_str(this.read_pointer(file_name)?)?;
         let desired_access = this.read_scalar(desired_access)?.to_u32()?;
         let share_mode = this.read_scalar(share_mode)?.to_u32()?;
         let security_attributes = this.read_pointer(security_attributes)?;
@@ -267,19 +280,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let handle = if is_dir && exists {
             let fh = &mut this.machine.fds;
-            let fd = fh.insert_new(DirHandle { path: file_name.into() });
-            Ok(Handle::File(fd))
+            let fd_num = fh.insert_new(DirHandle { path: file_name.into() });
+            Ok(Handle::File(fd_num))
         } else if creation_disposition == open_existing && desired_access == 0 {
             // Windows supports handles with no permissions. These allow things such as reading
             // metadata, but not file content.
             let fh = &mut this.machine.fds;
-            let fd = fh.insert_new(MetadataHandle { path: file_name.into() });
-            Ok(Handle::File(fd))
+            let fd_num = fh.insert_new(MetadataHandle { path: file_name.into() });
+            Ok(Handle::File(fd_num))
         } else {
             options.open(file_name).map(|file| {
                 let fh = &mut this.machine.fds;
-                let fd = fh.insert_new(FileHandle { file, writable: desired_write });
-                Handle::File(fd)
+                let fd_num = fh.insert_new(FileHandle { file, writable: desired_write });
+                Handle::File(fd_num)
             })
         };
 
@@ -308,13 +321,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.windows_ty_layout("BY_HANDLE_FILE_INFORMATION"),
         )?;
 
-        let fd = if let Handle::File(fd) = file {
-            fd
+        let fd_num = if let Handle::File(fd_num) = file {
+            fd_num
         } else {
             this.invalid_handle("GetFileInformationByHandle")?
         };
 
-        let Some(desc) = this.machine.fds.get(fd) else {
+        let Some(desc) = this.machine.fds.get(fd_num) else {
             this.invalid_handle("GetFileInformationByHandle")?
         };
 
@@ -390,14 +403,4 @@ fn write_filetime_field<'tcx>(
         &[("dwLowDateTime", low.into()), ("dwHighDateTime", high.into())],
         &cx.project_field_named(val, name)?,
     )
-}
-
-fn local_path(path: &str) -> Cow<'_, Path> {
-    if cfg!(windows) {
-        Cow::Borrowed(path.as_ref())
-    } else {
-        let stripped = if path.starts_with(r"\\?\") { &path[3..] } else { path };
-        let path = PathBuf::from(stripped.replace("\\", "/"));
-        Cow::Owned(path)
-    }
 }
