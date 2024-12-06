@@ -316,6 +316,7 @@ impl UnixFileDescription for AnonSocket {
         interp_ok(epoll_ready_events)
     }
 }
+
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// For more information on the arguments see the socketpair manpage:
