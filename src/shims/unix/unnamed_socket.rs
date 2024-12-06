@@ -100,11 +100,15 @@ impl FileDescription for AnonSocket {
             // corresponding ErrorKind variant.
             throw_unsup_format!("reading from the write end of a pipe");
         };
+        let peer_fd = self.peer_fd().clone();
+        let dest = dest.clone();
+        let weak_self_ref = self_ref.downgrade();
+        // TODO: move this to helper
         if readbuf.borrow().buf.is_empty() {
             if self.peer_fd().upgrade().is_none() {
                 // Socketpair with no peer and empty buffer.
                 // 0 bytes successfully read indicates end-of-file.
-                return ecx.return_read_success(ptr, &[], 0, dest);
+                return ecx.return_read_success(ptr, &[], 0, &dest);
             } else {
                 if self.is_nonblock {
                     // Non-blocking socketpair with writer and empty buffer.
@@ -112,13 +116,9 @@ impl FileDescription for AnonSocket {
                     // EAGAIN or EWOULDBLOCK can be returned for socket,
                     // POSIX.1-2001 allows either error to be returned for this case.
                     // Since there is no ErrorKind for EAGAIN, WouldBlock is used.
-                    return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+                    return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
                 } else {
-                    // TODO: move this to helper
                     // Blocking socketpair with writer and empty buffer.
-                    let peer_fd = self.peer_fd().clone();
-                    let dest = dest.clone();
-                    let weak_self_ref = self_ref.downgrade();
                     ecx.block_thread(
                         BlockReason::UnnamedSocket,
                         None,
@@ -138,6 +138,8 @@ impl FileDescription for AnonSocket {
                     );
                 }
             }
+        } else {
+            return anonsocket_read(weak_self_ref, peer_fd, len, ptr, dest, ecx);
         }
         interp_ok(())
     }
@@ -171,14 +173,15 @@ impl FileDescription for AnonSocket {
         };
         let available_space =
             MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
+        let peer_fd = peer_fd.downgrade();
+        let dest = dest.clone();
+        // TODO: move this to helper
         if available_space == 0 {
             if self.is_nonblock {
                 // Non-blocking socketpair with a full buffer.
-                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
             } else {
                 // Blocking socketpair with a full buffer.
-                let peer_fd = peer_fd.downgrade();
-                let dest = dest.clone();
                 ecx.block_thread(
                     BlockReason::UnnamedSocket,
                     None,
@@ -197,6 +200,8 @@ impl FileDescription for AnonSocket {
                     ),
                 );
             }
+        } else {
+            return anonsocket_write(available_space, peer_fd, ptr, len, dest, ecx);
         }
         interp_ok(())
     }
