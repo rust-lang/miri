@@ -1,8 +1,7 @@
-use std::borrow::Cow;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
 use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use rustc_abi::Size;
@@ -157,9 +156,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.assert_target_os("windows", "CreateFileW");
         this.check_no_isolation("`CreateFileW`")?;
 
-        let file_name =
-            String::from_utf16_lossy(&this.read_wide_str(this.read_pointer(file_name)?)?);
-        let file_name = local_path(&file_name);
+        let file_name = this.read_path_from_wide_str(this.read_pointer(file_name)?)?;
         let desired_access = this.read_scalar(desired_access)?.to_u32()?;
         let share_mode = this.read_scalar(share_mode)?.to_u32()?;
         let security_attributes = this.read_pointer(security_attributes)?;
@@ -374,9 +371,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "DeleteFileW");
         this.check_no_isolation("`DeleteFileW`")?;
-        let file_name =
-            String::from_utf16_lossy(&this.read_wide_str(this.read_pointer(file_name)?)?);
-        let file_name = Path::new(&file_name);
+        let file_name = this.read_path_from_wide_str(this.read_pointer(file_name)?)?;
         match std::fs::remove_file(file_name) {
             Ok(_) => interp_ok(this.eval_windows("c", "TRUE")),
             Err(e) => {
