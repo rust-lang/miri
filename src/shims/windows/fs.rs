@@ -280,13 +280,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let handle = if is_dir && exists {
             let fh = &mut this.machine.fds;
-            let fd_num = fh.insert_new(DirHandle { path: file_name.into() });
+            let fd_num = fh.insert_new(DirHandle { path: file_name });
             Ok(Handle::File(fd_num))
         } else if creation_disposition == open_existing && desired_access == 0 {
             // Windows supports handles with no permissions. These allow things such as reading
             // metadata, but not file content.
             let fh = &mut this.machine.fds;
-            let fd_num = fh.insert_new(MetadataHandle { path: file_name.into() });
+            let fd_num = fh.insert_new(MetadataHandle { path: file_name });
             Ok(Handle::File(fd_num))
         } else {
             options.open(file_name).map(|file| {
