@@ -46,12 +46,6 @@ impl<T: VisitProvenance> VisitProvenance for std::cell::RefCell<T> {
     }
 }
 
-impl<T: VisitProvenance> VisitProvenance for std::vec::Vec<T> {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
-        // TODO: this is just a temporary change to get Vec<u8> to work in unblock_thread, might remove later.
-    }
-}
-
 impl VisitProvenance for BorTag {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
         visit(None, Some(*self))
