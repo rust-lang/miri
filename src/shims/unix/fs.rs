@@ -1099,19 +1099,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let is_linux = matches!(&*this.tcx.sess.target.os, "linux");
 
-                let dirent64_layout = if is_linux {
-                    this.libc_ty_layout("dirent64")
-                } else {
-                    this.libc_ty_layout("dirent")
-                };
-                let fields = &dirent64_layout.fields;
-                let last_field = (*fields).count().strict_sub(1);
-                let d_name_offset = (*fields).offset(last_field).bytes();
+                let dirent_type = if is_linux { "dirent64" } else { "dirent" };
+                let dirent_layout = this.libc_ty_layout(dirent_type);
+                let fields = &dirent_layout.fields;
+                let last_field = fields.count().strict_sub(1);
+                let d_name_offset = fields.offset(last_field).bytes();
                 let size = d_name_offset.strict_add(name_len);
 
                 let entry = this.allocate_ptr(
                     Size::from_bytes(size),
-                    dirent64_layout.align.abi,
+                    dirent_layout.align.abi,
                     MiriMemoryKind::Runtime.into(),
                 )?;
                 let entry: Pointer = entry.into();
@@ -1126,13 +1123,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let file_type = this.file_type_to_d_type(dir_entry.file_type())?;
                 this.write_int_fields_named(
                     &[("d_ino", ino.into()), ("d_off", 0), ("d_reclen", size.into())],
-                    &this.ptr_to_mplace(entry, dirent64_layout),
+                    &this.ptr_to_mplace(entry, dirent_layout),
                 )?;
 
-                if let Some(d_type) = this.try_project_field_named(
-                    &this.ptr_to_mplace(entry, dirent64_layout),
-                    "d_type",
-                )? {
+                if let Some(d_type) = this
+                    .try_project_field_named(&this.ptr_to_mplace(entry, dirent_layout), "d_type")?
+                {
                     this.write_int(file_type, &d_type)?;
                 }
 
