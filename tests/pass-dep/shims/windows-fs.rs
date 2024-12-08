@@ -11,8 +11,8 @@ mod utils;
 use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError};
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
 };
 
 fn main() {
@@ -31,7 +31,7 @@ unsafe fn test_create_dir_file() {
     let handle = CreateFileW(
         raw_path.as_ptr(),
         GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
         ptr::null_mut(),
         OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS,
@@ -57,7 +57,7 @@ unsafe fn test_create_normal_file() {
     let handle = CreateFileW(
         raw_path.as_ptr(),
         GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
         ptr::null_mut(),
         CREATE_NEW,
         0,

@@ -22,51 +22,6 @@ impl FileDescription for FileHandle {
         "file"
     }
 
-    fn read<'tcx>(
-        &self,
-        _self_ref: &FileDescriptionRef,
-        communicate_allowed: bool,
-        ptr: Pointer,
-        len: usize,
-        dest: &MPlaceTy<'tcx>,
-        ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
-        let mut bytes = vec![0; len];
-        let result = (&mut &self.file).read(&mut bytes);
-        match result {
-            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
-        }
-    }
-
-    fn write<'tcx>(
-        &self,
-        _self_ref: &FileDescriptionRef,
-        communicate_allowed: bool,
-        ptr: Pointer,
-        len: usize,
-        dest: &MPlaceTy<'tcx>,
-        ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
-        let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
-        let result = (&mut &self.file).write(bytes);
-        match result {
-            Ok(write_size) => ecx.return_write_success(write_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
-        }
-    }
-
-    fn seek<'tcx>(
-        &self,
-        communicate_allowed: bool,
-        offset: SeekFrom,
-    ) -> InterpResult<'tcx, io::Result<u64>> {
-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
-        interp_ok((&mut &self.file).seek(offset))
-    }
-
     fn close<'tcx>(
         self: Box<Self>,
         communicate_allowed: bool,
@@ -177,22 +132,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let generic_read = this.eval_windows_u32("c", "GENERIC_READ");
         let generic_write = this.eval_windows_u32("c", "GENERIC_WRITE");
 
-        if desired_access & !(generic_read | generic_write) != 0 {
-            throw_unsup_format!("CreateFileW: Unsupported access mode: {desired_access}");
-        }
-
         let file_share_delete = this.eval_windows_u32("c", "FILE_SHARE_DELETE");
         let file_share_read = this.eval_windows_u32("c", "FILE_SHARE_READ");
         let file_share_write = this.eval_windows_u32("c", "FILE_SHARE_WRITE");
-
-        if share_mode & !(file_share_delete | file_share_read | file_share_write) != 0
-            || share_mode == 0
-        {
-            throw_unsup_format!("CreateFileW: Unsupported share mode: {share_mode}");
-        }
-        if !this.ptr_is_null(security_attributes)? {
-            throw_unsup_format!("CreateFileW: Security attributes are not supported");
-        }
 
         let create_always = this.eval_windows_u32("c", "CREATE_ALWAYS");
         let create_new = this.eval_windows_u32("c", "CREATE_NEW");
@@ -200,20 +142,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let open_existing = this.eval_windows_u32("c", "OPEN_EXISTING");
         let truncate_existing = this.eval_windows_u32("c", "TRUNCATE_EXISTING");
 
-        if ![create_always, create_new, open_always, open_existing, truncate_existing]
-            .contains(&creation_disposition)
-        {
-            throw_unsup_format!(
-                "CreateFileW: Unsupported creation disposition: {creation_disposition}"
-            );
-        }
-
         let file_attribute_normal = this.eval_windows_u32("c", "FILE_ATTRIBUTE_NORMAL");
         // This must be passed to allow getting directory handles. If not passed, we error on trying
         // to open directories below
         let file_flag_backup_semantics = this.eval_windows_u32("c", "FILE_FLAG_BACKUP_SEMANTICS");
         let file_flag_open_reparse_point =
             this.eval_windows_u32("c", "FILE_FLAG_OPEN_REPARSE_POINT");
+
+        if share_mode != (file_share_delete | file_share_read | file_share_write) {
+            throw_unsup_format!("CreateFileW: Unsupported share mode: {share_mode}");
+        }
+        if !this.ptr_is_null(security_attributes)? {
+            throw_unsup_format!("CreateFileW: Security attributes are not supported");
+        }
 
         let flags_and_attributes = match flags_and_attributes {
             0 => file_attribute_normal,
@@ -238,8 +179,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("CreateFileW: Template files are not supported");
         }
 
-        let desired_read = desired_access & generic_read != 0;
-        let desired_write = desired_access & generic_write != 0;
         let exists = file_name.exists();
         let is_dir = file_name.is_dir();
 
@@ -249,11 +188,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let mut options = OpenOptions::new();
-        if desired_read {
+        if desired_access & generic_read != 0 {
+            desired_access &= !generic_read;
             options.read(true);
         }
-        if desired_write {
+        if desired_access & generic_write != 0 {
+            desired_access &= !generic_write;
             options.write(true);
+        }
+
+        if desired_access != 0 {
+            throw_unsup_format!(
+                "CreateFileW: Unsupported bits set for access mode: {desired_access:#x}"
+            );
         }
 
         if creation_disposition == create_always {
@@ -276,6 +223,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Nothing
         } else if creation_disposition == truncate_existing {
             options.truncate(true);
+        } else {
+            throw_unsup_format!(
+                "CreateFileW: Unsupported creation disposition: {creation_disposition}"
+            );
         }
 
         let handle = if is_dir && exists {
