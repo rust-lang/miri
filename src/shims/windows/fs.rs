@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::shims::files::{FileDescription, FileDescriptionRef};
+use crate::shims::files::FileDescription;
 use crate::shims::time::system_time_to_duration;
 use crate::shims::windows::handle::{EvalContextExt as _, Handle};
 use crate::*;
@@ -80,7 +80,7 @@ impl FileDescription for DirHandle {
 
 #[derive(Debug)]
 pub struct MetadataHandle {
-    pub(crate) path: PathBuf,
+    pub(crate) meta: Metadata,
 }
 
 impl FileDescription for MetadataHandle {
@@ -89,7 +89,7 @@ impl FileDescription for MetadataHandle {
     }
 
     fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
-        interp_ok(self.path.metadata())
+        interp_ok(Ok(self.meta.clone()))
     }
 
     fn close<'tcx>(
@@ -238,8 +238,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Windows supports handles with no permissions. These allow things such as reading
             // metadata, but not file content.
             let fh = &mut this.machine.fds;
-            let fd_num = fh.insert_new(MetadataHandle { path: file_name });
-            Ok(Handle::File(fd_num))
+            file_name.metadata().map(|meta| {
+                let fd_num = fh.insert_new(MetadataHandle { meta });
+                Handle::File(fd_num)
+            })
         } else {
             options.open(file_name).map(|file| {
                 let fh = &mut this.machine.fds;
