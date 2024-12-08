@@ -100,7 +100,6 @@ impl FileDescription for AnonSocket {
             // corresponding ErrorKind variant.
             throw_unsup_format!("reading from the write end of a pipe");
         };
-        let peer_fd = self.peer_fd().clone();
         let dest = dest.clone();
         let weak_self_ref = self_ref.downgrade();
         // TODO: move this to helper
@@ -125,21 +124,20 @@ impl FileDescription for AnonSocket {
                         callback!(
                             @capture<'tcx> {
                                 weak_self_ref: WeakFileDescriptionRef,
-                                peer_fd: WeakFileDescriptionRef,
                                 len: usize,
                                 ptr: Pointer,
                                 dest: MPlaceTy<'tcx>,
                             }
                             @unblock = |this| {
                                 // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
-                                anonsocket_read(weak_self_ref, peer_fd, len, ptr, dest, this)
+                                anonsocket_read(weak_self_ref, len, ptr, dest, this)
                             }
                         ),
                     );
                 }
             }
         } else {
-            return anonsocket_read(weak_self_ref, peer_fd, len, ptr, dest, ecx);
+            return anonsocket_read(weak_self_ref, len, ptr, dest, ecx);
         }
         interp_ok(())
     }
@@ -250,7 +248,6 @@ fn anonsocket_write<'tcx>(
 /// Read from AnonSocket and return the number of bytes read.
 fn anonsocket_read<'tcx>(
     self_ref: WeakFileDescriptionRef,
-    peer_fd: WeakFileDescriptionRef,
     len: usize,
     ptr: Pointer,
     dest: MPlaceTy<'tcx>,
@@ -258,7 +255,16 @@ fn anonsocket_read<'tcx>(
 ) -> InterpResult<'tcx> {
     let mut bytes = vec![0; len];
     let self_ref = self_ref.upgrade().unwrap(); // TODO: handle this later
+
     let anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
+
+    // We are writing to our peer's readbuf, so return earlier if it is closed.
+    let Some(peer_fd) = anonsocket.peer_fd().upgrade() else {
+        // If the upgrade from Weak to Rc fails, it indicates that all read ends have been
+        // closed.
+        return ecx.set_last_error_and_return(ErrorKind::BrokenPipe, &dest);
+    };
+
     let Some(readbuf) = &anonsocket.readbuf else {
         // FIXME: This should return EBADF, but there's no nice way to do that as there's no
         // corresponding ErrorKind variant.
@@ -285,10 +291,7 @@ fn anonsocket_read<'tcx>(
     // don't know what that *certain number* is, we will provide a notification every time
     // a read is successful. This might result in our epoll emulation providing more
     // notifications than the real system.
-    let peer_fd = peer_fd.upgrade(); // TODO: handle unwrap
-    if let Some(peer_fd) = peer_fd {
-        ecx.check_and_update_readiness(&peer_fd)?;
-    }
+    ecx.check_and_update_readiness(&peer_fd)?;
 
     ecx.return_read_success(ptr, &bytes, actual_read_size, &dest)
 }
