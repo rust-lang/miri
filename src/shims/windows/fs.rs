@@ -332,11 +332,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 fn extract_windows_epoch<'tcx>(
     time: io::Result<SystemTime>,
 ) -> InterpResult<'tcx, Option<(u32, u32)>> {
-    // (seconds in a year) * (369 years between 1970 and 1601) * 10 million (nanoseconds/second / 100)
-    const TIME_TO_EPOCH: u64 = 31_556_926 * 369 * 10_000_000;
+    // (seconds in a year * (years between 1970 and 1601)) + (89 leap days in that span) * 10 million (nanoseconds/second / 100)
+    const TIME_TO_EPOCH: u64 = (3600 * 24 * 365 * (1970 - 1601) + (3600 * 24 * 89)) * 10_000_000;
     match time.ok() {
         Some(time) => {
             let duration = system_time_to_duration(&time)?;
+            // 10 million is the number of 100ns periods per second.
             let secs = duration.as_secs().saturating_mul(10_000_000);
             let nanos_hundred: u64 = (duration.subsec_nanos() / 100).into();
             let total = secs.saturating_add(nanos_hundred).saturating_add(TIME_TO_EPOCH);
