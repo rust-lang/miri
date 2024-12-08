@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use crate::shims::files::FileDescription;
-use crate::shims::time::system_time_to_duration;
 use crate::shims::windows::handle::{EvalContextExt as _, Handle};
 use crate::*;
 
@@ -329,9 +328,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.eval_windows_u32("c", "FILE_ATTRIBUTE_DEVICE")
         };
 
-        let created = extract_windows_epoch(metadata.created())?.unwrap_or((0, 0));
-        let accessed = extract_windows_epoch(metadata.accessed())?.unwrap_or((0, 0));
-        let written = extract_windows_epoch(metadata.modified())?.unwrap_or((0, 0));
+        let created = extract_windows_epoch(this, metadata.created())?.unwrap_or((0, 0));
+        let accessed = extract_windows_epoch(this, metadata.accessed())?.unwrap_or((0, 0));
+        let written = extract_windows_epoch(this, metadata.modified())?.unwrap_or((0, 0));
 
         this.write_int_fields_named(&[("dwFileAttributes", attributes.into())], &file_information)?;
         write_filetime_field(this, &file_information, "ftCreationTime", created)?;
@@ -355,21 +354,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
 /// Windows FILETIME is measured in 100-nanosecs since 1601
 fn extract_windows_epoch<'tcx>(
+    ecx: &MiriInterpCx<'tcx>,
     time: io::Result<SystemTime>,
 ) -> InterpResult<'tcx, Option<(u32, u32)>> {
-    // (seconds in a year * years between 1970 and 1601) + (89 leap days in that span)
-    const SECONDS_TO_EPOCH: u64 = 3600 * 24 * 365 * (1970 - 1601) + 3600 * 24 * 89;
-    // seconds between unix and windows epochs * 10 million (nanoseconds/second / 100)
-    const TIME_TO_EPOCH: u64 = SECONDS_TO_EPOCH * 10_000_000;
     match time.ok() {
         Some(time) => {
-            let duration = system_time_to_duration(&time)?;
-            // 10 million is the number of 100ns periods per second.
-            let secs = duration.as_secs().saturating_mul(10_000_000);
-            let nanos_hundred: u64 = (duration.subsec_nanos() / 100).into();
-            let total = secs.saturating_add(nanos_hundred).saturating_add(TIME_TO_EPOCH);
+            let duration = ecx.system_time_since_windows_epoch(&time)?;
+            let duration_ticks = ecx.windows_ticks_for(duration)?;
             #[allow(clippy::cast_possible_truncation)]
-            interp_ok(Some((total as u32, (total >> 32) as u32)))
+            interp_ok(Some((duration_ticks as u32, (duration_ticks >> 32) as u32)))
         }
         None => interp_ok(None),
     }
