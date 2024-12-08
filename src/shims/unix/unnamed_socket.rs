@@ -258,13 +258,6 @@ fn anonsocket_read<'tcx>(
 
     let anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
 
-    // We are writing to our peer's readbuf, so return earlier if it is closed.
-    let Some(peer_fd) = anonsocket.peer_fd().upgrade() else {
-        // If the upgrade from Weak to Rc fails, it indicates that all read ends have been
-        // closed.
-        return ecx.set_last_error_and_return(ErrorKind::BrokenPipe, &dest);
-    };
-
     let Some(readbuf) = &anonsocket.readbuf else {
         // FIXME: This should return EBADF, but there's no nice way to do that as there's no
         // corresponding ErrorKind variant.
@@ -291,7 +284,9 @@ fn anonsocket_read<'tcx>(
     // don't know what that *certain number* is, we will provide a notification every time
     // a read is successful. This might result in our epoll emulation providing more
     // notifications than the real system.
-    ecx.check_and_update_readiness(&peer_fd)?;
+    if let Some(peer_fd) = anonsocket.peer_fd().upgrade() {
+        ecx.check_and_update_readiness(&peer_fd)?;
+    };
 
     ecx.return_read_success(ptr, &bytes, actual_read_size, &dest)
 }
