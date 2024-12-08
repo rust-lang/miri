@@ -1,12 +1,10 @@
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
-use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use rustc_abi::Size;
-
-use crate::shims::files::{EvalContextExt as _, FileDescription, FileDescriptionRef};
+use crate::shims::files::{FileDescription, FileDescriptionRef};
 use crate::shims::time::system_time_to_duration;
 use crate::shims::windows::handle::{EvalContextExt as _, Handle};
 use crate::*;
@@ -122,7 +120,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.check_no_isolation("`CreateFileW`")?;
 
         let file_name = this.read_path_from_wide_str(this.read_pointer(file_name)?)?;
-        let desired_access = this.read_scalar(desired_access)?.to_u32()?;
+        let mut desired_access = this.read_scalar(desired_access)?.to_u32()?;
         let share_mode = this.read_scalar(share_mode)?.to_u32()?;
         let security_attributes = this.read_pointer(security_attributes)?;
         let creation_disposition = this.read_scalar(creation_disposition)?.to_u32()?;
@@ -187,12 +185,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return interp_ok(Handle::Invalid);
         }
 
+        let desired_read = desired_access & generic_read != 0;
+        let desired_write = desired_access & generic_write != 0;
+
         let mut options = OpenOptions::new();
-        if desired_access & generic_read != 0 {
+        if desired_read {
             desired_access &= !generic_read;
             options.read(true);
         }
-        if desired_access & generic_write != 0 {
+        if desired_write {
             desired_access &= !generic_write;
             options.write(true);
         }
@@ -233,7 +234,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let fh = &mut this.machine.fds;
             let fd_num = fh.insert_new(DirHandle { path: file_name });
             Ok(Handle::File(fd_num))
-        } else if creation_disposition == open_existing && desired_access == 0 {
+        } else if creation_disposition == open_existing && !(desired_read || desired_write) {
             // Windows supports handles with no permissions. These allow things such as reading
             // metadata, but not file content.
             let fh = &mut this.machine.fds;
