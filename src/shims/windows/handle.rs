@@ -249,3 +249,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(ret)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invalid_encoding() {
+        // Ensure the invalid handle encodes to `u32::MAX`/`INVALID_HANDLE_VALUE`.
+        assert_eq!(Handle::Invalid.to_packed(), 0xFFFFFFFF)
+    }
+}
