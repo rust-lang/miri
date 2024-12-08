@@ -314,6 +314,9 @@ impl VisitProvenance for FdTable {
     }
 }
 
+/// Internal type of a file-descriptor - this is what [`FdTable`] expects
+pub type FdNum = i32;
+
 impl FdTable {
     fn new() -> Self {
         FdTable { fds: BTreeMap::new(), next_file_description_id: FdId(0) }
@@ -344,7 +347,7 @@ impl FdTable {
         self.insert(fd_ref)
     }
 
-    pub fn insert(&mut self, fd_ref: DynFileDescriptionRef) -> i32 {
+    pub fn insert(&mut self, fd_ref: DynFileDescriptionRef) -> FdNum {
         self.insert_with_min_num(fd_ref, 0)
     }
 
@@ -352,8 +355,8 @@ impl FdTable {
     pub fn insert_with_min_num(
         &mut self,
         file_handle: DynFileDescriptionRef,
-        min_fd_num: i32,
-    ) -> i32 {
+        min_fd_num: FdNum,
+    ) -> FdNum {
         // Find the lowest unused FD, starting from min_fd. If the first such unused FD is in
         // between used FDs, the find_map combinator will return it. If the first such unused FD
         // is after all other used FDs, the find_map combinator will return None, and we will use
@@ -379,16 +382,16 @@ impl FdTable {
         new_fd_num
     }
 
-    pub fn get(&self, fd_num: i32) -> Option<DynFileDescriptionRef> {
+    pub fn get(&self, fd_num: FdNum) -> Option<DynFileDescriptionRef> {
         let fd = self.fds.get(&fd_num)?;
         Some(fd.clone())
     }
 
-    pub fn remove(&mut self, fd_num: i32) -> Option<DynFileDescriptionRef> {
+    pub fn remove(&mut self, fd_num: FdNum) -> Option<DynFileDescriptionRef> {
         self.fds.remove(&fd_num)
     }
 
-    pub fn is_fd_num(&self, fd_num: i32) -> bool {
+    pub fn is_fd_num(&self, fd_num: FdNum) -> bool {
         self.fds.contains_key(&fd_num)
     }
 }

@@ -3,10 +3,8 @@ use std::mem::variant_count;
 use rustc_abi::HasDataLayout;
 
 use crate::concurrency::thread::ThreadNotFound;
+use crate::shims::files::FdNum;
 use crate::*;
-
-/// Internal type of a file-descriptor - this is what [`FdTable`](shims::files::FdTable) expects
-type FdNum = i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PseudoHandle {
