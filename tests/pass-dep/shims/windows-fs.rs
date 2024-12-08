@@ -9,17 +9,21 @@ use std::ptr;
 #[path = "../../utils/mod.rs"]
 mod utils;
 
-use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, GENERIC_READ, GENERIC_WRITE, GetLastError,
+};
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+    BY_HANDLE_FILE_INFORMATION, CREATE_ALWAYS, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
+    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_ALWAYS, OPEN_EXISTING,
 };
 
 fn main() {
     unsafe {
         test_create_dir_file();
         test_create_normal_file();
+        test_create_always_twice();
+        test_open_always_twice();
     }
 }
 
@@ -84,6 +88,76 @@ unsafe fn test_create_normal_file() {
         panic!("Failed to get file information: {}", GetLastError())
     };
     assert!(info.dwFileAttributes & FILE_ATTRIBUTE_NORMAL != 0);
+    if CloseHandle(handle) == 0 {
+        panic!("Failed to close file")
+    };
+}
+
+/// Tests that CREATE_ALWAYS sets the error value correctly based on whether the file already exists
+unsafe fn test_create_always_twice() {
+    let temp = utils::tmp().join("test_create_always.txt");
+    let raw_path = to_wide_cstr(&temp);
+    let handle = CreateFileW(
+        raw_path.as_ptr(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+        ptr::null_mut(),
+        CREATE_ALWAYS,
+        0,
+        0,
+    );
+    assert_ne!(handle, -1, "CreateFileW Failed: {}", GetLastError());
+    assert_eq!(GetLastError(), 0);
+    if CloseHandle(handle) == 0 {
+        panic!("Failed to close file")
+    };
+
+    let handle = CreateFileW(
+        raw_path.as_ptr(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+        ptr::null_mut(),
+        CREATE_ALWAYS,
+        0,
+        0,
+    );
+    assert_ne!(handle, -1, "CreateFileW Failed: {}", GetLastError());
+    assert_eq!(GetLastError(), ERROR_ALREADY_EXISTS);
+    if CloseHandle(handle) == 0 {
+        panic!("Failed to close file")
+    };
+}
+
+/// Tests that OPEN_ALWAYS sets the error value correctly based on whether the file already exists
+unsafe fn test_open_always_twice() {
+    let temp = utils::tmp().join("test_open_always.txt");
+    let raw_path = to_wide_cstr(&temp);
+    let handle = CreateFileW(
+        raw_path.as_ptr(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+        ptr::null_mut(),
+        OPEN_ALWAYS,
+        0,
+        0,
+    );
+    assert_ne!(handle, -1, "CreateFileW Failed: {}", GetLastError());
+    assert_eq!(GetLastError(), 0);
+    if CloseHandle(handle) == 0 {
+        panic!("Failed to close file")
+    };
+
+    let handle = CreateFileW(
+        raw_path.as_ptr(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+        ptr::null_mut(),
+        OPEN_ALWAYS,
+        0,
+        0,
+    );
+    assert_ne!(handle, -1, "CreateFileW Failed: {}", GetLastError());
+    assert_eq!(GetLastError(), ERROR_ALREADY_EXISTS);
     if CloseHandle(handle) == 0 {
         panic!("Failed to close file")
     };

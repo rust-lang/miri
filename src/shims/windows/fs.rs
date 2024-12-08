@@ -177,7 +177,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("CreateFileW: Template files are not supported");
         }
 
-        let exists = file_name.exists();
         let is_dir = file_name.is_dir();
 
         if flags_and_attributes == file_attribute_normal && is_dir {
@@ -204,20 +203,46 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
+        // This is racy, but there doesn't appear to be an std API that both succeeds if a file
+        // exists but tells us it isn't new. Either we accept racing one way or another, or we
+        // use an iffy heuristic like file creation time. This implementation prefers to fail in the
+        // direction of erroring more often.
+        let exists = file_name.exists();
+
         if creation_disposition == create_always {
-            if file_name.exists() {
+            // Per the documentation:
+            // If the specified file exists and is writable, the function truncates the file, the
+            // function succeeds, and last-error code is set to ERROR_ALREADY_EXISTS.
+            // If the specified file does not exist and is a valid path, a new file is created, the
+            // function succeeds, and the last-error code is set to zero.
+            // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+            if exists {
                 this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
+            } else {
+                this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
             }
             options.create(true);
             options.truncate(true);
         } else if creation_disposition == create_new {
             options.create_new(true);
+            // Per `create_new` documentation:
+            // If the specified file does not exist and is a valid path to a writable location, the
+            // function creates a file and the last-error code is set to zero.
+            // https://doc.rust-lang.org/std/fs/struct.OpenOptions.html#method.create_new
             if !desired_write {
                 options.append(true);
             }
         } else if creation_disposition == open_always {
-            if file_name.exists() {
+            // Per the documentation:
+            // If the specified file exists, the function succeeds and the last-error code is set
+            // to ERROR_ALREADY_EXISTS.
+            // If the specified file does not exist and is a valid path to a writable location, the
+            // function creates a file and the last-error code is set to zero.
+            // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+            if exists {
                 this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
+            } else {
+                this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
             }
             options.create(true);
         } else if creation_disposition == open_existing {
@@ -230,7 +255,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
-        let handle = if is_dir && exists {
+        let handle = if is_dir {
             let fh = &mut this.machine.fds;
             let fd_num = fh.insert_new(DirHandle { path: file_name });
             Ok(Handle::File(fd_num))
