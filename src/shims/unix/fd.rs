@@ -121,7 +121,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("unsupported flags {:#x}", op);
         };
 
-        let result = fd.as_unix().flock(this.machine.communicate(), parsed_op)?;
+        let result = fd.as_unix(this).flock(this.machine.communicate(), parsed_op)?;
+        drop(fd);
         // return `0` if flock is successful
         let result = result.map(|()| 0i32);
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
@@ -273,7 +274,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let Ok(offset) = u64::try_from(offset) else {
                     return this.set_last_error_and_return(LibcError("EINVAL"), dest);
                 };
-                fd.as_unix().pread(communicate, offset, buf, count, this, finish)?
+                fd.as_unix(this).pread(communicate, offset, buf, count, this, finish)?
             }
         };
         interp_ok(())
@@ -333,7 +334,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let Ok(offset) = u64::try_from(offset) else {
                     return this.set_last_error_and_return(LibcError("EINVAL"), dest);
                 };
-                fd.as_unix().pwrite(communicate, buf, count, offset, this, finish)?
+                fd.as_unix(this).pwrite(communicate, buf, count, offset, this, finish)?
             }
         };
         interp_ok(())

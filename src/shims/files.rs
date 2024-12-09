@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::io::{IsTerminal, SeekFrom, Write};
+use std::fs::{File, Metadata};
+use std::io::{IsTerminal, Read, SeekFrom, Seek, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
@@ -192,7 +193,7 @@ pub trait FileDescription: std::fmt::Debug + FileDescriptionExt {
         false
     }
 
-    fn as_unix(&self) -> &dyn UnixFileDescription {
+    fn as_unix<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
         panic!("Not a unix file descriptor: {}", self.name());
     }
 }
@@ -275,6 +276,99 @@ impl FileDescription for io::Stderr {
 
     fn is_tty(&self, communicate_allowed: bool) -> bool {
         communicate_allowed && self.is_terminal()
+    }
+}
+
+#[derive(Debug)]
+pub struct FileHandle {
+    pub(crate) file: File,
+    pub(crate) writable: bool,
+}
+
+impl FileDescription for FileHandle {
+    fn name(&self) -> &'static str {
+        "file"
+    }
+
+    fn read<'tcx>(
+        &self,
+        _self_ref: &FileDescriptionRef,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+
+        let result = ecx.read_from_host(&self.file, len, ptr)?;
+        finish.call(ecx, result)
+    }
+
+    fn write<'tcx>(
+        &self,
+        _self_ref: &FileDescriptionRef,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+
+        let result = ecx.write_to_host(&self.file, len, ptr)?;
+        finish.call(ecx, result)
+    }
+
+    fn seek<'tcx>(
+        &self,
+        communicate_allowed: bool,
+        offset: SeekFrom,
+    ) -> InterpResult<'tcx, io::Result<u64>> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+        interp_ok((&mut &self.file).seek(offset))
+    }
+
+    fn close<'tcx>(
+        self: Box<Self>,
+        communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+        // We sync the file if it was opened in a mode different than read-only.
+        if self.writable {
+            // `File::sync_all` does the checks that are done when closing a file. We do this to
+            // to handle possible errors correctly.
+            let result = self.file.sync_all();
+            // Now we actually close the file and return the result.
+            drop(self.file);
+            interp_ok(result)
+        } else {
+            // We drop the file, this closes it but ignores any errors
+            // produced when closing it. This is done because
+            // `File::sync_all` cannot be done over files like
+            // `/dev/urandom` which are read-only. Check
+            // https://github.com/rust-lang/miri/issues/999#issuecomment-568920439
+            // for a deeper discussion.
+            drop(self.file);
+            interp_ok(Ok(()))
+        }
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
+        interp_ok(self.file.metadata())
+    }
+
+    fn is_tty(&self, communicate_allowed: bool) -> bool {
+        communicate_allowed && self.file.is_terminal()
+    }
+
+    fn as_unix<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
+        assert!(
+            ecx.target_os_is_unix(),
+            "unix file operations are only available for unix targets"
+        );
+        self
     }
 }
 

@@ -1,58 +1,11 @@
-use std::fs::{File, Metadata, OpenOptions};
+use std::fs::{Metadata, OpenOptions};
 use std::io;
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::shims::files::FileDescription;
+use crate::shims::files::{FileDescription, FileHandle};
 use crate::shims::windows::handle::{EvalContextExt as _, Handle};
 use crate::*;
-
-#[derive(Debug)]
-pub struct FileHandle {
-    pub(crate) file: File,
-    pub(crate) writable: bool,
-}
-
-impl FileDescription for FileHandle {
-    fn name(&self) -> &'static str {
-        "file"
-    }
-
-    fn close<'tcx>(
-        self: Box<Self>,
-        communicate_allowed: bool,
-        _ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx, io::Result<()>> {
-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
-        // We sync the file if it was opened in a mode different than read-only.
-        if self.writable {
-            // `File::sync_all` does the checks that are done when closing a file. We do this to
-            // to handle possible errors correctly.
-            let result = self.file.sync_all();
-            // Now we actually close the file and return the result.
-            drop(*self);
-            interp_ok(result)
-        } else {
-            // We drop the file, this closes it but ignores any errors
-            // produced when closing it. This is done because
-            // `File::sync_all` cannot be done over files like
-            // `/dev/urandom` which are read-only. Check
-            // https://github.com/rust-lang/miri/issues/999#issuecomment-568920439
-            // for a deeper discussion.
-            drop(*self);
-            interp_ok(Ok(()))
-        }
-    }
-
-    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
-        interp_ok(self.file.metadata())
-    }
-
-    fn is_tty(&self, communicate_allowed: bool) -> bool {
-        communicate_allowed && self.file.is_terminal()
-    }
-}
 
 #[derive(Debug)]
 pub struct DirHandle {
