@@ -19,6 +19,24 @@ error: deadlock: the evaluated program deadlocked
    = note: the evaluated program deadlocked
    = note: (no span available)
    = note: BACKTRACE on thread `unnamed-ID`:
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC
+   |
+LL |       let thread1 = thread::spawn(move || {
+   |  ___________________^
+LL | |         let sized_8_data = (u64::MAX - 1).to_ne_bytes();
+LL | |         let res: i64 = unsafe {
+LL | |             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8).try_into().unwrap()
+...  |
+LL | |         assert_eq!(res, 8);
+LL | |     });
+   | |______^
 
 error: deadlock: the evaluated program deadlocked
   --> tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC
@@ -28,12 +46,48 @@ LL |             libc::write(fd, sized_8_data.as_ptr() as *const libc::c_void, 8
    |
    = note: BACKTRACE on thread `unnamed-ID`:
    = note: inside closure at tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC
+   |
+LL |       let thread2 = thread::spawn(move || {
+   |  ___________________^
+LL | |         let sized_8_data = (u64::MAX - 1).to_ne_bytes();
+LL | |         // Write u64::MAX - 1, so the all subsequent write will block.
+LL | |         let res: i64 = unsafe {
+...  |
+LL | |         assert_eq!(res, 8);
+LL | |     });
+   | |______^
 
 error: deadlock: the evaluated program deadlocked
    |
    = note: the evaluated program deadlocked
    = note: (no span available)
    = note: BACKTRACE on thread `unnamed-ID`:
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail-dep/libc/eventfd_block_write_twice.rs:LL:CC
+   |
+LL |       let thread3 = thread::spawn(move || {
+   |  ___________________^
+LL | |         let mut buf: [u8; 8] = [0; 8];
+LL | |         // This will unblock both `write` in thread1 and thread2.
+LL | |         let res: i64 = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), 8).try_into().unwrap() };
+...  |
+LL | |         assert_eq!(counter, (u64::MAX - 1));
+LL | |     });
+   | |______^
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

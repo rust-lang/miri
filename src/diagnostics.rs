@@ -588,6 +588,36 @@ pub fn report_msg<'tcx>(
         }
     }
 
+    // Traverse thread spawns to display thread backtraces up to main thread
+    if let Some(mut thread) = thread {
+        let mut thread_spawn_context = machine.threads.get_thread_spawn_context(thread);
+
+        while let Some((spawning_thread, thread_spawn_backtrace)) = thread_spawn_context {
+            err.note(format!(
+                "thread `{}` was spawned by thread `{}`",
+                machine.threads.get_thread_display_name(thread),
+                machine.threads.get_thread_display_name(*spawning_thread)
+            ));
+            let (pruned_stacktrace, _was_pruned) =
+                prune_stacktrace(thread_spawn_backtrace.to_vec(), machine);
+
+            for (idx, frame_info) in pruned_stacktrace.iter().enumerate() {
+                let is_local = machine.is_local(frame_info);
+                // No span for non-local frames except the first frame (which is the error site).
+                if is_local && idx > 0 {
+                    err.subdiagnostic(frame_info.as_note(machine.tcx));
+                } else {
+                    let sm = sess.source_map();
+                    let span = sm.span_to_embeddable_string(frame_info.span);
+                    err.note(format!("{frame_info} at {span}"));
+                }
+            }
+
+            thread = *spawning_thread;
+            thread_spawn_context = machine.threads.get_thread_spawn_context(thread);
+        }
+    }
+
     err.emit();
 }
 

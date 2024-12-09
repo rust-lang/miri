@@ -15,6 +15,36 @@ LL |             a16.store(1, Ordering::SeqCst);
    = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
    = note: BACKTRACE (of the first span) on thread `unnamed-ID`:
    = note: inside closure at tests/fail/data_race/mixed_size_write_write.rs:LL:CC
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::scoped::<impl std::thread::Builder>::spawn_scoped::<'_, {closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/scoped.rs:LL:CC
+   = note: inside `std::thread::Scope::<'_, '_>::spawn::<{closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/scoped.rs:LL:CC
+note: inside closure
+  --> tests/fail/data_race/mixed_size_write_write.rs:LL:CC
+   |
+LL | / ...   s.spawn(|| {
+LL | | ...       let idx = if cfg!(fst) { 0 } else { 1 };
+LL | | ...       a8[idx].store(1, Ordering::SeqCst);
+LL | | ...
+LL | | ...   });
+   | |________^
+   = note: inside closure at RUSTLIB/std/src/thread/scoped.rs:LL:CC
+   = note: inside `<std::panic::AssertUnwindSafe<{closure@std::thread::scope<'_, {closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>::{closure#0}}> as std::ops::FnOnce<()>>::call_once` at RUSTLIB/core/src/panic/unwind_safe.rs:LL:CC
+   = note: inside `std::panicking::r#try::do_call::<std::panic::AssertUnwindSafe<{closure@std::thread::scope<'_, {closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>::{closure#0}}>, ()>` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::panicking::r#try::<(), std::panic::AssertUnwindSafe<{closure@std::thread::scope<'_, {closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>::{closure#0}}>>` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::panic::catch_unwind::<std::panic::AssertUnwindSafe<{closure@std::thread::scope<'_, {closure@tests/fail/data_race/mixed_size_write_write.rs:LL:CC}, ()>::{closure#0}}>, ()>` at RUSTLIB/std/src/panic.rs:LL:CC
+note: inside `main`
+  --> tests/fail/data_race/mixed_size_write_write.rs:LL:CC
+   |
+LL | /     thread::scope(|s| {
+LL | |         s.spawn(|| {
+LL | |             a16.store(1, Ordering::SeqCst);
+LL | |         });
+...  |
+LL | |         });
+LL | |     });
+   | |______^
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

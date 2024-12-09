@@ -13,6 +13,24 @@ LL |             *c.0 = 1;
    = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
    = note: BACKTRACE (of the first span) on thread `unnamed-ID`:
    = note: inside closure at tests/fail/data_race/relax_acquire_race.rs:LL:CC
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail/data_race/relax_acquire_race.rs:LL:CC}, u32>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail/data_race/relax_acquire_race.rs:LL:CC}, u32>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail/data_race/relax_acquire_race.rs:LL:CC}, u32>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail/data_race/relax_acquire_race.rs:LL:CC}, u32>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail/data_race/relax_acquire_race.rs:LL:CC
+   |
+LL |   ...   let j3 = spawn(move || {
+   |  ________________^
+LL | | ...       let c = c; // avoid field capturing
+LL | | ...       if SYNC.load(Ordering::Acquire) == 2 {
+LL | | ...           *c.0
+...  |
+LL | | ...       }
+LL | | ...   });
+   | |________^
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

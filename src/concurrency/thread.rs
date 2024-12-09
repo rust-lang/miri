@@ -235,6 +235,9 @@ pub struct Thread<'tcx> {
     /// The join status.
     join_status: ThreadJoinStatus,
 
+    // ThreadId that spawned this thread and backtrace to where this thread was spawned
+    thread_spawn_context: Option<(ThreadId, Vec<FrameInfo<'tcx>>)>,
+
     /// Stack of active panic payloads for the current thread. Used for storing
     /// the argument of the call to `miri_start_unwind` (the panic payload) when unwinding.
     /// This is pointer-sized, and matches the `Payload` type in `src/libpanic_unwind/miri.rs`.
@@ -321,13 +324,18 @@ impl<'tcx> std::fmt::Debug for Thread<'tcx> {
 }
 
 impl<'tcx> Thread<'tcx> {
-    fn new(name: Option<&str>, on_stack_empty: Option<StackEmptyCallback<'tcx>>) -> Self {
+    fn new(
+        name: Option<&str>,
+        on_stack_empty: Option<StackEmptyCallback<'tcx>>,
+        thread_spawn_context: Option<(ThreadId, Vec<FrameInfo<'tcx>>)>,
+    ) -> Self {
         Self {
             state: ThreadState::Enabled,
             thread_name: name.map(|name| Vec::from(name.as_bytes())),
             stack: Vec::new(),
             top_user_relevant_frame: None,
             join_status: ThreadJoinStatus::Joinable,
+            thread_spawn_context,
             panic_payloads: Vec::new(),
             last_error: None,
             on_stack_empty,
@@ -345,6 +353,7 @@ impl VisitProvenance for Thread<'_> {
             state: _,
             thread_name: _,
             join_status: _,
+            thread_spawn_context: _,
             on_stack_empty: _, // we assume the closure captures no GC-relevant state
         } = self;
 
@@ -475,7 +484,7 @@ impl<'tcx> Default for ThreadManager<'tcx> {
     fn default() -> Self {
         let mut threads = IndexVec::new();
         // Create the main thread and add it to the list of threads.
-        threads.push(Thread::new(Some("main"), None));
+        threads.push(Thread::new(Some("main"), None, None));
         Self {
             active_thread: ThreadId::MAIN_THREAD,
             threads,
@@ -542,9 +551,13 @@ impl<'tcx> ThreadManager<'tcx> {
     }
 
     /// Create a new thread and returns its id.
-    fn create_thread(&mut self, on_stack_empty: StackEmptyCallback<'tcx>) -> ThreadId {
+    fn create_thread(
+        &mut self,
+        on_stack_empty: StackEmptyCallback<'tcx>,
+        thread_spawn_context: Option<(ThreadId, Vec<FrameInfo<'tcx>>)>,
+    ) -> ThreadId {
         let new_thread_id = ThreadId::new(self.threads.len());
-        self.threads.push(Thread::new(None, Some(on_stack_empty)));
+        self.threads.push(Thread::new(None, Some(on_stack_empty), thread_spawn_context));
         new_thread_id
     }
 
@@ -709,6 +722,13 @@ impl<'tcx> ThreadManager<'tcx> {
 
     pub fn get_thread_display_name(&self, thread: ThreadId) -> String {
         self.threads[thread].thread_display_name(thread)
+    }
+
+    pub fn get_thread_spawn_context(
+        &self,
+        thread: ThreadId,
+    ) -> Option<&(ThreadId, Vec<FrameInfo<'tcx>>)> {
+        self.threads[thread].thread_spawn_context.as_ref()
     }
 
     /// Put the thread into the blocked state.
@@ -924,10 +944,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         // Create the new thread
-        let new_thread_id = this.machine.threads.create_thread({
-            let mut state = tls::TlsDtorsState::default();
-            Box::new(move |m| state.on_stack_empty(m))
-        });
+        let new_thread_id = this.machine.threads.create_thread(
+            {
+                let mut state = tls::TlsDtorsState::default();
+                Box::new(move |m| state.on_stack_empty(m))
+            },
+            Some((this.machine.threads.active_thread(), this.generate_stacktrace())),
+        );
         let current_span = this.machine.current_span();
         if let Some(data_race) = &mut this.machine.data_race {
             data_race.thread_created(&this.machine.threads, new_thread_id, current_span);

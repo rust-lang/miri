@@ -22,6 +22,23 @@ LL | |             );
    | |_____________^
    = note: BACKTRACE (of the first span) on thread `unnamed-ID`:
    = note: inside closure at tests/fail/data_race/dealloc_write_race2.rs:LL:CC
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail/data_race/dealloc_write_race2.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail/data_race/dealloc_write_race2.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail/data_race/dealloc_write_race2.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail/data_race/dealloc_write_race2.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail/data_race/dealloc_write_race2.rs:LL:CC
+   |
+LL |   ...   let j2 = spawn(move || {
+   |  ________________^
+LL | | ...       let ptr = ptr; // avoid field capturing
+LL | | ...       // Also an error of the form: Data race detected between (1) deallocation on thread `unnamed-ID` and (2) non-atomic write on th...
+LL | | ...       // but the invalid allocation is detected first.
+LL | | ...       *ptr.0 = 2;
+LL | | ...   });
+   | |________^
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 
