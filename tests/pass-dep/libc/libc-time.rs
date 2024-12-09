@@ -5,7 +5,14 @@ use std::{env, mem, ptr};
 fn main() {
     test_clocks();
     test_posix_gettimeofday();
-    test_localtime_r();
+    test_localtime_r_gmt();
+    test_localtime_r_pst();
+    test_localtime_r_epoch();
+    // Architecture-specific tests.
+    #[cfg(target_pointer_width = "32")]
+    test_localtime_r_future_32b();
+    #[cfg(target_pointer_width = "64")]
+    test_localtime_r_future_64b();
 }
 
 /// Tests whether clock support exists at all
@@ -46,14 +53,9 @@ fn test_posix_gettimeofday() {
     assert_eq!(is_error, -1);
 }
 
-fn test_localtime_r() {
-    // Set timezone to GMT.
-    let key = "TZ";
-    env::set_var(key, "GMT");
-
-    const TIME_SINCE_EPOCH: libc::time_t = 1712475836;
-    let custom_time_ptr = &TIME_SINCE_EPOCH;
-    let mut tm = libc::tm {
+// Helper function to create an empty tm struct.
+fn create_empty_tm() -> libc::tm {
+    libc::tm {
         tm_sec: 0,
         tm_min: 0,
         tm_hour: 0,
@@ -77,7 +79,17 @@ fn test_localtime_r() {
             target_os = "android"
         ))]
         tm_zone: std::ptr::null_mut::<libc::c_char>(),
-    };
+    }
+}
+
+// Original GMT test
+fn test_localtime_r_gmt() {
+    // Set timezone to GMT.
+    let key = "TZ";
+    env::set_var(key, "GMT");
+    const TIME_SINCE_EPOCH: libc::time_t = 1712475836; // 2024-04-07 07:43:56 GMT
+    let custom_time_ptr = &TIME_SINCE_EPOCH;
+    let mut tm = create_empty_tm();
     let res = unsafe { libc::localtime_r(custom_time_ptr, &mut tm) };
 
     assert_eq!(tm.tm_sec, 56);
@@ -95,20 +107,172 @@ fn test_localtime_r() {
         target_os = "freebsd",
         target_os = "android"
     ))]
-    assert_eq!(tm.tm_gmtoff, 0);
+    {
+        assert_eq!(tm.tm_gmtoff, 0);
+        unsafe {
+            assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "+00");
+        }
+    }
+
+    // The returned value is the pointer passed in.
+    assert!(ptr::eq(res, &mut tm));
+
+    // Remove timezone setting.
+    env::remove_var(key);
+}
+
+// PST timezone test (testing different timezone handling).
+fn test_localtime_r_pst() {
+    let key = "TZ";
+    env::set_var(key, "PST8PDT");
+    const TIME_SINCE_EPOCH: libc::time_t = 1712475836;
+    let custom_time_ptr = &TIME_SINCE_EPOCH;
+    let mut tm = create_empty_tm();
+
+    let res = unsafe { libc::localtime_r(custom_time_ptr, &mut tm) };
+
+    assert_eq!(tm.tm_sec, 56);
+    assert_eq!(tm.tm_min, 43);
+    assert_eq!(tm.tm_hour, 0); // 7 - 7 = 0 (PDT offset)
+    assert_eq!(tm.tm_mday, 7);
+    assert_eq!(tm.tm_mon, 3);
+    assert_eq!(tm.tm_year, 124);
+    assert_eq!(tm.tm_wday, 0);
+    assert_eq!(tm.tm_yday, 97);
+    assert_eq!(tm.tm_isdst, -1); // DST information unavailable
+
     #[cfg(any(
         target_os = "linux",
         target_os = "macos",
         target_os = "freebsd",
         target_os = "android"
     ))]
-    unsafe {
-        assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "+00")
-    };
+    {
+        assert_eq!(tm.tm_gmtoff, -25200); // -7 hours in seconds
+        unsafe {
+            assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "-07");
+        }
+    }
 
-    // The returned value is the pointer passed in.
     assert!(ptr::eq(res, &mut tm));
+    env::remove_var(key);
+}
 
-    // Remove timezone setting.
+// Unix epoch test (edge case testing).
+fn test_localtime_r_epoch() {
+    let key = "TZ";
+    env::set_var(key, "GMT");
+    const TIME_SINCE_EPOCH: libc::time_t = 0; // 1970-01-01 00:00:00
+    let custom_time_ptr = &TIME_SINCE_EPOCH;
+    let mut tm = create_empty_tm();
+
+    let res = unsafe { libc::localtime_r(custom_time_ptr, &mut tm) };
+
+    assert_eq!(tm.tm_sec, 0);
+    assert_eq!(tm.tm_min, 0);
+    assert_eq!(tm.tm_hour, 0);
+    assert_eq!(tm.tm_mday, 1);
+    assert_eq!(tm.tm_mon, 0);
+    assert_eq!(tm.tm_year, 70);
+    assert_eq!(tm.tm_wday, 4); // Thursday
+    assert_eq!(tm.tm_yday, 0);
+    assert_eq!(tm.tm_isdst, -1);
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "android"
+    ))]
+    {
+        assert_eq!(tm.tm_gmtoff, 0);
+        unsafe {
+            assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "+00");
+        }
+    }
+
+    assert!(ptr::eq(res, &mut tm));
+    env::remove_var(key);
+}
+
+// Future date test (testing large values).
+#[cfg(target_pointer_width = "64")]
+fn test_localtime_r_future_64b() {
+    let key = "TZ";
+    env::set_var(key, "GMT");
+
+    // Using 2050-01-01 00:00:00 for 64-bit systems
+    // value that's safe for 64-bit time_t
+    const TIME_SINCE_EPOCH: libc::time_t = 2524608000;
+    let custom_time_ptr = &TIME_SINCE_EPOCH;
+    let mut tm = create_empty_tm();
+
+    let res = unsafe { libc::localtime_r(custom_time_ptr, &mut tm) };
+
+    assert_eq!(tm.tm_sec, 0);
+    assert_eq!(tm.tm_min, 0);
+    assert_eq!(tm.tm_hour, 0);
+    assert_eq!(tm.tm_mday, 1);
+    assert_eq!(tm.tm_mon, 0);
+    assert_eq!(tm.tm_year, 150); // 2050 - 1900
+    assert_eq!(tm.tm_wday, 6); // Saturday
+    assert_eq!(tm.tm_yday, 0);
+    assert_eq!(tm.tm_isdst, -1);
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "android"
+    ))]
+    {
+        assert_eq!(tm.tm_gmtoff, 0);
+        unsafe {
+            assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "+00");
+        }
+    }
+
+    assert!(ptr::eq(res, &mut tm));
+    env::remove_var(key);
+}
+
+#[cfg(target_pointer_width = "32")]
+fn test_localtime_r_future_32b() {
+    let key = "TZ";
+    env::set_var(key, "GMT");
+
+    // Using 2030-01-01 00:00:00 for 32-bit systems
+    // Safe value within i32 range
+    const TIME_SINCE_EPOCH: libc::time_t = 1893456000;
+    let custom_time_ptr = &TIME_SINCE_EPOCH;
+    let mut tm = create_empty_tm();
+
+    let res = unsafe { libc::localtime_r(custom_time_ptr, &mut tm) };
+
+    // Verify 2030-01-01 00:00:00
+    assert_eq!(tm.tm_sec, 0);
+    assert_eq!(tm.tm_min, 0);
+    assert_eq!(tm.tm_hour, 0);
+    assert_eq!(tm.tm_mday, 1);
+    assert_eq!(tm.tm_mon, 0);
+    assert_eq!(tm.tm_year, 130); // 2030 - 1900
+    assert_eq!(tm.tm_wday, 2); // Tuesday
+    assert_eq!(tm.tm_yday, 0);
+    assert_eq!(tm.tm_isdst, -1);
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "android"
+    ))]
+    {
+        assert_eq!(tm.tm_gmtoff, 0);
+        unsafe {
+            assert_eq!(std::ffi::CStr::from_ptr(tm.tm_zone).to_str().unwrap(), "+00");
+        }
+    }
+
+    assert!(ptr::eq(res, &mut tm));
     env::remove_var(key);
 }
