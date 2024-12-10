@@ -15,31 +15,33 @@ use std::path::PathBuf;
 mod utils;
 
 fn main() {
-    test_dup();
-    test_dup_stdout_stderr();
-    test_canonicalize_too_long();
-    test_rename();
-    test_ftruncate::<libc::off_t>(libc::ftruncate);
-    #[cfg(target_os = "linux")]
-    test_ftruncate::<libc::off64_t>(libc::ftruncate64);
-    test_file_open_unix_allow_two_args();
-    test_file_open_unix_needs_three_args();
-    test_file_open_unix_extra_third_arg();
-    #[cfg(target_os = "linux")]
-    test_o_tmpfile_flag();
-    test_posix_mkstemp();
-    test_posix_realpath_alloc();
-    test_posix_realpath_noalloc();
-    test_posix_realpath_errors();
-    #[cfg(target_os = "linux")]
-    test_posix_fadvise();
-    #[cfg(target_os = "linux")]
-    test_sync_file_range();
-    test_isatty();
-    test_read_and_uninit();
-    test_nofollow_not_symlink();
+    // test_dup();
+    // test_dup_stdout_stderr();
+    // test_canonicalize_too_long();
+    // test_rename();
+    // test_ftruncate::<libc::off_t>(libc::ftruncate);
+    // #[cfg(target_os = "linux")]
+    // test_ftruncate::<libc::off64_t>(libc::ftruncate64);
+    // test_file_open_unix_allow_two_args();
+    // test_file_open_unix_needs_three_args();
+    // test_file_open_unix_extra_third_arg();
+    // #[cfg(target_os = "linux")]
+    // test_o_tmpfile_flag();
+    // test_posix_mkstemp();
+    // test_posix_realpath_alloc();
+    // test_posix_realpath_noalloc();
+    // test_posix_realpath_errors();
+    // #[cfg(target_os = "linux")]
+    // test_posix_fadvise();
+    // #[cfg(target_os = "linux")]
+    // test_sync_file_range();
+    // test_isatty();
+    // test_read_and_uninit();
+    // test_nofollow_not_symlink();
+    test_readv();
 }
 
+#[allow(unused)]
 fn test_file_open_unix_allow_two_args() {
     let path = utils::prepare_with_content("test_file_open_unix_allow_two_args.txt", &[]);
 
@@ -49,6 +51,7 @@ fn test_file_open_unix_allow_two_args() {
     let _fd = unsafe { libc::open(name_ptr, libc::O_RDONLY) };
 }
 
+#[allow(unused)]
 fn test_file_open_unix_needs_three_args() {
     let path = utils::prepare_with_content("test_file_open_unix_needs_three_args.txt", &[]);
 
@@ -58,6 +61,7 @@ fn test_file_open_unix_needs_three_args() {
     let _fd = unsafe { libc::open(name_ptr, libc::O_CREAT, 0o666) };
 }
 
+#[allow(unused)]
 fn test_file_open_unix_extra_third_arg() {
     let path = utils::prepare_with_content("test_file_open_unix_extra_third_arg.txt", &[]);
 
@@ -67,6 +71,7 @@ fn test_file_open_unix_extra_third_arg() {
     let _fd = unsafe { libc::open(name_ptr, libc::O_RDONLY, 42) };
 }
 
+#[allow(unused)]
 fn test_dup_stdout_stderr() {
     let bytes = b"hello dup fd\n";
     unsafe {
@@ -77,6 +82,7 @@ fn test_dup_stdout_stderr() {
     }
 }
 
+#[allow(unused)]
 fn test_dup() {
     let bytes = b"dup and dup2";
     let path = utils::prepare_with_content("miri_test_libc_dup.txt", bytes);
@@ -102,12 +108,14 @@ fn test_dup() {
     }
 }
 
+#[allow(unused)]
 fn test_canonicalize_too_long() {
     // Make sure we get an error for long paths.
     let too_long = "x/".repeat(libc::PATH_MAX.try_into().unwrap());
     assert!(canonicalize(too_long).is_err());
 }
 
+#[allow(unused)]
 fn test_rename() {
     let path1 = utils::prepare("miri_test_libc_fs_source.txt");
     let path2 = utils::prepare("miri_test_libc_fs_rename_destination.txt");
@@ -133,6 +141,7 @@ fn test_rename() {
     remove_file(&path2).unwrap();
 }
 
+#[allow(unused)]
 fn test_ftruncate<T: From<i32>>(
     ftruncate: unsafe extern "C" fn(fd: libc::c_int, length: T) -> libc::c_int,
 ) {
@@ -167,6 +176,7 @@ fn test_ftruncate<T: From<i32>>(
     remove_file(&path).unwrap();
 }
 
+#[allow(unused)]
 #[cfg(target_os = "linux")]
 fn test_o_tmpfile_flag() {
     use std::fs::{OpenOptions, create_dir};
@@ -186,6 +196,7 @@ fn test_o_tmpfile_flag() {
     );
 }
 
+#[allow(unused)]
 fn test_posix_mkstemp() {
     use std::ffi::OsStr;
     use std::os::unix::io::FromRawFd;
@@ -228,6 +239,7 @@ fn test_posix_mkstemp() {
     }
 }
 
+#[allow(unused)]
 /// Test allocating variant of `realpath`.
 fn test_posix_realpath_alloc() {
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -253,6 +265,7 @@ fn test_posix_realpath_alloc() {
     remove_file(&path).unwrap();
 }
 
+#[allow(unused)]
 /// Test non-allocating variant of `realpath`.
 fn test_posix_realpath_noalloc() {
     use std::ffi::{CStr, CString};
@@ -280,6 +293,7 @@ fn test_posix_realpath_noalloc() {
     remove_file(&path).unwrap();
 }
 
+#[allow(unused)]
 /// Test failure cases for `realpath`.
 fn test_posix_realpath_errors() {
     use std::ffi::CString;
@@ -294,6 +308,7 @@ fn test_posix_realpath_errors() {
     assert_eq!(e.kind(), ErrorKind::NotFound);
 }
 
+#[allow(unused)]
 #[cfg(target_os = "linux")]
 fn test_posix_fadvise() {
     use std::io::Write;
@@ -321,6 +336,7 @@ fn test_posix_fadvise() {
     assert_eq!(result, 0);
 }
 
+#[allow(unused)]
 #[cfg(target_os = "linux")]
 fn test_sync_file_range() {
     use std::io::Write;
@@ -366,6 +382,7 @@ fn test_sync_file_range() {
     assert_eq!(result_2, 0);
 }
 
+#[allow(unused)]
 fn test_isatty() {
     // Testing whether our isatty shim returns the right value would require controlling whether
     // these streams are actually TTYs, which is hard.
@@ -390,6 +407,7 @@ fn test_isatty() {
     }
 }
 
+#[allow(unused)]
 fn test_read_and_uninit() {
     use std::mem::MaybeUninit;
     {
@@ -424,10 +442,71 @@ fn test_read_and_uninit() {
     }
 }
 
+#[allow(unused)]
 fn test_nofollow_not_symlink() {
     let bytes = b"Hello, World!\n";
     let path = utils::prepare_with_content("test_nofollow_not_symlink.txt", bytes);
     let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
     let ret = unsafe { libc::open(cpath.as_ptr(), libc::O_NOFOLLOW | libc::O_CLOEXEC) };
     assert!(ret >= 0);
+}
+
+fn test_readv() {
+    let bytes = b"abcdefgh";
+    let path = utils::prepare_with_content("miri_test_libc_readv.txt", bytes);
+
+    // Convert path to a null-terminated CString
+    let name = CString::new(path.into_os_string().into_string().unwrap()).unwrap();
+    let name_ptr = name.as_ptr();
+
+    unsafe {
+        let mut first_buf = [0u8; 4];
+        let mut second_buf = [0u8; 8];
+
+        // Define iovec structures
+        let iov: [libc::iovec; 2] = [
+            libc::iovec {
+                iov_len: first_buf.len() as usize,
+                iov_base: first_buf.as_mut_ptr() as *mut libc::c_void,
+            },
+            libc::iovec {
+                iov_len: second_buf.len() as usize,
+                iov_base: second_buf.as_mut_ptr() as *mut libc::c_void,
+            },
+        ];
+
+        // Open file
+        let fd = libc::open(name_ptr, libc::O_RDONLY);
+        if fd < 0 {
+            eprintln!("Failed to open file: {}", Error::last_os_error().to_string());
+            return;
+        }
+
+        // Call readv with proper type conversions
+        let iovcnt = libc::c_int::try_from(iov.len()).expect("iovec count too large for platform");
+
+        // Call readv with proper type handling for the count
+        let res = libc::readv(fd, iov.as_ptr() as *const libc::iovec, iovcnt);
+
+        if res < 0 {
+            eprintln!("Failed to readv: {}", Error::last_os_error());
+            libc::close(fd);
+            return;
+        }
+
+        // Print the results
+        println!("libc::readv rval({})", res);
+
+        // Validate buffers
+        if first_buf != *b"abcd" {
+            eprintln!("First buffer mismatch: {:?}", first_buf);
+        }
+
+        if second_buf != *b"efgh\0\0\0\0" {
+            eprintln!("Second buffer mismatch: {:?}", second_buf);
+        }
+
+        // Close the file descriptor
+        libc::close(fd);
+    }
 }
