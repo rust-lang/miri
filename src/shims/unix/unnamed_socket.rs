@@ -181,16 +181,14 @@ fn anonsocket_write<'tcx>(
         // corresponding ErrorKind variant.
         throw_unsup_format!("writing to the reading end of a pipe")
     };
-    let mut writebuf = writebuf.borrow_mut();
 
-    let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.buf.len());
-    let weak_peer_fd = peer_fd.downgrade();
-    let dest = dest.clone();
+    let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
 
     // This is only for blocking socketpair.
     if available_space == 0 {
-        drop(writebuf);
         // Blocking socketpair with a full buffer.
+        let weak_peer_fd = peer_fd.downgrade();
+        let dest = dest.clone();
         ecx.block_thread(
             BlockReason::UnnamedSocket,
             None,
@@ -207,6 +205,7 @@ fn anonsocket_write<'tcx>(
             ),
         );
     } else {
+        let mut writebuf = writebuf.borrow_mut();
         // Remember this clock so `read` can synchronize with us.
         ecx.release_clock(|clock| {
             writebuf.clock.join(clock);
@@ -247,17 +246,14 @@ fn anonsocket_read<'tcx>(
         // corresponding ErrorKind variant.
         throw_unsup_format!("reading from the write end of a pipe")
     };
-    let mut readbuf = readbuf.borrow_mut();
-    let weak_self_ref = self_ref.downgrade();
-    let buf_is_empty = readbuf.buf.is_empty();
 
-    if buf_is_empty {
-        drop(readbuf);
+    if readbuf.borrow_mut().buf.is_empty() {
         if anonsocket.peer_fd().upgrade().is_none() {
             // Socketpair with no peer and empty buffer.
             // 0 bytes successfully read indicates end-of-file.
             return ecx.return_read_success(ptr, &[], 0, &dest);
         } else {
+            let weak_self_ref = self_ref.downgrade();
             // We only need to consider the blocking case here.
             // Blocking socketpair with writer and empty buffer.
             ecx.block_thread(
@@ -278,6 +274,7 @@ fn anonsocket_read<'tcx>(
             );
         }
     } else {
+        let mut readbuf = readbuf.borrow_mut();
         // Synchronize with all previous writes to this buffer.
         // FIXME: this over-synchronizes; a more precise approach would be to
         // only sync with the writes whose data we will read.
