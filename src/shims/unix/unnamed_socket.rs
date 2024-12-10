@@ -173,35 +173,12 @@ impl FileDescription for AnonSocket {
             MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
         let peer_fd = peer_fd.downgrade();
         let dest = dest.clone();
-        // TODO: move this to helper
-        if available_space == 0 {
-            if self.is_nonblock {
-                // Non-blocking socketpair with a full buffer.
-                return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
-            } else {
-                // Blocking socketpair with a full buffer.
-                ecx.block_thread(
-                    BlockReason::UnnamedSocket,
-                    None,
-                    callback!(
-                        @capture<'tcx> {
-                            available_space: usize,
-                            peer_fd: WeakFileDescriptionRef,
-                            ptr: Pointer,
-                            len: usize,
-                            dest: MPlaceTy<'tcx>,
-                        }
-                        @unblock = |this| {
-                            // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
-                            anonsocket_write(available_space, peer_fd, ptr, len, dest, this)
-                        }
-                    ),
-                );
-            }
-        } else {
-            return anonsocket_write(available_space, peer_fd, ptr, len, dest, ecx);
+        if available_space == 0 && self.is_nonblock {
+            // Non-blocking socketpair with a full buffer.
+            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
         }
-        interp_ok(())
+        // TODO: We might need to decide what to do if peer_fd is closed when read is blocked.
+        anonsocket_write(peer_fd, ptr, len, dest, ecx)
     }
 
     fn as_unix(&self) -> &dyn UnixFileDescription {
@@ -211,7 +188,6 @@ impl FileDescription for AnonSocket {
 
 /// Write to AnonSocket based on the space available and return the written byte size.
 fn anonsocket_write<'tcx>(
-    available_space: usize,
     peer_fd: WeakFileDescriptionRef,
     ptr: Pointer,
     len: usize,
@@ -226,23 +202,49 @@ fn anonsocket_write<'tcx>(
     };
     let mut writebuf = writebuf.borrow_mut();
 
-    // Remember this clock so `read` can synchronize with us.
-    ecx.release_clock(|clock| {
-        writebuf.clock.join(clock);
-    });
-    // Do full write / partial write based on the space available.
-    let actual_write_size = len.min(available_space);
-    let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
-    writebuf.buf.extend(&bytes[..actual_write_size]);
+    let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.buf.len());
+    let weak_peer_fd = peer_fd.downgrade();
+    let dest = dest.clone();
 
-    // Need to stop accessing peer_fd so that it can be notified.
-    drop(writebuf);
+    // This is only for blocking socketpair.
+    if available_space == 0 {
+        drop(writebuf);
+        // Blocking socketpair with a full buffer.
+        ecx.block_thread(
+            BlockReason::UnnamedSocket,
+            None,
+            callback!(
+                @capture<'tcx> {
+                    weak_peer_fd: WeakFileDescriptionRef,
+                    ptr: Pointer,
+                    len: usize,
+                    dest: MPlaceTy<'tcx>,
+                }
+                @unblock = |this| {
+                    anonsocket_write(weak_peer_fd, ptr, len, dest, this)
+                }
+            ),
+        );
+    } else {
+        // Remember this clock so `read` can synchronize with us.
+        ecx.release_clock(|clock| {
+            writebuf.clock.join(clock);
+        });
+        // Do full write / partial write based on the space available.
+        let actual_write_size = len.min(available_space);
+        let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
+        writebuf.buf.extend(&bytes[..actual_write_size]);
 
-    // Notification should be provided for peer fd as it became readable.
-    // The kernel does this even if the fd was already readable before, so we follow suit.
-    ecx.check_and_update_readiness(&peer_fd)?;
+        // Need to stop accessing peer_fd so that it can be notified.
+        drop(writebuf);
 
-    ecx.return_write_success(actual_write_size, &dest)
+        // Notification should be provided for peer fd as it became readable.
+        // The kernel does this even if the fd was already readable before, so we follow suit.
+        ecx.check_and_update_readiness(&peer_fd)?;
+
+        return ecx.return_write_success(actual_write_size, &dest);
+    }
+    interp_ok(())
 }
 
 /// Read from AnonSocket and return the number of bytes read.
