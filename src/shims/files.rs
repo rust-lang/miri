@@ -146,6 +146,20 @@ pub trait FileDescription: std::fmt::Debug + FileDescriptionExt {
         throw_unsup_format!("cannot read from {}", self.name());
     }
 
+    /// Reads data directly into a byte buffer without using Miri's pointer abstraction.
+    /// This function provides an alternative to `read()` that works with byte slices,
+    /// making it particularly suitable for operations requiring atomic reads or
+    /// direct buffer manipulation.
+    fn read_buffer<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _communicate_allowed: bool,
+        _buf: &mut [u8],
+        _dest: &MPlaceTy<'tcx>,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx> {
+        throw_unsup_format!("cannot read from {}", self.name());
+    }
+
     /// Writes as much as possible from the given buffer `ptr`.
     /// `len` indicates how many bytes we should try to write.
     /// `dest` is where the return value should be stored: number of bytes written, or `-1` in case of error.

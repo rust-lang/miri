@@ -47,6 +47,36 @@ impl FileDescription for FileHandle {
         }
     }
 
+    /// Reads data directly into a byte buffer without using Miri's pointer abstraction.
+    /// This function provides an alternative to `read()` that works with byte slices,
+    /// making it particularly suitable for operations requiring atomic reads or
+    /// direct buffer manipulation.
+    fn read_buffer<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        buf: &mut [u8],
+        dest: &MPlaceTy<'tcx>,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = ecx.eval_context_mut();
+
+        // Check isolation mode
+        if !communicate_allowed {
+            helpers::isolation_abort_error("`read` operation")?;
+        }
+
+        // Perform read operation
+        let result = (&mut &self.file).read(buf);
+
+        match result {
+            Ok(read_size) => {
+                this.write_int(u64::try_from(read_size).unwrap(), dest)?;
+                interp_ok(())
+            }
+            Err(e) => this.set_last_error_and_return(e, dest),
+        }
+    }
+
     fn write<'tcx>(
         self: FileDescriptionRef<Self>,
         communicate_allowed: bool,

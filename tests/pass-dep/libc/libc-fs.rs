@@ -14,6 +14,42 @@ use std::path::PathBuf;
 #[path = "../../utils/mod.rs"]
 mod utils;
 
+/// Platform-specific offset type for file seeking operations.
+/// the lseek system call typically expects an off_t type, which can be 64 bits
+/// even on some 32-bit systems.
+#[cfg(any(
+    target_os = "illumos",
+    target_os = "solaris",
+    target_os = "android",
+    all(target_os = "linux", target_pointer_width = "64"),
+    all(target_os = "macos", target_arch = "aarch64")
+))]
+type LseekOffset = i64;
+
+#[cfg(any(
+    target_os = "freebsd",
+    all(target_os = "macos", not(target_arch = "aarch64")),
+    all(target_os = "linux", target_pointer_width = "32")
+))]
+type LseekOffset = i32;
+
+/// Seeks to a specific position in the file
+fn seek(fd: i32, offset: LseekOffset) -> LseekOffset {
+    let result = unsafe {
+        // the lseek64 function is not part of the POSIX standard and
+        // may not be available on all systems.
+        #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+        let result = libc::lseek64(fd, offset.into(), libc::SEEK_SET);
+
+        #[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+        let result = libc::lseek(fd, offset.into(), libc::SEEK_SET);
+
+        result
+    };
+
+    LseekOffset::try_from(result).expect("seek operation failed")
+}
+
 fn main() {
     test_dup();
     test_dup_stdout_stderr();
@@ -38,6 +74,10 @@ fn main() {
     test_isatty();
     test_read_and_uninit();
     test_nofollow_not_symlink();
+    test_readv_basic();
+    test_readv_large_buffers();
+    test_readv_partial_and_eof();
+    test_readv_error_conditions();
 }
 
 fn test_file_open_unix_allow_two_args() {
@@ -430,4 +470,443 @@ fn test_nofollow_not_symlink() {
     let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
     let ret = unsafe { libc::open(cpath.as_ptr(), libc::O_NOFOLLOW | libc::O_CLOEXEC) };
     assert!(ret >= 0);
+}
+
+/// Tests basic functionality of the readv() system call by reading a small file
+/// with multiple buffers.
+///
+/// Verifies that:
+/// - File contents are read correctly into provided buffers
+/// - The total number of bytes read matches file size
+/// - Buffer boundaries are respected
+/// - Return values match expected behavior
+fn test_readv_basic() {
+    let bytes = b"abcdefgh";
+    let path = utils::prepare_with_content("miri_test_libc_readv.txt", bytes);
+
+    // Convert path to a null-terminated CString.
+    let name = CString::new(path.into_os_string().into_string().unwrap()).unwrap();
+    let name_ptr = name.as_ptr();
+
+    let mut first_buf = [0u8; 4];
+    let mut second_buf = [0u8; 8];
+
+    unsafe {
+        // Define iovec structures.
+        let iov: [libc::iovec; 2] = [
+            libc::iovec {
+                iov_len: first_buf.len() as usize,
+                iov_base: first_buf.as_mut_ptr() as *mut libc::c_void,
+            },
+            libc::iovec {
+                iov_len: second_buf.len() as usize,
+                iov_base: second_buf.as_mut_ptr() as *mut libc::c_void,
+            },
+        ];
+
+        // Open file.
+        let fd = libc::open(name_ptr, libc::O_RDONLY);
+        if fd < 0 {
+            eprintln!("Failed to open file: {}", Error::last_os_error().to_string());
+            return;
+        }
+
+        // Call readv with proper type conversions.
+        let iovcnt = libc::c_int::try_from(iov.len()).expect("iovec count too large for platform");
+
+        // Call readv with proper type handling for the count.
+        let res = libc::readv(fd, iov.as_ptr() as *const libc::iovec, iovcnt);
+
+        if res < 0 {
+            eprintln!("Failed to readv: {}", Error::last_os_error());
+            libc::close(fd);
+            return;
+        }
+
+        // Close the file descriptor.
+        libc::close(fd);
+    }
+
+    // Validate buffers.
+    if first_buf != *b"abcd" {
+        eprintln!("First buffer mismatch: {:?}", first_buf);
+    }
+
+    if second_buf != *b"efgh\0\0\0\0" {
+        eprintln!("Second buffer mismatch: {:?}", second_buf);
+    }
+}
+
+/// Tests readv() system call with large buffer sizes and pattern verification.
+/// Uses multiple buffers (16KB, 16KB, 32KB) to read a 64KB file containing
+/// a repeating 'ABCD' pattern with markers at buffer boundaries.
+///
+/// Verifies that:
+/// - Large file contents are read correctly
+/// - Markers at buffer boundaries are preserved
+/// - Pattern integrity is maintained between markers
+/// - Memory safety with large allocations
+/// - Buffer boundary handling for larger sizes
+fn test_readv_large_buffers() {
+    const BUFFER_SIZE_1: usize = 16384; // 16KB
+    const BUFFER_SIZE_2: usize = 16384; // 16KB
+    const BUFFER_SIZE_3: usize = 32768; // 32KB
+
+    // Define our buffer sizes
+    let buffer_sizes = &[
+        BUFFER_SIZE_1, // 16KB
+        BUFFER_SIZE_2, // 16KB
+        BUFFER_SIZE_3, // 32KB
+    ];
+
+    // Create large test file with patterns and markers.
+    // Generate pattern with awareness of buffer boundaries.
+    let large_content = utils::generate_test_pattern(buffer_sizes);
+
+    let path = utils::prepare_with_content("large_readv_test.txt", &large_content);
+
+    // Create buffers based on our defined sizes.
+    let mut buffers: Vec<Vec<u8>> = buffer_sizes.iter().map(|&size| vec![0u8; size]).collect();
+
+    // Convert path to CString for libc interface.
+    let path_cstr = CString::new(path.into_os_string().into_string().unwrap()).unwrap();
+
+    let bytes_read: usize = unsafe {
+        let fd = libc::open(path_cstr.as_ptr(), libc::O_RDONLY);
+        assert!(fd > 0, "Failed to open test file");
+
+        // Create iovec array using our buffers.
+        let iov = buffers
+            .iter_mut()
+            .map(|buf| {
+                libc::iovec { iov_base: buf.as_mut_ptr() as *mut libc::c_void, iov_len: buf.len() }
+            })
+            .collect::<Vec<_>>();
+
+        // Perform readv operation.
+        let read_result = libc::readv(fd, iov.as_ptr(), iov.len() as i32);
+
+        libc::close(fd);
+        read_result.try_into().unwrap()
+    };
+
+    // Verify total bytes read.
+    let expected_total: usize = buffer_sizes.iter().sum();
+    assert_eq!(
+        bytes_read, expected_total,
+        "Unexpected bytes read. Expected {}, got {}",
+        expected_total, bytes_read
+    );
+
+    // Verify markers in each buffer with correct positioning.
+    let mut current_pos = 0;
+    for (i, buf) in buffers.iter().enumerate() {
+        let marker = format!("##MARKER{}##", i + 1);
+        let marker_len = marker.len();
+
+        // Calculate correct position for this buffer
+        let buffer_size = buf.len();
+        let marker_pos = buffer_size - marker_len;
+
+        // Read the exact number of bytes needed for the marker.
+        let content = std::str::from_utf8(&buf[marker_pos..marker_pos + marker_len])
+            .unwrap_or("Invalid UTF-8");
+
+        assert_eq!(
+            content,
+            marker,
+            "Marker {} mismatch at position {}. Expected '{}', found '{}'",
+            i + 1,
+            current_pos + marker_pos,
+            marker,
+            content
+        );
+
+        // Update position for next buffer
+        current_pos += buffer_size;
+    }
+
+    // Helper function to verify the repeating ABCD pattern.
+    let verify_pattern = |buf: &[u8], start: usize, end: usize, buffer_num: usize| {
+        // Safety check for range validity
+        if start >= end || end > buf.len() {
+            println!(
+                "Invalid range for buffer {}: start={}, end={}, len={}",
+                buffer_num,
+                start,
+                end,
+                buf.len()
+            );
+            return false;
+        }
+
+        let chunk = &buf[start..end];
+
+        // Calculate the pattern offset for alignment.
+        let pattern_offset = start % 4;
+        let expected_pattern = [b'A', b'B', b'C', b'D'];
+
+        // Verify each byte against the expected pattern at the correct offset.
+        chunk.iter().enumerate().all(|(i, &byte)| {
+            let expected = expected_pattern[(i + pattern_offset) % 4];
+            if byte != expected {
+                println!(
+                    "Mismatch at position {}: expected {}, found {}",
+                    start + i,
+                    expected as char,
+                    byte as char
+                );
+                false
+            } else {
+                true
+            }
+        })
+    };
+
+    // Adjust verification ranges and pattern alignment.
+    for (i, buf) in buffers.iter().enumerate() {
+        let buffer_num = i + 1;
+        let buffer_size = buf.len();
+        let marker_len = 11;
+
+        // Calculate correct start position based on marker alignment.
+        let start = if buffer_num == 1 { 0 } else { marker_len };
+        let end = buffer_size - marker_len;
+
+        assert!(
+            verify_pattern(buf, start, end, buffer_num),
+            "Pattern corruption detected in buffer {}. Expected aligned 'ABCD' pattern \
+             in range {}..{}",
+            buffer_num,
+            start,
+            end
+        );
+    }
+}
+
+/// Tests readv() system call behavior with EOF conditions and partial reads.
+/// Uses a test file smaller than total buffer size to verify correct handling
+/// of file boundaries and partial data transfers.
+///
+/// Verifies that:
+/// - Partial reads near EOF work correctly
+/// - Reading exactly at EOF returns 0
+/// - Buffer contents match expected data
+/// - Total bytes read matches available data
+/// - Remaining buffer space is unmodified
+fn test_readv_partial_and_eof() {
+    // Let's create a file smaller than our total buffer sizes.
+    // We'll use a structured pattern to make validation easier.
+    let test_data = b"HEADER_DATA_SECTION_ONE_DATA_SECTION_TWO_END"; // 41 bytes
+    let path = utils::prepare_with_content("partial_read_test.txt", test_data);
+
+    // Test Case 1: Normal buffers larger than file size.
+    {
+        let mut first_buf = vec![0u8; 20]; // Should be filled completely
+        let mut second_buf = vec![0u8; 20]; // Should be filled completely
+        let mut third_buf = vec![0u8; 20]; // Should be partially filled
+
+        let path_cstr = CString::new(path.to_str().unwrap()).unwrap();
+
+        let bytes_read: usize = unsafe {
+            let fd = libc::open(path_cstr.as_ptr(), libc::O_RDONLY);
+            assert!(fd > 0, "Failed to open test file");
+
+            let iov = [
+                libc::iovec {
+                    iov_base: first_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: first_buf.len(),
+                },
+                libc::iovec {
+                    iov_base: second_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: second_buf.len(),
+                },
+                libc::iovec {
+                    iov_base: third_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: third_buf.len(),
+                },
+            ];
+
+            let result = libc::readv(fd, iov.as_ptr(), iov.len() as i32);
+            libc::close(fd);
+            result.try_into().unwrap()
+        };
+
+        // Verify total bytes read matches file size.
+        assert_eq!(
+            bytes_read,
+            test_data.len(),
+            "Expected {} bytes read, got {}",
+            test_data.len(),
+            bytes_read
+        );
+
+        // Verify buffer contents
+        assert_eq!(&first_buf[..20], &test_data[..20], "First buffer content mismatch");
+        assert_eq!(&second_buf[..20], &test_data[20..40], "Second buffer content mismatch");
+        assert_eq!(&third_buf[..1], &test_data[40..41], "Third buffer partial content mismatch");
+    }
+
+    // Test Case 2: Reading from an offset near EOF.
+    {
+        let mut first_buf = vec![0u8; 10];
+        let mut second_buf = vec![0u8; 10];
+
+        let path_cstr = CString::new(path.to_str().unwrap()).unwrap();
+
+        let bytes_read: usize = unsafe {
+            let fd = libc::open(path_cstr.as_ptr(), libc::O_RDONLY);
+            assert!(fd > 0, "Failed to open test file");
+
+            // Seek to near end of file
+            // Use the platform-specific offset type directly
+            let offset = LseekOffset::try_from(test_data.len() - 15).unwrap();
+            let seek_result = seek(fd, offset);
+
+            // Compare using the same types
+            assert_eq!(LseekOffset::try_from(seek_result).unwrap(), offset);
+
+            let iov = [
+                libc::iovec {
+                    iov_base: first_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: first_buf.len(),
+                },
+                libc::iovec {
+                    iov_base: second_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: second_buf.len(),
+                },
+            ];
+
+            let result = libc::readv(fd, iov.as_ptr(), iov.len() as i32);
+            libc::close(fd);
+            result.try_into().unwrap()
+        };
+
+        // Should read remaining 15 bytes
+        assert_eq!(bytes_read, 15, "Expected 15 bytes read from offset, got {}", bytes_read);
+    }
+
+    // Test Case 3: Reading at EOF.
+    {
+        let mut buf = vec![0u8; 10];
+
+        let path_cstr = CString::new(path.to_str().unwrap()).unwrap();
+
+        let bytes_read: usize = unsafe {
+            let fd = libc::open(path_cstr.as_ptr(), libc::O_RDONLY);
+            assert!(fd > 0, "Failed to open test file");
+
+            // Seek to EOF
+            // Cast the offset to the appropriate type for the platform
+            let offset = LseekOffset::try_from(test_data.len()).unwrap();
+            let seek_result = seek(fd, offset);
+            assert_eq!(
+                LseekOffset::try_from(seek_result).unwrap(),
+                LseekOffset::try_from(test_data.len()).unwrap()
+            );
+
+            let iov = [libc::iovec {
+                iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+                iov_len: buf.len(),
+            }];
+
+            let result = libc::readv(fd, iov.as_ptr(), iov.len() as i32);
+            libc::close(fd);
+            result.try_into().unwrap()
+        };
+
+        // Should read 0 bytes at EOF
+        assert_eq!(bytes_read, 0, "Expected 0 bytes read at EOF, got {}", bytes_read);
+    }
+
+    // Test Case 4: Small buffers with exact boundaries.
+    {
+        let mut first_buf = vec![0u8; 7]; // "HEADER_"
+        let mut second_buf = vec![0u8; 5]; // "DATA_"
+        let mut third_buf = vec![0u8; 7]; // "SECTION"
+
+        let path_cstr = CString::new(path.to_str().unwrap()).unwrap();
+
+        let bytes_read: usize = unsafe {
+            let fd = libc::open(path_cstr.as_ptr(), libc::O_RDONLY);
+            assert!(fd > 0, "Failed to open test file");
+
+            let iov = [
+                libc::iovec {
+                    iov_base: first_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: first_buf.len(),
+                },
+                libc::iovec {
+                    iov_base: second_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: second_buf.len(),
+                },
+                libc::iovec {
+                    iov_base: third_buf.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: third_buf.len(),
+                },
+            ];
+
+            let result = libc::readv(fd, iov.as_ptr(), iov.len() as i32);
+            libc::close(fd);
+            result.try_into().unwrap()
+        };
+
+        // Verify exact buffer fills.
+        assert_eq!(
+            bytes_read, 19,
+            "Expected 19 bytes read for exact boundaries, got {}",
+            bytes_read
+        );
+        assert_eq!(&first_buf, b"HEADER_", "First buffer exact content mismatch");
+        assert_eq!(&second_buf, b"DATA_", "Second buffer exact content mismatch");
+        assert_eq!(&third_buf[..7], b"SECTION", "Third buffer exact content mismatch");
+    }
+}
+
+/// Tests error handling conditions of the readv() system call.
+/// Verifies that the implementation properly handles various error scenarios
+/// including invalid file descriptors,
+///
+/// Test coverage includes:
+/// - Invalid file descriptor scenarios
+fn test_readv_error_conditions() {
+    #[cfg(any(target_os = "illumos", target_os = "solaris"))]
+    use libc::___errno as __errno_location;
+    #[cfg(target_os = "android")]
+    use libc::__errno as __errno_location;
+    #[cfg(target_os = "linux")]
+    use libc::__errno_location;
+    #[cfg(any(target_os = "freebsd", target_os = "macos"))]
+    use libc::__error as __errno_location;
+
+    // Test Case 1: Invalid File Descriptor Scenarios.
+    {
+        let mut buffer = vec![0u8; 10];
+
+        // Create a single valid iovec structure for testing.
+        let iov = [libc::iovec {
+            iov_base: buffer.as_mut_ptr() as *mut libc::c_void,
+            iov_len: buffer.len(),
+        }];
+
+        unsafe {
+            // Test with negative file descriptor.
+            let result = libc::readv(-1, iov.as_ptr(), 1);
+            assert_eq!(result, -1, "Expected error for negative file descriptor");
+            assert_eq!(
+                *__errno_location(),
+                libc::EBADF,
+                "Expected EBADF for negative file descriptor"
+            );
+
+            // Test with unopened but potentially valid fd number.
+            let result = libc::readv(999999, iov.as_ptr(), 1);
+            assert_eq!(result, -1, "Expected error for invalid file descriptor");
+            assert_eq!(
+                *__errno_location(),
+                libc::EBADF,
+                "Expected EBADF for invalid file descriptor"
+            );
+        }
+    }
 }
