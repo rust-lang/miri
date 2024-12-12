@@ -10,7 +10,7 @@ fn main() {
     let _ = unsafe { libc::write(fds[0], arr1.as_ptr() as *const libc::c_void, 212992) };
     let data = "abc".as_bytes().as_ptr();
     // The write below will be blocked as the buffer is full.
-    let _ = unsafe { libc::write(fds[0], data as *const libc::c_void, 3) }; //~ERROR: blocking isn't supported
+    let _ = unsafe { libc::write(fds[0], data as *const libc::c_void, 3) }; //~ERROR: deadlock
     let mut buf: [u8; 3] = [0; 3];
     let _res = unsafe { libc::read(fds[1], buf.as_mut_ptr().cast(), buf.len() as libc::size_t) };
 }

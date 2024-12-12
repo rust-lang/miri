@@ -8,5 +8,5 @@ fn main() {
     let _ = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
     // The read below will be blocked because the buffer is empty.
     let mut buf: [u8; 3] = [0; 3];
-    let _res = unsafe { libc::read(fds[1], buf.as_mut_ptr().cast(), buf.len() as libc::size_t) }; //~ERROR: blocking isn't supported
+    let _res = unsafe { libc::read(fds[1], buf.as_mut_ptr().cast(), buf.len() as libc::size_t) }; //~ERROR: deadlock
 }
