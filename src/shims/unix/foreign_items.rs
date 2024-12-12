@@ -157,6 +157,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let count = this.read_target_usize(count)?;
                 this.read(fd, buf, count, None, dest)?;
             }
+
+            "readv" => {
+                let [fd, iov, iovcnt] = this.check_shim(abi, ExternAbi::C { unwind: false }, link_name, args)?;
+                let fd = this.read_scalar(fd)?.to_i32()?;
+                let iovcnt = this.read_scalar(iovcnt)?.to_i32()?;
+                this.readv(fd, iov, iovcnt as _, None, dest)?;
+            }
+
             "write" => {
                 let [fd, buf, n] = this.check_shim(abi, ExternAbi::C { unwind: false }, link_name, args)?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
