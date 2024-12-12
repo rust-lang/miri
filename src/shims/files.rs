@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::io::{IsTerminal, Read, SeekFrom, Write};
+use std::fs::{File, Metadata};
+use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
 use std::{fs, io};
@@ -72,7 +73,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
         false
     }
 
-    fn as_unix(&self) -> &dyn UnixFileDescription {
+    fn as_unix<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
         panic!("Not a unix file descriptor: {}", self.name());
     }
 }
@@ -178,6 +179,105 @@ impl FileDescription for io::Stderr {
     }
 }
 
+#[derive(Debug)]
+pub struct FileHandle {
+    pub(crate) file: File,
+    pub(crate) writable: bool,
+}
+
+impl FileDescription for FileHandle {
+    fn name(&self) -> &'static str {
+        "file"
+    }
+
+    fn read<'tcx>(
+        &self,
+        _self_ref: &FileDescriptionRef,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        dest: &MPlaceTy<'tcx>,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+        let mut bytes = vec![0; len];
+        let result = (&mut &self.file).read(&mut bytes);
+        match result {
+            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
+            Err(e) => ecx.set_last_error_and_return(e, dest),
+        }
+    }
+
+    fn write<'tcx>(
+        &self,
+        _self_ref: &FileDescriptionRef,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        dest: &MPlaceTy<'tcx>,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+        let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
+        let result = (&mut &self.file).write(bytes);
+        match result {
+            Ok(write_size) => ecx.return_write_success(write_size, dest),
+            Err(e) => ecx.set_last_error_and_return(e, dest),
+        }
+    }
+
+    fn seek<'tcx>(
+        &self,
+        communicate_allowed: bool,
+        offset: SeekFrom,
+    ) -> InterpResult<'tcx, io::Result<u64>> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+        interp_ok((&mut &self.file).seek(offset))
+    }
+
+    fn close<'tcx>(
+        self: Box<Self>,
+        communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
+        assert!(communicate_allowed, "isolation should have prevented even opening a file");
+        // We sync the file if it was opened in a mode different than read-only.
+        if self.writable {
+            // `File::sync_all` does the checks that are done when closing a file. We do this to
+            // to handle possible errors correctly.
+            let result = self.file.sync_all();
+            // Now we actually close the file and return the result.
+            drop(*self);
+            interp_ok(result)
+        } else {
+            // We drop the file, this closes it but ignores any errors
+            // produced when closing it. This is done because
+            // `File::sync_all` cannot be done over files like
+            // `/dev/urandom` which are read-only. Check
+            // https://github.com/rust-lang/miri/issues/999#issuecomment-568920439
+            // for a deeper discussion.
+            drop(*self);
+            interp_ok(Ok(()))
+        }
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
+        interp_ok(self.file.metadata())
+    }
+
+    fn is_tty(&self, communicate_allowed: bool) -> bool {
+        communicate_allowed && self.file.is_terminal()
+    }
+
+    fn as_unix<'tcx>(&self, ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
+        assert!(
+            ecx.target_os_is_unix(),
+            "unix file operations are only available for unix targets"
+        );
+        self
+    }
+}
+
 /// Like /dev/null
 #[derive(Debug)]
 pub struct NullOutput;
@@ -275,6 +375,9 @@ impl VisitProvenance for WeakFileDescriptionRef {
     }
 }
 
+/// Internal type of a file-descriptor - this is what [`FdTable`] expects
+pub type FdNum = i32;
+
 /// A unique id for file descriptions. While we could use the address, considering that
 /// is definitely unique, the address would expose interpreter internal state when used
 /// for sorting things. So instead we generate a unique id per file description is the name
@@ -325,12 +428,16 @@ impl FdTable {
         self.insert(fd_ref)
     }
 
-    pub fn insert(&mut self, fd_ref: FileDescriptionRef) -> i32 {
+    pub fn insert(&mut self, fd_ref: FileDescriptionRef) -> FdNum {
         self.insert_with_min_num(fd_ref, 0)
     }
 
     /// Insert a file description, giving it a file descriptor that is at least `min_fd_num`.
-    pub fn insert_with_min_num(&mut self, file_handle: FileDescriptionRef, min_fd_num: i32) -> i32 {
+    pub fn insert_with_min_num(
+        &mut self,
+        file_handle: FileDescriptionRef,
+        min_fd_num: FdNum,
+    ) -> FdNum {
         // Find the lowest unused FD, starting from min_fd. If the first such unused FD is in
         // between used FDs, the find_map combinator will return it. If the first such unused FD
         // is after all other used FDs, the find_map combinator will return None, and we will use
@@ -356,16 +463,16 @@ impl FdTable {
         new_fd_num
     }
 
-    pub fn get(&self, fd_num: i32) -> Option<FileDescriptionRef> {
+    pub fn get(&self, fd_num: FdNum) -> Option<FileDescriptionRef> {
         let fd = self.fds.get(&fd_num)?;
         Some(fd.clone())
     }
 
-    pub fn remove(&mut self, fd_num: i32) -> Option<FileDescriptionRef> {
+    pub fn remove(&mut self, fd_num: FdNum) -> Option<FileDescriptionRef> {
         self.fds.remove(&fd_num)
     }
 
-    pub fn is_fd_num(&self, fd_num: i32) -> bool {
+    pub fn is_fd_num(&self, fd_num: FdNum) -> bool {
         self.fds.contains_key(&fd_num)
     }
 }
