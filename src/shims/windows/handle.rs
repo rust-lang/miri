@@ -257,6 +257,6 @@ mod tests {
     #[test]
     fn test_invalid_encoding() {
         // Ensure the invalid handle encodes to `u32::MAX`/`INVALID_HANDLE_VALUE`.
-        assert_eq!(Handle::Invalid.to_packed(), 0xFFFFFFFF)
+        assert_eq!(Handle::Invalid.to_packed(), u32::MAX)
     }
 }
