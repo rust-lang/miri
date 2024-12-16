@@ -397,7 +397,7 @@ impl FileDescription for NullOutput {
 /// The file descriptor table
 #[derive(Debug)]
 pub struct FdTable {
-    pub fds: BTreeMap<i32, DynFileDescriptionRef>,
+    pub fds: BTreeMap<FdNum, DynFileDescriptionRef>,
     /// Unique identifier for file description, used to differentiate between various file description.
     next_file_description_id: FdId,
 }
@@ -436,7 +436,7 @@ impl FdTable {
     }
 
     /// Insert a new file description to the FdTable.
-    pub fn insert_new(&mut self, fd: impl FileDescription) -> i32 {
+    pub fn insert_new(&mut self, fd: impl FileDescription) -> FdNum {
         let fd_ref = self.new_ref(fd);
         self.insert(fd_ref)
     }
