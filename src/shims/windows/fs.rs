@@ -1,7 +1,10 @@
 use std::fs::{Metadata, OpenOptions};
 use std::io;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::SystemTime;
+
+use bitflags::bitflags;
 
 use crate::shims::files::{FileDescription, FileHandle};
 use crate::shims::windows::handle::{EvalContextExt as _, Handle};
@@ -30,6 +33,9 @@ impl FileDescription for DirHandle {
     }
 }
 
+/// Windows supports handles without any read/write/delete permissions - these handles can get
+/// metadata, but little else. We represent that by storing the metadata from the time the handle
+/// was opened.
 #[derive(Debug)]
 pub struct MetadataHandle {
     pub(crate) meta: Metadata,
@@ -53,6 +59,88 @@ impl FileDescription for MetadataHandle {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum CreationDisposition {
+    CreateAlways,
+    CreateNew,
+    OpenAlways,
+    OpenExisting,
+    TruncateExisting,
+}
+
+impl CreationDisposition {
+    fn new<'tcx>(
+        value: u32,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, CreationDisposition> {
+        let create_always = ecx.eval_windows_u32("c", "CREATE_ALWAYS");
+        let create_new = ecx.eval_windows_u32("c", "CREATE_NEW");
+        let open_always = ecx.eval_windows_u32("c", "OPEN_ALWAYS");
+        let open_existing = ecx.eval_windows_u32("c", "OPEN_EXISTING");
+        let truncate_existing = ecx.eval_windows_u32("c", "TRUNCATE_EXISTING");
+
+        let out = if value == create_always {
+            CreationDisposition::CreateAlways
+        } else if value == create_new {
+            CreationDisposition::CreateNew
+        } else if value == open_always {
+            CreationDisposition::OpenAlways
+        } else if value == open_existing {
+            CreationDisposition::OpenExisting
+        } else if value == truncate_existing {
+            CreationDisposition::TruncateExisting
+        } else {
+            throw_unsup_format!("CreateFileW: Unsupported creation disposition: {value}");
+        };
+        interp_ok(out)
+    }
+}
+
+bitflags! {
+    #[derive(PartialEq)]
+    struct FileAttributes: u32 {
+        const ZERO = 0;
+        const NORMAL = 1 << 0;
+        /// This must be passed to allow getting directory handles. If not passed, we error on trying
+        /// to open directories
+        const BACKUP_SEMANTICS = 1 << 1;
+        const OPEN_REPARSE = 1 << 2;
+    }
+}
+
+impl FileAttributes {
+    fn new<'tcx>(
+        mut value: u32,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<FileAttributes, IoError>> {
+        let file_attribute_normal = ecx.eval_windows_u32("c", "FILE_ATTRIBUTE_NORMAL");
+        let file_flag_backup_semantics = ecx.eval_windows_u32("c", "FILE_FLAG_BACKUP_SEMANTICS");
+        let file_flag_open_reparse_point =
+            ecx.eval_windows_u32("c", "FILE_FLAG_OPEN_REPARSE_POINT");
+
+        let mut out = FileAttributes::ZERO;
+        if value & file_flag_backup_semantics != 0 {
+            value &= !file_flag_backup_semantics;
+            out |= FileAttributes::BACKUP_SEMANTICS;
+        } else if value & file_flag_open_reparse_point != 0 {
+            value &= !file_flag_open_reparse_point;
+            out |= FileAttributes::OPEN_REPARSE;
+        } else if value & file_attribute_normal {
+            value &= !file_attribute_normal;
+            out |= FileAttributes::NORMAL;
+        }
+
+        if value != 0 {
+            throw_unsup_format!("CreateFileW: Unsupported flags_and_attributes: {value}");
+        }
+
+        if out == FileAttributes::ZERO {
+            out = FileAttributes::NORMAL;
+        }
+        interp_ok(Ok(out))
+    }
+}
+
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 #[allow(non_snake_case)]
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
@@ -67,6 +155,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         template_file: &OpTy<'tcx>,        // HANDLE
     ) -> InterpResult<'tcx, Handle> {
         // ^ Returns HANDLE
+        use CreationDisposition::*;
+
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "CreateFileW");
         this.check_no_isolation("`CreateFileW`")?;
@@ -86,18 +176,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let file_share_read = this.eval_windows_u32("c", "FILE_SHARE_READ");
         let file_share_write = this.eval_windows_u32("c", "FILE_SHARE_WRITE");
 
-        let create_always = this.eval_windows_u32("c", "CREATE_ALWAYS");
-        let create_new = this.eval_windows_u32("c", "CREATE_NEW");
-        let open_always = this.eval_windows_u32("c", "OPEN_ALWAYS");
-        let open_existing = this.eval_windows_u32("c", "OPEN_EXISTING");
-        let truncate_existing = this.eval_windows_u32("c", "TRUNCATE_EXISTING");
-
-        let file_attribute_normal = this.eval_windows_u32("c", "FILE_ATTRIBUTE_NORMAL");
-        // This must be passed to allow getting directory handles. If not passed, we error on trying
-        // to open directories below
-        let file_flag_backup_semantics = this.eval_windows_u32("c", "FILE_FLAG_BACKUP_SEMANTICS");
-        let file_flag_open_reparse_point =
-            this.eval_windows_u32("c", "FILE_FLAG_OPEN_REPARSE_POINT");
+        let creation_disposition = CreationDisposition::new(creation_disposition, this)?;
+        let attributes = FileAttributes::new(flags_and_attributes, this)?;
 
         if share_mode != (file_share_delete | file_share_read | file_share_write) {
             throw_unsup_format!("CreateFileW: Unsupported share mode: {share_mode}");
@@ -106,22 +186,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("CreateFileW: Security attributes are not supported");
         }
 
-        let flags_and_attributes = match flags_and_attributes {
-            0 => file_attribute_normal,
-            _ => flags_and_attributes,
-        };
-        if !(file_attribute_normal | file_flag_backup_semantics | file_flag_open_reparse_point)
-            & flags_and_attributes
-            != 0
-        {
-            throw_unsup_format!(
-                "CreateFileW: Unsupported flags_and_attributes: {flags_and_attributes}"
-            );
-        }
-
-        if flags_and_attributes & file_flag_open_reparse_point != 0
-            && creation_disposition == create_always
-        {
+        if attributes & FileAttributes::OPEN_REPARSE != 0 && creation_disposition == CreateAlways {
             throw_machine_stop!(TerminationInfo::Abort("Invalid CreateFileW argument combination: FILE_FLAG_OPEN_REPARSE_POINT with CREATE_ALWAYS".to_string()));
         }
 
@@ -131,7 +196,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let is_dir = file_name.is_dir();
 
-        if flags_and_attributes == file_attribute_normal && is_dir {
+        if !attributes.contains(FileAttributes::BACKUP_SEMANTICS) && is_dir {
             this.set_last_error(IoError::WindowsError("ERROR_ACCESS_DENIED"))?;
             return interp_ok(Handle::Invalid);
         }
@@ -155,63 +220,48 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
-        // This is racy, but there doesn't appear to be an std API that both succeeds if a file
-        // exists but tells us it isn't new. Either we accept racing one way or another, or we
-        // use an iffy heuristic like file creation time. This implementation prefers to fail in the
-        // direction of erroring more often.
-        let exists = file_name.exists();
-
-        if creation_disposition == create_always {
-            // Per the documentation:
-            // If the specified file exists and is writable, the function truncates the file, the
-            // function succeeds, and last-error code is set to ERROR_ALREADY_EXISTS.
-            // If the specified file does not exist and is a valid path, a new file is created, the
-            // function succeeds, and the last-error code is set to zero.
-            // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
-            if exists {
-                this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
-            } else {
-                this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
+        match creation_disposition {
+            CreateNew | OpenAlways => {
+                // This is racy, but there doesn't appear to be an std API that both succeeds if a
+                // file exists but tells us it isn't new. Either we accept racing one way or another,
+                // or we use an iffy heuristic like file creation time. This implementation prefers
+                // to fail in the direction of erroring more often.
+                // Per the documentation:
+                // If the specified file exists and is writable, the function truncates the file,
+                // the function succeeds, and last-error code is set to ERROR_ALREADY_EXISTS.
+                // If the specified file does not exist and is a valid path, a new file is created,
+                // the function succeeds, and the last-error code is set to zero.
+                // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+                if file_name.exists() {
+                    this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
+                } else {
+                    this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
+                }
+                options.create(true);
+                if creation_disposition == CreateNew {
+                    options.truncate(true);
+                }
             }
-            options.create(true);
-            options.truncate(true);
-        } else if creation_disposition == create_new {
-            options.create_new(true);
-            // Per `create_new` documentation:
-            // If the specified file does not exist and is a valid path to a writable location, the
-            // function creates a file and the last-error code is set to zero.
-            // https://doc.rust-lang.org/std/fs/struct.OpenOptions.html#method.create_new
-            if !desired_write {
-                options.append(true);
+            CreateAlways => {
+                options.create_new(true);
+                // Per `create_new` documentation:
+                // The file must be opened with write or append access in order to create a new file.
+                // https://doc.rust-lang.org/std/fs/struct.OpenOptions.html#method.create_new
+                if !desired_write {
+                    options.append(true);
+                }
             }
-        } else if creation_disposition == open_always {
-            // Per the documentation:
-            // If the specified file exists, the function succeeds and the last-error code is set
-            // to ERROR_ALREADY_EXISTS.
-            // If the specified file does not exist and is a valid path to a writable location, the
-            // function creates a file and the last-error code is set to zero.
-            // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
-            if exists {
-                this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
-            } else {
-                this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
+            OpenExisting => (), // Nothing
+            TruncateExisting => {
+                options.truncate(true);
             }
-            options.create(true);
-        } else if creation_disposition == open_existing {
-            // Nothing
-        } else if creation_disposition == truncate_existing {
-            options.truncate(true);
-        } else {
-            throw_unsup_format!(
-                "CreateFileW: Unsupported creation disposition: {creation_disposition}"
-            );
         }
 
         let handle = if is_dir {
             let fh = &mut this.machine.fds;
             let fd_num = fh.insert_new(DirHandle { path: file_name });
             Ok(Handle::File(fd_num))
-        } else if creation_disposition == open_existing && !(desired_read || desired_write) {
+        } else if creation_disposition == OpenExisting && !(desired_read || desired_write) {
             // Windows supports handles with no permissions. These allow things such as reading
             // metadata, but not file content.
             let fh = &mut this.machine.fds;
