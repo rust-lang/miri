@@ -88,6 +88,77 @@ pub fn escape_for_toml(s: &str) -> String {
     format!("\"{s}\"")
 }
 
+pub fn flagsplit(flags: &str) -> Vec<String> {
+    // This code is taken from `RUSTFLAGS` handling in cargo.
+    // Taken from miri-script util.rs
+    flags.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
+}
+
+pub fn get_miriflags_cargo_mini() -> Vec<String> {
+    // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
+    // If MIRIFLAGS is present, flags from cargo config are ignored.
+    // This matches cargo behavior for RUSTFLAGS.
+    //
+    // Strategy: (1) check pseudo var CARGO_ENCODED_MIRIFLAGS first (this is only set after we check for --config
+    // in the cargo_dash_dash in the if else)
+    //
+    // if CARGO_ENCODED_MIRIFLAGS doesn't exist, we check in --config (2)
+    // if --config doesn't exist, we check offical env var MIRIFLAGS (3)
+    //
+    // if MIRIFLAGS is non-existent, we then check for toml (4)
+    if let Ok(cargo_encoded_miri_flags) = env::var("CARGO_ENCODED_MIRIFLAGS") {
+        // (1)
+        // eprintln!("Choice 1");
+        flagsplit(cargo_encoded_miri_flags.as_str())
+    } else if cargo_extra_flags().iter().any(|s| s.contains(&"-Zmiri".to_string())) {
+        // (2)
+        // eprintln!("Choice 2");
+        let cargo_dash_dash_config = cargo_extra_flags();
+        let miri_flags_vec = cargo_dash_dash_config
+            .into_iter()
+            .filter(|arg| arg.contains(&"-Zmiri".to_string()))
+            .collect::<Vec<String>>();
+        let miri_flags_string = miri_flags_vec.join(" ");
+        env::set_var("CARGO_ENCODED_MIRIFLAGS", miri_flags_string);
+        miri_flags_vec
+    } else {
+        Vec::default()
+    }
+}
+pub fn get_miriflags_runner() -> Vec<String> {
+    // TODO: I quite not understand what Carl Jung means by Oh and please add a link to https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags.
+    // I guess we don't support the target.rustflags part yet? (That's okay but should be mentioned in a comment.)
+    //
+    // Fetch miri flags from cargo config.
+    let mut cmd = cargo();
+    cmd.args(["-Zunstable-options", "config", "get", "miri.flags", "--format=json-value"]);
+    let output = cmd.output().expect("failed to run `cargo config`");
+    let config_miriflags =
+        std::str::from_utf8(&output.stdout).expect("failed to get `cargo config` output");
+
+    // Respect `MIRIFLAGS` and `miri.flags` setting in cargo config.
+    // If MIRIFLAGS is present, flags from cargo config are ignored.
+    // This matches cargo behavior for RUSTFLAGS.
+    //
+    // Strategy: (1) check pseudo var CARGO_ENCODED_MIRIFLAGS first (this is only set after we check for --config
+    // in the cargo_dash_dash in the if else)
+    //
+    // if CARGO_ENCODED_MIRIFLAGS doesn't exist, we check in --config (2)
+    // if --config doesn't exist, we check offical env var MIRIFLAGS (3)
+    //
+    // if MIRIFLAGS is non-existent, we then check for toml (4)
+    if let Ok(a) = env::var("MIRIFLAGS") {
+        // (3)
+        // This code is taken from `RUSTFLAGS` handling in cargo.
+        // eprintln!("Choice 3");
+        // eprintln!("{}", a);
+        a.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
+    } else {
+        // (4)
+        // eprintln!("Choice 4");
+        serde_json::from_str::<Vec<String>>(config_miriflags).unwrap_or_default()
+    }
+}
 /// Returns the path to the `miri` binary
 pub fn find_miri() -> PathBuf {
     if let Some(path) = env::var_os("MIRI") {
@@ -116,11 +187,6 @@ pub fn miri_for_host() -> Command {
 
 pub fn cargo() -> Command {
     Command::new(env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo")))
-}
-
-pub fn flagsplit(flags: &str) -> Vec<String> {
-    // This code is taken from `RUSTFLAGS` handling in cargo.
-    flags.split(' ').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
 }
 
 /// Execute the `Command`, where possible by replacing the current process with a new process
