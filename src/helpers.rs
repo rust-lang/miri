@@ -720,6 +720,53 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(value_place)
     }
 
+    /// Dereferences a pointer to access an element within a source array, with specialized bounds checking
+    /// for vectored I/O operations like readv().
+    ///
+    /// This function provides array-aware bounds checking that is specifically designed for situations
+    /// where we need to access multiple independent memory regions, such as when processing an array
+    /// of iovec structures. Unlike simple pointer arithmetic bounds checking, this implementation
+    /// understands and validates array-based access patterns.
+    fn deref_pointer_and_offset_vectored(
+        &self,
+        op: &impl Projectable<'tcx, Provenance>,
+        offset_bytes: u64,
+        base_layout: TyAndLayout<'tcx>,
+        count: usize,
+        value_layout: TyAndLayout<'tcx>,
+    ) -> InterpResult<'tcx, MPlaceTy<'tcx>> {
+        // 1. Validate the iovec array bounds.
+        let array_size = base_layout
+            .size
+            .bytes()
+            .checked_mul(count as u64)
+            .ok_or_else(|| err_ub_format!("iovec array size overflow"))?;
+
+        // 2. Check if our offset is within the array.
+        if offset_bytes >= array_size {
+            throw_ub_format!(
+                "{}",
+                format!(
+                    "iovec array access out of bounds: offset {} in array of size {}",
+                    offset_bytes, array_size
+                )
+            );
+        }
+
+        // 3. Ensure the iovec structure we're accessing is fully contained.
+        if offset_bytes.checked_add(base_layout.size.bytes()).is_none_or(|end| end > array_size) {
+            throw_ub_format!("iovec structure would extend past array bounds");
+        }
+
+        // 4. Proceed with the dereferencing.
+        let this = self.eval_context_ref();
+        let op_place = this.deref_pointer_as(op, base_layout)?;
+        let offset = Size::from_bytes(offset_bytes);
+
+        let value_place = op_place.offset(offset, value_layout, this)?;
+        interp_ok(value_place)
+    }
+
     fn deref_pointer_and_read(
         &self,
         op: &impl Projectable<'tcx, Provenance>,

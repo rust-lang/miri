@@ -257,6 +257,135 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(())
     }
 
+    fn readv(
+        &mut self,
+        fd_num: i32,
+        iov_ptr: &OpTy<'tcx>,
+        iovcnt: i32,
+        offset: Option<i128>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        // Early returns for empty or invalid cases
+        if iovcnt == 0 {
+            trace!("readv: iovcnt is 0, returning 0 bytes read.");
+            return this.write_scalar(Scalar::from_i32(0), dest);
+        }
+
+        let Some(fd) = this.machine.fds.get(fd_num) else {
+            trace!("readv: FD not found");
+            return this.set_last_error_and_return(LibcError("EBADF"), dest);
+        };
+        trace!("readv: FD mapped to {fd:?}");
+
+        // Convert count only once at the start
+        let iovcnt = usize::try_from(iovcnt).expect("iovcnt conversion to usize failed");
+
+        // Get iovec layout information
+        let iovec_layout = this.libc_ty_layout("iovec");
+
+        // Create temporary storage for read results
+        // We need temporary storage for each individual read operation's result
+        // Using an intermediate buffer helps handle error conditions cleanly
+        // We use i128 to safely handle both success (positive) and error (-1) cases
+        let read_dest = this.allocate(this.machine.layouts.i128, MiriMemoryKind::Machine.into())?;
+
+        // Use usize to match ssize_t semantics while staying platform-independent
+        let mut total_bytes_read: usize = 0;
+
+        let mut current_offset = offset;
+
+        // Process each iovec structure
+        for i in 0..iovcnt {
+            // Access the current iovec structure
+            let offset_bytes = iovec_layout
+                .size
+                .bytes()
+                .checked_mul(i as u64)
+                .expect("iovec array index calculation overflow");
+
+            let current_iov = this.deref_pointer_and_offset_vectored(
+                iov_ptr,
+                offset_bytes,
+                iovec_layout,
+                iovcnt,
+                iovec_layout,
+            )?;
+
+            // Extract buffer information
+            let iov_base = this.project_field_named(&current_iov, "iov_base")?;
+            let iov_base_ptr = this.read_pointer(&iov_base)?;
+
+            let iov_len = this.project_field_named(&current_iov, "iov_len")?;
+            let iov_len = usize::try_from(this.read_target_usize(&iov_len)?)
+                .expect("iovec length exceeds platform size");
+
+            if iov_len == 0 {
+                continue;
+            }
+
+            // Validate buffer access
+            let buffer_size = Size::from_bytes(iov_len);
+            this.check_ptr_access(iov_base_ptr, buffer_size, CheckInAllocMsg::MemoryAccessTest)?;
+
+            // Perform the read operation
+            let read_result = if let Some(off) = current_offset {
+                // Handle pread case
+                let Ok(off) = u64::try_from(off) else {
+                    return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+                };
+
+                fd.as_unix().pread(
+                    this.machine.communicate(),
+                    off,
+                    iov_base_ptr,
+                    iov_len,
+                    &read_dest,
+                    this,
+                )?;
+                this.read_scalar(&read_dest)?.to_i128()?
+            } else {
+                // Handle regular read case
+                fd.read(&fd, this.machine.communicate(), iov_base_ptr, iov_len, &read_dest, this)?;
+                this.read_scalar(&read_dest)?.to_i128()?
+            };
+
+            // Handle read result
+            if read_result < 0 {
+                this.write_int(-1, dest)?;
+                return interp_ok(());
+            }
+
+            // Update offset for next read if preadv
+            if let Some(off) = current_offset.as_mut() {
+                // Safe addition with overflow check for offset
+                *off = off.checked_add(read_result).expect("file offset calculation overflow");
+            }
+
+            let read_result = usize::try_from(read_result).unwrap();
+
+            // Safe addition with overflow check
+            total_bytes_read = total_bytes_read
+                .checked_add(read_result)
+                .expect("total bytes read calculation overflow");
+
+            // Break if we hit EOF (partial read)
+            // Convert read_result to unsigned safely for comparison
+            if read_result < iov_len {
+                break;
+            }
+        }
+
+        trace!("readv: Total bytes read: {}", total_bytes_read);
+        this.write_int(
+            u64::try_from(total_bytes_read).expect("total bytes read exceeds u64 capacity"),
+            dest,
+        )?;
+
+        interp_ok(())
+    }
+
     fn write(
         &mut self,
         fd_num: i32,
