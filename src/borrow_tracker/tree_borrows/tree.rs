@@ -897,11 +897,11 @@ impl Tree {
     pub fn tree_grew_significantly_since_last_gc(&self) -> bool {
         let current = self.nodes_count();
         // do not trigger the GC for small nodes
-        let last = self.nodes_at_last_gc.max(50);
+        let last = self.nodes_at_last_gc.max(100);
         // trigger the GC if the tree doubled since the last run,
         // or otherwise got "significantly" larger.
         // Note that for trees < 100 nodes, nothing happens.
-        current > 2 * last || current > last + 1500
+        current > 2 * last || current > last + 2500
     }
 
     pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
