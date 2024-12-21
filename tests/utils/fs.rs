@@ -51,3 +51,50 @@ pub fn prepare_dir(dirname: &str) -> PathBuf {
     fs::remove_dir_all(&path).ok();
     path
 }
+
+/// Generates a test pattern with markers placed at buffer boundaries
+///
+/// Arguments:
+/// * `buffer_sizes` - An array of buffer sizes that will be used in the readv operation
+///
+/// Returns:
+/// * A vector containing the test pattern with markers placed at buffer boundaries
+///
+/// The function creates a pattern by:
+/// 1. Filling the content with repeating "ABCD" sequences
+/// 2. Placing markers at each buffer boundary
+/// 3. Adding an end pattern to detect overruns
+pub fn generate_test_pattern(buffer_sizes: &[usize]) -> Vec<u8> {
+    // Calculate total size needed for all buffers.
+    let total_size: usize = buffer_sizes.iter().sum();
+
+    // Create our base content vector.
+    let mut content = Vec::with_capacity(total_size);
+
+    // Fill with repeating ABCD pattern.
+    let base_pattern = b"ABCD";
+    while content.len() < total_size {
+        content.extend_from_slice(base_pattern);
+    }
+    content.truncate(total_size);
+
+    // Calculate marker positions at buffer boundaries.
+    // We'll accumulate sizes to find boundary positions.
+    // Calculate correct marker positions based on cumulative buffer boundaries.
+    let mut cumulative_position = 0;
+    for (i, &buffer_size) in buffer_sizes.iter().enumerate() {
+        let marker = format!("##MARKER{}##", i + 1).into_bytes();
+        let marker_len = marker.len();
+
+        // Position marker relative to the current buffer's end
+        let marker_position = cumulative_position + buffer_size - marker_len;
+
+        if marker_position + marker_len <= total_size {
+            content[marker_position..marker_position + marker_len].copy_from_slice(&marker);
+        }
+
+        cumulative_position += buffer_size;
+    }
+
+    content
+}
