@@ -16,7 +16,7 @@ fn main() {
     });
     let thread2 = thread::spawn(move || {
         // Close the socketpair fd while thread1 is blocking on it.
-        assert_eq!(unsafe { libc::close(fds[0]) }, 0);
+        assert_eq!(unsafe { libc::close(fds[1]) }, 0);
         let data = "abc".as_bytes().as_ptr();
         let res = unsafe { libc::write(fds[0], data as *const libc::c_void, 3) };
         // This will fail because we can't write anything if the peer_fd is closed.
