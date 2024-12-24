@@ -14,7 +14,10 @@ use rustc_data_structures::fx::FxHashMap;
 
 use self::shims::time::system_time_to_duration;
 use crate::helpers::check_min_arg_count;
-use crate::shims::files::{EvalContextExt as _, FileDescription, FileDescriptionRef};
+use crate::shims::files::{
+    EvalContextExt as _, FileDescription, FileDescriptionRef, IoTransferOperation,
+    WeakFileDescriptionRef,
+};
 use crate::shims::os_str::bytes_to_os_str;
 use crate::shims::unix::fd::{FlockOp, UnixFileDescription};
 use crate::*;
@@ -23,6 +26,74 @@ use crate::*;
 struct FileHandle {
     file: File,
     writable: bool,
+    file_lock: MutexRef,
+}
+
+impl VisitProvenance for FileHandle {
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
+        // No provenance tracking needed for FileHandle as it contains no references.
+        // This implementation satisfies the trait requirement but performs no operations.
+    }
+}
+
+impl FileHandle {
+    fn new(file: File, writable: bool, file_lock: MutexRef) -> Self {
+        Self { file, writable, file_lock }
+    }
+
+    fn try_clone<'tcx>(&self) -> InterpResult<'tcx, FileHandle> {
+        // Explicitly handling errors with more context
+        let cloned_file = self
+            .file
+            .try_clone()
+            .map_err(|e| err_unsup_format!("Failed to clone file handle: {}", e))?;
+
+        interp_ok(FileHandle {
+            file: cloned_file,
+            writable: self.writable,
+            file_lock: self.file_lock.clone(),
+        })
+    }
+
+    fn perform_read<'tcx>(
+        this: &mut MiriInterpCx<'tcx>,
+        dest: MPlaceTy<'tcx>,
+        mut file_handle: FileHandle,
+        weak_fd: WeakFileDescriptionRef,
+        op: std::rc::Rc<std::cell::RefCell<IoTransferOperation<'tcx>>>,
+    ) -> InterpResult<'tcx> {
+        this.mutex_lock(&file_handle.file_lock);
+
+        let result = (|| {
+            // Verify file descriptor is still valid
+            let Some(_fd_ref) = weak_fd.upgrade() else {
+                throw_unsup_format!("file got closed while blocking");
+            };
+
+            // Perform the actual read operation on the underlying file
+            let read_result = (file_handle.file).read(op.borrow_mut().buffer_mut());
+
+            match read_result {
+                Ok(read_size) => {
+                    // Update the read operation with results
+                    op.borrow_mut().distribute_data(this, &dest, read_size)?;
+
+                    // Write the number of bytes read to the destination
+                    this.write_int(u64::try_from(read_size).unwrap(), &dest)
+                }
+                Err(_ec) => {
+                    // Propagate any read errors through our error handling system
+                    this.set_last_error_and_return(LibcError("EIO"), &dest)
+                }
+            }
+        })();
+
+        // Always unlock the mutex, even if the read operation failed
+        this.mutex_unlock(&file_handle.file_lock)?;
+
+        // Return the result of our read operation
+        result
+    }
 }
 
 impl FileDescription for FileHandle {
@@ -30,21 +101,67 @@ impl FileDescription for FileHandle {
         "file"
     }
 
-    fn read<'tcx>(
+    /// Performs an atomic read operation on the file.
+    ///
+    /// # Arguments
+    /// * `self_ref` - Strong reference to file description for lifetime management
+    /// * `communicate_allowed` - Whether external communication is permitted
+    /// * `op` - The I/O operation containing buffer and layout information
+    /// * `dest` - Destination for storing operation results
+    /// * `ecx` - Mutable reference to interpreter context
+    ///
+    /// # Returns
+    /// * `Ok(())` on successful read
+    /// * `Err(_)` if read fails or is unsupported        
+    fn read_atomic<'tcx>(
         &self,
-        _self_ref: &FileDescriptionRef,
+        self_ref: &FileDescriptionRef,
         communicate_allowed: bool,
-        ptr: Pointer,
-        len: usize,
+        op: &mut IoTransferOperation<'tcx>,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
+        let this = ecx;
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
-        let mut bytes = vec![0; len];
-        let result = (&mut &self.file).read(&mut bytes);
-        match result {
-            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+
+        // Clone the underlying File
+        let clone_file_handle = match self.try_clone().report_err() {
+            Ok(handle) => handle,
+            Err(_e) => return this.set_last_error_and_return(LibcError("EIO"), dest),
+        };
+
+        let weak_fd = self_ref.downgrade();
+        let op = std::rc::Rc::new(std::cell::RefCell::new(op.clone()));
+        let dest = dest.clone();
+
+        // Rest of the implementation remains the same
+        if this.mutex_is_locked(&self.file_lock) {
+            this.block_thread(
+                BlockReason::Mutex,
+                None,
+                callback!(
+                    @capture<'tcx> {
+                        dest: MPlaceTy<'tcx>,
+                        clone_file_handle: FileHandle,
+                        weak_fd: WeakFileDescriptionRef,
+                        op: std::rc::Rc<std::cell::RefCell<IoTransferOperation<'tcx>>>,
+                    }
+                    @unblock = |this, state| {
+                        match state {
+                            MachineCallbackState::Ready => {
+                                FileHandle::perform_read(this, dest, clone_file_handle, weak_fd, op)
+                            }
+                            MachineCallbackState::TimedOut => {
+                                panic!("Mutex operation received unexpected timeout state")
+                            },
+                        }
+                    }
+                ),
+            );
+
+            unreachable!()
+        } else {
+            FileHandle::perform_read(this, dest, clone_file_handle, weak_fd, op)
         }
     }
 
@@ -586,9 +703,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(ErrorKind::PermissionDenied);
         }
 
-        let fd = options
-            .open(path)
-            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable }));
+        let fd = options.open(path).map(|file| {
+            this.machine.fds.insert_new(FileHandle::new(
+                file,
+                writable,
+                this.machine.sync.mutex_create(),
+            ))
+        });
 
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
     }
@@ -1311,7 +1432,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         // FIXME: Support ftruncate64 for all FDs
-        let FileHandle { file, writable } = fd.downcast::<FileHandle>().ok_or_else(|| {
+        let FileHandle { file, writable, .. } = fd.downcast::<FileHandle>().ok_or_else(|| {
             err_unsup_format!("`ftruncate64` is only supported on file-backed file descriptors")
         })?;
 
@@ -1358,7 +1479,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(LibcError("EBADF"));
         };
         // Only regular files support synchronization.
-        let FileHandle { file, writable } = fd.downcast::<FileHandle>().ok_or_else(|| {
+        let FileHandle { file, writable, .. } = fd.downcast::<FileHandle>().ok_or_else(|| {
             err_unsup_format!("`fsync` is only supported on file-backed file descriptors")
         })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_all);
@@ -1382,7 +1503,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(LibcError("EBADF"));
         };
         // Only regular files support synchronization.
-        let FileHandle { file, writable } = fd.downcast::<FileHandle>().ok_or_else(|| {
+        let FileHandle { file, writable, .. } = fd.downcast::<FileHandle>().ok_or_else(|| {
             err_unsup_format!("`fdatasync` is only supported on file-backed file descriptors")
         })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_data);
@@ -1425,7 +1546,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(LibcError("EBADF"));
         };
         // Only regular files support synchronization.
-        let FileHandle { file, writable } = fd.downcast::<FileHandle>().ok_or_else(|| {
+        let FileHandle { file, writable, .. } = fd.downcast::<FileHandle>().ok_or_else(|| {
             err_unsup_format!("`sync_data_range` is only supported on file-backed file descriptors")
         })?;
         let io_result = maybe_sync_file(file, *writable, File::sync_data);
@@ -1653,7 +1774,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             match file {
                 Ok(f) => {
-                    let fd = this.machine.fds.insert_new(FileHandle { file: f, writable: true });
+                    let fd = this.machine.fds.insert_new(FileHandle::new(
+                        f,
+                        true,
+                        this.machine.sync.mutex_create(),
+                    ));
                     return interp_ok(Scalar::from_i32(fd));
                 }
                 Err(e) =>
