@@ -111,10 +111,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     pending_place: MPlaceTy<'tcx>,
                     dest: MPlaceTy<'tcx>,
                 }
-                @unblock = |this| {
-                    let ret = this.init_once_try_begin(id, &pending_place, &dest)?;
-                    assert!(ret, "we were woken up but init_once_try_begin still failed");
-                    interp_ok(())
+                @unblock = |this, tcb_state| {
+                    match tcb_state {
+                        MachineCallbackState::Ready => {
+                            let ret = this.init_once_try_begin(id, &pending_place, &dest)?;
+                            assert!(ret, "we were woken up but init_once_try_begin still failed");
+                            interp_ok(())
+                        },
+                        MachineCallbackState::TimedOut => {
+                            panic!("Windows sync init received unexpected timeout state - operations do not support timeouts")
+                        },
+                    }
                 }
             ),
         );

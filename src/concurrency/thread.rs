@@ -38,70 +38,62 @@ pub enum TlsAllocAction {
     Leak,
 }
 
-/// Trait for callbacks that are executed when a thread gets unblocked.
-pub trait UnblockCallback<'tcx>: VisitProvenance {
-    /// Will be invoked when the thread was unblocked the "regular" way,
-    /// i.e. whatever event it was blocking on has happened.
-    fn unblock(self: Box<Self>, ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>) -> InterpResult<'tcx>;
-
-    /// Will be invoked when the timeout ellapsed without the event the
-    /// thread was blocking on having occurred.
-    fn timeout(self: Box<Self>, _ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>)
-    -> InterpResult<'tcx>;
+/// The completion state of an asynchronous machine operation in Miri's concurrency system.
+/// Used by callbacks to determine how a blocked thread should proceed after being woken.
+#[derive(Debug)]
+pub enum MachineCallbackState {
+    /// The operation completed successfully and the thread can proceed with its normal execution.
+    Ready,
+    /// The operation did not complete within its specified duration and should handle the timeout case.
+    TimedOut,
 }
-pub type DynUnblockCallback<'tcx> = Box<dyn UnblockCallback<'tcx> + 'tcx>;
 
+/// Generic callback trait for machine operations.
+pub trait MachineCallback<'tcx>: VisitProvenance {
+    /// Called when the operation completes (successfully or with timeout).
+    fn call(
+        self: Box<Self>,
+        ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
+        result: MachineCallbackState,
+    ) -> InterpResult<'tcx>;
+}
+
+pub type DyMachineCallback<'tcx> = Box<dyn MachineCallback<'tcx> + 'tcx>;
+
+/// Macro for creating machine callbacks
 #[macro_export]
 macro_rules! callback {
-    (
-        @capture<$tcx:lifetime $(,)? $($lft:lifetime),*> { $($name:ident: $type:ty),* $(,)? }
-        @unblock = |$this:ident| $unblock:block
-    ) => {
-        callback!(
-            @capture<$tcx, $($lft),*> { $($name: $type),* }
-            @unblock = |$this| $unblock
-            @timeout = |_this| {
-                unreachable!(
-                    "timeout on a thread that was blocked without a timeout (or someone forgot to overwrite this method)"
-                )
-            }
-        )
-    };
-    (
-        @capture<$tcx:lifetime $(,)? $($lft:lifetime),*> { $($name:ident: $type:ty),* $(,)? }
-        @unblock = |$this:ident| $unblock:block
-        @timeout = |$this_timeout:ident| $timeout:block
-    ) => {{
+    (@capture<$tcx:lifetime $(,)? $($lft:lifetime),*> { $($name:ident: $type:ty),* $(,)? }
+     @unblock = |$this:ident, $result:ident| $complete:expr $(,)?)
+    => {{
+
         struct Callback<$tcx, $($lft),*> {
             $($name: $type,)*
             _phantom: std::marker::PhantomData<&$tcx ()>,
         }
 
         impl<$tcx, $($lft),*> VisitProvenance for Callback<$tcx, $($lft),*> {
-            #[allow(unused_variables)]
-            fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+            fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
                 $(
-                    self.$name.visit_provenance(visit);
+                    self.$name.visit_provenance(_visit);
                 )*
             }
         }
 
-        impl<$tcx, $($lft),*> UnblockCallback<$tcx> for Callback<$tcx, $($lft),*> {
-            fn unblock(self: Box<Self>, $this: &mut MiriInterpCx<$tcx>) -> InterpResult<$tcx> {
+        impl<$tcx, $($lft),*> MachineCallback<$tcx> for Callback<$tcx, $($lft),*> {
+            fn call(
+                self: Box<Self>,
+                $this: &mut MiriInterpCx<$tcx>,
+                $result: MachineCallbackState
+            ) -> InterpResult<$tcx> {
                 #[allow(unused_variables)]
                 let Callback { $($name,)* _phantom } = *self;
-                $unblock
-            }
-
-            fn timeout(self: Box<Self>, $this_timeout: &mut MiriInterpCx<$tcx>) -> InterpResult<$tcx> {
-                #[allow(unused_variables)]
-                let Callback { $($name,)* _phantom } = *self;
-                $timeout
+                $complete
             }
         }
 
         Box::new(Callback { $($name,)* _phantom: std::marker::PhantomData })
-    }}
+    }};
 }
 
 /// A thread identifier.
@@ -168,7 +160,7 @@ enum ThreadState<'tcx> {
     /// The thread is enabled and can be executed.
     Enabled,
     /// The thread is blocked on something.
-    Blocked { reason: BlockReason, timeout: Option<Timeout>, callback: DynUnblockCallback<'tcx> },
+    Blocked { reason: BlockReason, timeout: Option<Timeout>, callback: DyMachineCallback<'tcx> },
     /// The thread has terminated its execution. We do not delete terminated
     /// threads (FIXME: why?).
     Terminated,
@@ -656,11 +648,18 @@ impl<'tcx> ThreadManager<'tcx> {
                     @capture<'tcx> {
                         joined_thread_id: ThreadId,
                     }
-                    @unblock = |this| {
-                        if let Some(data_race) = &mut this.machine.data_race {
-                            data_race.thread_joined(&this.machine.threads, joined_thread_id);
+                    @unblock = |this, tcb_state| {
+                        match tcb_state {
+                            MachineCallbackState::Ready => {
+                                if let Some(data_race) = &mut this.machine.data_race {
+                                    data_race.thread_joined(&this.machine.threads, joined_thread_id);
+                                }
+                                interp_ok(())
+                            }
+                            MachineCallbackState::TimedOut => {
+                                panic!("Join thread operation received unexpected timeout state - operations do not support timeouts")
+                            },
                         }
-                        interp_ok(())
                     }
                 ),
             );
@@ -718,7 +717,7 @@ impl<'tcx> ThreadManager<'tcx> {
         &mut self,
         reason: BlockReason,
         timeout: Option<Timeout>,
-        callback: DynUnblockCallback<'tcx>,
+        callback: DyMachineCallback<'tcx>,
     ) {
         let state = &mut self.threads[self.active_thread].state;
         assert!(state.is_enabled());
@@ -842,7 +841,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // 2. Make the scheduler the only place that can change the active
             //    thread.
             let old_thread = this.machine.threads.set_active_thread_id(thread);
-            callback.timeout(this)?;
+            callback.call(this, MachineCallbackState::TimedOut)?;
             this.machine.threads.set_active_thread_id(old_thread);
         }
         // found_callback can remain None if the computer's clock
@@ -1040,7 +1039,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         &mut self,
         reason: BlockReason,
         timeout: Option<(TimeoutClock, TimeoutAnchor, Duration)>,
-        callback: DynUnblockCallback<'tcx>,
+        callback: DyMachineCallback<'tcx>,
     ) {
         let this = self.eval_context_mut();
         let timeout = timeout.map(|(clock, anchor, duration)| {
@@ -1084,7 +1083,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
         // The callback must be executed in the previously blocked thread.
         let old_thread = this.machine.threads.set_active_thread_id(thread);
-        callback.unblock(this)?;
+        callback.call(this, MachineCallbackState::Ready)?;
         this.machine.threads.set_active_thread_id(old_thread);
         interp_ok(())
     }

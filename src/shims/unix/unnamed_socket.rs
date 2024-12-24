@@ -199,8 +199,15 @@ fn anonsocket_write<'tcx>(
                     len: usize,
                     dest: MPlaceTy<'tcx>,
                 }
-                @unblock = |this| {
-                    anonsocket_write(weak_self_ref, ptr, len, dest, this)
+                @unblock = |this, tcb_state| {
+                    match tcb_state {
+                        MachineCallbackState::Ready => {
+                            anonsocket_write(weak_self_ref, ptr, len, dest, this)
+                        },
+                        MachineCallbackState::TimedOut => {
+                            panic!("Unnamed socket write operation received unexpected timeout state - operations do not support timeouts")
+                        },
+                    }
                 }
             ),
         );
@@ -273,8 +280,15 @@ fn anonsocket_read<'tcx>(
                         ptr: Pointer,
                         dest: MPlaceTy<'tcx>,
                     }
-                    @unblock = |this| {
-                        anonsocket_read(weak_self_ref, len, ptr, dest, this)
+                    @unblock = |this, tcb_state| {
+                        match tcb_state {
+                            MachineCallbackState::Ready => {
+                                anonsocket_read(weak_self_ref, len, ptr, dest, this)
+                            },
+                            MachineCallbackState::TimedOut => {
+                                panic!("Unnamed socket read operation received unexpected timeout state - operations do not support timeouts")
+                            },
+                        }
                     }
                 ),
             );

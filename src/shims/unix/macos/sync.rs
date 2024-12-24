@@ -64,7 +64,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 None,
                 callback!(
                     @capture<'tcx> {}
-                    @unblock = |_this| {
+                    @unblock = |_this, _tcb_state| {
                         panic!("we shouldn't wake up ever")
                     }
                 ),

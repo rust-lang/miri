@@ -126,8 +126,8 @@ pub use crate::concurrency::sync::{
     CondvarId, EvalContextExt as _, MutexRef, RwLockId, SynchronizationObjects,
 };
 pub use crate::concurrency::thread::{
-    BlockReason, EvalContextExt as _, StackEmptyCallback, ThreadId, ThreadManager, TimeoutAnchor,
-    TimeoutClock, UnblockCallback,
+    BlockReason, EvalContextExt as _, MachineCallback, MachineCallbackState, StackEmptyCallback,
+    ThreadId, ThreadManager, TimeoutAnchor, TimeoutClock,
 };
 pub use crate::diagnostics::{
     EvalContextExt as _, NonHaltingDiagnostic, TerminationInfo, report_error,

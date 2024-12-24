@@ -496,22 +496,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         dest: MPlaceTy<'tcx>,
                         event: MPlaceTy<'tcx>,
                     }
-                    @unblock = |this| {
-                        return_ready_list(epfd_value, weak_epfd, &dest, &event, this)?;
-                        interp_ok(())
-                    }
-                    @timeout = |this| {
-                        // No notification after blocking timeout.
-                        let Some(epfd) = weak_epfd.upgrade() else {
-                            throw_unsup_format!("epoll FD {epfd_value} got closed while blocking.")
-                        };
-                        // Remove the current active thread_id from the blocked thread_id list.
-                        epfd.downcast::<Epoll>()
-                            .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_wait`"))?
-                            .thread_id.borrow_mut()
-                            .retain(|&id| id != this.active_thread());
-                        this.write_int(0, &dest)?;
-                        interp_ok(())
+                    @unblock = |this, tcb_state| {
+                        match tcb_state {
+                            MachineCallbackState::Ready => {
+                                return_ready_list(epfd_value, weak_epfd, &dest, &event, this)?;
+                                interp_ok(())
+                            },
+                            MachineCallbackState::TimedOut => {
+                                // No notification after blocking timeout.
+                                let Some(epfd) = weak_epfd.upgrade() else {
+                                    throw_unsup_format!("epoll FD {epfd_value} got closed while blocking.")
+                                };
+                                // Remove the current active thread_id from the blocked thread_id list.
+                                epfd.downcast::<Epoll>()
+                                    .ok_or_else(|| err_unsup_format!("non-epoll FD passed to `epoll_wait`"))?
+                                    .thread_id.borrow_mut()
+                                    .retain(|&id| id != this.active_thread());
+                                this.write_int(0, &dest)?;
+                                interp_ok(())
+                            },
+                        }
                     }
                 ),
             );
