@@ -96,25 +96,6 @@ impl FileDescription for AnonSocket {
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
-        // Always succeed on read size 0.
-        if len == 0 {
-            return ecx.return_read_success(ptr, &[], 0, dest);
-        }
-
-        let Some(readbuf) = &self.readbuf else {
-            // FIXME: This should return EBADF, but there's no nice way to do that as there's no
-            // corresponding ErrorKind variant.
-            throw_unsup_format!("reading from the write end of a pipe");
-        };
-
-        if readbuf.borrow().buf.is_empty() && self.is_nonblock {
-            // Non-blocking socketpair with writer and empty buffer.
-            // https://linux.die.net/man/2/read
-            // EAGAIN or EWOULDBLOCK can be returned for socket,
-            // POSIX.1-2001 allows either error to be returned for this case.
-            // Since there is no ErrorKind for EAGAIN, WouldBlock is used.
-            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
-        }
         anonsocket_read(self_ref.downgrade(), len, ptr, dest.clone(), ecx)
     }
 
@@ -127,30 +108,6 @@ impl FileDescription for AnonSocket {
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
-        // Always succeed on write size 0.
-        // ("If count is zero and fd refers to a file other than a regular file, the results are not specified.")
-        if len == 0 {
-            return ecx.return_write_success(0, dest);
-        }
-
-        // We are writing to our peer's readbuf.
-        let Some(peer_fd) = self.peer_fd().upgrade() else {
-            // If the upgrade from Weak to Rc fails, it indicates that all read ends have been
-            // closed.
-            return ecx.set_last_error_and_return(ErrorKind::BrokenPipe, dest);
-        };
-
-        let Some(writebuf) = &peer_fd.downcast::<AnonSocket>().unwrap().readbuf else {
-            // FIXME: This should return EBADF, but there's no nice way to do that as there's no
-            // corresponding ErrorKind variant.
-            throw_unsup_format!("writing to the reading end of a pipe");
-        };
-        let available_space =
-            MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
-        if available_space == 0 && self.is_nonblock {
-            // Non-blocking socketpair with a full buffer.
-            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
-        }
         anonsocket_write(self_ref.downgrade(), ptr, len, dest.clone(), ecx)
     }
 
@@ -167,6 +124,12 @@ fn anonsocket_write<'tcx>(
     dest: MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
+    // Always succeed on write size 0.
+    // ("If count is zero and fd refers to a file other than a regular file, the results are not specified.")
+    if len == 0 {
+        return ecx.return_write_success(0, &dest);
+    }
+
     let self_ref = weak_self_ref.upgrade().unwrap();
     let self_anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
     let Some(peer_fd) = self_anonsocket.peer_fd().upgrade() else {
@@ -183,6 +146,10 @@ fn anonsocket_write<'tcx>(
     let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
 
     if available_space == 0 {
+        if self_anonsocket.is_nonblock {
+            // Non-blocking socketpair with a full buffer.
+            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
+        }
         // Blocking socketpair with a full buffer.
         let dest = dest.clone();
         self_anonsocket.blocked_write_tid.borrow_mut().push(ecx.active_thread());
@@ -239,6 +206,11 @@ fn anonsocket_read<'tcx>(
     dest: MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
+    // Always succeed on read size 0.
+    if len == 0 {
+        return ecx.return_read_success(ptr, &[], 0, &dest);
+    }
+
     let self_ref = weak_self_ref.upgrade().unwrap();
     let self_anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
 
@@ -249,6 +221,15 @@ fn anonsocket_read<'tcx>(
     };
 
     if readbuf.borrow_mut().buf.is_empty() {
+        if self_anonsocket.is_nonblock {
+            // Non-blocking socketpair with writer and empty buffer.
+            // https://linux.die.net/man/2/read
+            // EAGAIN or EWOULDBLOCK can be returned for socket,
+            // POSIX.1-2001 allows either error to be returned for this case.
+            // Since there is no ErrorKind for EAGAIN, WouldBlock is used.
+            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
+        }
+
         if self_anonsocket.peer_fd().upgrade().is_none() {
             // Socketpair with no peer and empty buffer.
             // 0 bytes successfully read indicates end-of-file.
