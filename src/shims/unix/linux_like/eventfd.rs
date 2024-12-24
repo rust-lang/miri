@@ -254,9 +254,16 @@ fn eventfd_write<'tcx>(
                         dest: MPlaceTy<'tcx>,
                         weak_eventfd: WeakFileDescriptionRef,
                     }
-                    @unblock = |this| {
-                        // When we get unblocked, try again.
-                        eventfd_write(num, buf_place, &dest, weak_eventfd, this)
+                    @unblock = |this, tcb_state| {
+                        match tcb_state {
+                            MachineCallbackState::Ready => {
+                                // When we get unblocked, try again.
+                                eventfd_write(num, buf_place, &dest, weak_eventfd, this)
+                            },
+                            MachineCallbackState::TimedOut => {
+                                panic!("Eventfd write operation received unexpected timeout state - operations do not support timeouts")
+                            },
+                        }
                     }
                 ),
             );
@@ -302,9 +309,16 @@ fn eventfd_read<'tcx>(
                     dest: MPlaceTy<'tcx>,
                     weak_eventfd: WeakFileDescriptionRef,
                 }
-                @unblock = |this| {
-                    // When we get unblocked, try again.
-                    eventfd_read(buf_place, &dest, weak_eventfd, this)
+                @unblock = |this, tcb_state| {
+                    match tcb_state {
+                        MachineCallbackState::Ready => {
+                            // When we get unblocked, try again.
+                            eventfd_read(buf_place, &dest, weak_eventfd, this)
+                        },
+                        MachineCallbackState::TimedOut => {
+                            panic!("Eventfd read operation received unexpected timeout state - operations do not support timeouts")
+                        },
+                    }
                 }
             ),
         );
