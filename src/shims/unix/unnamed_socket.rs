@@ -221,8 +221,8 @@ fn anonsocket_write<'tcx>(
         // Notification should be provided for peer fd as it became readable.
         // The kernel does this even if the fd was already readable before, so we follow suit.
         ecx.check_and_update_readiness(&peer_fd)?;
-        let peer_anonsocket = peer_fd.downcast::<AnonSocket>().unwrap();
         // Unblock all threads that are currently blocked on peer_fd's read.
+        let peer_anonsocket = peer_fd.downcast::<AnonSocket>().unwrap();
         let waiting_threads = std::mem::take(&mut *peer_anonsocket.blocked_read_tid.borrow_mut());
         // FIXME: We can randomize the order of unblocking.
         for thread_id in waiting_threads {
@@ -303,8 +303,8 @@ fn anonsocket_read<'tcx>(
         // notifications than the real system.
         if let Some(peer_fd) = self_anonsocket.peer_fd().upgrade() {
             ecx.check_and_update_readiness(&peer_fd)?;
-            let peer_anonsocket = peer_fd.downcast::<AnonSocket>().unwrap();
             // Unblock all threads that are currently blocked on peer_fd's write.
+            let peer_anonsocket = peer_fd.downcast::<AnonSocket>().unwrap();
             let waiting_threads =
                 std::mem::take(&mut *peer_anonsocket.blocked_write_tid.borrow_mut());
             // FIXME: We can randomize the order of unblocking.
