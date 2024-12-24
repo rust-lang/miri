@@ -1723,3 +1723,77 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         Cow::Borrowed(ecx.machine.union_data_ranges.entry(ty).or_insert_with(compute_range))
     }
 }
+
+/// Trait for callbacks handling asynchronous machine operations.
+///
+/// Callbacks receive a completion state and can perform follow-up actions while
+/// maintaining interpreter invariants. They are executed with mutable access to
+/// the interpreter context.
+///
+/// # Type Parameters
+/// - `'tcx`: Typing context lifetime for the interpreter.
+/// - `T`: Type of argument passed to the callback on completion.
+pub trait MachineCallback<'tcx, T>: VisitProvenance {
+    /// Executes the callback when an operation completes.
+    ///
+    /// # Arguments
+    /// - `self`: Owned callback, boxed for dynamic dispatch
+    /// - `ecx`: Mutable interpreter context
+    /// - `arg`: Operation-specific completion argument
+    ///
+    /// # Returns
+    /// Success or error of the callback execution.
+    fn call(
+        self: Box<Self>,
+        ecx: &mut InterpCx<'tcx, MiriMachine<'tcx>>,
+        arg: T,
+    ) -> InterpResult<'tcx>;
+}
+
+/// Creates machine callbacks with captured variables and generic argument types.
+///
+/// This macro generates the boilerplate needed to create type-safe callbacks:
+/// - Creates a struct to hold captured variables
+/// - Implements required traits (VisitProvenance, MachineCallback)
+/// - Handles proper lifetime and type parameters
+///
+/// The callback body receives the interpreter context and completion argument.
+#[macro_export]
+macro_rules! callback {
+    (@capture<$tcx:lifetime $(,)? $($lft:lifetime),*>
+     { $($name:ident: $type:ty),* $(,)? }
+     @unblock = |$this:ident, $arg:ident: $arg_ty:ty| $body:expr $(,)?) => {{
+        // Create callback struct with the captured variables and generic type T
+        struct Callback<$tcx, $($lft),*> {
+            $($name: $type,)*
+            _phantom: std::marker::PhantomData<&$tcx ()>,
+        }
+
+        // Implement VisitProvenance trait for the callback
+        impl<$tcx, $($lft),*> VisitProvenance for Callback<$tcx, $($lft),*> {
+            fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
+                $(
+                    self.$name.visit_provenance(_visit);
+                )*
+            }
+        }
+
+        // Implement MachineCallback trait with the specified argument type
+        impl<$tcx, $($lft),*> MachineCallback<$tcx, $arg_ty> for Callback<$tcx, $($lft),*> {
+            fn call(
+                self: Box<Self>,
+                $this: &mut MiriInterpCx<$tcx>,
+                $arg: $arg_ty
+            ) -> InterpResult<$tcx> {
+                #[allow(unused_variables)]
+                let Callback { $($name,)* _phantom } = *self;
+                $body
+            }
+        }
+
+        Box::new(Callback {
+            $($name,)*
+            _phantom: std::marker::PhantomData
+        })
+    }};
+}
