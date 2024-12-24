@@ -167,10 +167,7 @@ fn anonsocket_write<'tcx>(
     dest: MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
-    let Some(self_ref) = weak_self_ref.upgrade() else {
-        // FIXME:  We should raise a deadlock error if the self_ref upgrade failed.
-        throw_unsup_format!("This will be a deadlock error in future")
-    };
+    let self_ref = weak_self_ref.upgrade().unwrap();
     let self_anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
     let Some(peer_fd) = self_anonsocket.peer_fd().upgrade() else {
         // If the upgrade from Weak to Rc fails, it indicates that all read ends have been
@@ -242,10 +239,7 @@ fn anonsocket_read<'tcx>(
     dest: MPlaceTy<'tcx>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
-    let Some(self_ref) = weak_self_ref.upgrade() else {
-        // FIXME:  We should raise a deadlock error if the self_ref upgrade failed.
-        throw_unsup_format!("This will be a deadlock error in future")
-    };
+    let self_ref = weak_self_ref.upgrade().unwrap();
     let self_anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
 
     let Some(readbuf) = &self_anonsocket.readbuf else {
