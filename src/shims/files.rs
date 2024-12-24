@@ -121,6 +121,10 @@ impl<T: FileDescription + 'static> FileDescriptionExt for T {
 
 pub type DynFileDescriptionRef = FileDescriptionRef<dyn FileDescription>;
 
+/// Represents a dynamic callback for file I/O operations that is invoked upon completion.
+/// The callback receives either the number of bytes successfully read (u64) or an IoError.
+pub type DynFileDescriptionCallback<'tcx> = DynMachineCallback<'tcx, Result<u64, IoError>>;
+
 impl FileDescriptionRef<dyn FileDescription> {
     pub fn downcast<T: FileDescription + 'static>(self) -> Option<FileDescriptionRef<T>> {
         let inner = self.into_rc_any().downcast::<FdIdWith<T>>().ok()?;
@@ -134,13 +138,14 @@ pub trait FileDescription: std::fmt::Debug + FileDescriptionExt {
 
     /// Reads as much as possible into the given buffer `ptr`.
     /// `len` indicates how many bytes we should try to read.
-    /// `dest` is where the return value should be stored: number of bytes read, or `-1` in case of error.
+    /// `finish` Callback to be invoked on operation completion with bytes read or error
+    #[allow(dead_code)]
     fn read<'tcx>(
         self: FileDescriptionRef<Self>,
         _communicate_allowed: bool,
         _ptr: Pointer,
         _len: usize,
-        _dest: &MPlaceTy<'tcx>,
+        _finish: DynFileDescriptionCallback<'tcx>,
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
         throw_unsup_format!("cannot read from {}", self.name());
@@ -207,18 +212,32 @@ impl FileDescription for io::Stdin {
         communicate_allowed: bool,
         ptr: Pointer,
         len: usize,
-        dest: &MPlaceTy<'tcx>,
+        finish: DynFileDescriptionCallback<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
-        let mut bytes = vec![0; len];
+        // First handle isolation mode check
         if !communicate_allowed {
             // We want isolation mode to be deterministic, so we have to disallow all reads, even stdin.
             helpers::isolation_abort_error("`read` from stdin")?;
         }
-        let result = Read::read(&mut &*self, &mut bytes);
-        match result {
-            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+
+        let mut bytes = vec![0; len];
+
+        match Read::read(&mut &*self, &mut bytes) {
+            Ok(actual_read_size) => {
+                // Write the successfully read bytes to the destination pointer
+                ecx.write_bytes_ptr(ptr, bytes[..actual_read_size].iter().copied())?;
+
+                let Ok(read_size) = u64::try_from(actual_read_size) else {
+                    throw_unsup_format!(
+                        "Read operation returned size {} which exceeds maximum allowed value",
+                        actual_read_size
+                    )
+                };
+
+                finish.call(ecx, Ok(read_size))
+            }
+            Err(e) => finish.call(ecx, Err(e.into())),
         }
     }
 

@@ -7,7 +7,7 @@ use std::io::ErrorKind;
 use rustc_abi::Size;
 
 use crate::helpers::check_min_arg_count;
-use crate::shims::files::FileDescription;
+use crate::shims::files::{DynFileDescriptionCallback, FileDescription};
 use crate::shims::unix::linux_like::epoll::EpollReadyEvents;
 use crate::shims::unix::*;
 use crate::*;
@@ -203,7 +203,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
     }
 
-    /// Read data from `fd` into buffer specified by `buf` and `count`.
+    /// Reads data from a file descriptor using callback-based completion.
     ///
     /// If `offset` is `None`, reads data from current cursor position associated with `fd`
     /// and updates cursor position on completion. Otherwise, reads from the specified offset
@@ -239,13 +239,32 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return(LibcError("EBADF"), dest);
         };
 
-        trace!("read: FD mapped to {fd:?}");
+        trace!("Reading from FD {}, size {}, offset {:?}", fd_num, count, offset);
         // We want to read at most `count` bytes. We are sure that `count` is not negative
         // because it was a target's `usize`. Also we are sure that its smaller than
         // `usize::MAX` because it is bounded by the host's `isize`.
 
+        // Clone the result destination for use in the completion callback
+        let result_destination = dest.clone();
+
+        let completion_callback: DynFileDescriptionCallback<'tcx> = callback!(
+            @capture<'tcx> {
+                result_destination: MPlaceTy<'tcx>,
+            }
+            |this, read_result: Result<u64, IoError>| {
+                match read_result {
+                    Ok(read_size) => {
+                        this.write_int(read_size, &result_destination)
+                    }
+                    Err(_err_code) => {
+                        this.set_last_error_and_return(LibcError("EIO"), &result_destination)
+                    }
+                }
+            }
+        );
+
         match offset {
-            None => fd.read(communicate, buf, count, dest, this)?,
+            None => fd.read(communicate, buf, count, completion_callback, this)?,
             Some(offset) => {
                 let Ok(offset) = u64::try_from(offset) else {
                     return this.set_last_error_and_return(LibcError("EINVAL"), dest);

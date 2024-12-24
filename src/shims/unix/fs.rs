@@ -14,7 +14,10 @@ use rustc_data_structures::fx::FxHashMap;
 
 use self::shims::time::system_time_to_duration;
 use crate::helpers::check_min_arg_count;
-use crate::shims::files::{EvalContextExt as _, FileDescription, FileDescriptionRef};
+use crate::shims::files::{
+    DynFileDescriptionCallback, EvalContextExt as _, FileDescription, FileDescriptionRef,
+    WeakFileDescriptionRef,
+};
 use crate::shims::os_str::bytes_to_os_str;
 use crate::shims::unix::fd::{FlockOp, UnixFileDescription};
 use crate::*;
@@ -23,6 +26,92 @@ use crate::*;
 struct FileHandle {
     file: File,
     writable: bool,
+    /// Mutex for synchronizing file access across threads.
+    file_lock: MutexRef,
+}
+
+impl VisitProvenance for FileHandle {
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
+        // No provenance tracking needed for FileHandle as it contains no references.
+        // This implementation satisfies the trait requirement but performs no operations.
+    }
+}
+
+impl FileHandle {
+    /// Creates a new FileHandle with specified permissions and synchronization primitive.
+    fn new(file: File, writable: bool, file_lock: MutexRef) -> Self {
+        Self { file, writable, file_lock }
+    }
+
+    /// Attempts to create a clone of the file handle while preserving all attributes.
+    ///
+    /// # Errors
+    /// Returns an `InterpResult` error if file handle cloning fails.    
+    fn try_clone<'tcx>(&self) -> InterpResult<'tcx, FileHandle> {
+        let cloned_file = self
+            .file
+            .try_clone()
+            .map_err(|e| err_unsup_format!("Failed to clone file handle: {}", e))?;
+
+        interp_ok(FileHandle {
+            file: cloned_file,
+            writable: self.writable,
+            file_lock: self.file_lock.clone(),
+        })
+    }
+
+    /// Performs a synchronized file read with callback completion.
+    fn perform_read<'tcx>(
+        this: &mut MiriInterpCx<'tcx>,
+        finish: DynFileDescriptionCallback<'tcx>,
+        mut file_handle: FileHandle,
+        weak_fd: WeakFileDescriptionRef<FileHandle>,
+        buffer_ptr: Pointer,
+        length: usize,
+    ) -> InterpResult<'tcx> {
+        this.mutex_lock(&file_handle.file_lock);
+
+        let result = {
+            // Verify file descriptor is still valid.
+            if weak_fd.upgrade().is_none() {
+                throw_unsup_format!("file got closed while blocking")
+            }
+
+            let mut bytes = vec![0; length];
+            let read_result = file_handle.file.read(&mut bytes);
+
+            // Handle the read result.
+            match read_result {
+                Ok(read_size) => {
+                    // Write the bytes to memory.
+                    if let Err(err_code) = this
+                        .write_bytes_ptr(buffer_ptr, bytes[..read_size].iter().copied())
+                        .report_err()
+                    {
+                        throw_unsup_format!(
+                            "Memory write failed during file read operation: {:#?}",
+                            err_code
+                        )
+                    }
+
+                    let Ok(read_size) = u64::try_from(read_size) else {
+                        throw_unsup_format!(
+                            "Read operation returned size {} which exceeds maximum allowed value",
+                            read_size
+                        )
+                    };
+
+                    finish.call(this, Ok(read_size))
+                }
+                Err(err_code) => finish.call(this, Err(err_code.into())),
+            }
+        };
+
+        // Always unlock the mutex, even if the read operation failed.
+        this.mutex_unlock(&file_handle.file_lock)?;
+
+        result
+    }
 }
 
 impl FileDescription for FileHandle {
@@ -35,15 +124,42 @@ impl FileDescription for FileHandle {
         communicate_allowed: bool,
         ptr: Pointer,
         len: usize,
-        dest: &MPlaceTy<'tcx>,
+        finish: DynFileDescriptionCallback<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
+        let this = ecx;
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
-        let mut bytes = vec![0; len];
-        let result = (&mut &self.file).read(&mut bytes);
-        match result {
-            Ok(read_size) => ecx.return_read_success(ptr, &bytes, read_size, dest),
-            Err(e) => ecx.set_last_error_and_return(e, dest),
+
+        // Clone the underlying File.
+        let clone_file_handle = match self.try_clone().report_err() {
+            Ok(handle) => handle,
+            Err(ec) => throw_unsup_format!("unable to clone file discp {:#?}", ec),
+        };
+
+        let weak_fd = FileDescriptionRef::downgrade(&self);
+
+        if this.mutex_is_locked(&self.file_lock) {
+            this.block_thread(
+                BlockReason::Mutex,
+                None,
+                callback!(
+                    @capture<'tcx> {
+                        finish: DynFileDescriptionCallback<'tcx>,
+                        clone_file_handle: FileHandle,
+                        weak_fd: WeakFileDescriptionRef<FileHandle>,
+                        ptr: Pointer,
+                        len: usize,
+                    }
+                    |this, unblock: UnblockKind| {
+                        assert_eq!(unblock, UnblockKind::Ready);
+                        FileHandle::perform_read(this, finish, clone_file_handle, weak_fd, ptr, len)
+                    }
+                ),
+            );
+
+            unreachable!()
+        } else {
+            FileHandle::perform_read(this, finish, clone_file_handle, weak_fd, ptr, len)
         }
     }
 
@@ -584,9 +700,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(ErrorKind::PermissionDenied);
         }
 
-        let fd = options
-            .open(path)
-            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable }));
+        let fd = options.open(path).map(|file| {
+            this.machine.fds.insert_new(FileHandle::new(
+                file,
+                writable,
+                this.machine.sync.mutex_create(),
+            ))
+        });
 
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
     }
@@ -1645,7 +1765,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             match file {
                 Ok(f) => {
-                    let fd = this.machine.fds.insert_new(FileHandle { file: f, writable: true });
+                    let fd = this.machine.fds.insert_new(FileHandle::new(
+                        f,
+                        true,
+                        this.machine.sync.mutex_create(),
+                    ));
                     return interp_ok(Scalar::from_i32(fd));
                 }
                 Err(e) =>

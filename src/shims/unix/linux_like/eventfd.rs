@@ -4,7 +4,9 @@ use std::io;
 use std::io::ErrorKind;
 
 use crate::concurrency::VClock;
-use crate::shims::files::{FileDescription, FileDescriptionRef, WeakFileDescriptionRef};
+use crate::shims::files::{
+    DynFileDescriptionCallback, FileDescription, FileDescriptionRef, WeakFileDescriptionRef,
+};
 use crate::shims::unix::UnixFileDescription;
 use crate::shims::unix::linux_like::epoll::{EpollReadyEvents, EvalContextExt as _};
 use crate::*;
@@ -51,20 +53,22 @@ impl FileDescription for EventFd {
         _communicate_allowed: bool,
         ptr: Pointer,
         len: usize,
-        dest: &MPlaceTy<'tcx>,
+        finish: DynFileDescriptionCallback<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
         // We're treating the buffer as a `u64`.
         let ty = ecx.machine.layouts.u64;
+
         // Check the size of slice, and return error only if the size of the slice < 8.
         if len < ty.size.bytes_usize() {
-            return ecx.set_last_error_and_return(ErrorKind::InvalidInput, dest);
+            return finish.call(ecx, Err(ErrorKind::InvalidInput.into()));
         }
 
         // Turn the pointer into a place at the right type.
         let buf_place = ecx.ptr_to_mplace_unaligned(ptr, ty);
 
-        eventfd_read(buf_place, dest, self, ecx)
+        // Now handle the eventfd read operation with callbacks
+        eventfd_read(buf_place, finish, self, ecx)
     }
 
     /// A write call adds the 8-byte integer value supplied in
@@ -260,7 +264,7 @@ fn eventfd_write<'tcx>(
 /// else just return the current counter value to the caller and set the counter to 0.
 fn eventfd_read<'tcx>(
     buf_place: MPlaceTy<'tcx>,
-    dest: &MPlaceTy<'tcx>,
+    finish: DynFileDescriptionCallback<'tcx>,
     eventfd: FileDescriptionRef<EventFd>,
     ecx: &mut MiriInterpCx<'tcx>,
 ) -> InterpResult<'tcx> {
@@ -270,20 +274,24 @@ fn eventfd_read<'tcx>(
     // Block when counter == 0.
     if counter == 0 {
         if eventfd.is_nonblock {
-            return ecx.set_last_error_and_return(ErrorKind::WouldBlock, dest);
+            // For non-blocking mode, return WouldBlock error through callback
+            return finish.call(ecx, Err(ErrorKind::WouldBlock.into()));
         }
-        let dest = dest.clone();
 
+        // Add current thread to blocked readers list
         eventfd.blocked_read_tid.borrow_mut().push(ecx.active_thread());
 
+        // Create weak reference for blocking operation
         let weak_eventfd = FileDescriptionRef::downgrade(&eventfd);
+
+        // Block the thread with a completion callback
         ecx.block_thread(
             BlockReason::Eventfd,
             None,
             callback!(
                 @capture<'tcx> {
                     buf_place: MPlaceTy<'tcx>,
-                    dest: MPlaceTy<'tcx>,
+                    finish: DynFileDescriptionCallback<'tcx>,
                     weak_eventfd: WeakFileDescriptionRef<EventFd>,
                 }
                 |this, unblock: UnblockKind| {
@@ -291,33 +299,38 @@ fn eventfd_read<'tcx>(
                     // When we get unblocked, try again. We know the ref is still valid,
                     // otherwise there couldn't be a `write` that unblocks us.
                     let eventfd_ref = weak_eventfd.upgrade().unwrap();
-                    eventfd_read(buf_place, &dest, eventfd_ref, this)
+                    eventfd_read(buf_place, finish, eventfd_ref, this)
                 }
             ),
         );
-    } else {
-        // Synchronize with all prior `write` calls to this FD.
-        ecx.acquire_clock(&eventfd.clock.borrow());
-
-        // Return old counter value into user-space buffer.
-        ecx.write_int(counter, &buf_place)?;
-
-        // Unblock *all* threads previously blocked on `write`.
-        // We need to take out the blocked thread ids and unblock them together,
-        // because `unblock_threads` may block them again and end up re-adding the
-        // thread to the blocked list.
-        let waiting_threads = std::mem::take(&mut *eventfd.blocked_write_tid.borrow_mut());
-        // FIXME: We can randomize the order of unblocking.
-        for thread_id in waiting_threads {
-            ecx.unblock_thread(thread_id, BlockReason::Eventfd)?;
-        }
-
-        // The state changed; we check and update the status of all supported event
-        // types for current file description.
-        ecx.check_and_update_readiness(eventfd)?;
-
-        // Tell userspace how many bytes we put into the buffer.
-        return ecx.write_int(buf_place.layout.size.bytes(), dest);
+        return interp_ok(());
     }
-    interp_ok(())
+
+    // Handle successful read case
+
+    // Synchronize with all prior `write` calls to this FD.
+    ecx.acquire_clock(&eventfd.clock.borrow());
+
+    // Return old counter value into user-space buffer.
+    ecx.write_int(counter, &buf_place)?;
+
+    // Unblock *all* threads previously blocked on `write`.
+    // We need to take out the blocked thread ids and unblock them together,
+    // because `unblock_threads` may block them again and end up re-adding the
+    // thread to the blocked list.
+    let waiting_threads = std::mem::take(&mut *eventfd.blocked_write_tid.borrow_mut());
+
+    // FIXME: We can randomize the order of unblocking.
+    for thread_id in waiting_threads {
+        ecx.unblock_thread(thread_id, BlockReason::Eventfd)?;
+    }
+
+    // The state changed; we check and update the status of all supported event
+    // types for current file description.
+    ecx.check_and_update_readiness(eventfd)?;
+
+    // Complete the operation with the number of bytes written
+    let bytes_written = buf_place.layout.size.bytes();
+
+    finish.call(ecx, Ok(bytes_written))
 }
