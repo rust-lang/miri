@@ -130,6 +130,8 @@ fn anonsocket_write<'tcx>(
         return ecx.return_write_success(0, &dest);
     }
 
+    // If this fd is closed while blocking on `write`, any subsequent `read` on peer_fd will never
+    // wake up this thread. So the `unwrap` here is safe.
     let self_ref = weak_self_ref.upgrade().unwrap();
     let self_anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
     let Some(peer_fd) = self_anonsocket.peer_fd().upgrade() else {
@@ -149,24 +151,25 @@ fn anonsocket_write<'tcx>(
         if self_anonsocket.is_nonblock {
             // Non-blocking socketpair with a full buffer.
             return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
+        } else {
+            // Blocking socketpair with a full buffer.
+            self_anonsocket.blocked_write_tid.borrow_mut().push(ecx.active_thread());
+            ecx.block_thread(
+                BlockReason::UnnamedSocket,
+                None,
+                callback!(
+                    @capture<'tcx> {
+                        weak_self_ref: WeakFileDescriptionRef,
+                        ptr: Pointer,
+                        len: usize,
+                        dest: MPlaceTy<'tcx>,
+                    }
+                    @unblock = |this| {
+                        anonsocket_write(weak_self_ref, ptr, len, dest, this)
+                    }
+                ),
+            );
         }
-        // Blocking socketpair with a full buffer.
-        self_anonsocket.blocked_write_tid.borrow_mut().push(ecx.active_thread());
-        ecx.block_thread(
-            BlockReason::UnnamedSocket,
-            None,
-            callback!(
-                @capture<'tcx> {
-                    weak_self_ref: WeakFileDescriptionRef,
-                    ptr: Pointer,
-                    len: usize,
-                    dest: MPlaceTy<'tcx>,
-                }
-                @unblock = |this| {
-                    anonsocket_write(weak_self_ref, ptr, len, dest, this)
-                }
-            ),
-        );
     } else {
         let mut writebuf = writebuf.borrow_mut();
         // Remember this clock so `read` can synchronize with us.
@@ -210,6 +213,8 @@ fn anonsocket_read<'tcx>(
         return ecx.return_read_success(ptr, &[], 0, &dest);
     }
 
+    // If this fd is closed while blocking, it is impossible to unblock this `read` through
+    // another `write` in peer_fd, so the `unwrap` here is fine.
     let self_ref = weak_self_ref.upgrade().unwrap();
     let self_anonsocket = self_ref.downcast::<AnonSocket>().unwrap();
 
@@ -227,9 +232,7 @@ fn anonsocket_read<'tcx>(
             // POSIX.1-2001 allows either error to be returned for this case.
             // Since there is no ErrorKind for EAGAIN, WouldBlock is used.
             return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
-        }
-
-        if self_anonsocket.peer_fd().upgrade().is_none() {
+        } else if self_anonsocket.peer_fd().upgrade().is_none() {
             // Socketpair with no peer and empty buffer.
             // 0 bytes successfully read indicates end-of-file.
             return ecx.return_read_success(ptr, &[], 0, &dest);
