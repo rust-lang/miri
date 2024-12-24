@@ -151,7 +151,6 @@ fn anonsocket_write<'tcx>(
             return ecx.set_last_error_and_return(ErrorKind::WouldBlock, &dest);
         }
         // Blocking socketpair with a full buffer.
-        let dest = dest.clone();
         self_anonsocket.blocked_write_tid.borrow_mut().push(ecx.active_thread());
         ecx.block_thread(
             BlockReason::UnnamedSocket,
@@ -236,7 +235,6 @@ fn anonsocket_read<'tcx>(
             return ecx.return_read_success(ptr, &[], 0, &dest);
         } else {
             // Blocking socketpair with writer and empty buffer.
-            let weak_self_ref = weak_self_ref.clone();
             self_anonsocket.blocked_read_tid.borrow_mut().push(ecx.active_thread());
             ecx.block_thread(
                 BlockReason::UnnamedSocket,
