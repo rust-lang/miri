@@ -26,6 +26,7 @@ use crate::*;
 struct FileHandle {
     file: File,
     writable: bool,
+    /// Mutex for synchronizing file access across threads.
     file_lock: MutexRef,
 }
 
@@ -37,12 +38,16 @@ impl VisitProvenance for FileHandle {
 }
 
 impl FileHandle {
+    /// Creates a new FileHandle with specified permissions and synchronization primitive.
     fn new(file: File, writable: bool, file_lock: MutexRef) -> Self {
         Self { file, writable, file_lock }
     }
 
+    /// Attempts to create a clone of the file handle while preserving all attributes.
+    ///
+    /// # Errors
+    /// Returns an `InterpResult` error if file handle cloning fails.    
     fn try_clone<'tcx>(&self) -> InterpResult<'tcx, FileHandle> {
-        // Explicitly handling errors with more context
         let cloned_file = self
             .file
             .try_clone()
@@ -55,6 +60,17 @@ impl FileHandle {
         })
     }
 
+    /// Performs a synchronized read operation on the file handle.
+    ///
+    /// # Arguments
+    /// * `this` - Interpreter context
+    /// * `dest` - Destination for the read operation result
+    /// * `file_handle` - Handle to read from
+    /// * `weak_fd` - Weak reference to file descriptor for validity checking
+    /// * `op` - I/O transfer operation specification
+    ///
+    /// # Returns
+    /// InterpResult indicating success or failure of the read operation.
     fn perform_read<'tcx>(
         this: &mut MiriInterpCx<'tcx>,
         dest: MPlaceTy<'tcx>,
@@ -101,23 +117,15 @@ impl FileDescription for FileHandle {
         "file"
     }
 
-    /// Performs an atomic read operation on the file.
-    ///
-    /// # Arguments
-    /// * `self_ref` - Strong reference to file description for lifetime management
-    /// * `communicate_allowed` - Whether external communication is permitted
-    /// * `op` - The I/O operation containing buffer and layout information
-    /// * `dest` - Destination for storing operation results
-    /// * `ecx` - Mutable reference to interpreter context
-    ///
-    /// # Returns
-    /// * `Ok(())` on successful read
-    /// * `Err(_)` if read fails or is unsupported        
-    fn read_atomic<'tcx>(
+    /// Reads as much as possible into the given buffer `ptr`, with proper synchronization and error handling.
+    /// `len` indicates how many bytes we should try to read.
+    /// `dest` is where the return value should be stored: number of bytes read, or `-1` in case of error.
+    fn read<'tcx>(
         &self,
         self_ref: &FileDescriptionRef,
         communicate_allowed: bool,
-        op: &mut IoTransferOperation<'tcx>,
+        ptr: Pointer,
+        len: usize,
         dest: &MPlaceTy<'tcx>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx> {
@@ -130,11 +138,12 @@ impl FileDescription for FileHandle {
             Err(_e) => return this.set_last_error_and_return(LibcError("EIO"), dest),
         };
 
+        let op = IoTransferOperation::new_contiguous(ptr, len);
+
         let weak_fd = self_ref.downgrade();
         let op = std::rc::Rc::new(std::cell::RefCell::new(op.clone()));
         let dest = dest.clone();
 
-        // Rest of the implementation remains the same
         if this.mutex_is_locked(&self.file_lock) {
             this.block_thread(
                 BlockReason::Mutex,
@@ -146,15 +155,9 @@ impl FileDescription for FileHandle {
                         weak_fd: WeakFileDescriptionRef,
                         op: std::rc::Rc<std::cell::RefCell<IoTransferOperation<'tcx>>>,
                     }
-                    @unblock = |this, state| {
-                        match state {
-                            MachineCallbackState::Ready => {
-                                FileHandle::perform_read(this, dest, clone_file_handle, weak_fd, op)
-                            }
-                            MachineCallbackState::TimedOut => {
-                                panic!("Mutex operation received unexpected timeout state")
-                            },
-                        }
+                    @unblock = |this, unblock: UnblockKind| {
+                        assert_eq!(unblock, UnblockKind::Ready);
+                        FileHandle::perform_read(this, dest, clone_file_handle, weak_fd, op)
                     }
                 ),
             );

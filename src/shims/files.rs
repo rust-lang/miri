@@ -30,29 +30,6 @@ pub trait FileDescription: std::fmt::Debug + Any {
         throw_unsup_format!("cannot read from {}", self.name());
     }
 
-    /// Performs an atomic read operation on the file.
-    ///
-    /// # Arguments
-    /// * `self_ref` - Strong reference to file description for lifetime management
-    /// * `communicate_allowed` - Whether external communication is permitted
-    /// * `op` - The I/O operation containing buffer and layout information
-    /// * `dest` - Destination for storing operation results
-    /// * `ecx` - Mutable reference to interpreter context
-    ///
-    /// # Returns
-    /// * `Ok(())` on successful read
-    /// * `Err(_)` if read fails or is unsupported
-    fn read_atomic<'tcx>(
-        &self,
-        _self_ref: &FileDescriptionRef,
-        _communicate_allowed: bool,
-        _op: &mut IoTransferOperation<'tcx>,
-        _dest: &MPlaceTy<'tcx>,
-        _ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
-        throw_unsup_format!("cannot read from {}", self.name());
-    }
-
     /// Writes as much as possible from the given buffer `ptr`.
     /// `len` indicates how many bytes we should try to write.
     /// `dest` is where the return value should be stored: number of bytes written, or `-1` in case of error.
@@ -435,7 +412,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 }
 
 /// Represents an atomic I/O operation that handles data transfer between memory regions.
-/// Supports both contiguous and scattered memory layouts for efficient I/O operations.
+/// Supports contiguous memory layouts for efficient I/O operations.
 #[derive(Clone)]
 pub struct IoTransferOperation<'tcx> {
     /// Intermediate buffer for atomic transfer operations.
@@ -458,8 +435,6 @@ pub struct IoTransferOperation<'tcx> {
 enum IoBufferLayout {
     /// Single continuous memory region for transfer.
     Contiguous { address: Pointer },
-    /// Multiple discontinuous memory regions.
-    Scattered { regions: Vec<(Pointer, usize)> },
 }
 
 impl VisitProvenance for IoTransferOperation<'_> {
@@ -476,17 +451,6 @@ impl<'tcx> IoTransferOperation<'tcx> {
             transfer_buffer: vec![0; len],
             layout: IoBufferLayout::Contiguous { address: ptr },
             total_size: len,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    /// Creates a new I/O operation for scattered memory regions.
-    pub fn new_scattered(buffers: Vec<(Pointer, usize)>) -> Self {
-        let total_size = buffers.iter().map(|(_, len)| len).sum();
-        IoTransferOperation {
-            transfer_buffer: vec![0; total_size],
-            layout: IoBufferLayout::Scattered { regions: buffers },
-            total_size,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -532,53 +496,6 @@ impl<'tcx> IoTransferOperation<'tcx> {
                     .is_err()
                 {
                     return ecx.set_last_error_and_return(LibcError("EIO"), dest);
-                }
-            }
-
-            IoBufferLayout::Scattered { regions } => {
-                let mut current_pos = 0;
-
-                for (ptr, len) in regions {
-                    if current_pos >= bytes_processed {
-                        break;
-                    }
-
-                    // Calculate copy size with safe arithmetic
-                    let remaining_bytes = bytes_processed
-                        .checked_sub(current_pos)
-                        .expect("current_pos should never exceed bytes_read");
-                    let copy_size = (*len).min(remaining_bytes);
-
-                    // POSIX Compliance: Verify each buffer's accessibility
-                    if ecx
-                        .check_ptr_access(
-                            *ptr,
-                            Size::from_bytes(copy_size),
-                            CheckInAllocMsg::MemoryAccessTest,
-                        )
-                        .report_err()
-                        .is_err()
-                    {
-                        return ecx.set_last_error_and_return(LibcError("EFAULT"), dest);
-                    }
-
-                    let end_pos = current_pos
-                        .checked_add(copy_size)
-                        .expect("end position calculation should not overflow");
-
-                    // Attempt the write operation with proper error handling
-                    if ecx
-                        .write_bytes_ptr(
-                            *ptr,
-                            self.transfer_buffer[current_pos..end_pos].iter().copied(),
-                        )
-                        .report_err()
-                        .is_err()
-                    {
-                        return ecx.set_last_error_and_return(LibcError("EIO"), dest);
-                    }
-
-                    current_pos = end_pos;
                 }
             }
         }

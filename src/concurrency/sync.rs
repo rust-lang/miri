@@ -428,16 +428,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     assert!(!this.mutex_is_locked(&mutex_ref));
                     this.mutex_lock(&mutex_ref);
 
-                            if let Some((retval, dest)) = retval_dest {
-                                this.write_scalar(retval, &dest)?;
-                            }
-
-                            interp_ok(())
-                        },
-                        MachineCallbackState::TimedOut => {
-                            panic!("Mutex operation received unexpected timeout state - mutex operations do not support timeouts")
-                        },
+                    if let Some((retval, dest)) = retval_dest {
+                        this.write_scalar(retval, &dest)?;
                     }
+
+                    interp_ok(())
                 }
             ),
         );
