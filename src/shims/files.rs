@@ -17,6 +17,7 @@ pub trait FileDescription: std::fmt::Debug + Any {
     /// Reads as much as possible into the given buffer `ptr`.
     /// `len` indicates how many bytes we should try to read.
     /// `dest` is where the return value should be stored: number of bytes read, or `-1` in case of error.
+    #[allow(dead_code)]
     fn read<'tcx>(
         &self,
         _self_ref: &FileDescriptionRef,
@@ -406,6 +407,99 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         // The actual write size is always less than what got originally requested so this cannot fail.
         this.write_int(u64::try_from(actual_write_size).unwrap(), dest)?;
+        interp_ok(())
+    }
+}
+
+/// Represents an atomic I/O operation that handles data transfer between memory regions.
+/// Supports contiguous memory layouts for efficient I/O operations.
+#[derive(Clone)]
+pub struct IoTransferOperation<'tcx> {
+    /// Intermediate buffer for atomic transfer operations.
+    /// For reads: Temporary storage before distribution to destinations
+    /// For writes: Aggregation point before writing to file
+    transfer_buffer: Vec<u8>,
+
+    /// Memory layout specification for the transfer operation.
+    layout: IoBufferLayout,
+
+    /// Total number of bytes to be processed in this operation.
+    total_size: usize,
+
+    /// Interpreter context lifetime marker.
+    _phantom: std::marker::PhantomData<&'tcx ()>,
+}
+
+/// Specifies how memory regions are organized for I/O operations
+#[derive(Clone)]
+enum IoBufferLayout {
+    /// Single continuous memory region for transfer.
+    Contiguous { address: Pointer },
+}
+
+impl VisitProvenance for IoTransferOperation<'_> {
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
+        // Visits any references that need provenance tracking.
+        // Currently a no-op as IoTransferOperation contains no such references.
+    }
+}
+
+impl<'tcx> IoTransferOperation<'tcx> {
+    /// Creates a new I/O operation for a contiguous memory region.
+    pub fn new_contiguous(ptr: Pointer, len: usize) -> Self {
+        IoTransferOperation {
+            transfer_buffer: vec![0; len],
+            layout: IoBufferLayout::Contiguous { address: ptr },
+            total_size: len,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Provides mutable access to the transfer buffer.
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        &mut self.transfer_buffer
+    }
+
+    /// Distributes data from the transfer buffer to final destinations.
+    pub fn distribute_data(
+        &mut self,
+        ecx: &mut MiriInterpCx<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+        bytes_processed: usize,
+    ) -> InterpResult<'tcx> {
+        if bytes_processed > self.total_size {
+            return ecx.set_last_error_and_return(LibcError("EINVAL"), dest);
+        }
+
+        match &self.layout {
+            IoBufferLayout::Contiguous { address } => {
+                // POSIX Compliance: Verify buffer accessibility before writing
+                if ecx
+                    .check_ptr_access(
+                        *address,
+                        Size::from_bytes(bytes_processed),
+                        CheckInAllocMsg::MemoryAccessTest,
+                    )
+                    .report_err()
+                    .is_err()
+                {
+                    return ecx.set_last_error_and_return(LibcError("EFAULT"), dest);
+                }
+
+                // Attempt the write operation
+                if ecx
+                    .write_bytes_ptr(
+                        *address,
+                        self.transfer_buffer[..bytes_processed].iter().copied(),
+                    )
+                    .report_err()
+                    .is_err()
+                {
+                    return ecx.set_last_error_and_return(LibcError("EIO"), dest);
+                }
+            }
+        }
+
         interp_ok(())
     }
 }

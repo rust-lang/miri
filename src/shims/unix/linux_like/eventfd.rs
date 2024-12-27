@@ -254,7 +254,8 @@ fn eventfd_write<'tcx>(
                         dest: MPlaceTy<'tcx>,
                         weak_eventfd: WeakFileDescriptionRef,
                     }
-                    @unblock = |this| {
+                    @unblock = |this, unblock: UnblockKind| {
+                        assert_eq!(unblock, UnblockKind::Ready);
                         // When we get unblocked, try again.
                         eventfd_write(num, buf_place, &dest, weak_eventfd, this)
                     }
@@ -302,7 +303,8 @@ fn eventfd_read<'tcx>(
                     dest: MPlaceTy<'tcx>,
                     weak_eventfd: WeakFileDescriptionRef,
                 }
-                @unblock = |this| {
+                @unblock = |this, unblock: UnblockKind| {
+                    assert_eq!(unblock, UnblockKind::Ready);
                     // When we get unblocked, try again.
                     eventfd_read(buf_place, &dest, weak_eventfd, this)
                 }

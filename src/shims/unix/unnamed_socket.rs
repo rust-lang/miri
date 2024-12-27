@@ -199,7 +199,8 @@ fn anonsocket_write<'tcx>(
                     len: usize,
                     dest: MPlaceTy<'tcx>,
                 }
-                @unblock = |this| {
+                @unblock = |this, unblock: UnblockKind| {
+                    assert_eq!(unblock, UnblockKind::Ready);
                     anonsocket_write(weak_self_ref, ptr, len, dest, this)
                 }
             ),
@@ -273,7 +274,8 @@ fn anonsocket_read<'tcx>(
                         ptr: Pointer,
                         dest: MPlaceTy<'tcx>,
                     }
-                    @unblock = |this| {
+                    @unblock = |this, unblock: UnblockKind| {
+                        assert_eq!(unblock, UnblockKind::Ready);
                         anonsocket_read(weak_self_ref, len, ptr, dest, this)
                     }
                 ),
