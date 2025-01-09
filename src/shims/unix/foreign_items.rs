@@ -677,9 +677,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let cpusetsize = this.read_target_usize(cpusetsize)?;
                 let mask = this.read_pointer(mask)?;
 
-                // TODO: when https://github.com/rust-lang/miri/issues/3730 is fixed this should use its notion of tid/pid
-                let thread_id = match pid {
-                    0 => this.active_thread(),
+                let thread_id = match (pid, &*this.tcx.sess.target.os) {
+                    (0, _) => this.active_thread(),
+                    (tid, "linux") => {
+                        if let Ok(tid) = this.machine.threads.thread_id_try_from(tid) {
+                            tid
+                        } else {
+                            this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+
+                            return interp_ok(EmulateItemResult::NeedsReturn);
+                        }
+                    },
                     _ => throw_unsup_format!("`sched_getaffinity` is only supported with a pid of 0 (indicating the current thread)"),
                 };
 
@@ -717,9 +725,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let cpusetsize = this.read_target_usize(cpusetsize)?;
                 let mask = this.read_pointer(mask)?;
 
-                // TODO: when https://github.com/rust-lang/miri/issues/3730 is fixed this should use its notion of tid/pid
-                let thread_id = match pid {
-                    0 => this.active_thread(),
+                let thread_id = match (pid, &*this.tcx.sess.target.os) {
+                    (0, _) => this.active_thread(),
+                    (tid, "linux") => {
+                        if let Ok(tid) = this.machine.threads.thread_id_try_from(tid) {
+                            tid
+                        } else {
+                            this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+
+                            return interp_ok(EmulateItemResult::NeedsReturn);
+                        }
+                    },
                     _ => throw_unsup_format!("`sched_setaffinity` is only supported with a pid of 0 (indicating the current thread)"),
                 };
 
