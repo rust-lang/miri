@@ -17,6 +17,8 @@ mod utils;
 fn main() {
     test_dup();
     test_dup_stdout_stderr();
+    #[cfg(target_os = "macos")]
+    test_ioctl();
     test_canonicalize_too_long();
     test_rename();
     test_ftruncate::<libc::off_t>(libc::ftruncate);
@@ -74,6 +76,20 @@ fn test_dup_stdout_stderr() {
         let new_stderr = libc::fcntl(2, libc::F_DUPFD, 0);
         libc::write(new_stdout, bytes.as_ptr() as *const libc::c_void, bytes.len());
         libc::write(new_stderr, bytes.as_ptr() as *const libc::c_void, bytes.len());
+    }
+}
+
+fn test_ioctl() {
+    let path = utils::prepare_with_content("miri_test_libc_ioctl.txt", &[]);
+    
+    let mut name = path.into_os_string();
+    name.push("\0");
+    let name_ptr = name.as_bytes().as_ptr().cast::<libc::c_char>();
+    unsafe {
+        assert_eq!(libc::ioctl(1, libc::FIOCLEX), -1);
+        
+        let fd = libc::open(name_ptr, libc::O_RDONLY);
+        assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);
     }
 }
 
