@@ -204,7 +204,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } else {
                 this.set_last_error_and_return_i32(LibcError("EBADF"))
             }
-            // interp_ok(Scalar::from_i32(0))
         } else {
             throw_unsup_format!("ioctl: unsupported command {cmd:#x}");
         }
