@@ -192,7 +192,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn ioctl(&mut self, args: &[OpTy<'tcx>]) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let [fd_num, cmd] = check_min_arg_count("fcntl", args)?;
+        let [fd_num, cmd] = check_min_arg_count("ioctl", args)?;
         let fioclex = this.eval_libc_i32("FIOCLEX");
 
         let fd_num = this.read_scalar(fd_num)?.to_i32()?;
