@@ -81,13 +81,13 @@ fn test_dup_stdout_stderr() {
 
 fn test_ioctl() {
     let path = utils::prepare_with_content("miri_test_libc_ioctl.txt", &[]);
-    
+
     let mut name = path.into_os_string();
     name.push("\0");
     let name_ptr = name.as_bytes().as_ptr().cast::<libc::c_char>();
     unsafe {
         assert_eq!(libc::ioctl(1, libc::FIOCLEX), -1);
-        
+
         let fd = libc::open(name_ptr, libc::O_RDONLY);
         assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);
     }
