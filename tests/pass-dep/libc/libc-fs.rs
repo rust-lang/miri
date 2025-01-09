@@ -81,6 +81,7 @@ fn test_dup_stdout_stderr() {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn test_ioctl() {
     let path = utils::prepare_with_content("miri_test_libc_ioctl.txt", &[]);
 
