@@ -189,6 +189,27 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    fn ioctl(&mut self, args: &[OpTy<'tcx>]) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let [fd_num, cmd] = check_min_arg_count("fcntl", args)?;
+        let fioclex = this.eval_libc_i32("FIOCLEX");
+
+        let fd_num = this.read_scalar(fd_num)?.to_i32()?;
+        let cmd = this.read_scalar(cmd)?.to_i32()?;
+
+        if cmd == fioclex {
+            if this.machine.fds.is_fd_num(fd_num) {
+                interp_ok(Scalar::from_i32(0))
+            } else {
+                this.set_last_error_and_return_i32(LibcError("EBADF"))
+            }
+            // interp_ok(Scalar::from_i32(0))
+        } else {
+            throw_unsup_format!("ioctl: unsupported command {cmd:#x}");
+        }
+    }
+
     fn close(&mut self, fd_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 

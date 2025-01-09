@@ -67,6 +67,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.realpath(path, resolved_path)?;
                 this.write_scalar(result, dest)?;
             }
+            "ioctl" => {
+                // `ioctl` is variadic. The argument count is checked based on the first argument
+                // in `this.ioctl()`, so we do not use `check_shim` here.
+                this.check_abi_and_shim_symbol_clash(abi, Conv::C, link_name)?;
+                let result = this.ioctl(args)?;
+                this.write_scalar(result, dest)?;
+            }
 
             // Environment related shims
             "_NSGetEnviron" => {
