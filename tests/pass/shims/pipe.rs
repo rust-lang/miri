@@ -1,3 +1,5 @@
+//@ignore-target: windows
+
 #![feature(anonymous_pipe)]
 use std::io::{Read, Write};
 
