@@ -89,7 +89,7 @@ fn test_ioctl() {
     name.push("\0");
     let name_ptr = name.as_bytes().as_ptr().cast::<libc::c_char>();
     unsafe {
-        assert_eq!(libc::ioctl(1, libc::FIOCLEX), -1);
+        assert_eq!(libc::ioctl(10, libc::FIOCLEX), -1);
 
         let fd = libc::open(name_ptr, libc::O_RDONLY);
         assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);

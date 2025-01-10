@@ -193,10 +193,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         let [fd_num, cmd] = check_min_arg_count("ioctl", args)?;
-        let fioclex = this.eval_libc_i32("FIOCLEX");
+        let fioclex = this.eval_libc_u64("FIOCLEX");
 
         let fd_num = this.read_scalar(fd_num)?.to_i32()?;
-        let cmd = this.read_scalar(cmd)?.to_i32()?;
+        let cmd = this.read_scalar(cmd)?.to_u64()?;
 
         if cmd == fioclex {
             if this.machine.fds.is_fd_num(fd_num) {
