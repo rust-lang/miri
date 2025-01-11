@@ -17,8 +17,6 @@ mod utils;
 fn main() {
     test_dup();
     test_dup_stdout_stderr();
-    #[cfg(target_os = "macos")]
-    test_ioctl();
     test_canonicalize_too_long();
     test_rename();
     test_ftruncate::<libc::off_t>(libc::ftruncate);
@@ -40,6 +38,8 @@ fn main() {
     test_isatty();
     test_read_and_uninit();
     test_nofollow_not_symlink();
+    #[cfg(target_os = "macos")]
+    test_ioctl();
 }
 
 fn test_file_open_unix_allow_two_args() {
@@ -76,21 +76,6 @@ fn test_dup_stdout_stderr() {
         let new_stderr = libc::fcntl(2, libc::F_DUPFD, 0);
         libc::write(new_stdout, bytes.as_ptr() as *const libc::c_void, bytes.len());
         libc::write(new_stderr, bytes.as_ptr() as *const libc::c_void, bytes.len());
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn test_ioctl() {
-    let path = utils::prepare_with_content("miri_test_libc_ioctl.txt", &[]);
-
-    let mut name = path.into_os_string();
-    name.push("\0");
-    let name_ptr = name.as_bytes().as_ptr().cast::<libc::c_char>();
-    unsafe {
-        assert_eq!(libc::ioctl(10, libc::FIOCLEX), -1);
-
-        let fd = libc::open(name_ptr, libc::O_RDONLY);
-        assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);
     }
 }
 
@@ -447,4 +432,22 @@ fn test_nofollow_not_symlink() {
     let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
     let ret = unsafe { libc::open(cpath.as_ptr(), libc::O_NOFOLLOW | libc::O_CLOEXEC) };
     assert!(ret >= 0);
+}
+
+#[cfg(target_os = "macos")]
+fn test_ioctl() {
+    let path = utils::prepare_with_content("miri_test_libc_ioctl.txt", &[]);
+
+    let mut name = path.into_os_string();
+    name.push("\0");
+    let name_ptr = name.as_bytes().as_ptr().cast::<libc::c_char>();
+    unsafe {
+        // 100 surely is an invalid FD.
+        assert_eq!(libc::ioctl(100, libc::FIOCLEX), -1);
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(errno, libc::EBADF);
+
+        let fd = libc::open(name_ptr, libc::O_RDONLY);
+        assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);
+    }
 }
