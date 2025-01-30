@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::fs::{File, Metadata};
-use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
+use std::io::{IsTerminal, Seek, SeekFrom, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
@@ -291,8 +291,7 @@ impl FileDescription for FileHandle {
     }
 
     fn read<'tcx>(
-        &self,
-        _self_ref: &FileDescriptionRef,
+        self: FileDescriptionRef<Self>,
         communicate_allowed: bool,
         ptr: Pointer,
         len: usize,
@@ -306,8 +305,7 @@ impl FileDescription for FileHandle {
     }
 
     fn write<'tcx>(
-        &self,
-        _self_ref: &FileDescriptionRef,
+        self: FileDescriptionRef<Self>,
         communicate_allowed: bool,
         ptr: Pointer,
         len: usize,
@@ -330,7 +328,7 @@ impl FileDescription for FileHandle {
     }
 
     fn close<'tcx>(
-        self: Box<Self>,
+        self,
         communicate_allowed: bool,
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {

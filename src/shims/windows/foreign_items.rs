@@ -250,7 +250,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     creation_disposition,
                     flags_and_attributes,
                     template_file,
-                ] = this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                ] = this.check_shim(abi, sys_conv, link_name, args)?;
                 let handle = this.CreateFileW(
                     file_name,
                     desired_access,
@@ -263,8 +263,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(handle.to_scalar(this), dest)?;
             }
             "GetFileInformationByHandle" => {
-                let [handle, info] =
-                    this.check_shim(abi, ExternAbi::System { unwind: false }, link_name, args)?;
+                let [handle, info] = this.check_shim(abi, sys_conv, link_name, args)?;
                 let res = this.GetFileInformationByHandle(handle, info)?;
                 this.write_scalar(res, dest)?;
             }

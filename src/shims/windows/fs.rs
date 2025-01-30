@@ -1,6 +1,5 @@
 use std::fs::{Metadata, OpenOptions};
 use std::io;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -25,7 +24,7 @@ impl FileDescription for DirHandle {
     }
 
     fn close<'tcx>(
-        self: Box<Self>,
+        self,
         _communicate_allowed: bool,
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
@@ -51,7 +50,7 @@ impl FileDescription for MetadataHandle {
     }
 
     fn close<'tcx>(
-        self: Box<Self>,
+        self,
         _communicate_allowed: bool,
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
@@ -115,7 +114,7 @@ impl FileAttributes {
     fn new<'tcx>(
         mut value: u32,
         ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx, Result<FileAttributes, IoError>> {
+    ) -> InterpResult<'tcx, FileAttributes> {
         let file_attribute_normal = ecx.eval_windows_u32("c", "FILE_ATTRIBUTE_NORMAL");
         let file_flag_backup_semantics = ecx.eval_windows_u32("c", "FILE_FLAG_BACKUP_SEMANTICS");
         let file_flag_open_reparse_point =
@@ -128,7 +127,7 @@ impl FileAttributes {
         } else if value & file_flag_open_reparse_point != 0 {
             value &= !file_flag_open_reparse_point;
             out |= FileAttributes::OPEN_REPARSE;
-        } else if value & file_attribute_normal {
+        } else if value & file_attribute_normal != 0 {
             value &= !file_attribute_normal;
             out |= FileAttributes::NORMAL;
         }
@@ -140,7 +139,7 @@ impl FileAttributes {
         if out == FileAttributes::ZERO {
             out = FileAttributes::NORMAL;
         }
-        interp_ok(Ok(out))
+        interp_ok(out)
     }
 }
 
@@ -189,7 +188,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("CreateFileW: Security attributes are not supported");
         }
 
-        if attributes & FileAttributes::OPEN_REPARSE != 0 && creation_disposition == CreateAlways {
+        if attributes.contains(FileAttributes::OPEN_REPARSE) && creation_disposition == CreateAlways
+        {
             throw_machine_stop!(TerminationInfo::Abort("Invalid CreateFileW argument combination: FILE_FLAG_OPEN_REPARSE_POINT with CREATE_ALWAYS".to_string()));
         }
 
