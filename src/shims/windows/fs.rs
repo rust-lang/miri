@@ -104,6 +104,9 @@ bitflags! {
         /// This must be passed to allow getting directory handles. If not passed, we error on trying
         /// to open directories
         const BACKUP_SEMANTICS = 1 << 1;
+        /// Open a reparse point as a regular file - this is basically similar to 'readlink' in Unix
+        /// terminology. A reparse point is a file with custom logic when navigated to, of which
+        /// a symlink is one specific example.
         const OPEN_REPARSE = 1 << 2;
     }
 }
@@ -251,7 +254,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     options.append(true);
                 }
             }
-            OpenExisting => (), // Nothing
+            OpenExisting => {} // Default options
             TruncateExisting => {
                 options.truncate(true);
             }

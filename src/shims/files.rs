@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::fs::{File, Metadata};
-use std::io::{IsTerminal, Read, SeekFrom, Seek, Write};
+use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
@@ -394,6 +394,9 @@ impl FileDescription for NullOutput {
     }
 }
 
+/// Internal type of a file-descriptor - this is what [`FdTable`] expects
+pub type FdNum = i32;
+
 /// The file descriptor table
 #[derive(Debug)]
 pub struct FdTable {
@@ -407,9 +410,6 @@ impl VisitProvenance for FdTable {
         // All our FileDescription instances do not have any tags.
     }
 }
-
-/// Internal type of a file-descriptor - this is what [`FdTable`] expects
-pub type FdNum = i32;
 
 impl FdTable {
     fn new() -> Self {
