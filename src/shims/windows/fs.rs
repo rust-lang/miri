@@ -224,7 +224,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         match creation_disposition {
-            CreateNew | OpenAlways => {
+            CreateAlways | OpenAlways => {
                 // This is racy, but there doesn't appear to be an std API that both succeeds if a
                 // file exists but tells us it isn't new. Either we accept racing one way or another,
                 // or we use an iffy heuristic like file creation time. This implementation prefers
@@ -241,11 +241,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
                 }
                 options.create(true);
-                if creation_disposition == CreateNew {
+                if creation_disposition == CreateAlways {
                     options.truncate(true);
                 }
             }
-            CreateAlways => {
+            CreateNew => {
+                // See comments in
                 options.create_new(true);
                 // Per `create_new` documentation:
                 // The file must be opened with write or append access in order to create a new file.
