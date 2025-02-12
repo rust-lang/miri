@@ -162,6 +162,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "CreateFileW");
         this.check_no_isolation("`CreateFileW`")?;
+        this.set_last_error(IoError::Raw(Scalar::from_i32(0)))?;
 
         let file_name = this.read_path_from_wide_str(this.read_pointer(file_name)?)?;
         let mut desired_access = this.read_scalar(desired_access)?.to_u32()?;
