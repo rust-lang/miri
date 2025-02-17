@@ -14,7 +14,7 @@ use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use rustc_middle::middle::dependency_format::Linkage;
 use rustc_middle::middle::exported_symbols::ExportedSymbol;
 use rustc_middle::ty::layout::{FnAbiOf, LayoutOf, MaybeResult, TyAndLayout};
-use rustc_middle::ty::{self, FloatTy, IntTy, Ty, TyCtxt, UintTy};
+use rustc_middle::ty::{self, Binder, FloatTy, FnSig, IntTy, Ty, TyCtxt, UintTy};
 use rustc_session::config::CrateType;
 use rustc_span::{Span, Symbol};
 use rustc_target::callconv::{Conv, FnAbi};
@@ -1011,6 +1011,67 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         throw_ub_format!(
             "incorrect number of arguments for `{link_name}`: got {}, expected {}",
             args.len(),
+            N
+        )
+    }
+
+    // Creates Expected FnAbi of the called fn from the args and matches it's compatability with the
+    // FnAbi passed along miri the shim handling and also checks for mismatch between shim symbol and abi.
+    fn check_shim_abi<'a, const N: usize>(
+        &mut self,
+        link_name: Symbol,
+        caller_fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
+        abi: ExternAbi,
+        callee_input_args_ty: &[Ty<'tcx>],
+        callee_output_ty: Ty<'tcx>,
+        caller_args: &'a [OpTy<'tcx>],
+    ) -> InterpResult<'tcx, &'a [OpTy<'tcx>; N]>
+    where
+        &'a [OpTy<'tcx>; N]: TryFrom<&'a [OpTy<'tcx>]>,
+    {
+        let this = self.eval_context_mut();
+        let mut inputs_and_output = callee_input_args_ty.to_vec();
+        inputs_and_output.push(callee_output_ty);
+        let fn_sig_binder = Binder::dummy(FnSig {
+            inputs_and_output: this.machine.tcx.mk_type_list(&inputs_and_output),
+            c_variadic: false,
+            safety: Safety::Safe,
+            abi,
+        });
+        let callee_fn_abi = this.fn_abi_of_fn_ptr(fn_sig_binder, Default::default())?;
+
+        let caller_args_abi = &caller_fn_abi.args;
+        let callee_args_abi = &callee_fn_abi.args;
+
+        if caller_fn_abi.c_variadic != callee_fn_abi.c_variadic
+            || callee_fn_abi.fixed_count != caller_fn_abi.fixed_count
+            || callee_fn_abi.can_unwind != caller_fn_abi.can_unwind
+            || callee_args_abi.len() != callee_args_abi.len()
+            || !this.check_argument_compat(&caller_fn_abi.ret, &callee_fn_abi.ret)?
+            || !caller_args_abi
+                .iter()
+                .zip(callee_args_abi.iter())
+                .map(|(caller_arg, callee_arg)| this.check_argument_compat(caller_arg, callee_arg))
+                .collect::<InterpResult<'tcx, Vec<bool>>>()?
+                .into_iter()
+                .all(|b| b)
+        {
+            throw_ub_format!("Invalid argument type: ABI mismatch");
+        }
+
+        self.check_abi_and_shim_symbol_clash(caller_fn_abi, callee_fn_abi.conv, link_name)?;
+
+        if caller_fn_abi.c_variadic {
+            throw_ub_format!(
+                "calling a non-variadic function with a variadic caller-side signature"
+            );
+        }
+        if let Ok(ops) = caller_args.try_into() {
+            return interp_ok(ops);
+        }
+        throw_ub_format!(
+            "incorrect number of arguments for `{link_name}`: got {}, expected {}",
+            caller_args.len(),
             N
         )
     }
