@@ -204,7 +204,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    &[this.tcx.types.i32],
+                    [this.tcx.types.i32],
                     this.tcx.types.i32,
                     args,
                 )?;
