@@ -22,7 +22,7 @@ const MAX_SOCKETPAIR_BUFFER_CAPACITY: usize = 212992;
 
 /// One end of a pair of connected unnamed sockets.
 #[derive(Debug)]
-struct AnonSocket {
+pub struct AnonSocket {
     /// The buffer we are reading from, or `None` if this is the writing end of a pipe.
     /// (In that case, the peer FD will be the reading end of that pipe.)
     readbuf: Option<RefCell<Buffer>>,
@@ -58,6 +58,10 @@ impl Buffer {
 impl AnonSocket {
     fn peer_fd(&self) -> &WeakFileDescriptionRef<AnonSocket> {
         self.peer_fd.get().unwrap()
+    }
+
+    pub fn is_nonblock(&self) -> bool {
+        self.is_nonblock
     }
 }
 
