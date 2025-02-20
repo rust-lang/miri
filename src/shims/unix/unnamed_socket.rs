@@ -40,7 +40,7 @@ pub struct AnonSocket {
     /// A list of thread ids blocked because the buffer was full.
     /// Once another thread reads some bytes, these threads will be unblocked.
     blocked_write_tid: RefCell<Vec<ThreadId>>,
-    is_nonblock: bool,
+    is_nonblock: Cell<bool>,
 }
 
 #[derive(Debug)]
@@ -61,7 +61,11 @@ impl AnonSocket {
     }
 
     pub fn is_nonblock(&self) -> bool {
-        self.is_nonblock
+        self.is_nonblock.get()
+    }
+
+    pub fn set_nonblock(&self) {
+        self.is_nonblock.set(true);
     }
 }
 
@@ -145,7 +149,7 @@ fn anonsocket_write<'tcx>(
     // Let's see if we can write.
     let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
     if available_space == 0 {
-        if self_ref.is_nonblock {
+        if self_ref.is_nonblock() {
             // Non-blocking socketpair with a full buffer.
             return finish.call(ecx, Err(ErrorKind::WouldBlock.into()));
         } else {
@@ -227,7 +231,7 @@ fn anonsocket_read<'tcx>(
             // Socketpair with no peer and empty buffer.
             // 0 bytes successfully read indicates end-of-file.
             return finish.call(ecx, Ok(0));
-        } else if self_ref.is_nonblock {
+        } else if self_ref.is_nonblock() {
             // Non-blocking socketpair with writer and empty buffer.
             // https://linux.die.net/man/2/read
             // EAGAIN or EWOULDBLOCK can be returned for socket,
@@ -411,7 +415,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             peer_lost_data: Cell::new(false),
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
-            is_nonblock: is_sock_nonblock,
+            is_nonblock: Cell::new(is_sock_nonblock),
         });
         let fd1 = fds.new_ref(AnonSocket {
             readbuf: Some(RefCell::new(Buffer::new())),
@@ -419,7 +423,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             peer_lost_data: Cell::new(false),
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
-            is_nonblock: is_sock_nonblock,
+            is_nonblock: Cell::new(is_sock_nonblock),
         });
 
         // Make the file descriptions point to each other.
@@ -479,7 +483,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             peer_lost_data: Cell::new(false),
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
-            is_nonblock,
+            is_nonblock: Cell::new(is_nonblock),
         });
         let fd1 = fds.new_ref(AnonSocket {
             readbuf: None,
@@ -487,7 +491,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             peer_lost_data: Cell::new(false),
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
-            is_nonblock,
+            is_nonblock: Cell::new(is_nonblock),
         });
 
         // Make the file descriptions point to each other.
