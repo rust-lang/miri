@@ -40,7 +40,7 @@ fn main() {
     test_nofollow_not_symlink();
     #[cfg(target_os = "macos")]
     test_ioctl();
-    test_fsetfl();
+    test_setfl_getfl();
 }
 
 fn test_file_open_unix_allow_two_args() {
@@ -453,7 +453,8 @@ fn test_ioctl() {
     }
 }
 
-fn test_fsetfl() {
+/// Test F_SETFL and F_GETFL flag for fcntl.
+fn test_setfl_getfl() {
     // Test fd without SOCK_NONBLOCK flag.
     let mut fds = [-1, -1];
     let res = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
@@ -462,16 +463,9 @@ fn test_fsetfl() {
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
     assert_eq!(res, 0);
 
-    // Test fd with SOCK_NONBLOCK flag.
-    let mut fds = [-1, -1];
-    let res = unsafe {
-        libc::socketpair(
-            libc::AF_UNIX,
-            libc::SOCK_STREAM | libc::SOCK_NONBLOCK,
-            0,
-            fds.as_mut_ptr(),
-        )
-    };
+    // Modify the flag to SOCK_NONBLOCK flag with setfl.
+    let new_flag = libc::SOCK_NONBLOCK;
+    let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
     assert_eq!(res, 0);
 
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
