@@ -137,8 +137,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             }
                         ),
                     );
-                };
-                interp_ok(())
+                    interp_ok(())
+                } else {
+                    // The manual doesn't document what should happen if `val` is invalid, so we error out.
+                    // TODO: do something else?
+                    this.set_last_error_and_return(LibcError("EINVAL"), dest)
+                }
             }
             // UMTX_OP_WAKE has a private variant that enables an optimization that stops it from working across processes.
             // Miri doesn't support that anyway, so we ignore that variant and use the same implementation for all wait ops.
