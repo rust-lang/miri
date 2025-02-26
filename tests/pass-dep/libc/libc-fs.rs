@@ -42,6 +42,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     test_ioctl();
     test_setfl_getfl();
+    test_setfl_getfl_threaded();
 }
 
 fn test_file_open_unix_allow_two_args() {
@@ -473,6 +474,11 @@ fn test_setfl_getfl() {
     assert_eq!(res, libc::SOCK_NONBLOCK);
 }
 
+// Test the behaviour of setfl/getfl when a fd is blocking.
+// The expected execution is:
+// 1. Main thread blocks on fds[0] `read`.
+// 2. Thread 1 set O_NONBLOCK  flag on fds[0], then check the value of F_GETFL.
+// 3. Thread 2 writes to fds[1] to unblock the `read` in main thread.
 fn test_setfl_getfl_threaded() {
     let mut fds = [-1, -1];
     let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
@@ -498,8 +504,4 @@ fn test_setfl_getfl_threaded() {
     thread1.join().unwrap();
     thread2.join().unwrap();
     assert_eq!(res, 5);
-    // Add a nonblock test here
-    let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-    assert_eq!(res, libc::SOCK_NONBLOCK);
 }
-
