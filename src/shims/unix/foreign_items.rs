@@ -339,6 +339,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.mkstemp(template)?;
                 this.write_scalar(result, dest)?;
             }
+            "chmod" => {
+                let [path, mode] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let result = this.chmod(path, mode)?;
+                this.write_scalar(result, dest)?;
+            },
+            "fchmod" => {
+                let [fd, mode] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let result = this.fchmod(fd, mode)?;
+                this.write_scalar(result, dest)?;
+            }
 
             // Unnamed sockets and pipes
             "socketpair" => {

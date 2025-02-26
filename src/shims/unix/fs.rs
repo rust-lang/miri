@@ -2,8 +2,8 @@
 
 use std::borrow::Cow;
 use std::fs::{
-    DirBuilder, File, FileType, Metadata, OpenOptions, ReadDir, read_dir, remove_dir, remove_file,
-    rename,
+    DirBuilder, File, FileType, Metadata, OpenOptions, Permissions, ReadDir, read_dir, remove_dir,
+    remove_file, rename,
 };
 use std::io::{self, ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -1663,6 +1663,75 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // We ran out of attempts to create the file, return an error.
         this.set_last_error_and_return_i32(LibcError("EEXIST"))
+    }
+
+    fn chmod(&mut self, path_op: &OpTy<'tcx>, perm_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        // Permissions::from_mode is Unix-specific.
+        this.assert_target_os_is_unix("chmod");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let pathname = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+            let perm = this.read_scalar(perm_op)?.to_u32()?;
+
+            // Reject if isolation is enabled.
+            if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+                this.reject_in_isolation("`chmod`", reject_with)?;
+                return this.set_last_error_and_return_i32(LibcError("EACCES"));
+            }
+
+            let result = std::fs::set_permissions(pathname, Permissions::from_mode(perm));
+            let result = this.try_unwrap_io_result(result.map(|_| 0i32))?;
+
+            interp_ok(Scalar::from_i32(result))
+        }
+        #[cfg(not(unix))]
+        {
+            unreachable!()
+        }
+    }
+
+    fn fchmod(&mut self, fd_op: &OpTy<'tcx>, perm_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        // `Permissions::from_mode` is Unix-specific.
+        this.assert_target_os_is_unix("fchmod");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let fd = this.read_scalar(fd_op)?.to_i32()?;
+            let perm = this.read_scalar(perm_op)?.to_u32()?;
+
+            // Reject if isolation is enabled.
+            if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+                this.reject_in_isolation("`fchmod`", reject_with)?;
+                // Set error code as "EBADF" (bad fd)
+                return this.set_last_error_and_return_i32(LibcError("EBADF"));
+            }
+
+            let Some(fd) = this.machine.fds.get(fd) else {
+                return this.set_last_error_and_return_i32(LibcError("EBADF"));
+            };
+
+            let file = fd.downcast::<FileHandle>().ok_or_else(|| {
+                err_unsup_format!("`fchmod` is only supported on file-backed file descriptors")
+            })?;
+
+            let result = file.file.set_permissions(Permissions::from_mode(perm));
+            let result = this.try_unwrap_io_result(result.map(|_| 0i32))?;
+
+            interp_ok(Scalar::from_i32(result))
+        }
+        #[cfg(not(unix))]
+        {
+            unreachable!()
+        }
     }
 }
 
