@@ -179,18 +179,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
             cmd if cmd == f_getfl => {
-                // We only support F_GETFL for socketpair and pipe.
-
                 // Check if this is a valid open file descriptor.
                 let Some(fd) = this.machine.fds.get(fd_num) else {
                     return this.set_last_error_and_return_i32(LibcError("EBADF"));
                 };
 
+                // We only support F_GETFL for socketpair and pipe.
                 let anonsocket_fd = fd.downcast::<AnonSocket>().ok_or_else(|| {
                     err_unsup_format!("fcntl: only socketpair / pipe are supported for F_SETFL")
                 })?;
 
-                if anonsocket_fd.is_nonblock() {
+                if anonsocket_fd.is_nonblock.get() {
                     // socketpair's SOCK_NONBLOCK and pipe's O_NONBLOCK have the same value.
                     interp_ok(this.eval_libc("O_NONBLOCK"))
                 } else {
@@ -198,13 +197,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
             cmd if cmd == f_setfl => {
-                // We only support F_SETFL for socketpair and pipe.
-
                 // Check if this is a valid open file descriptor.
                 let Some(fd) = this.machine.fds.get(fd_num) else {
                     return this.set_last_error_and_return_i32(LibcError("EBADF"));
                 };
 
+                // We only support F_SETFL for socketpair and pipe.
                 let anonsocket_fd = fd.downcast::<AnonSocket>().ok_or_else(|| {
                     err_unsup_format!("fcntl: only socketpair / pipe are supported for F_GETFL")
                 })?;
