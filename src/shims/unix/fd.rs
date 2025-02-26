@@ -213,7 +213,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [flag] = check_min_vararg_count(cmd_name, varargs)?;
                 let flag = this.read_scalar(flag)?.to_i32()?;
 
-                // TODO: File access mode flag should be ignored instead of rejected.
+                // FIXME: File access mode and file creation flags should be ignored.
                 if flag == this.eval_libc_i32("O_NONBLOCK") {
                     anonsocket_fd.set_nonblock();
                 } else {
