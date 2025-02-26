@@ -457,7 +457,7 @@ fn test_ioctl() {
 
 /// Basic test for fcntl's F_SETFL and F_GETFL flag.
 fn test_setfl_getfl() {
-    // Test fd without SOCK_NONBLOCK flag.
+    // Test fd without O_NONBLOCK flag.
     let mut fds = [-1, -1];
     let res = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
     assert_eq!(res, 0);
@@ -465,13 +465,13 @@ fn test_setfl_getfl() {
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
     assert_eq!(res, 0);
 
-    // Modify the flag to SOCK_NONBLOCK flag with setfl.
-    let new_flag = libc::SOCK_NONBLOCK;
+    // Modify the flag to O_NONBLOCK flag with setfl.
+    let new_flag = libc::O_NONBLOCK;
     let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
     assert_eq!(res, 0);
 
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-    assert_eq!(res, libc::SOCK_NONBLOCK);
+    assert_eq!(res, libc::O_NONBLOCK);
 }
 
 // Test the behaviour of setfl/getfl when a fd is blocking.
@@ -492,7 +492,7 @@ fn test_setfl_getfl_threaded() {
         assert_eq!(res, 0);
         // Check the new flag value while the main thread is still blocked on fds[0].
         let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-        assert_eq!(res, libc::SOCK_NONBLOCK);
+        assert_eq!(res, libc::O_NONBLOCK);
     });
     let thread2 = thread::spawn(move || {
         // This thread will unblock the `read` on main thread.
