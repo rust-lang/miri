@@ -1,5 +1,5 @@
 //@ignore-target: windows # File handling is not implemented yet
-//@compile-flags: -Zmiri-disable-isolation
+//@compile-flags: -Zmiri-disable-isolation -Zmiri-preemption-rate=0
 
 #![feature(io_error_more)]
 #![feature(io_error_uncategorized)]
@@ -10,6 +10,7 @@ use std::io::{Error, ErrorKind, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
+use std::thread;
 
 #[path = "../../utils/mod.rs"]
 mod utils;
@@ -453,7 +454,7 @@ fn test_ioctl() {
     }
 }
 
-/// Test F_SETFL and F_GETFL flag for fcntl.
+/// Basic test for fcntl's F_SETFL and F_GETFL flag.
 fn test_setfl_getfl() {
     // Test fd without SOCK_NONBLOCK flag.
     let mut fds = [-1, -1];
@@ -471,3 +472,34 @@ fn test_setfl_getfl() {
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
     assert_eq!(res, libc::SOCK_NONBLOCK);
 }
+
+fn test_setfl_getfl_threaded() {
+    let mut fds = [-1, -1];
+    let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
+    assert_eq!(res, 0);
+    let mut buf: [u8; 5] = [0; 5];
+    // This `read` will block.
+    let thread1 = thread::spawn(move || {
+        // Add O_NONBLOCK flag while pipe is still block on read.
+        let new_flag = libc::O_NONBLOCK;
+        let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
+        assert_eq!(res, 0);
+        // Check the new flag value while the main thread is still blocked on fds[0].
+        let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
+        assert_eq!(res, libc::SOCK_NONBLOCK);
+    });
+    let thread2 = thread::spawn(move || {
+        // This thread will unblock the `read` on main thread.
+        let data = "abcde".as_bytes().as_ptr();
+        let res = unsafe { libc::write(fds[1], data as *const libc::c_void, 5) };
+        assert_eq!(res, 5);
+    });
+    let res = unsafe { libc::read(fds[0], buf.as_mut_ptr().cast(), buf.len() as libc::size_t) };
+    thread1.join().unwrap();
+    thread2.join().unwrap();
+    assert_eq!(res, 5);
+    // Add a nonblock test here
+    let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
+    assert_eq!(res, libc::SOCK_NONBLOCK);
+}
+
