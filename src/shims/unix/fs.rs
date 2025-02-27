@@ -2,8 +2,8 @@
 
 use std::borrow::Cow;
 use std::fs::{
-    DirBuilder, File, FileType, Metadata, OpenOptions, Permissions, ReadDir, read_dir, remove_dir,
-    remove_file, rename,
+    DirBuilder, File, FileType, Metadata, OpenOptions, ReadDir, read_dir, remove_dir, remove_file,
+    rename,
 };
 use std::io::{self, ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -1668,9 +1668,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn chmod(&mut self, path_op: &OpTy<'tcx>, perm_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let pathname = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
-        let perm = this.read_scalar(perm_op)?.to_uint(this.libc_ty_layout("mode_t").size)?;
-
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`chmod`", reject_with)?;
@@ -1680,7 +1677,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Permissions::from_mode is Unix-specific.
         #[cfg(unix)]
         {
+            use std::fs::Permissions;
             use std::os::unix::fs::PermissionsExt;
+
+            let pathname = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+            let perm = this.read_scalar(perm_op)?.to_uint(this.libc_ty_layout("mode_t").size)?;
 
             let result = std::fs::set_permissions(
                 pathname,
@@ -1692,6 +1693,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         #[cfg(not(unix))]
         {
+            let (_, _) = (path_op, perm_op);
             throw_unsup_format!("`chmod` is not supported on this platform")
         }
     }
@@ -1699,19 +1701,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn fchmod(&mut self, fd_op: &OpTy<'tcx>, perm_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        let fd = this.read_scalar(fd_op)?.to_i32()?;
-        let perm = this.read_scalar(perm_op)?.to_uint(this.libc_ty_layout("mode_t").size)?;
-
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`fchmod`", reject_with)?;
             // Set error code as "EBADF" (bad fd)
             return this.set_last_error_and_return_i32(LibcError("EBADF"));
         }
+
         // `Permissions::from_mode` is Unix-specific.
         #[cfg(unix)]
         {
+            use std::fs::Permissions;
             use std::os::unix::fs::PermissionsExt;
+
+            let fd = this.read_scalar(fd_op)?.to_i32()?;
+            let perm = this.read_scalar(perm_op)?.to_uint(this.libc_ty_layout("mode_t").size)?;
 
             let Some(fd) = this.machine.fds.get(fd) else {
                 return this.set_last_error_and_return_i32(LibcError("EBADF"));
@@ -1729,6 +1733,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         #[cfg(not(unix))]
         {
+            let (_, _) = (fd_op, perm_op);
             throw_unsup_format!("`fchmod` is not supported on this platform")
         }
     }
