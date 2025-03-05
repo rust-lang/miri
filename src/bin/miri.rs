@@ -33,8 +33,8 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Once};
 
 use miri::{
-    BacktraceStyle, BorrowTrackerMethod, MiriConfig, MiriEntryFnType, ProvenanceMode, RetagFields,
-    ValidationMode,
+    BacktraceStyle, BorrowTrackerMethod, MiriConfig, MiriEntryFnType, ProvenanceGcSettings,
+    ProvenanceMode, RetagFields, ValidationMode,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -646,7 +646,10 @@ fn main() {
             let interval = param.parse::<u32>().unwrap_or_else(|err| {
                 show_error!("-Zmiri-provenance-gc requires a `u32`: {}", err)
             });
-            miri_config.gc_interval = interval;
+            miri_config.gc_settings = match interval {
+                0 => ProvenanceGcSettings::Disabled,
+                interval => ProvenanceGcSettings::Regularly { interval },
+            };
         } else if let Some(param) = arg.strip_prefix("-Zmiri-measureme=") {
             miri_config.measureme_out = Some(param.to_string());
         } else if let Some(param) = arg.strip_prefix("-Zmiri-backtrace=") {
