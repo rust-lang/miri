@@ -87,7 +87,7 @@ impl Handle {
         // INVALID_HANDLE_VALUE.
         let variant_count = variant_count::<Self>();
 
-        // However, std's ilog2 is floor(log2(x))
+        // However, std's ilog2 is floor(log2(x)).
         let floor_log2 = variant_count.ilog2();
 
         // We need to add one for non powers of two to compensate for the difference.
@@ -165,7 +165,7 @@ impl Handle {
     /// Structurally invalid handles return [`HandleError::InvalidHandle`].
     /// If the handle is structurally valid but semantically invalid, e.g. a for non-existent thread
     /// ID, returns [`HandleError::ThreadNotFound`].
-    pub fn try_from_scalar<'tcx>(
+    fn try_from_scalar<'tcx>(
         handle: Scalar,
         cx: &MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, Result<Self, HandleError>> {
@@ -197,6 +197,8 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 
 #[allow(non_snake_case)]
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Convert a scalar into a structured `Handle`.
+    /// If the handle is invalid, or references a non-existent item, this returns a machine abort.
     #[track_caller]
     fn read_handle(&self, handle: &OpTy<'tcx>, function_name: &str) -> InterpResult<'tcx, Handle> {
         let this = self.eval_context_ref();

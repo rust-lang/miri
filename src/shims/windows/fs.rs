@@ -124,10 +124,12 @@ impl FileAttributes {
         if value & file_flag_backup_semantics != 0 {
             value &= !file_flag_backup_semantics;
             out |= FileAttributes::BACKUP_SEMANTICS;
-        } else if value & file_flag_open_reparse_point != 0 {
+        }
+        if value & file_flag_open_reparse_point != 0 {
             value &= !file_flag_open_reparse_point;
             out |= FileAttributes::OPEN_REPARSE;
-        } else if value & file_attribute_normal != 0 {
+        }
+        if value & file_attribute_normal != 0 {
             value &= !file_attribute_normal;
             out |= FileAttributes::NORMAL;
         }
@@ -137,6 +139,7 @@ impl FileAttributes {
         }
 
         if out == FileAttributes::ZERO {
+            // NORMAL is equivalent to 0. Avoid needing to check both cases by unifying the two.
             out = FileAttributes::NORMAL;
         }
         interp_ok(out)
@@ -162,6 +165,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         this.assert_target_os("windows", "CreateFileW");
         this.check_no_isolation("`CreateFileW`")?;
+
+        // This function appears to always set the error to 0. This is important for some flag
+        // combinations, which may set error code on success.
         this.set_last_error(IoError::Raw(Scalar::from_i32(0)))?;
 
         let file_name = this.read_path_from_wide_str(this.read_pointer(file_name)?)?;
@@ -200,6 +206,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let is_dir = file_name.is_dir();
 
+        // BACKUP_SEMANTICS is how Windows calls the act of opening a directory handle.
         if !attributes.contains(FileAttributes::BACKUP_SEMANTICS) && is_dir {
             this.set_last_error(IoError::WindowsError("ERROR_ACCESS_DENIED"))?;
             return interp_ok(Handle::Invalid);
@@ -226,20 +233,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         match creation_disposition {
             CreateAlways | OpenAlways => {
-                // This is racy, but there doesn't appear to be an std API that both succeeds if a
-                // file exists but tells us it isn't new. Either we accept racing one way or another,
-                // or we use an iffy heuristic like file creation time. This implementation prefers
-                // to fail in the direction of erroring more often.
                 // Per the documentation:
                 // If the specified file exists and is writable, the function truncates the file,
                 // the function succeeds, and last-error code is set to ERROR_ALREADY_EXISTS.
                 // If the specified file does not exist and is a valid path, a new file is created,
                 // the function succeeds, and the last-error code is set to zero.
                 // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+                //
+                // This is racy, but there doesn't appear to be an std API that both succeeds if a
+                // file exists but tells us it isn't new. Either we accept racing one way or another,
+                // or we use an iffy heuristic like file creation time. This implementation prefers
+                // to fail in the direction of erroring more often.
                 if file_name.exists() {
                     this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
-                } else {
-                    this.set_last_error(IoError::Raw(Scalar::from_u32(0)))?;
                 }
                 options.create(true);
                 if creation_disposition == CreateAlways {

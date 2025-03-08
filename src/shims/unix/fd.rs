@@ -122,7 +122,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         let result = fd.as_unix(this).flock(this.machine.communicate(), parsed_op)?;
-        drop(fd);
         // return `0` if flock is successful
         let result = result.map(|()| 0i32);
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))

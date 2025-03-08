@@ -145,10 +145,10 @@ fn test_metadata() {
     let path = utils::prepare_with_content("miri_test_fs_metadata.txt", bytes);
 
     // Test that metadata of an absolute path is correct.
-    check_metadata(bytes, &path).expect("Absolute path metadata");
+    check_metadata(bytes, &path).expect("absolute path metadata");
     // Test that metadata of a relative path is correct.
     std::env::set_current_dir(path.parent().unwrap()).unwrap();
-    check_metadata(bytes, Path::new(path.file_name().unwrap())).expect("Relative path metadata");
+    check_metadata(bytes, Path::new(path.file_name().unwrap())).expect("relative path metadata");
 
     // Removing file should succeed.
     remove_file(&path).unwrap();

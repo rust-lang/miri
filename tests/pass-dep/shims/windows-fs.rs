@@ -30,6 +30,7 @@ fn main() {
 unsafe fn test_create_dir_file() {
     let temp = utils::tmp();
     let raw_path = to_wide_cstr(&temp);
+    // Open the `temp` directory.
     let handle = CreateFileW(
         raw_path.as_ptr(),
         GENERIC_READ,
