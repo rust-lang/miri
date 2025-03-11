@@ -145,7 +145,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
             // UMTX_OP_WAKE has a private variant that enables an optimization that stops it from working across processes.
-            // Miri doesn't support that anyway, so we ignore that variant and use the same implementation for all wait ops.
+            // Miri doesn't support that anyway, so we ignore that variant and use the same implementation for all wake ops.
             op if op == wake || op == wake_private => {
                 let Some(futex_ref) =
                     this.get_sync_or_init(obj, |_| FreeBSDFutex { futex: Default::default() })
