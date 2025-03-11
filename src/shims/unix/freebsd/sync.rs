@@ -1,9 +1,6 @@
 //! Contains FreeBSD-specific synchronization functions
 
 use core::time::Duration;
-use std::u64;
-
-use rustc_span::sym::TryFrom;
 
 use crate::concurrency::sync::FutexRef;
 use crate::*;
