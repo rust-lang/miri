@@ -1,6 +1,9 @@
 //! Contains FreeBSD-specific synchronization functions
 
 use core::time::Duration;
+use std::u64;
+
+use rustc_span::sym::TryFrom;
 
 use crate::concurrency::sync::FutexRef;
 use crate::*;
@@ -55,18 +58,33 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // UMTX_OP_WAIT_UINT has a private variant that enables an optimization that stops it from working across processes.
             // Miri doesn't support that anyway, so we ignore that variant and use the same implementation for all wait ops.
             op if op == wait || op == wait_uint || op == wait_uint_private => {
-                // TODO: the normal UMTX_OP_WAIT accepts a `long` instead of u64,
-                // does this really matter?? (probably)
+                // TODO: A better way to do this? Because I don't want to duplicate the actual logic.
+                let equal = if op == wait {
+                    // Read a long = isize.
+                    let obj = this.ptr_to_mplace(obj, this.machine.layouts.isize);
 
-                let obj = this.ptr_to_mplace(obj, this.machine.layouts.i32);
+                    // Read the Linux futex implementation in Miri to understand why this fence is needed.
+                    this.atomic_fence(AtomicFenceOrd::SeqCst)?;
+                    let obj_val = this
+                        .read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?
+                        .to_target_isize(this)?;
 
-                // TODO: the Linux futex syscall sets a fence here, but what I understand from the manual is that
-                // these semantics need to be done by the user. Should this still be added?
-                if u64::from(this.read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?.to_u32()?)
-                    == val
-                {
+                    // If obj points to something negative this can never hit, otherwise we can test.
+                    if obj_val < 0 { false } else { val == u64::try_from(obj_val).unwrap() }
+                } else {
+                    // read a u_int = u32
+                    let obj = this.ptr_to_mplace(obj, this.machine.layouts.u32);
+
+                    // Read the Linux futex implementation in Miri to understand why this fence is needed.
+                    this.atomic_fence(AtomicFenceOrd::SeqCst)?;
+                    let obj_val =
+                        this.read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?.to_u32()?;
+                    val == u64::from(obj_val)
+                };
+
+                if equal {
                     let futex_ref = this
-                        .get_sync_or_init(obj.ptr(), |_| FreeBSDFutex { futex: Default::default() })
+                        .get_sync_or_init(obj, |_| FreeBSDFutex { futex: Default::default() })
                         .unwrap()
                         .futex
                         .clone();
@@ -78,6 +96,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // must be equal to the size of that struct.
                     let timeout = if this.ptr_is_null(uaddr2)? {
                         if this.ptr_is_null(this.read_pointer(uaddr)?)? {
+                            // ptr is null -> no timespec
                             None
                         } else {
                             let timespec =
@@ -140,7 +159,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     interp_ok(())
                 } else {
                     // The manual doesn't document what should happen if `val` is invalid, so we error out.
-                    // TODO: do something else?
                     this.set_last_error_and_return(LibcError("EINVAL"), dest)
                 }
             }
@@ -159,12 +177,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
                 let futex_ref = futex_ref.futex.clone();
 
+                let count = match val{
+                    u64::MAX => usize::MAX, // Preserve MAX because it specifies to wake everyone.
+                    // This fits because we did `read_target_usize`.
+                    val => usize::try_from(val).expect("`futex_wait` accepts `count` as usize, which can't seem to fit `val` of `_umtx_op`")
+                };
+
+                // Read the Linux futex implementation in Miri to understand why this fence is needed.
+                this.atomic_fence(AtomicFenceOrd::SeqCst)?;
                 // `_umtx_op` doesn't return the amount of woken threads.
                 let _woken = this.futex_wake(
-                &futex_ref,
-                u32::MAX,     // we set the bitset to include all bits
-                val as usize, /* TODO: I can't read a usize from val, I haven't found a way as of now */
-            )?;
+                    &futex_ref,
+                    u32::MAX, // we set the bitset to include all bits
+                    count,
+                )?;
                 this.write_int(0, dest)?;
                 interp_ok(())
             }
