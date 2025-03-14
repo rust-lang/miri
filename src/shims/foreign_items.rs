@@ -17,6 +17,7 @@ use rustc_target::callconv::FnAbi;
 use self::helpers::{ToHost, ToSoft};
 use super::alloc::EvalContextExt as _;
 use super::backtrace::EvalContextExt as _;
+use crate::concurrency::GenmcEvalContextExt as _;
 use crate::*;
 
 /// Type of dynamic symbols (for `dlsym` et al)
@@ -435,6 +436,21 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
 
+            /*** \/ GENMC VERIFIER CALLS \/ ****/
+            "miri_genmc_verifier_assume" => {
+                let [condition] = this.check_shim(abi, CanonAbi::Rust, link_name, args)?;
+                if this.machine.data_race.as_genmc_ref().is_some() {
+                    this.handle_genmc_verifier_assume(condition)?;
+                } else {
+                    tracing::warn!(
+                        "GenMC: function `miri_genmc_verifier_assume` used, but GenMC mode is not active, skip ..."
+                    );
+                }
+            }
+
+            // TODO GENMC: add other genmc functions
+
+            /*** /\ GENMC VERIFIER CALLS /\ ****/
             // Aborting the process.
             "exit" => {
                 let [code] = this.check_shim(abi, CanonAbi::C, link_name, args)?;

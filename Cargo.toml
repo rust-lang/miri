@@ -28,6 +28,8 @@ chrono-tz = "0.10"
 directories = "6"
 bitflags = "2.6"
 serde_json = { version = "1.0", optional = true }
+cxx = { version = "1.0.143", features = ["c++20"], optional = true }
+genmc-sys = { path = "./genmc-sys/", version = "0.11.0", optional = true }
 
 # Copied from `compiler/rustc/Cargo.toml`.
 # But only for some targets, it fails for others. Rustc configures this in its CI, but we can't
@@ -65,8 +67,10 @@ name = "ui"
 harness = false
 
 [features]
-default = ["stack-cache", "native-lib"]
-genmc = []
+# TODO GENMC (DEBUGGING): `genmc` feature should be turned off in upstream repo for now
+default = ["stack-cache", "genmc"]
+# default = ["stack-cache", "native-lib"]
+genmc = ["dep:cxx", "dep:genmc-sys"]
 stack-cache = []
 stack-cache-consistency-check = ["stack-cache"]
 tracing = ["serde_json"]

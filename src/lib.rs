@@ -132,7 +132,7 @@ pub use crate::concurrency::thread::{
     BlockReason, DynUnblockCallback, EvalContextExt as _, StackEmptyCallback, ThreadId,
     ThreadManager, TimeoutAnchor, TimeoutClock, UnblockKind,
 };
-pub use crate::concurrency::{GenmcConfig, GenmcCtx};
+pub use crate::concurrency::{GenmcConfig, GenmcCtx, miri_genmc};
 pub use crate::data_structures::dedup_range_map::DedupRangeMap;
 pub use crate::data_structures::mono_hash_map::MonoHashMap;
 pub use crate::diagnostics::{
