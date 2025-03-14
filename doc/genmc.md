@@ -24,6 +24,9 @@ Note that `cargo miri test` in GenMC mode is currently not supported.
 ### Supported Parameters
 
 - `-Zmiri-genmc`: Enable GenMC mode (not required if any other GenMC options are used).
+- `-Zmiri-genmc-print-exec-graphs={none,explored,blocked,all}`: Make GenMC print the execution graph of the program after every explored, every blocked, or after every execution (default: None).
+- `-Zmiri-genmc-print-exec-graphs`: Shorthand for suffix `=explored`.
+- `-Zmiri-genmc-print-genmc-output`: Print the output that GenMC provides. NOTE: this output is quite verbose and the events in the printed execution graph are hard to map back to the Rust code location they originate from.
 - `-Zmiri-genmc-log=LOG_LEVEL`: Change the log level for GenMC. Default: `warning`.
   - `quiet`:    Disable logging.
   - `error`:    Print errors.

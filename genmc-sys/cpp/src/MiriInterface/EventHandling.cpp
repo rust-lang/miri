@@ -89,6 +89,72 @@
     );
 }
 
+void MiriGenmcShim::handle_fence(ThreadId thread_id, MemOrdering ord) {
+    const auto pos = inc_pos(thread_id);
+    GenMCDriver::handleFence(pos, ord, EventDeps());
+}
+
+[[nodiscard]] auto MiriGenmcShim::handle_read_modify_write(
+    ThreadId thread_id,
+    uint64_t address,
+    uint64_t size,
+    MemOrdering loadOrd,
+    MemOrdering store_ordering,
+    RMWBinOp rmw_op,
+    GenmcScalar rhs_value,
+    GenmcScalar old_val
+) -> ReadModifyWriteResult {
+    const auto addr = SAddr(address);
+    // `type` is only used for printing.
+    const auto type = AType::Unsigned;
+
+    const auto rhsVal = GenmcScalarExt::to_sval(rhs_value);
+
+    const auto load_ret = handle_load_reset_if_none<EventLabel::EventLabelKind::FaiRead>(
+        thread_id,
+        loadOrd,
+        addr,
+        ASize(size),
+        type,
+        rmw_op,
+        rhsVal,
+        EventDeps()
+    );
+    if (const auto* err = std::get_if<VerificationError>(&load_ret))
+        return ReadModifyWriteResultExt::from_error(format_error(*err));
+
+    const auto* ret_val = std::get_if<SVal>(&load_ret);
+    if (nullptr == ret_val) {
+        ERROR("Unimplemented: read-modify-write returned unexpected result.");
+    }
+    const auto read_old_val = *ret_val;
+    const auto new_value = executeRMWBinOp(read_old_val, rhsVal, size, rmw_op);
+
+    const auto storePos = inc_pos(thread_id);
+    const auto store_ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::FaiWrite>(
+        storePos,
+        store_ordering,
+        addr,
+        ASize(size),
+        type,
+        new_value
+    );
+    if (const auto* err = std::get_if<VerificationError>(&store_ret))
+        return ReadModifyWriteResultExt::from_error(format_error(*err));
+
+    const auto* store_ret_val = std::get_if<std::monostate>(&store_ret);
+    ERROR_ON(nullptr == store_ret_val, "Unimplemented: RMW store returned unexpected result.");
+
+    // FIXME(genmc,mixed-accesses): Use the value that GenMC returns from handleStore (once
+    // available).
+    const auto& g = getExec().getGraph();
+    return ReadModifyWriteResultExt::ok(
+        /* old_value: */ read_old_val,
+        new_value,
+        /* is_coherence_order_maximal_write */ g.co_max(SAddr(address))->getPos() == storePos
+    );
+}
+
 /**** Memory (de)allocation ****/
 
 auto MiriGenmcShim::handle_malloc(ThreadId thread_id, uint64_t size, uint64_t alignment)

@@ -63,9 +63,12 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     auto conf = std::make_shared<Config>();
 
     // Set whether GenMC should print execution graphs after every explored/blocked execution.
-    // FIXME(genmc): pass these settings from Miri.
-    conf->printExecGraphs = false;
-    conf->printBlockedExecs = false;
+    conf->printExecGraphs =
+        (params.print_execution_graphs == ExecutiongraphPrinting::Explored ||
+         params.print_execution_graphs == ExecutiongraphPrinting::ExploredAndBlocked);
+    conf->printBlockedExecs =
+        (params.print_execution_graphs == ExecutiongraphPrinting::Blocked ||
+         params.print_execution_graphs == ExecutiongraphPrinting::ExploredAndBlocked);
 
     // `1024` is the default value that GenMC uses.
     // If any thread has at least this many events, a warning/tip will be printed.

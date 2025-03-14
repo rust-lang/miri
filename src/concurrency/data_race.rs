@@ -793,9 +793,9 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
                 this,
                 place.ptr().addr(),
                 place.layout.size,
+                atomic_op,
                 place.layout.backend_repr.is_signed(),
                 ord,
-                atomic_op,
                 rhs.to_scalar(),
                 old.to_scalar(),
             )?;
@@ -901,7 +901,6 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
                 can_fail_spuriously,
                 old.to_scalar(),
             )?;
-
             // The store might be the latest store in coherence order (determined by GenMC).
             // If it is, we need to update the value in Miri's memory:
             if let Some(new_value) = new_value {
