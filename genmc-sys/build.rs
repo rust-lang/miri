@@ -224,7 +224,6 @@ fn compile_cpp_dependencies(genmc_path: &Path) {
         .include(genmc_include_dir)
         .include(llvm_include_dirs)
         .include("./src_cpp")
-        .file("./src_cpp/MiriInterface.hpp")
         .file("./src_cpp/MiriInterface.cpp")
         .compile("genmc_interop");
 

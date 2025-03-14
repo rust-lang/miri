@@ -1,12 +1,10 @@
-#![allow(unused)]
-
 use rustc_abi::{Align, Size};
-use rustc_const_eval::interpret::{InterpCx, InterpResult};
+use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult};
 use rustc_middle::mir;
 
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
-    MiriMachine, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
+    MiriMachine, OpTy, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
 };
 
 #[derive(Debug)]
@@ -15,12 +13,41 @@ pub struct GenmcCtx {}
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {}
 
+pub mod miri_genmc {
+    use std::rc::Rc;
+
+    use crate::{GenmcConfig, GenmcCtx, MiriConfig};
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum Mode {
+        Estimation,
+        Verification,
+    }
+
+    pub fn run_genmc_mode(
+        _config: &MiriConfig,
+        _genmc_config: &GenmcConfig,
+        _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
+        _mode: Mode,
+    ) -> Option<i32> {
+        unreachable!();
+    }
+}
+
 impl GenmcCtx {
     pub fn new(_miri_config: &MiriConfig) -> Self {
         unreachable!()
     }
 
-    pub fn get_stuck_execution_count(&self) -> usize {
+    pub fn print_estimation_result(&self) {
+        unreachable!()
+    }
+
+    pub fn get_blocked_execution_count(&self) -> usize {
+        unreachable!()
+    }
+
+    pub fn get_explored_execution_count(&self) -> usize {
         unreachable!()
     }
 
@@ -29,6 +56,10 @@ impl GenmcCtx {
     }
 
     pub fn is_exploration_done(&self) -> bool {
+        unreachable!()
+    }
+
+    pub fn get_exit_status(&self) -> Option<(i32, bool)> {
         unreachable!()
     }
 
@@ -67,8 +98,9 @@ impl GenmcCtx {
         _address: Size,
         _size: Size,
         _value: Scalar,
+        _old_value: Option<Scalar>,
         _ordering: AtomicWriteOrd,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx, bool> {
         unreachable!()
     }
 
@@ -76,7 +108,7 @@ impl GenmcCtx {
         &self,
         _machine: &MiriMachine<'tcx>,
         _ordering: AtomicFenceOrd,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         unreachable!()
     }
 
@@ -86,22 +118,24 @@ impl GenmcCtx {
         _address: Size,
         _size: Size,
         _ordering: AtomicRwOrd,
-        (rmw_op, not): (mir::BinOp, bool),
+        (_rmw_op, _not): (mir::BinOp, bool),
         _rhs_scalar: Scalar,
-    ) -> InterpResult<'tcx, (Scalar, Scalar)> {
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         unreachable!()
     }
 
     pub(crate) fn atomic_min_max_op<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        ordering: AtomicRwOrd,
-        min: bool,
-        is_signed: bool,
-        rhs_scalar: Scalar,
-    ) -> InterpResult<'tcx, (Scalar, Scalar)> {
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _ordering: AtomicRwOrd,
+        _min: bool,
+        _is_signed: bool,
+        _rhs_scalar: Scalar,
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         unreachable!()
     }
 
@@ -112,7 +146,8 @@ impl GenmcCtx {
         _size: Size,
         _rhs_scalar: Scalar,
         _ordering: AtomicRwOrd,
-    ) -> InterpResult<'tcx, (Scalar, bool)> {
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         unreachable!()
     }
 
@@ -126,7 +161,8 @@ impl GenmcCtx {
         _success: AtomicRwOrd,
         _fail: AtomicReadOrd,
         _can_fail_spuriously: bool,
-    ) -> InterpResult<'tcx, (Scalar, bool)> {
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, bool, bool)> {
         unreachable!()
     }
 
@@ -135,7 +171,7 @@ impl GenmcCtx {
         _machine: &MiriMachine<'tcx>,
         _address: Size,
         _size: Size,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         unreachable!()
     }
 
@@ -144,7 +180,7 @@ impl GenmcCtx {
         _machine: &MiriMachine<'tcx>,
         _address: Size,
         _size: Size,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         unreachable!()
     }
 
@@ -152,7 +188,8 @@ impl GenmcCtx {
 
     pub(crate) fn handle_alloc<'tcx>(
         &self,
-        _machine: &MiriMachine<'tcx>,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _alloc_id: AllocId,
         _size: Size,
         _alignment: Align,
         _memory_kind: MemoryKind,
@@ -163,11 +200,12 @@ impl GenmcCtx {
     pub(crate) fn handle_dealloc<'tcx>(
         &self,
         _machine: &MiriMachine<'tcx>,
+        _alloc_id: AllocId,
         _address: Size,
         _size: Size,
         _align: Align,
         _kind: MemoryKind,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         unreachable!()
     }
 
@@ -176,8 +214,10 @@ impl GenmcCtx {
     pub(crate) fn handle_thread_create<'tcx>(
         &self,
         _threads: &ThreadManager<'tcx>,
+        _start_routine: crate::Pointer,
+        _func_arg: &crate::ImmTy<'tcx>,
         _new_thread_id: ThreadId,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         unreachable!()
     }
 
@@ -185,37 +225,46 @@ impl GenmcCtx {
         &self,
         _active_thread_id: ThreadId,
         _child_thread_id: ThreadId,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         unreachable!()
     }
 
-    pub(crate) fn handle_thread_stack_empty(&self, _thread_id: ThreadId) {
+    pub(crate) fn handle_thread_finish<'tcx>(&self, _threads: &ThreadManager<'tcx>) {
         unreachable!()
     }
 
-    pub(crate) fn handle_thread_finish<'tcx>(
+    pub(crate) fn handle_exit<'tcx>(
         &self,
-        _threads: &ThreadManager<'tcx>,
-    ) -> InterpResult<'tcx, ()> {
+        _thread: ThreadId,
+        _exit_code: i32,
+        _is_exit_call: bool,
+    ) -> InterpResult<'tcx> {
+        unreachable!()
+    }
+}
+
+/// Other functionality not directly related to event handling
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    fn check_genmc_intercept_function(
+        &mut self,
+        _instance: rustc_middle::ty::Instance<'tcx>,
+        _args: &[rustc_const_eval::interpret::FnArg<'tcx, crate::Provenance>],
+        _dest: &crate::PlaceTy<'tcx>,
+        _ret: Option<mir::BasicBlock>,
+    ) -> InterpResult<'tcx, bool> {
         unreachable!()
     }
 
     /**** Scheduling functionality ****/
 
-    pub(crate) fn schedule_thread<'tcx>(
-        &self,
-        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    ) -> InterpResult<'tcx, ThreadId> {
+    fn genmc_schedule_thread(&mut self) -> InterpResult<'tcx, ThreadId> {
         unreachable!()
     }
 
     /**** Blocking instructions ****/
 
-    pub(crate) fn handle_verifier_assume<'tcx>(
-        &self,
-        _machine: &MiriMachine<'tcx>,
-        _condition: bool,
-    ) -> InterpResult<'tcx, ()> {
+    fn handle_genmc_verifier_assume(&mut self, _condition: &OpTy<'tcx>) -> InterpResult<'tcx> {
         unreachable!()
     }
 }
@@ -229,7 +278,7 @@ impl VisitProvenance for GenmcCtx {
 impl GenmcConfig {
     pub fn parse_arg(
         _genmc_config: &mut Option<GenmcConfig>,
-        trimmed_arg: &str,
+        _trimmed_arg: &str,
     ) -> Result<(), String> {
         if cfg!(feature = "genmc") {
             Err(format!("GenMC is disabled in this build of Miri"))
@@ -238,7 +287,11 @@ impl GenmcConfig {
         }
     }
 
-    pub fn should_print_graph(&self, _rep: usize) -> bool {
+    pub fn print_exec_graphs(&self) -> bool {
+        unreachable!()
+    }
+
+    pub fn do_estimation(&self) -> bool {
         unreachable!()
     }
 }

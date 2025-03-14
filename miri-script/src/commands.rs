@@ -499,7 +499,11 @@ impl Command {
         // The basic command that executes the Miri driver.
         let mut cmd = if dep {
             // We invoke the test suite as that has all the logic for running with dependencies.
-            let cmd = e.cargo_cmd(".", "test", &features).args(&["--test", "ui"]).args(quiet_flag).arg("--");
+            let cmd = e
+                .cargo_cmd(".", "test", &features)
+                .args(&["--test", "ui"])
+                .args(quiet_flag)
+                .arg("--");
             if flamegraph {
                 cmd.args(&["--miri-run-dep-mode-flamegraph"])
             } else {

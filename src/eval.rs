@@ -303,8 +303,17 @@ impl<'tcx> MainThreadState<'tcx> {
                 // to be like a global `static`, so that all memory reached by it is considered to "not leak".
                 this.terminate_active_thread(TlsAllocAction::Leak)?;
 
-                // Stop interpreter loop.
-                throw_machine_stop!(TerminationInfo::Exit { code: exit_code, leak_check: true });
+                // In GenMC mode, we let GenMC decide what happens on main thread exit.
+                if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+                    // If there's no error, execution will continue (on another thread).
+                    genmc_ctx.handle_exit(ThreadId::MAIN_THREAD, exit_code, false)?;
+                } else {
+                    // Stop interpreter loop.
+                    throw_machine_stop!(TerminationInfo::Exit {
+                        code: exit_code,
+                        leak_check: true
+                    });
+                }
             }
         }
         interp_ok(Poll::Pending)
