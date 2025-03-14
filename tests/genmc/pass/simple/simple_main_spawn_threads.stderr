@@ -1,0 +1,9 @@
+warning: GenMC mode currently does not model spurious failures of `compare_exchange_weak`. This may lead to missed bugs (possible unsoundness)!
+
+warning: GenMC currently does not model the atomic failure ordering for `compare_exchange`. Failure ordering 'Relaxed' is treated like 'Acquire', which means that Miri might miss bugs related to this memory access (possible unsoundness)!
+
+warning: GenMC currently does not model the atomic failure ordering for `compare_exchange`. Failure ordering 'Acquire' is treated like 'Relaxed', which means that Miri might incorrectly detect errors related to this memory access (possible false positives).
+
+
+(GenMC) Verification complete. No errors were detected.
+Number of complete executions explored: 1

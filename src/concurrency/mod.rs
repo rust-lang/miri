@@ -13,5 +13,7 @@ pub mod weak_memory;
 mod genmc;
 
 pub use self::data_race_handler::{AllocDataRaceHandler, GlobalDataRaceHandler};
-pub use self::genmc::{GenmcConfig, GenmcCtx};
+pub use self::genmc::{
+    EvalContextExt as GenmcEvalContextExt, GenmcConfig, GenmcCtx, miri_genmc,
+};
 pub use self::vector_clock::VClock;

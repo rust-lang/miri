@@ -337,6 +337,10 @@ fn main() -> Result<()> {
         ui(Mode::Pass, "tests/native-lib/pass", &target, WithoutDependencies, tmpdir.path())?;
         ui(Mode::Fail, "tests/native-lib/fail", &target, WithoutDependencies, tmpdir.path())?;
     }
+    if cfg!(feature = "genmc") {
+        ui(Mode::Pass, "tests/genmc/pass", &target, WithDependencies, tmpdir.path())?;
+        ui(Mode::Fail, "tests/genmc/fail", &target, WithDependencies, tmpdir.path())?;
+    }
 
     Ok(())
 }
