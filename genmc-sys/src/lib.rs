@@ -45,10 +45,17 @@ pub fn create_genmc_driver_handle(
 }
 
 impl GenmcScalar {
-    pub const UNINIT: Self = Self { value: 0, is_init: false };
+    pub const UNINIT: Self = Self { value: 0, extra: 0, is_init: false };
+
+    pub const MUTEX_LOCKED_STATE: Self = Self::from_u64(1);
+    pub const MUTEX_UNLOCKED_STATE: Self = Self::from_u64(0);
 
     pub const fn from_u64(value: u64) -> Self {
-        Self { value, is_init: true }
+        Self { value, extra: 0, is_init: true }
+    }
+
+    pub const fn has_provenance(&self) -> bool {
+        self.extra != 0
     }
 }
 
@@ -166,6 +173,7 @@ mod ffi {
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
+        extra: u64,
         is_init: bool,
     }
 
