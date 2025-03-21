@@ -6,6 +6,21 @@ LL |             assert_eq!(WaitForSingleObject(MAIN_THREAD, INFINITE), WAIT_OBJ
    |
    = note: BACKTRACE on thread `unnamed-ID`:
    = note: inside closure at RUSTLIB/core/src/macros/mod.rs:LL:CC
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail-dep/concurrency/windows_join_main.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail-dep/concurrency/windows_join_main.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail-dep/concurrency/windows_join_main.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail-dep/concurrency/windows_join_main.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail-dep/concurrency/windows_join_main.rs:LL:CC
+   |
+LL | /     thread::spawn(|| {
+LL | |         unsafe {
+LL | |             assert_eq!(WaitForSingleObject(MAIN_THREAD, INFINITE), WAIT_OBJECT_0);
+LL | |         }
+LL | |     })
+   | |______^
    = note: this error originates in the macro `assert_eq` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: deadlock: the evaluated program deadlocked
