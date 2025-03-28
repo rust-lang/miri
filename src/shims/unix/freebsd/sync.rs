@@ -5,7 +5,7 @@ use core::time::Duration;
 use crate::concurrency::sync::FutexRef;
 use crate::*;
 
-pub struct FreeBSDFutex {
+pub struct FreeBsdFutex {
     futex: FutexRef,
 }
 
@@ -52,48 +52,31 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let absolute_time_flag = this.eval_libc_u32("UMTX_ABSTIME");
 
         match op {
-            // UMTX_OP_WAIT_UINT has a private variant that enables an optimization that stops it from working across processes.
-            // Miri doesn't support that anyway, so we ignore that variant and use the same implementation for all wait ops.
+            // UMTX_OP_WAIT_UINT and UMTX_OP_WAIT_UINT_PRIVATE only differ in whether they work across
+            // processes or not. For Miri, we can treat them the same.
             op if op == wait || op == wait_uint || op == wait_uint_private => {
-                // TODO: A better way to do this? Because I don't want to duplicate the actual logic.
-                let equal = if op == wait {
-                    // Read a long = isize.
-                    let obj = this.ptr_to_mplace(obj, this.machine.layouts.isize);
+                let obj_layout =
+                    if op == wait { this.machine.layouts.isize } else { this.machine.layouts.u32 };
+                let obj = this.ptr_to_mplace(obj, obj_layout);
+                // Read the Linux futex implementation in Miri to understand why this fence is needed.
+                this.atomic_fence(AtomicFenceOrd::SeqCst)?;
+                let obj_val =
+                    this.read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?.to_target_usize(this)?;
 
-                    // Read the Linux futex implementation in Miri to understand why this fence is needed.
-                    this.atomic_fence(AtomicFenceOrd::SeqCst)?;
-                    let obj_val = this
-                        .read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?
-                        .to_target_isize(this)?;
-
-                    // If obj points to something negative this can never hit, otherwise we can test.
-                    if obj_val < 0 { false } else { val == u64::try_from(obj_val).unwrap() }
-                } else {
-                    // read a u_int = u32
-                    let obj = this.ptr_to_mplace(obj, this.machine.layouts.u32);
-
-                    // Read the Linux futex implementation in Miri to understand why this fence is needed.
-                    this.atomic_fence(AtomicFenceOrd::SeqCst)?;
-                    let obj_val =
-                        this.read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?.to_u32()?;
-                    val == u64::from(obj_val)
-                };
-
-                if equal {
+                if obj_val == val {
                     let futex_ref = this
-                        .get_sync_or_init(obj, |_| FreeBSDFutex { futex: Default::default() })
+                        .get_sync_or_init(obj.ptr(), |_| FreeBsdFutex { futex: Default::default() })
                         .unwrap()
                         .futex
                         .clone();
 
-                    // TODO: This can be cleaned up no? :)
                     // From the man page:
                     // If `uaddr2` is null than `uaddr` can point to an optional timespec parameter
                     // otherwise `uaddr2` must point to a `_umtx_time` parameter and the value of `uaddr`
                     // must be equal to the size of that struct.
                     let timeout = if this.ptr_is_null(uaddr2)? {
                         if this.ptr_is_null(this.read_pointer(uaddr)?)? {
-                            // ptr is null -> no timespec
+                            // Both ptrs is null -> no timespec.
                             None
                         } else {
                             let timespec =
@@ -145,6 +128,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             }
                             |ecx, unblock: UnblockKind| match unblock {
                                 UnblockKind::Ready => {
+                                    // From the docs:
+                                    // If successful, all requests, except UMTX_SHM_CREAT and  UMTX_SHM_LOOKUP
+                                    // sub-requests  of	 the  UMTX_OP_SHM  request,  will  return  zero.
                                     ecx.write_int(0, &dest)
                                 }
                                 UnblockKind::TimedOut => {
@@ -159,11 +145,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.set_last_error_and_return(LibcError("EINVAL"), dest)
                 }
             }
-            // UMTX_OP_WAKE has a private variant that enables an optimization that stops it from working across processes.
-            // Miri doesn't support that anyway, so we ignore that variant and use the same implementation for all wake ops.
+            // UMTX_OP_WAKE and UMTX_OP_WAKE_PRIVATE only differ in whether they work across
+            // processes or not. For Miri, we can treat them the same.
             op if op == wake || op == wake_private => {
                 let Some(futex_ref) =
-                    this.get_sync_or_init(obj, |_| FreeBSDFutex { futex: Default::default() })
+                    this.get_sync_or_init(obj, |_| FreeBsdFutex { futex: Default::default() })
                 else {
                     // From Linux implemenation:
                     // No AllocId, or no live allocation at that AllocId.
@@ -174,11 +160,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
                 let futex_ref = futex_ref.futex.clone();
 
-                let count = match val{
-                    u64::MAX => usize::MAX, // Preserve MAX because it specifies to wake everyone.
-                    // This fits because we did `read_target_usize`.
-                    val => usize::try_from(val).expect("`futex_wait` accepts `count` as usize, which can't seem to fit `val` of `_umtx_op`")
-                };
+                let count = usize::try_from(val).unwrap_or(usize::MAX);
 
                 // Read the Linux futex implementation in Miri to understand why this fence is needed.
                 this.atomic_fence(AtomicFenceOrd::SeqCst)?;
@@ -188,6 +170,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     u32::MAX, // we set the bitset to include all bits
                     count,
                 )?;
+                // From the docs:
+                // If successful, all requests, except UMTX_SHM_CREAT and  UMTX_SHM_LOOKUP
+                // sub-requests  of	 the  UMTX_OP_SHM  request,  will  return  zero.
                 this.write_int(0, dest)?;
                 interp_ok(())
             }
