@@ -11,8 +11,8 @@ pub struct FreeBsdFutex {
 
 pub struct UmtxTime {
     timeout: Duration,
-    flags: u32,
-    _clock_id: u32, // TODO: I'm not understanding why this is needed atm
+    abs_time: bool,
+    timeout_clock: TimeoutClock,
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -100,21 +100,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             return this.set_last_error_and_return(LibcError("EINVAL"), dest);
                         }
 
-                        // Inner `timespec` must still be valid.
-                        let umtx_time = match this.read_umtx_time(&umtx_time_place)? {
+                        // In FreeBSD the `umtx_time` contains a `timespec` struct, which must be parsed.
+                        // This can fail, which fails `read_umtx_time`, so we need to catch that.
+                        let umtx_time = match read_umtx_time(this, &umtx_time_place)? {
                             Some(duration) => duration,
                             None => {
                                 return this.set_last_error_and_return(LibcError("EINVAL"), dest);
                             }
                         };
 
-                        let anchor = if umtx_time.flags == absolute_time_flag {
+                        let anchor = if umtx_time.abs_time {
                             TimeoutAnchor::Absolute
                         } else {
                             TimeoutAnchor::Relative
                         };
 
-                        Some((TimeoutClock::Monotonic, anchor, umtx_time.timeout))
+                        Some((umtx_time.timeout_clock, anchor, umtx_time.timeout))
                     };
 
                     let dest = dest.clone();
@@ -181,21 +182,46 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
     }
+}
 
-    /// Parses a `_umtx_time` struct.
-    /// Returns `None` if the underlying `timespec` struct is invalid.
-    fn read_umtx_time(&mut self, ut: &MPlaceTy<'tcx>) -> InterpResult<'tcx, Option<UmtxTime>> {
-        let this = self.eval_context_mut();
-        let timespec_place = this.project_field(ut, 0)?;
-        // Inner `timespec` must still be valid.
-        let duration = match this.read_timespec(&timespec_place)? {
-            Some(dur) => dur,
-            None => return interp_ok(None),
-        };
-        let flags_place = this.project_field(ut, 1)?;
-        let flags = this.read_scalar(&flags_place)?.to_u32()?;
-        let clock_id_place = this.project_field(ut, 2)?;
-        let clock_id = this.read_scalar(&clock_id_place)?.to_u32()?;
-        interp_ok(Some(UmtxTime { timeout: duration, flags, _clock_id: clock_id }))
-    }
+/// Parses a `_umtx_time` struct.
+/// Returns `None` if the underlying `timespec` struct is invalid.
+fn read_umtx_time<'tcx>(
+    ecx: &mut MiriInterpCx<'tcx>,
+    ut: &MPlaceTy<'tcx>,
+) -> InterpResult<'tcx, Option<UmtxTime>> {
+    let this = ecx.eval_context_mut();
+    // Only flag allowed is UMTX_ABSTIME.
+    let abs_time = this.eval_libc_u32("UMTX_ABSTIME");
+
+    let timespec_place = this.project_field(ut, 0)?;
+    // Inner `timespec` must still be valid.
+    let duration = match this.read_timespec(&timespec_place)? {
+        Some(dur) => dur,
+        None => return interp_ok(None),
+    };
+
+    let flags_place = this.project_field(ut, 1)?;
+    let flags = this.read_scalar(&flags_place)?.to_u32()?;
+    let abs_time_flag = flags == abs_time;
+
+    let clock_id_place = this.project_field(ut, 2)?;
+    let clock_id = this.read_scalar(&clock_id_place)?.to_i32()?;
+    let timeout_clock = umtx_time_translate_clock_id(this, clock_id)?;
+
+    interp_ok(Some(UmtxTime { timeout: duration, abs_time: abs_time_flag, timeout_clock }))
+}
+
+fn umtx_time_translate_clock_id<'tcx>(
+    ecx: &mut MiriInterpCx<'tcx>,
+    id: i32,
+) -> InterpResult<'tcx, TimeoutClock> {
+    let timeout = if id == ecx.eval_libc_i32("CLOCK_REALTIME") {
+        TimeoutClock::RealTime
+    } else if id == ecx.eval_libc_i32("CLOCK_MONOTONIC") {
+        TimeoutClock::Monotonic
+    } else {
+        throw_unsup_format!("unsupported clock id {id}");
+    };
+    interp_ok(timeout)
 }
