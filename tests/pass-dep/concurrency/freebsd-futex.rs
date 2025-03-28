@@ -11,6 +11,7 @@ fn wake_nobody() {
     // TODO: _umtx_op does not return how many threads were woken up
     // How do i test this?
 }
+
 fn wake_dangling() {
     let futex = Box::new(0);
     let ptr: *const u32 = &*futex;
@@ -51,7 +52,7 @@ fn wait_wrong_val() {
     }
 }
 
-fn wait_timeout() {
+fn wait_relative_timeout() {
     let start = Instant::now();
 
     let futex: u32 = 123;
@@ -74,6 +75,7 @@ fn wait_timeout() {
 
     assert!((200..1000).contains(&start.elapsed().as_millis()));
 }
+
 fn wait_absolute_timeout() {
     let start = Instant::now();
 
@@ -164,7 +166,7 @@ fn main() {
     wake_nobody();
     wake_dangling();
     wait_wrong_val();
-    wait_timeout();
+    wait_relative_timeout();
     wait_absolute_timeout();
     wait_wake();
 }

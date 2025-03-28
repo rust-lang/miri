@@ -49,8 +49,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let wake = this.eval_libc_i32("UMTX_OP_WAKE");
         let wake_private = this.eval_libc_i32("UMTX_OP_WAKE_PRIVATE");
 
-        let absolute_time_flag = this.eval_libc_u32("UMTX_ABSTIME");
-
         match op {
             // UMTX_OP_WAIT_UINT and UMTX_OP_WAIT_UINT_PRIVATE only differ in whether they work across
             // processes or not. For Miri, we can treat them the same.
