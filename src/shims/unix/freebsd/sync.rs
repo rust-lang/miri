@@ -40,6 +40,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let obj = this.read_pointer(obj)?;
         let op = this.read_scalar(op)?.to_i32()?;
         let val = this.read_target_usize(val)?;
+        let uaddr = this.read_scalar(uaddr)?;
         let uaddr2 = this.read_pointer(uaddr2)?;
 
         let wait = this.eval_libc_i32("UMTX_OP_WAIT");
@@ -56,12 +57,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let obj_layout =
                     if op == wait { this.machine.layouts.isize } else { this.machine.layouts.u32 };
                 let obj = this.ptr_to_mplace(obj, obj_layout);
+
                 // Read the Linux futex implementation in Miri to understand why this fence is needed.
                 this.atomic_fence(AtomicFenceOrd::SeqCst)?;
-                let obj_val =
-                    this.read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?.to_target_usize(this)?;
+                let obj_val = this
+                    .read_scalar_atomic(&obj, AtomicReadOrd::Acquire)?
+                    .to_bits(obj_layout.size)?; // isize and u32 can have different sizes
 
-                if obj_val == val {
+                if obj_val == u128::from(val) {
                     let futex_ref = this
                         .get_sync_or_init(obj.ptr(), |_| FreeBsdFutex { futex: Default::default() })
                         .unwrap()
@@ -73,12 +76,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // otherwise `uaddr2` must point to a `_umtx_time` parameter and the value of `uaddr`
                     // must be equal to the size of that struct.
                     let timeout = if this.ptr_is_null(uaddr2)? {
-                        if this.ptr_is_null(this.read_pointer(uaddr)?)? {
-                            // Both ptrs is null -> no timespec.
+                        let uaddr_ptr = uaddr.to_pointer(this)?;
+                        if this.ptr_is_null(uaddr_ptr)? {
+                            // Both ptrs are null -> no timespec.
                             None
                         } else {
                             let timespec =
-                                this.deref_pointer_as(uaddr, this.libc_ty_layout("timespec"))?;
+                                this.ptr_to_mplace(uaddr_ptr, this.libc_ty_layout("timespec"));
                             let duration = match this.read_timespec(&timespec)? {
                                 Some(duration) => duration,
                                 None => {
@@ -92,7 +96,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     } else {
                         let umtx_time_place =
                             this.ptr_to_mplace(uaddr2, this.libc_ty_layout("_umtx_time"));
-                        let uaddr_as_size = this.read_target_usize(uaddr)?;
+                        let uaddr_as_size = uaddr.to_target_usize(this)?;
 
                         if umtx_time_place.layout().size.bytes() != uaddr_as_size {
                             return this.set_last_error_and_return(LibcError("EINVAL"), dest);
