@@ -9,6 +9,7 @@ pub struct FreeBsdFutex {
     futex: FutexRef,
 }
 
+/// Extended variant of the `timespec` struct.
 pub struct UmtxTime {
     timeout: Duration,
     abs_time: bool,
@@ -17,8 +18,8 @@ pub struct UmtxTime {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    /// Implementation of the FreeBSD [`_umtx_op`](https://man.freebsd.org/cgi/man.cgi?query=_umtx_op&sektion=2&manpath=FreeBSD+14.2-RELEASE+and+Ports) syscall. :
-    /// This is used for futex operations.
+    /// Implementation of the FreeBSD [`_umtx_op`](https://man.freebsd.org/cgi/man.cgi?query=_umtx_op&sektion=2&manpath=FreeBSD+14.2-RELEASE+and+Ports) syscall.
+    /// This is used for futex operations on FreeBSD.
     ///
     /// `obj`: a pointer to the futex object (can be a lot of things, mostly *AtomicU32)
     /// `op`: the futex operation to run
