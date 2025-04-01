@@ -40,7 +40,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let obj = this.read_pointer(obj)?;
         let op = this.read_scalar(op)?.to_i32()?;
         let val = this.read_target_usize(val)?;
-        let uaddr = this.read_scalar(uaddr)?;
+        let uaddr = this.read_target_usize(uaddr)?;
         let uaddr2 = this.read_pointer(uaddr2)?;
 
         let wait = this.eval_libc_i32("UMTX_OP_WAIT");
@@ -49,6 +49,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let wake = this.eval_libc_i32("UMTX_OP_WAKE");
         let wake_private = this.eval_libc_i32("UMTX_OP_WAKE_PRIVATE");
+
+        let timespec_layout = this.libc_ty_layout("timespec");
+        let umtx_time_layout = this.libc_ty_layout("_umtx_time");
 
         match op {
             // UMTX_OP_WAIT_UINT and UMTX_OP_WAIT_UINT_PRIVATE only differ in whether they work across
@@ -71,18 +74,37 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         .futex
                         .clone();
 
-                    // From the man page:
-                    // If `uaddr2` is null than `uaddr` can point to an optional timespec parameter
-                    // otherwise `uaddr2` must point to a `_umtx_time` parameter and the value of `uaddr`
-                    // must be equal to the size of that struct.
+                    // From the manual:
+                    // The timeout is specified by passing either the address of `struct timespec`, or its
+                    // extended  variant, `struct _umtx_time`, as the `uaddr2` argument of _umtx_op().
+                    // They are distinguished by the `uaddr` value, which  must be equal
+                    // to the size of the structure pointed to by `uaddr2`, casted to uintptr_t.
                     let timeout = if this.ptr_is_null(uaddr2)? {
-                        let uaddr_ptr = uaddr.to_pointer(this)?;
-                        if this.ptr_is_null(uaddr_ptr)? {
-                            // Both ptrs are null -> no timespec.
-                            None
-                        } else {
-                            let timespec =
-                                this.ptr_to_mplace(uaddr_ptr, this.libc_ty_layout("timespec"));
+                        // no timeout parameter
+                        None
+                    } else {
+                        if uaddr == umtx_time_layout.size.bytes() {
+                            // `uaddr2` points to a `struct _umtx_time`
+                            let umtx_time_place = this.ptr_to_mplace(uaddr2, umtx_time_layout);
+
+                            let umtx_time = match read_umtx_time(this, &umtx_time_place)? {
+                                Some(ut) => ut,
+                                None => {
+                                    return this
+                                        .set_last_error_and_return(LibcError("EINVAL"), dest);
+                                }
+                            };
+
+                            let anchor = if umtx_time.abs_time {
+                                TimeoutAnchor::Absolute
+                            } else {
+                                TimeoutAnchor::Relative
+                            };
+
+                            Some((umtx_time.timeout_clock, anchor, umtx_time.timeout))
+                        } else if uaddr == timespec_layout.size.bytes() {
+                            // `uaddr2` points to a `struct timespec`
+                            let timespec = this.ptr_to_mplace(uaddr2, timespec_layout);
                             let duration = match this.read_timespec(&timespec)? {
                                 Some(duration) => duration,
                                 None => {
@@ -91,33 +113,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 }
                             };
 
-                            Some((TimeoutClock::Monotonic, TimeoutAnchor::Relative, duration))
-                        }
-                    } else {
-                        let umtx_time_place =
-                            this.ptr_to_mplace(uaddr2, this.libc_ty_layout("_umtx_time"));
-                        let uaddr_as_size = uaddr.to_target_usize(this)?;
-
-                        if umtx_time_place.layout().size.bytes() != uaddr_as_size {
+                            // From the FreeBSD source code:
+                            // In the function `umtx_copyin_umtx_time` in kern_umtx.c, _clock_id is set to CLOCK_REALTIME when using `timespec`
+                            Some((TimeoutClock::RealTime, TimeoutAnchor::Relative, duration))
+                        } else {
                             return this.set_last_error_and_return(LibcError("EINVAL"), dest);
                         }
-
-                        // In FreeBSD the `umtx_time` contains a `timespec` struct, which must be parsed.
-                        // This can fail, which fails `read_umtx_time`, so we need to catch that.
-                        let umtx_time = match read_umtx_time(this, &umtx_time_place)? {
-                            Some(duration) => duration,
-                            None => {
-                                return this.set_last_error_and_return(LibcError("EINVAL"), dest);
-                            }
-                        };
-
-                        let anchor = if umtx_time.abs_time {
-                            TimeoutAnchor::Absolute
-                        } else {
-                            TimeoutAnchor::Relative
-                        };
-
-                        Some((umtx_time.timeout_clock, anchor, umtx_time.timeout))
                     };
 
                     let dest = dest.clone();
@@ -131,7 +132,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             }
                             |ecx, unblock: UnblockKind| match unblock {
                                 UnblockKind::Ready => {
-                                    // From the docs:
+                                    // From the manual:
                                     // If successful, all requests, except UMTX_SHM_CREAT and  UMTX_SHM_LOOKUP
                                     // sub-requests  of	 the  UMTX_OP_SHM  request,  will  return  zero.
                                     ecx.write_int(0, &dest)
@@ -144,8 +145,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     );
                     interp_ok(())
                 } else {
-                    // The manual doesn't document what should happen if `val` is invalid, so we error out.
-                    this.set_last_error_and_return(LibcError("EINVAL"), dest)
+                    // The manual doesn’t specify what should happen if the futex value doesn’t match the expected one.
+                    // On FreeBSD 14.2, testing shows that WAIT operations return 0 even when the value is incorrect.
+                    this.write_int(0, dest)?;
+                    interp_ok(())
                 }
             }
             // UMTX_OP_WAKE and UMTX_OP_WAKE_PRIVATE only differ in whether they work across
@@ -163,17 +166,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
                 let futex_ref = futex_ref.futex.clone();
 
+                // Saturating cast for when usize is smaller than u64.
                 let count = usize::try_from(val).unwrap_or(usize::MAX);
 
                 // Read the Linux futex implementation in Miri to understand why this fence is needed.
                 this.atomic_fence(AtomicFenceOrd::SeqCst)?;
+
                 // `_umtx_op` doesn't return the amount of woken threads.
                 let _woken = this.futex_wake(
                     &futex_ref,
                     u32::MAX, // we set the bitset to include all bits
                     count,
                 )?;
-                // From the docs:
+
+                // From the manual:
                 // If successful, all requests, except UMTX_SHM_CREAT and  UMTX_SHM_LOOKUP
                 // sub-requests  of	 the  UMTX_OP_SHM  request,  will  return  zero.
                 this.write_int(0, dest)?;
@@ -184,46 +190,43 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
     }
-}
 
-/// Parses a `_umtx_time` struct.
-/// Returns `None` if the underlying `timespec` struct is invalid.
-fn read_umtx_time<'tcx>(
-    ecx: &mut MiriInterpCx<'tcx>,
-    ut: &MPlaceTy<'tcx>,
-) -> InterpResult<'tcx, Option<UmtxTime>> {
-    let this = ecx.eval_context_mut();
-    // Only flag allowed is UMTX_ABSTIME.
-    let abs_time = this.eval_libc_u32("UMTX_ABSTIME");
+    /// Parses a `_umtx_time` struct.
+    /// Returns `None` if the underlying `timespec` struct is invalid.
+    fn read_umtx_time(&mut self, ut: &MPlaceTy<'tcx>) -> InterpResult<'tcx, Option<UmtxTime>> {
+        let this = self.eval_context_mut();
+        // Only flag allowed is UMTX_ABSTIME.
+        let abs_time = this.eval_libc_u32("UMTX_ABSTIME");
 
-    let timespec_place = this.project_field(ut, 0)?;
-    // Inner `timespec` must still be valid.
-    let duration = match this.read_timespec(&timespec_place)? {
-        Some(dur) => dur,
-        None => return interp_ok(None),
-    };
+        let timespec_place = this.project_field(ut, 0)?;
+        // Inner `timespec` must still be valid.
+        let duration = match this.read_timespec(&timespec_place)? {
+            Some(dur) => dur,
+            None => return interp_ok(None),
+        };
 
-    let flags_place = this.project_field(ut, 1)?;
-    let flags = this.read_scalar(&flags_place)?.to_u32()?;
-    let abs_time_flag = flags == abs_time;
+        let flags_place = this.project_field(ut, 1)?;
+        let flags = this.read_scalar(&flags_place)?.to_u32()?;
+        let abs_time_flag = flags == abs_time;
 
-    let clock_id_place = this.project_field(ut, 2)?;
-    let clock_id = this.read_scalar(&clock_id_place)?.to_i32()?;
-    let timeout_clock = umtx_time_translate_clock_id(this, clock_id)?;
+        let clock_id_place = this.project_field(ut, 2)?;
+        let clock_id = this.read_scalar(&clock_id_place)?.to_i32()?;
+        let timeout_clock = this.translate_umtx_time_clock_id(clock_id)?;
 
-    interp_ok(Some(UmtxTime { timeout: duration, abs_time: abs_time_flag, timeout_clock }))
-}
+        interp_ok(Some(UmtxTime { timeout: duration, abs_time: abs_time_flag, timeout_clock }))
+    }
 
-fn umtx_time_translate_clock_id<'tcx>(
-    ecx: &mut MiriInterpCx<'tcx>,
-    id: i32,
-) -> InterpResult<'tcx, TimeoutClock> {
-    let timeout = if id == ecx.eval_libc_i32("CLOCK_REALTIME") {
-        TimeoutClock::RealTime
-    } else if id == ecx.eval_libc_i32("CLOCK_MONOTONIC") {
-        TimeoutClock::Monotonic
-    } else {
-        throw_unsup_format!("unsupported clock id {id}");
-    };
-    interp_ok(timeout)
+    /// Translate raw FreeBSD clockid to a Miri TimeoutClock
+    fn translate_umtx_time_clock_id(&mut self, raw_id: i32) -> InterpResult<'tcx, TimeoutClock> {
+        let this = self.eval_context_mut();
+
+        let timeout = if raw_id == this.eval_libc_i32("CLOCK_REALTIME") {
+            TimeoutClock::RealTime
+        } else if raw_id == this.eval_libc_i32("CLOCK_MONOTONIC") {
+            TimeoutClock::Monotonic
+        } else {
+            throw_unsup_format!("unsupported clock id {raw_id}");
+        };
+        interp_ok(timeout)
+    }
 }
