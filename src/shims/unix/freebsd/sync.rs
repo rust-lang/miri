@@ -87,7 +87,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             // `uaddr2` points to a `struct _umtx_time`
                             let umtx_time_place = this.ptr_to_mplace(uaddr2, umtx_time_layout);
 
-                            let umtx_time = match read_umtx_time(this, &umtx_time_place)? {
+                            let umtx_time = match this.read_umtx_time(&umtx_time_place)? {
                                 Some(ut) => ut,
                                 None => {
                                     return this
