@@ -3,7 +3,6 @@
 use core::time::Duration;
 
 use crate::concurrency::sync::FutexRef;
-use crate::helpers::EvalContextExt;
 use crate::*;
 
 pub struct FreeBsdFutex {
