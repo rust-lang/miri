@@ -233,40 +233,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
-        match creation_disposition {
-            CreateAlways | OpenAlways => {
-                // Per the documentation:
-                // If the specified file exists and is writable, the function truncates the file,
-                // the function succeeds, and last-error code is set to ERROR_ALREADY_EXISTS.
-                // If the specified file does not exist and is a valid path, a new file is created,
-                // the function succeeds, and the last-error code is set to zero.
-                // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
-                //
-                // This is racy, but there doesn't appear to be an std API that both succeeds if a
-                // file exists but tells us it isn't new. Either we accept racing one way or another,
-                // or we use an iffy heuristic like file creation time. This implementation prefers
-                // to fail in the direction of erroring more often.
-                if file_name.exists() {
-                    this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
-                }
-                options.create(true);
-                if creation_disposition == CreateAlways {
-                    options.truncate(true);
-                }
-            }
-            CreateNew => {
-                options.create_new(true);
-                // Per `create_new` documentation:
-                // The file must be opened with write or append access in order to create a new file.
-                // https://doc.rust-lang.org/std/fs/struct.OpenOptions.html#method.create_new
-                if !desired_write {
-                    options.append(true);
-                }
-            }
-            OpenExisting => {} // Default options
-            TruncateExisting => {
-                options.truncate(true);
-            }
+        // Per the documentation:
+        // If the specified file exists and is writable, the function truncates the file,
+        // the function succeeds, and last-error code is set to ERROR_ALREADY_EXISTS.
+        // If the specified file does not exist and is a valid path, a new file is created,
+        // the function succeeds, and the last-error code is set to zero.
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+        //
+        // This is racy, but there doesn't appear to be an std API that both succeeds if a
+        // file exists but tells us it isn't new. Either we accept racing one way or another,
+        // or we use an iffy heuristic like file creation time. This implementation prefers
+        // to fail in the direction of erroring more often.
+        if let CreateAlways | OpenAlways = creation_disposition
+            && file_name.exists()
+        {
+            this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
         }
 
         let handle = if is_dir {
@@ -282,6 +263,28 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 Handle::File(fd_num)
             })
         } else {
+            match creation_disposition {
+                CreateAlways | OpenAlways => {
+                    options.create(true);
+                    if creation_disposition == CreateAlways {
+                        options.truncate(true);
+                    }
+                }
+                CreateNew => {
+                    options.create_new(true);
+                    // Per `create_new` documentation:
+                    // The file must be opened with write or append access in order to create a new file.
+                    // https://doc.rust-lang.org/std/fs/struct.OpenOptions.html#method.create_new
+                    if !desired_write {
+                        options.append(true);
+                    }
+                }
+                OpenExisting => {} // Default options
+                TruncateExisting => {
+                    options.truncate(true);
+                }
+            }
+
             options.open(file_name).map(|file| {
                 let fh = &mut this.machine.fds;
                 let fd_num = fh.insert_new(FileHandle { file, writable: desired_write });

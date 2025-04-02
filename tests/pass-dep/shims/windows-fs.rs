@@ -25,6 +25,7 @@ fn main() {
         test_create_normal_file();
         test_create_always_twice();
         test_open_always_twice();
+        test_open_dir_reparse();
     }
 }
 
