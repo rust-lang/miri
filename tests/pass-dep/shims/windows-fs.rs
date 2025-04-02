@@ -14,8 +14,9 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_ALWAYS, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_ALWAYS, OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_ALWAYS,
+    OPEN_EXISTING,
 };
 
 fn main() {
@@ -159,6 +160,31 @@ unsafe fn test_open_always_twice() {
     );
     assert_ne!(handle, -1, "CreateFileW Failed: {}", GetLastError());
     assert_eq!(GetLastError(), ERROR_ALREADY_EXISTS);
+    if CloseHandle(handle) == 0 {
+        panic!("Failed to close file")
+    };
+}
+
+// TODO: Once we support more of the std API, it would be nice to test against an actual symlink
+unsafe fn test_open_dir_reparse() {
+    let temp = utils::tmp();
+    let raw_path = to_wide_cstr(&temp);
+    // Open the `temp` directory.
+    let handle = CreateFileW(
+        raw_path.as_ptr(),
+        GENERIC_READ,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+        ptr::null_mut(),
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        0,
+    );
+    assert_ne!(handle, -1, "CreateFileW Failed: {}", GetLastError());
+    let mut info = std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>();
+    if GetFileInformationByHandle(handle, &mut info) == 0 {
+        panic!("Failed to get file information")
+    };
+    assert!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0);
     if CloseHandle(handle) == 0 {
         panic!("Failed to close file")
     };

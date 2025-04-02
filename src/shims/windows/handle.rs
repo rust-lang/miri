@@ -198,7 +198,7 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 #[allow(non_snake_case)]
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Convert a scalar into a structured `Handle`.
-    /// If the handle is invalid, or references a non-existent item, this returns a machine abort.
+    /// If the handle is invalid, or references a non-existent item, execution is aborted.
     #[track_caller]
     fn read_handle(&self, handle: &OpTy<'tcx>, function_name: &str) -> InterpResult<'tcx, Handle> {
         let this = self.eval_context_ref();

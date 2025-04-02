@@ -204,6 +204,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("CreateFileW: Template files are not supported");
         }
 
+        // We need to know if the file is a directory to correctly open directory handles.
+        // This is racy, but currently the stdlib doesn't appear to offer a better solution.
         let is_dir = file_name.is_dir();
 
         // BACKUP_SEMANTICS is how Windows calls the act of opening a directory handle.
@@ -253,7 +255,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
             CreateNew => {
-                // See comments in
                 options.create_new(true);
                 // Per `create_new` documentation:
                 // The file must be opened with write or append access in order to create a new file.
@@ -342,6 +343,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.eval_windows_u32("c", "FILE_ATTRIBUTE_DEVICE")
         };
 
+        // Per the Windows documentation:
+        // "If the underlying file system does not support the [...] time, this member is zero (0)."
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-by_handle_file_information
         let created = extract_windows_epoch(this, metadata.created())?.unwrap_or((0, 0));
         let accessed = extract_windows_epoch(this, metadata.accessed())?.unwrap_or((0, 0));
         let written = extract_windows_epoch(this, metadata.modified())?.unwrap_or((0, 0));
