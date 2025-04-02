@@ -3,6 +3,7 @@
 use core::time::Duration;
 
 use crate::concurrency::sync::FutexRef;
+use crate::helpers::EvalContextExt;
 use crate::*;
 
 pub struct FreeBsdFutex {
@@ -104,6 +105,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                             Some((umtx_time.timeout_clock, anchor, umtx_time.timeout))
                         } else if uaddr == timespec_layout.size.bytes() {
+                            // RealTime clock can't be used in isolation mode.
+                            this.check_no_isolation("`_umtx_op` with `TimeoutClock::RealTime`")?;
+
                             // `uaddr2` points to a `struct timespec`
                             let timespec = this.ptr_to_mplace(uaddr2, timespec_layout);
                             let duration = match this.read_timespec(&timespec)? {
@@ -222,6 +226,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         let timeout = if raw_id == this.eval_libc_i32("CLOCK_REALTIME") {
+            // RealTime clock can't be used in isolation mode.
+            this.check_no_isolation("`_umtx_op` with `TimeoutClock::RealTime`")?;
             TimeoutClock::RealTime
         } else if raw_id == this.eval_libc_i32("CLOCK_MONOTONIC") {
             TimeoutClock::Monotonic
