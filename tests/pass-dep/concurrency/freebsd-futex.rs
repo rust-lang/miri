@@ -4,50 +4,99 @@
 use std::mem::{self, MaybeUninit};
 use std::ptr::{self, addr_of};
 use std::sync::atomic::AtomicU32;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{io, thread};
 
-fn wake_nobody() {
-    // Current thread waits on futex
-    // New thread wakes up 0 threads waiting on that futex
-    // Current thread should time out
-    static mut FUTEX: u32 = 0;
+fn wait_wake() {
+    fn wake_nobody() {
+        // Current thread waits on futex
+        // New thread wakes up 0 threads waiting on that futex
+        // Current thread should time out
+        static mut FUTEX: u32 = 0;
 
-    let waker = thread::spawn(|| {
-        thread::sleep(Duration::from_millis(200));
+        let waker = thread::spawn(|| {
+            unsafe {
+                assert_eq!(
+                    libc::_umtx_op(
+                        addr_of!(FUTEX) as *mut _,
+                        libc::UMTX_OP_WAKE_PRIVATE,
+                        0, // wake up 0 waiters
+                        ptr::null_mut::<libc::c_void>(),
+                        ptr::null_mut::<libc::c_void>(),
+                    ),
+                    0
+                );
+            }
+        });
+        thread::yield_now();
+        let mut timeout = libc::timespec { tv_sec: 0, tv_nsec: 400_000_000 };
+        let timeout_size_arg =
+            ptr::without_provenance_mut::<libc::c_void>(mem::size_of::<libc::timespec>());
+        unsafe {
+            assert_eq!(
+                libc::_umtx_op(
+                    addr_of!(FUTEX) as *mut _,
+                    libc::UMTX_OP_WAIT_UINT_PRIVATE,
+                    0,
+                    timeout_size_arg,
+                    &mut timeout as *mut _ as _,
+                ),
+                -1
+            );
+            // main thread did not get woken up, so it timed out
+            assert_eq!(io::Error::last_os_error().raw_os_error().unwrap(), libc::ETIMEDOUT);
+        }
 
+        waker.join().unwrap();
+    }
+
+    fn wake_one() {
+        // We create 2 threads that wait on a futex with a 500ms timeout.
+        // The main thread wakes up 1 thread waiting on this futex and after this
+        // checks that only 1 thread woke up and the other timed out.
+        static mut FUTEX: u32 = 0;
+
+        fn waiter() -> bool {
+            let mut timeout = libc::timespec { tv_sec: 0, tv_nsec: 500_000_000 };
+            let timeout_size_arg =
+                ptr::without_provenance_mut::<libc::c_void>(mem::size_of::<libc::timespec>());
+            unsafe {
+                libc::_umtx_op(
+                    addr_of!(FUTEX) as *mut _,
+                    libc::UMTX_OP_WAIT_UINT_PRIVATE,
+                    0, // FUTEX is 0
+                    timeout_size_arg,
+                    &mut timeout as *mut _ as _,
+                );
+                // Return wether this threads wait timed out or not.
+                io::Error::last_os_error().raw_os_error().unwrap() == libc::ETIMEDOUT
+            }
+        }
+
+        let t1 = thread::spawn(waiter);
+        let t2 = thread::spawn(waiter);
+
+        thread::yield_now();
+        // Wake up 1 thread and make sure the other is still waiting
         unsafe {
             assert_eq!(
                 libc::_umtx_op(
                     addr_of!(FUTEX) as *mut _,
                     libc::UMTX_OP_WAKE_PRIVATE,
-                    0, // wake up 0 waiters
+                    1,
                     ptr::null_mut::<libc::c_void>(),
                     ptr::null_mut::<libc::c_void>(),
                 ),
                 0
             );
         }
-    });
-    let mut timeout = libc::timespec { tv_sec: 0, tv_nsec: 400_000_000 };
-    let timeout_size_arg =
-        ptr::without_provenance_mut::<libc::c_void>(mem::size_of::<libc::timespec>());
-    unsafe {
-        assert_eq!(
-            libc::_umtx_op(
-                addr_of!(FUTEX) as *mut _,
-                libc::UMTX_OP_WAIT_UINT_PRIVATE,
-                0,
-                timeout_size_arg,
-                &mut timeout as *mut _ as _,
-            ),
-            -1
-        );
-        // main thread did not get woken up, so it timed out
-        assert_eq!(io::Error::last_os_error().raw_os_error().unwrap(), libc::ETIMEDOUT);
+        let t1_woke_up = t1.join().unwrap();
+        let t2_woke_up = t2.join().unwrap();
+        assert!(t1_woke_up ^ t2_woke_up, "Expected 1 thread to wake up");
     }
 
-    waker.join().unwrap();
+    wake_nobody();
+    wake_one();
 }
 
 fn wake_dangling() {
@@ -194,57 +243,10 @@ fn wait_absolute_timeout() {
     assert!((200..1000).contains(&start.elapsed().as_millis()));
 }
 
-fn wait_wake() {
-    // we create 2 threads that wait on a futex with a 500ms timeout.
-    // The main thread wakes up 1 thread waiting on this futex and after 100ms
-    // checks that only 1 thread woke up and the other timed out.
-    static mut FUTEX: u32 = 0;
-
-    fn waiter() -> bool {
-        let mut timeout = libc::timespec { tv_sec: 0, tv_nsec: 500_000_000 };
-        let timeout_size_arg =
-            ptr::without_provenance_mut::<libc::c_void>(mem::size_of::<libc::timespec>());
-        unsafe {
-            libc::_umtx_op(
-                addr_of!(FUTEX) as *mut _,
-                libc::UMTX_OP_WAIT_UINT_PRIVATE,
-                0, // FUTEX is 0
-                timeout_size_arg,
-                &mut timeout as *mut _ as _,
-            );
-            io::Error::last_os_error().raw_os_error().unwrap() == libc::ETIMEDOUT
-        }
-    }
-
-    let t1 = thread::spawn(waiter);
-    let t2 = thread::spawn(waiter);
-
-    // Wake up 1 thread and make sure the other is still waiting
-    thread::sleep(Duration::from_millis(200));
-    unsafe {
-        assert_eq!(
-            libc::_umtx_op(
-                addr_of!(FUTEX) as *mut _,
-                libc::UMTX_OP_WAKE_PRIVATE,
-                1,
-                ptr::null_mut::<libc::c_void>(),
-                ptr::null_mut::<libc::c_void>(),
-            ),
-            0
-        );
-    }
-    // Wait a bit more for good measure.
-    thread::sleep(Duration::from_millis(100));
-    let t1_woke_up = t1.join().unwrap();
-    let t2_woke_up = t2.join().unwrap();
-    assert!(t1_woke_up ^ t2_woke_up, "Expected 1 thread to wake up");
-}
-
 fn main() {
-    wake_nobody();
+    wait_wake();
     wake_dangling();
     wait_wrong_val();
     wait_relative_timeout();
     wait_absolute_timeout();
-    wait_wake();
 }
