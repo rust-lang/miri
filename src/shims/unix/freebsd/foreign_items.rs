@@ -56,7 +56,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(res, dest)?;
             }
 
-            // Futex
+            // Synchronization primitives
             "_umtx_op" => {
                 let [obj, op, val, uaddr, uaddr2] =
                     this.check_shim(abi, Conv::C, link_name, args)?;

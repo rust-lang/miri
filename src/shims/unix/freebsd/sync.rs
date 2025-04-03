@@ -53,6 +53,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let timespec_layout = this.libc_ty_layout("timespec");
         let umtx_time_layout = this.libc_ty_layout("_umtx_time");
+        assert!(
+            timespec_layout.size != umtx_time_layout.size,
+            "`struct timespec` and `struct _umtx_time` should have different sizes."
+        );
 
         match op {
             // UMTX_OP_WAIT_UINT and UMTX_OP_WAIT_UINT_PRIVATE only differ in whether they work across
@@ -78,14 +82,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // From the manual:
                     // The timeout is specified by passing either the address of `struct timespec`, or its
                     // extended  variant, `struct _umtx_time`, as the `uaddr2` argument of _umtx_op().
-                    // They are distinguished by the `uaddr` value, which  must be equal
+                    // They are distinguished by the `uaddr` value, which must be equal
                     // to the size of the structure pointed to by `uaddr2`, casted to uintptr_t.
                     let timeout = if this.ptr_is_null(uaddr2)? {
                         // no timeout parameter
                         None
                     } else {
                         if uaddr == umtx_time_layout.size.bytes() {
-                            // `uaddr2` points to a `struct _umtx_time`
+                            // `uaddr2` points to a `struct _umtx_time`.
                             let umtx_time_place = this.ptr_to_mplace(uaddr2, umtx_time_layout);
 
                             let umtx_time = match this.read_umtx_time(&umtx_time_place)? {
@@ -105,7 +109,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             Some((umtx_time.timeout_clock, anchor, umtx_time.timeout))
                         } else if uaddr == timespec_layout.size.bytes() {
                             // RealTime clock can't be used in isolation mode.
-                            this.check_no_isolation("`_umtx_op` with `TimeoutClock::RealTime`")?;
+                            this.check_no_isolation("`_umtx_op` with `timespec` timeout")?;
 
                             // `uaddr2` points to a `struct timespec`
                             let timespec = this.ptr_to_mplace(uaddr2, timespec_layout);
@@ -138,7 +142,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 UnblockKind::Ready => {
                                     // From the manual:
                                     // If successful, all requests, except UMTX_SHM_CREAT and  UMTX_SHM_LOOKUP
-                                    // sub-requests  of	 the  UMTX_OP_SHM  request,  will  return  zero.
+                                    // sub-requests of the UMTX_OP_SHM request, will return zero.
                                     ecx.write_int(0, &dest)
                                 }
                                 UnblockKind::TimedOut => {
@@ -220,13 +224,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Some(UmtxTime { timeout: duration, abs_time: abs_time_flag, timeout_clock }))
     }
 
-    /// Translate raw FreeBSD clockid to a Miri TimeoutClock
+    /// Translate raw FreeBSD clockid to a Miri TimeoutClock.
+    /// FIXME: share this code with the pthread and clock_gettime shims.
     fn translate_umtx_time_clock_id(&mut self, raw_id: i32) -> InterpResult<'tcx, TimeoutClock> {
         let this = self.eval_context_mut();
 
         let timeout = if raw_id == this.eval_libc_i32("CLOCK_REALTIME") {
             // RealTime clock can't be used in isolation mode.
-            this.check_no_isolation("`_umtx_op` with `TimeoutClock::RealTime`")?;
+            this.check_no_isolation("`_umtx_op` with `CLOCK_REALTIME` timeout")?;
             TimeoutClock::RealTime
         } else if raw_id == this.eval_libc_i32("CLOCK_MONOTONIC") {
             TimeoutClock::Monotonic
