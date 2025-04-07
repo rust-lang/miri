@@ -76,11 +76,11 @@ fn retagx_retagy_retx_writey_rety() {
             // This is ensuring taht we have UB *without* the spurious read,
             // so we don't read here.
             synchronized!(b, "ret x");
-            synchronized!(b, "write y");
             let x = x as *mut u8;
             x
         }
         let _x = as_mut(unsafe { &mut *ptr.0 }, b.clone());
+        synchronized!(b, "write y");
         synchronized!(b, "ret y");
         synchronized!(b, "end");
     });
