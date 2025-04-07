@@ -19,7 +19,7 @@ fn thread_1(p: SendPtr) {
 fn thread_2(p: SendPtr) {
     let p = p.0;
     unsafe {
-        *p = 5; //~ ERROR: /Data race detected between \(1\) retag (read|write) on thread `unnamed-[0-9]+` and \(2\) non-atomic write on thread `unnamed-[0-9]+`/
+        *p = 5; //~ ERROR: /Data race detected between \(1\) implicit (read|write) from the aliasing model on thread `unnamed-[0-9]+` and \(2\) non-atomic write on thread `unnamed-[0-9]+`/
     }
 }
 

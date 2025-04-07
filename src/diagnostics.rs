@@ -48,7 +48,7 @@ pub enum TerminationInfo {
         op1: RacingOp,
         op2: RacingOp,
         extra: Option<&'static str>,
-        retag_explain: bool,
+        aliasing_implicit_explain: bool,
     },
     UnsupportedForeignItem(String),
 }
@@ -288,16 +288,17 @@ pub fn report_error<'tcx>(
                 vec![note_span!(*span, "the `{link_name}` symbol is defined here")],
             Int2PtrWithStrictProvenance =>
                 vec![note!("use Strict Provenance APIs (https://doc.rust-lang.org/nightly/std/ptr/index.html#strict-provenance, https://crates.io/crates/sptr) instead")],
-            DataRace { op1, extra, retag_explain, .. } => {
+            DataRace { op1, extra, aliasing_implicit_explain, .. } => {
                 let mut helps = vec![note_span!(op1.span, "and (1) occurred earlier here")];
                 if let Some(extra) = extra {
                     helps.push(note!("{extra}"));
                     helps.push(note!("see https://doc.rust-lang.org/nightly/std/sync/atomic/index.html#memory-model-for-atomic-accesses for more information about the Rust memory model"));
                 }
-                if *retag_explain {
-                    helps.push(note!("retags occur on all (re)borrows and as well as when references are copied or moved"));
-                    helps.push(note!("retags permit optimizations that insert speculative reads or writes"));
-                    helps.push(note!("therefore from the perspective of data races, a retag has the same implications as a read or write"));
+                if *aliasing_implicit_explain {
+                    helps.push(note!("implicit reads/writes happen on all (re)borrows, as well as when references are copied or moved"));
+                    helps.push(note!("implicit accesses permit optimizations that insert speculative reads or writes"));
+                    helps.push(note!("therefore from the perspective of data races, such accesses have the same implications as a read or write"));
+                    helps.push(note!("Tree Borrows might also perform implicit accesses when returning from a function"));
                 }
                 helps.push(note!("this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior"));
                 helps.push(note!("see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information"));

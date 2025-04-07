@@ -917,7 +917,7 @@ impl<'tcx> Tree {
                                         data_race.read(
                                             alloc_id,
                                             access_range,
-                                            NaReadType::Retag,
+                                            NaReadType::AliasingImplicit,
                                             None,
                                             machine,
                                         )?,
@@ -925,7 +925,7 @@ impl<'tcx> Tree {
                                         data_race.write(
                                             alloc_id,
                                             access_range,
-                                            NaWriteType::Retag,
+                                            NaWriteType::AliasingImplicit,
                                             None,
                                             machine,
                                         )?,

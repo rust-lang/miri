@@ -62,7 +62,7 @@ impl VTimestamp {
     const fn encode_time_and_read_type(time: u32, read_type: NaReadType) -> u32 {
         let read_type_bit = match read_type {
             NaReadType::Read => 0,
-            NaReadType::Retag => 1,
+            NaReadType::AliasingImplicit => 1,
         };
         // Put the `read_type` in the lowest bit and `time` in the rest
         read_type_bit | time.checked_mul(2).expect("Vector clock overflow")
@@ -85,7 +85,11 @@ impl VTimestamp {
 
     #[inline]
     pub(super) fn read_type(&self) -> NaReadType {
-        if self.time_and_read_type & 1 == 0 { NaReadType::Read } else { NaReadType::Retag }
+        if self.time_and_read_type & 1 == 0 {
+            NaReadType::Read
+        } else {
+            NaReadType::AliasingImplicit
+        }
     }
 
     #[inline]

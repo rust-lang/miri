@@ -744,7 +744,7 @@ trait EvalContextPrivExt<'tcx, 'ecx>: crate::MiriInterpCxExt<'tcx> {
                         data_race.write(
                             alloc_id,
                             range,
-                            NaWriteType::Retag,
+                            NaWriteType::AliasingImplicit,
                             Some(place.layout.ty),
                             machine,
                         )?;
@@ -793,7 +793,7 @@ trait EvalContextPrivExt<'tcx, 'ecx>: crate::MiriInterpCxExt<'tcx> {
                             data_race.read(
                                 alloc_id,
                                 range,
-                                NaReadType::Retag,
+                                NaReadType::AliasingImplicit,
                                 Some(place.layout.ty),
                                 &this.machine,
                             )?;
