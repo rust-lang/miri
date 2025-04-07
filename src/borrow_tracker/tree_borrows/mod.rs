@@ -5,7 +5,7 @@ use rustc_middle::ty::{self, Ty};
 use rustc_span::def_id::DefId;
 
 use crate::borrow_tracker::{GlobalState, GlobalStateInner, ProtectorKind};
-use crate::concurrency::data_race::NaReadType;
+use crate::concurrency::data_race::{NaReadType, VClockAlloc};
 use crate::*;
 
 pub mod diagnostics;
@@ -63,7 +63,11 @@ impl<'tcx> Tree {
         let span = machine.current_span();
         self.perform_access(
             tag,
-            Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
+            tree::AccessRangeAndKind::Regular {
+                range,
+                kind: access_kind,
+                cause: diagnostics::AccessCause::Explicit(access_kind),
+            },
             global,
             alloc_id,
             span,
@@ -105,10 +109,17 @@ impl<'tcx> Tree {
         global: &GlobalState,
         tag: BorTag,
         alloc_id: AllocId, // diagnostics
+        data_race: Option<&VClockAlloc>,
     ) -> InterpResult<'tcx> {
         let span = machine.current_span();
         // `None` makes it the magic on-protector-end operation
-        self.perform_access(tag, None, global, alloc_id, span)
+        self.perform_access(
+            tag,
+            tree::AccessRangeAndKind::MagicProtectorEnd(data_race, machine),
+            global,
+            alloc_id,
+            span,
+        )
     }
 }
 
@@ -291,7 +302,11 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // All reborrows incur a (possibly zero-sized) read access to the parent
         tree_borrows.perform_access(
             orig_tag,
-            Some((range, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+            tree::AccessRangeAndKind::Regular {
+                range,
+                kind: AccessKind::Read,
+                cause: diagnostics::AccessCause::Reborrow,
+            },
             this.machine.borrow_tracker.as_ref().unwrap(),
             alloc_id,
             this.machine.current_span(),

@@ -7,6 +7,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::mir::RetagKind;
 use smallvec::SmallVec;
 
+use crate::concurrency::data_race::VClockAlloc;
 use crate::*;
 pub mod stacked_borrows;
 pub mod tree_borrows;
@@ -366,12 +367,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let kind = this.get_alloc_info(*alloc_id).kind;
             if matches!(kind, AllocKind::LiveData) {
                 let alloc_extra = this.get_alloc_extra(*alloc_id)?; // can still fail for `extern static`
+                let data_race = alloc_extra.data_race.as_ref();
                 let alloc_borrow_tracker = &alloc_extra.borrow_tracker.as_ref().unwrap();
                 alloc_borrow_tracker.release_protector(
                     &this.machine,
                     borrow_tracker,
                     *tag,
                     *alloc_id,
+                    data_race,
                 )?;
             }
         }
@@ -487,11 +490,12 @@ impl AllocState {
         global: &GlobalState,
         tag: BorTag,
         alloc_id: AllocId, // diagnostics
+        data_race: Option<&VClockAlloc>,
     ) -> InterpResult<'tcx> {
         match self {
             AllocState::StackedBorrows(_sb) => interp_ok(()),
             AllocState::TreeBorrows(tb) =>
-                tb.borrow_mut().release_protector(machine, global, tag, alloc_id),
+                tb.borrow_mut().release_protector(machine, global, tag, alloc_id, data_race),
         }
     }
 }

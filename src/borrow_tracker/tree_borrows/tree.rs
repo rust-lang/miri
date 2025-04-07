@@ -25,6 +25,7 @@ use crate::borrow_tracker::tree_borrows::foreign_access_skipping::IdempotentFore
 use crate::borrow_tracker::tree_borrows::perms::PermTransition;
 use crate::borrow_tracker::tree_borrows::unimap::{UniEntry, UniIndex, UniKeyMap, UniValMap};
 use crate::borrow_tracker::{GlobalState, ProtectorKind};
+use crate::concurrency::data_race::{NaReadType, NaWriteType, VClockAlloc};
 use crate::*;
 
 mod tests;
@@ -304,6 +305,20 @@ struct TreeVisitor<'tree> {
     tag_mapping: &'tree UniKeyMap<BorTag>,
     nodes: &'tree mut UniValMap<Node>,
     perms: &'tree mut UniValMap<LocationState>,
+}
+
+pub enum AccessRangeAndKind<'a, 'tcx> {
+    Regular { range: AllocRange, kind: AccessKind, cause: diagnostics::AccessCause },
+    MagicProtectorEnd(Option<&'a VClockAlloc>, &'a MiriMachine<'tcx>),
+}
+
+impl<'a, 'tcx> AccessRangeAndKind<'a, 'tcx> {
+    pub fn range(&self) -> Option<AllocRange> {
+        match self {
+            AccessRangeAndKind::MagicProtectorEnd(_, _) => None,
+            AccessRangeAndKind::Regular { range, .. } => Some(*range),
+        }
+    }
 }
 
 /// Whether to continue exploring the children recursively or not.
@@ -709,7 +724,11 @@ impl<'tcx> Tree {
     ) -> InterpResult<'tcx> {
         self.perform_access(
             tag,
-            Some((access_range, AccessKind::Write, diagnostics::AccessCause::Dealloc)),
+            AccessRangeAndKind::Regular {
+                range: access_range,
+                kind: AccessKind::Write,
+                cause: diagnostics::AccessCause::Dealloc,
+            },
             global,
             alloc_id,
             span,
@@ -768,7 +787,7 @@ impl<'tcx> Tree {
     pub fn perform_access(
         &mut self,
         tag: BorTag,
-        access_range_and_kind: Option<(AllocRange, AccessKind, diagnostics::AccessCause)>,
+        access_range_and_kind: AccessRangeAndKind<'_, 'tcx>,
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
@@ -790,6 +809,7 @@ impl<'tcx> Tree {
             let old_state = perm.get().copied().unwrap_or_else(|| node.default_location_state());
             old_state.skip_if_known_noop(access_kind, *rel_pos)
         };
+        let access_range = access_range_and_kind.range();
         let node_app = |perms_range: Range<u64>,
                         access_kind: AccessKind,
                         access_cause: diagnostics::AccessCause,
@@ -812,7 +832,7 @@ impl<'tcx> Tree {
                     transition,
                     is_foreign: rel_pos.is_foreign(),
                     access_cause,
-                    access_range: access_range_and_kind.map(|x| x.0),
+                    access_range,
                     transition_range: perms_range,
                     span,
                 });
@@ -838,45 +858,81 @@ impl<'tcx> Tree {
             .build()
         };
 
-        if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
-            // Default branch: this is a "normal" access through a known range.
-            // We iterate over affected locations and traverse the tree for each of them.
-            for (perms_range, perms) in self.rperms.iter_mut(access_range.start, access_range.size)
-            {
-                TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, perms }
-                    .traverse_this_parents_children_other(
-                        tag,
-                        |args| node_skipper(access_kind, args),
-                        |args| node_app(perms_range.clone(), access_kind, access_cause, args),
-                        |args| err_handler(perms_range.clone(), access_cause, args),
-                    )?;
-            }
-        } else {
-            // This is a special access through the entire allocation.
-            // It actually only affects `initialized` locations, so we need
-            // to filter on those before initiating the traversal.
-            //
-            // In addition this implicit access should not be visible to children,
-            // thus the use of `traverse_nonchildren`.
-            // See the test case `returned_mut_is_usable` from
-            // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
-            // why this is important.
-            for (perms_range, perms) in self.rperms.iter_mut_all() {
-                let idx = self.tag_mapping.get(&tag).unwrap();
-                // Only visit initialized permissions
-                if let Some(p) = perms.get(idx)
-                    && p.initialized
-                {
-                    let access_kind =
-                        if p.permission.is_active() { AccessKind::Write } else { AccessKind::Read };
-                    let access_cause = diagnostics::AccessCause::FnExit(access_kind);
+        match access_range_and_kind {
+            AccessRangeAndKind::Regular { range, kind, cause } => {
+                // Default branch: this is a "normal" access through a known range.
+                // We iterate over affected locations and traverse the tree for each of them.
+                for (perms_range, perms) in self.rperms.iter_mut(range.start, range.size) {
                     TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, perms }
-                        .traverse_nonchildren(
+                        .traverse_this_parents_children_other(
                         tag,
-                        |args| node_skipper(access_kind, args),
-                        |args| node_app(perms_range.clone(), access_kind, access_cause, args),
-                        |args| err_handler(perms_range.clone(), access_cause, args),
+                        |args| node_skipper(kind, args),
+                        |args| node_app(perms_range.clone(), kind, cause, args),
+                        |args| err_handler(perms_range.clone(), cause, args),
                     )?;
+                }
+            }
+            AccessRangeAndKind::MagicProtectorEnd(data_race, machine) => {
+                // This is a special access through the entire allocation.
+                // It actually only affects `initialized` locations, so we need
+                // to filter on those before initiating the traversal.
+                //
+                // In addition this implicit access should not be visible to children,
+                // thus the use of `traverse_nonchildren`.
+                // See the test case `returned_mut_is_usable` from
+                // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
+                // why this is important.
+                for (perms_range, perms) in self.rperms.iter_mut_all() {
+                    let idx = self.tag_mapping.get(&tag).unwrap();
+                    // Only visit initialized permissions
+                    if let Some(p) = perms.get(idx)
+                        && p.initialized
+                    {
+                        let access_kind = if p.permission.is_active() {
+                            AccessKind::Write
+                        } else {
+                            AccessKind::Read
+                        };
+                        let access_cause = diagnostics::AccessCause::FnExit(access_kind);
+                        let access_range = AllocRange::from(
+                            Size::from_bytes(perms_range.start)..Size::from_bytes(perms_range.end),
+                        );
+                        TreeVisitor {
+                            nodes: &mut self.nodes,
+                            tag_mapping: &self.tag_mapping,
+                            perms,
+                        }
+                        .traverse_nonchildren(
+                            tag,
+                            |args| node_skipper(access_kind, args),
+                            |args| node_app(perms_range.clone(), access_kind, access_cause, args),
+                            |args| err_handler(perms_range.clone(), access_cause, args),
+                        )?;
+
+                        // Also inform the data race model (but only if any bytes are actually affected).
+                        if access_range.size.bytes() > 0 {
+                            if let Some(data_race) = data_race {
+                                match access_kind {
+                                    AccessKind::Read =>
+                                        data_race.read(
+                                            alloc_id,
+                                            access_range,
+                                            NaReadType::Retag,
+                                            None,
+                                            machine,
+                                        )?,
+                                    AccessKind::Write =>
+                                        data_race.write(
+                                            alloc_id,
+                                            access_range,
+                                            NaWriteType::Retag,
+                                            None,
+                                            machine,
+                                        )?,
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
