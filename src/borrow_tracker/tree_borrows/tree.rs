@@ -866,6 +866,9 @@ impl<'tcx> Tree {
                 // Only visit initialized permissions
                 if let Some(p) = perms.get(idx)
                     && p.initialized
+                    // Do not do perform access if it is a `Cell`, as this
+                    // can cause data races when using thread-safe data types.
+                    && !p.permission.is_cell()
                 {
                     let access_kind =
                         if p.permission.is_active() { AccessKind::Write } else { AccessKind::Read };
