@@ -305,6 +305,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let res = this.DeleteFileW(file_name)?;
                 this.write_scalar(res, dest)?;
             }
+            "SetFilePointerEx" => {
+                let [file, distance_to_move, new_file_pointer, move_method] =
+                    this.check_shim(abi, sys_conv, link_name, args)?;
+                let res =
+                    this.SetFilePointerEx(file, distance_to_move, new_file_pointer, move_method)?;
+                this.write_scalar(res, dest)?;
+            }
 
             // Allocation
             "HeapAlloc" => {

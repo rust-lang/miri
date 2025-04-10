@@ -1,6 +1,6 @@
 use std::fs::{Metadata, OpenOptions};
 use std::io;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, SeekFrom};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -583,6 +583,57 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Return whether this was a success. 0 is success.
         interp_ok(this.read_scalar(&io_status)?)
+    }
+
+    fn SetFilePointerEx(
+        &mut self,
+        file: &OpTy<'tcx>,         // HANDLE
+        dist_to_move: &OpTy<'tcx>, // LARGE_INTEGER
+        new_fp: &OpTy<'tcx>,       // PLARGE_INTEGER
+        move_method: &OpTy<'tcx>,  // DWORD
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns BOOL (i32 on Windows)
+        let this = self.eval_context_mut();
+        let file = this.read_handle(file, "SetFilePointerEx")?;
+        let dist_to_move = this.read_scalar(dist_to_move)?.to_i64()?;
+        let move_method = this.read_scalar(move_method)?.to_u32()?;
+
+        let fd = match file {
+            Handle::File(fd) => fd,
+            _ => this.invalid_handle("SetFilePointerEx")?,
+        };
+
+        let Some(desc) = this.machine.fds.get(fd) else {
+            throw_unsup_format!("`SetFilePointerEx` is only supported on file backed handles");
+        };
+
+        let file_begin = this.eval_windows_u32("c", "FILE_BEGIN");
+        let file_current = this.eval_windows_u32("c", "FILE_CURRENT");
+        let file_end = this.eval_windows_u32("c", "FILE_END");
+
+        let seek = if move_method == file_begin {
+            SeekFrom::Start(dist_to_move.try_into().unwrap())
+        } else if move_method == file_current {
+            SeekFrom::Current(dist_to_move)
+        } else if move_method == file_end {
+            SeekFrom::End(dist_to_move)
+        } else {
+            throw_unsup_format!("Invalid move method: {move_method}")
+        };
+
+        match desc.seek(this.machine.communicate(), seek)? {
+            Ok(n) => {
+                this.write_scalar(
+                    Scalar::from_i64(n.try_into().unwrap()),
+                    &this.deref_pointer(new_fp)?,
+                )?;
+                interp_ok(this.eval_windows("c", "TRUE"))
+            }
+            Err(e) => {
+                this.set_last_error(e)?;
+                interp_ok(this.eval_windows("c", "FALSE"))
+            }
+        }
     }
 }
 
