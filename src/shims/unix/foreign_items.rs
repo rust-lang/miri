@@ -112,51 +112,122 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         match link_name.as_str() {
             // Environment related shims
             "getenv" => {
-                let [name] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [name] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty],
+                    this.machine.layouts.mut_raw_ptr.ty,
+                    args,
+                )?;
                 let result = this.getenv(name)?;
                 this.write_pointer(result, dest)?;
             }
             "unsetenv" => {
-                let [name] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [name] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.unsetenv(name)?;
                 this.write_scalar(result, dest)?;
             }
             "setenv" => {
-                let [name, value, overwrite] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [name, value, overwrite] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.machine.layouts.const_raw_ptr.ty,
+                        this.machine.layouts.const_raw_ptr.ty,
+                        this.tcx.types.i32,
+                    ],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 this.read_scalar(overwrite)?.to_i32()?;
                 let result = this.setenv(name, value)?;
                 this.write_scalar(result, dest)?;
             }
             "getcwd" => {
-                let [buf, size] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [buf, size] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.mut_raw_ptr.ty, this.libc_ty_layout("size_t").ty],
+                    this.machine.layouts.mut_raw_ptr.ty,
+                    args,
+                )?;
                 let result = this.getcwd(buf, size)?;
                 this.write_pointer(result, dest)?;
             }
             "chdir" => {
-                let [path] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [path] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.chdir(path)?;
                 this.write_scalar(result, dest)?;
             }
             "getpid" => {
-                let [] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [],
+                    this.libc_ty_layout("pid_t").ty,
+                    args,
+                )?;
                 let result = this.getpid()?;
                 this.write_scalar(result, dest)?;
             }
             "sysconf" => {
-                let [val] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [val] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32],
+                    this.libc_ty_layout("c_long").ty,
+                    args,
+                )?;
                 let result = this.sysconf(val)?;
                 this.write_scalar(result, dest)?;
             }
             // File descriptors
             "read" => {
-                let [fd, buf, count] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, buf, count] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.machine.layouts.mut_raw_ptr.ty, this.tcx.types.usize],
+                    this.libc_ty_layout("ssize_t").ty,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(count)?;
                 this.read(fd, buf, count, None, dest)?;
             }
             "write" => {
-                let [fd, buf, n] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, buf, n] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.machine.layouts.const_raw_ptr.ty,
+                        this.tcx.types.usize,
+                    ],
+                    this.libc_ty_layout("ssize_t").ty,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(n)?;
@@ -164,7 +235,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write(fd, buf, count, None, dest)?;
             }
             "pread" => {
-                let [fd, buf, count, offset] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, buf, count, offset] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.machine.layouts.mut_raw_ptr.ty,
+                        this.tcx.types.usize,
+                        this.libc_ty_layout("off_t").ty,
+                    ],
+                    this.libc_ty_layout("ssize_t").ty,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(count)?;
@@ -172,7 +255,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.read(fd, buf, count, Some(offset), dest)?;
             }
             "pwrite" => {
-                let [fd, buf, n, offset] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, buf, n, offset] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.machine.layouts.const_raw_ptr.ty,
+                        this.tcx.types.usize,
+                        this.libc_ty_layout("off_t").ty,
+                    ],
+                    this.tcx.types.isize,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(n)?;
@@ -181,7 +276,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write(fd, buf, count, Some(offset), dest)?;
             }
             "pread64" => {
-                let [fd, buf, count, offset] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, buf, count, offset] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.machine.layouts.mut_raw_ptr.ty,
+                        this.tcx.types.usize,
+                        this.libc_ty_layout("off64_t").ty,
+                    ],
+                    this.tcx.types.isize,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(count)?;
@@ -190,7 +297,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.read(fd, buf, count, Some(offset), dest)?;
             }
             "pwrite64" => {
-                let [fd, buf, n, offset] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, buf, n, offset] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.machine.layouts.const_raw_ptr.ty,
+                        this.tcx.types.usize,
+                        this.libc_ty_layout("off64_t").ty,
+                    ],
+                    this.tcx.types.isize,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(n)?;
@@ -218,13 +337,27 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "dup" => {
-                let [old_fd] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [old_fd] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let old_fd = this.read_scalar(old_fd)?.to_i32()?;
                 let new_fd = this.dup(old_fd)?;
                 this.write_scalar(new_fd, dest)?;
             }
             "dup2" => {
-                let [old_fd, new_fd] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [old_fd, new_fd] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.tcx.types.i32],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let old_fd = this.read_scalar(old_fd)?.to_i32()?;
                 let new_fd = this.read_scalar(new_fd)?.to_i32()?;
                 let result = this.dup2(old_fd, new_fd)?;
@@ -233,7 +366,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "flock" => {
                 // Currently this function does not exist on all Unixes, e.g. on Solaris.
                 this.check_target_os(&["linux", "freebsd", "macos", "illumos"], link_name)?;
-                let [fd, op] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, op] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.tcx.types.i32],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let op = this.read_scalar(op)?.to_i32()?;
                 let result = this.flock(fd, op)?;
@@ -250,42 +390,98 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "unlink" => {
-                let [path] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [path] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.unlink(path)?;
                 this.write_scalar(result, dest)?;
             }
             "symlink" => {
-                let [target, linkpath] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [target, linkpath] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty, this.machine.layouts.const_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.symlink(target, linkpath)?;
                 this.write_scalar(result, dest)?;
             }
             "rename" => {
-                let [oldpath, newpath] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [oldpath, newpath] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty, this.machine.layouts.const_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.rename(oldpath, newpath)?;
                 this.write_scalar(result, dest)?;
             }
             "mkdir" => {
-                let [path, mode] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [path, mode] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty, this.libc_ty_layout("mode_t").ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.mkdir(path, mode)?;
                 this.write_scalar(result, dest)?;
             }
             "rmdir" => {
-                let [path] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [path] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.rmdir(path)?;
                 this.write_scalar(result, dest)?;
             }
             "opendir" => {
-                let [name] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [name] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty],
+                    this.machine.layouts.mut_raw_ptr.ty,
+                    args,
+                )?;
                 let result = this.opendir(name)?;
                 this.write_scalar(result, dest)?;
             }
             "closedir" => {
-                let [dirp] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [dirp] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.mut_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.closedir(dirp)?;
                 this.write_scalar(result, dest)?;
             }
             "lseek64" => {
-                let [fd, offset, whence] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, offset, whence] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.libc_ty_layout("off64_t").ty, this.tcx.types.i32],
+                    this.libc_ty_layout("off64_t").ty,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let offset = this.read_scalar(offset)?.to_i64()?;
                 let whence = this.read_scalar(whence)?.to_i32()?;
@@ -293,7 +489,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "lseek" => {
-                let [fd, offset, whence] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, offset, whence] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.libc_ty_layout("off_t").ty, this.tcx.types.i32],
+                    this.libc_ty_layout("off_t").ty,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let offset = this.read_scalar(offset)?.to_int(this.libc_ty_layout("off_t").size)?;
                 let whence = this.read_scalar(whence)?.to_i32()?;
@@ -301,36 +504,87 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "ftruncate64" => {
-                let [fd, length] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, length] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.libc_ty_layout("off64_t").ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let length = this.read_scalar(length)?.to_i64()?;
                 let result = this.ftruncate64(fd, length.into())?;
                 this.write_scalar(result, dest)?;
             }
             "ftruncate" => {
-                let [fd, length] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, length] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32, this.libc_ty_layout("off_t").ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let length = this.read_scalar(length)?.to_int(this.libc_ty_layout("off_t").size)?;
                 let result = this.ftruncate64(fd, length)?;
                 this.write_scalar(result, dest)?;
             }
             "fsync" => {
-                let [fd] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.fsync(fd)?;
                 this.write_scalar(result, dest)?;
             }
             "fdatasync" => {
-                let [fd] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.tcx.types.i32],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.fdatasync(fd)?;
                 this.write_scalar(result, dest)?;
             }
             "readlink" => {
-                let [pathname, buf, bufsize] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [pathname, buf, bufsize] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.machine.layouts.const_raw_ptr.ty,
+                        this.machine.layouts.mut_raw_ptr.ty,
+                        this.tcx.types.usize,
+                    ],
+                    this.libc_ty_layout("ssize_t").ty,
+                    args,
+                )?;
                 let result = this.readlink(pathname, buf, bufsize)?;
                 this.write_scalar(Scalar::from_target_isize(result, this), dest)?;
             }
             "posix_fadvise" => {
-                let [fd, offset, len, advice] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [fd, offset, len, advice] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.libc_ty_layout("off_t").ty,
+                        this.libc_ty_layout("off_t").ty,
+                        this.tcx.types.i32,
+                    ],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 this.read_scalar(fd)?.to_i32()?;
                 this.read_target_isize(offset)?;
                 this.read_target_isize(len)?;
@@ -339,49 +593,109 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
             "realpath" => {
-                let [path, resolved_path] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [path, resolved_path] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty, this.machine.layouts.mut_raw_ptr.ty],
+                    this.machine.layouts.mut_raw_ptr.ty,
+                    args,
+                )?;
                 let result = this.realpath(path, resolved_path)?;
                 this.write_scalar(result, dest)?;
             }
             "mkstemp" => {
-                let [template] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [template] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.mut_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.mkstemp(template)?;
                 this.write_scalar(result, dest)?;
             }
 
             // Unnamed sockets and pipes
             "socketpair" => {
-                let [domain, type_, protocol, sv] =
-                    this.check_shim(abi, Conv::C, link_name, args)?;
+                let [domain, type_, protocol, sv] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [
+                        this.tcx.types.i32,
+                        this.tcx.types.i32,
+                        this.tcx.types.i32,
+                        this.machine.layouts.mut_raw_ptr.ty,
+                    ],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.socketpair(domain, type_, protocol, sv)?;
                 this.write_scalar(result, dest)?;
             }
             "pipe" => {
-                let [pipefd] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [pipefd] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.mut_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.pipe2(pipefd, /*flags*/ None)?;
                 this.write_scalar(result, dest)?;
             }
             "pipe2" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(&["linux", "freebsd", "solaris", "illumos"], link_name)?;
-                let [pipefd, flags] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [pipefd, flags] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.mut_raw_ptr.ty, this.tcx.types.i32],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.pipe2(pipefd, Some(flags))?;
                 this.write_scalar(result, dest)?;
             }
 
             // Time
             "gettimeofday" => {
-                let [tv, tz] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [tv, tz] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.mut_raw_ptr.ty, this.machine.layouts.mut_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.gettimeofday(tv, tz)?;
                 this.write_scalar(result, dest)?;
             }
             "localtime_r" => {
-                let [timep, result_op] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [timep, result_op] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.machine.layouts.const_raw_ptr.ty, this.machine.layouts.mut_raw_ptr.ty],
+                    this.machine.layouts.mut_raw_ptr.ty,
+                    args,
+                )?;
                 let result = this.localtime_r(timep, result_op)?;
                 this.write_pointer(result, dest)?;
             }
             "clock_gettime" => {
-                let [clk_id, tp] = this.check_shim(abi, Conv::C, link_name, args)?;
+                let [clk_id, tp] = this.check_shim_abi(
+                    link_name,
+                    abi,
+                    ExternAbi::C { unwind: false },
+                    [this.libc_ty_layout("clockid_t").ty, this.machine.layouts.mut_raw_ptr.ty],
+                    this.tcx.types.i32,
+                    args,
+                )?;
                 let result = this.clock_gettime(clk_id, tp)?;
                 this.write_scalar(result, dest)?;
             }
