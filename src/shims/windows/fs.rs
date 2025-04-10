@@ -477,7 +477,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         }
                         Err(e) => {
                             this.write_int(0, &io_status_info)?;
-                            this.write_int(error_kind_to_ntstatus(e), &io_status)
+                            this.write_int(error_kind_to_ntstatus(e) as i32, &io_status)
                         }
                 }}
             )
@@ -565,7 +565,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         }
                         Err(e) => {
                             this.write_int(0, &io_status_info)?;
-                            this.write_int(error_kind_to_ntstatus(e), &io_status)
+                            this.write_int(error_kind_to_ntstatus(e) as i32, &io_status)
                         }
                 }}
             )
@@ -596,6 +596,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         let file = this.read_handle(file, "SetFilePointerEx")?;
         let dist_to_move = this.read_scalar(dist_to_move)?.to_i64()?;
+        let new_fp_ptr = this.read_pointer(new_fp)?;
         let move_method = this.read_scalar(move_method)?.to_u32()?;
 
         let fd = match file {
@@ -623,10 +624,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         match desc.seek(this.machine.communicate(), seek)? {
             Ok(n) => {
-                this.write_scalar(
-                    Scalar::from_i64(n.try_into().unwrap()),
-                    &this.deref_pointer(new_fp)?,
-                )?;
+                if !this.ptr_is_null(new_fp_ptr)? {
+                    this.write_scalar(
+                        Scalar::from_i64(n.try_into().unwrap()),
+                        &this.deref_pointer_as(new_fp, this.machine.layouts.i64)?,
+                    )?;
+                }
                 interp_ok(this.eval_windows("c", "TRUE"))
             }
             Err(e) => {
