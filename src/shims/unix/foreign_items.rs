@@ -157,7 +157,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    [this.machine.layouts.mut_raw_ptr.ty, this.libc_ty_layout("size_t").ty],
+                    [this.machine.layouts.mut_raw_ptr.ty, this.tcx.types.usize],
                     this.machine.layouts.mut_raw_ptr.ty,
                     args,
                 )?;
@@ -194,7 +194,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     abi,
                     ExternAbi::C { unwind: false },
                     [this.tcx.types.i32],
-                    this.libc_ty_layout("c_long").ty,
+                    this.tcx.types.isize,
                     args,
                 )?;
                 let result = this.sysconf(val)?;
@@ -207,7 +207,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     abi,
                     ExternAbi::C { unwind: false },
                     [this.tcx.types.i32, this.machine.layouts.mut_raw_ptr.ty, this.tcx.types.usize],
-                    this.libc_ty_layout("ssize_t").ty,
+                    this.tcx.types.isize,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
@@ -225,7 +225,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.machine.layouts.const_raw_ptr.ty,
                         this.tcx.types.usize,
                     ],
-                    this.libc_ty_layout("ssize_t").ty,
+                    this.tcx.types.isize,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
@@ -235,6 +235,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write(fd, buf, count, None, dest)?;
             }
             "pread" => {
+                let off_t = this.libc_ty_layout("off_t");
                 let [fd, buf, count, offset] = this.check_shim_abi(
                     link_name,
                     abi,
@@ -243,18 +244,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.tcx.types.i32,
                         this.machine.layouts.mut_raw_ptr.ty,
                         this.tcx.types.usize,
-                        this.libc_ty_layout("off_t").ty,
+                        off_t.ty,
                     ],
-                    this.libc_ty_layout("ssize_t").ty,
+                    off_t.ty,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(count)?;
-                let offset = this.read_scalar(offset)?.to_int(this.libc_ty_layout("off_t").size)?;
+                let offset = this.read_scalar(offset)?.to_int(off_t.size)?;
                 this.read(fd, buf, count, Some(offset), dest)?;
             }
             "pwrite" => {
+                let off_t = this.libc_ty_layout("off_t");
                 let [fd, buf, n, offset] = this.check_shim_abi(
                     link_name,
                     abi,
@@ -263,7 +265,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.tcx.types.i32,
                         this.machine.layouts.const_raw_ptr.ty,
                         this.tcx.types.usize,
-                        this.libc_ty_layout("off_t").ty,
+                        off_t.ty,
                     ],
                     this.tcx.types.isize,
                     args,
@@ -271,11 +273,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(n)?;
-                let offset = this.read_scalar(offset)?.to_int(this.libc_ty_layout("off_t").size)?;
+                let offset = this.read_scalar(offset)?.to_int(off_t.size)?;
                 trace!("Called pwrite({:?}, {:?}, {:?}, {:?})", fd, buf, count, offset);
                 this.write(fd, buf, count, Some(offset), dest)?;
             }
             "pread64" => {
+                let off64_t = this.libc_ty_layout("off64_t");
                 let [fd, buf, count, offset] = this.check_shim_abi(
                     link_name,
                     abi,
@@ -284,7 +287,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.tcx.types.i32,
                         this.machine.layouts.mut_raw_ptr.ty,
                         this.tcx.types.usize,
-                        this.libc_ty_layout("off64_t").ty,
+                        off64_t.ty,
                     ],
                     this.tcx.types.isize,
                     args,
@@ -293,10 +296,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(count)?;
                 let offset =
-                    this.read_scalar(offset)?.to_int(this.libc_ty_layout("off64_t").size)?;
+                    this.read_scalar(offset)?.to_int(off64_t.size)?;
                 this.read(fd, buf, count, Some(offset), dest)?;
             }
             "pwrite64" => {
+                let off64_t = this.libc_ty_layout("off64_t");
                 let [fd, buf, n, offset] = this.check_shim_abi(
                     link_name,
                     abi,
@@ -305,7 +309,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.tcx.types.i32,
                         this.machine.layouts.const_raw_ptr.ty,
                         this.tcx.types.usize,
-                        this.libc_ty_layout("off64_t").ty,
+                        off64_t.ty,
                     ],
                     this.tcx.types.isize,
                     args,
@@ -314,7 +318,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(n)?;
                 let offset =
-                    this.read_scalar(offset)?.to_int(this.libc_ty_layout("off64_t").size)?;
+                    this.read_scalar(offset)?.to_int(off64_t.size)?;
                 trace!("Called pwrite64({:?}, {:?}, {:?}, {:?})", fd, buf, count, offset);
                 this.write(fd, buf, count, Some(offset), dest)?;
             }
@@ -474,60 +478,62 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "lseek64" => {
+                let off64_t = this.libc_ty_layout("off64_t");
                 let [fd, offset, whence] = this.check_shim_abi(
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    [this.tcx.types.i32, this.libc_ty_layout("off64_t").ty, this.tcx.types.i32],
-                    this.libc_ty_layout("off64_t").ty,
+                    [this.tcx.types.i32, off64_t.ty, this.tcx.types.i32],
+                    off64_t.ty,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
-                let offset = this.read_scalar(offset)?.to_i64()?;
+                let offset = this.read_scalar(offset)?.to_int(off64_t.size)?;
                 let whence = this.read_scalar(whence)?.to_i32()?;
-                let result = this.lseek64(fd, offset.into(), whence)?;
-                this.write_scalar(result, dest)?;
+                this.lseek64(fd, offset, whence, dest)?;
             }
             "lseek" => {
+                let off_t = this.libc_ty_layout("off_t");
                 let [fd, offset, whence] = this.check_shim_abi(
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    [this.tcx.types.i32, this.libc_ty_layout("off_t").ty, this.tcx.types.i32],
-                    this.libc_ty_layout("off_t").ty,
+                    [this.tcx.types.i32, off_t.ty, this.tcx.types.i32],
+                    off_t.ty,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
-                let offset = this.read_scalar(offset)?.to_int(this.libc_ty_layout("off_t").size)?;
+                let offset = this.read_scalar(offset)?.to_int(off_t.size)?;
                 let whence = this.read_scalar(whence)?.to_i32()?;
-                let result = this.lseek64(fd, offset, whence)?;
-                this.write_scalar(result, dest)?;
+                this.lseek64(fd, offset, whence, dest)?;
             }
             "ftruncate64" => {
+                let off64_t = this.libc_ty_layout("off64_t");
                 let [fd, length] = this.check_shim_abi(
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    [this.tcx.types.i32, this.libc_ty_layout("off64_t").ty],
+                    [this.tcx.types.i32, off64_t.ty],
                     this.tcx.types.i32,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
-                let length = this.read_scalar(length)?.to_i64()?;
-                let result = this.ftruncate64(fd, length.into())?;
+                let length = this.read_scalar(length)?.to_int(off64_t.size)?;
+                let result = this.ftruncate64(fd, length)?;
                 this.write_scalar(result, dest)?;
             }
             "ftruncate" => {
+                let off_t = this.libc_ty_layout("off_t");
                 let [fd, length] = this.check_shim_abi(
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    [this.tcx.types.i32, this.libc_ty_layout("off_t").ty],
+                    [this.tcx.types.i32, off_t.ty],
                     this.tcx.types.i32,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
-                let length = this.read_scalar(length)?.to_int(this.libc_ty_layout("off_t").size)?;
+                let length = this.read_scalar(length)?.to_int(off_t.size)?;
                 let result = this.ftruncate64(fd, length)?;
                 this.write_scalar(result, dest)?;
             }
@@ -565,29 +571,25 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.machine.layouts.mut_raw_ptr.ty,
                         this.tcx.types.usize,
                     ],
-                    this.libc_ty_layout("ssize_t").ty,
+                    this.tcx.types.isize,
                     args,
                 )?;
                 let result = this.readlink(pathname, buf, bufsize)?;
                 this.write_scalar(Scalar::from_target_isize(result, this), dest)?;
             }
             "posix_fadvise" => {
+                let off_t = this.libc_ty_layout("off_t");
                 let [fd, offset, len, advice] = this.check_shim_abi(
                     link_name,
                     abi,
                     ExternAbi::C { unwind: false },
-                    [
-                        this.tcx.types.i32,
-                        this.libc_ty_layout("off_t").ty,
-                        this.libc_ty_layout("off_t").ty,
-                        this.tcx.types.i32,
-                    ],
+                    [this.tcx.types.i32, off_t.ty, off_t.ty, this.tcx.types.i32],
                     this.tcx.types.i32,
                     args,
                 )?;
                 this.read_scalar(fd)?.to_i32()?;
-                this.read_target_isize(offset)?;
-                this.read_target_isize(len)?;
+                this.read_scalar(offset)?.to_int(off_t.size)?;
+                this.read_scalar(len)?.to_int(off_t.size)?;
                 this.read_scalar(advice)?.to_i32()?;
                 // fadvise is only informational, we can ignore it.
                 this.write_null(dest)?;
@@ -696,8 +698,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.tcx.types.i32,
                     args,
                 )?;
-                let result = this.clock_gettime(clk_id, tp)?;
-                this.write_scalar(result, dest)?;
+                this.clock_gettime(clk_id, tp, dest)?;
             }
 
             // Allocation
@@ -1148,7 +1149,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // These shims are enabled only when the caller is in the standard library.
             "pthread_attr_getguardsize" if this.frame_in_std() => {
                 let [_attr, guard_size] = this.check_shim(abi, Conv::C, link_name, args)?;
-                let guard_size_layout = this.libc_ty_layout("size_t");
+                let guard_size_layout = this.machine.layouts.usize;
                 let guard_size = this.deref_pointer_as(guard_size, guard_size_layout)?;
                 this.write_scalar(
                     Scalar::from_uint(this.machine.page_size, guard_size_layout.size),

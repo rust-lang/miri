@@ -21,7 +21,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         &mut self,
         clk_id_op: &OpTy<'tcx>,
         tp_op: &OpTy<'tcx>,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         // This clock support is deliberately minimal because a lot of clock types have fiddly
         // properties (is it possible for Miri to be suspended independently of the host?). If you
         // have a use for another clock type, please open an issue.
@@ -81,15 +82,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         } else if relative_clocks.contains(&clk_id) {
             this.machine.monotonic_clock.now().duration_since(this.machine.monotonic_clock.epoch())
         } else {
-            return this.set_last_error_and_return_i32(LibcError("EINVAL"));
+            return this.set_last_error_and_return(LibcError("EINVAL"), dest);
         };
 
         let tv_sec = duration.as_secs();
         let tv_nsec = duration.subsec_nanos();
 
         this.write_int_fields(&[tv_sec.into(), tv_nsec.into()], &tp)?;
+        this.write_int(0, dest)?;
 
-        interp_ok(Scalar::from_i32(0))
+        interp_ok(())
     }
 
     fn gettimeofday(
