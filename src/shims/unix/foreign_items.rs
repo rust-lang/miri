@@ -246,7 +246,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.tcx.types.usize,
                         off_t.ty,
                     ],
-                    off_t.ty,
+                    this.tcx.types.isize,
                     args,
                 )?;
                 let fd = this.read_scalar(fd)?.to_i32()?;
