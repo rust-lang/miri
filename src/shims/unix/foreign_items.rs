@@ -295,8 +295,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(count)?;
-                let offset =
-                    this.read_scalar(offset)?.to_int(off64_t.size)?;
+                let offset = this.read_scalar(offset)?.to_int(off64_t.size)?;
                 this.read(fd, buf, count, Some(offset), dest)?;
             }
             "pwrite64" => {
@@ -317,8 +316,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let buf = this.read_pointer(buf)?;
                 let count = this.read_target_usize(n)?;
-                let offset =
-                    this.read_scalar(offset)?.to_int(off64_t.size)?;
+                let offset = this.read_scalar(offset)?.to_int(off64_t.size)?;
                 trace!("Called pwrite64({:?}, {:?}, {:?}, {:?})", fd, buf, count, offset);
                 this.write(fd, buf, count, Some(offset), dest)?;
             }
