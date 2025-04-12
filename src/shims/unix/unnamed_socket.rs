@@ -40,6 +40,7 @@ pub struct AnonSocket {
     /// A list of thread ids blocked because the buffer was full.
     /// Once another thread reads some bytes, these threads will be unblocked.
     blocked_write_tid: RefCell<Vec<ThreadId>>,
+    /// Whether this is a non-blocking socket or not.
     is_nonblock: Cell<bool>,
 }
 
