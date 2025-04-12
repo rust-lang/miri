@@ -186,7 +186,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 // We only support F_GETFL for socketpair and pipe.
                 let anonsocket_fd = fd.downcast::<AnonSocket>().ok_or_else(|| {
-                    err_unsup_format!("fcntl: only socketpair / pipe are supported for F_SETFL")
+                    err_unsup_format!("fcntl: only socketpair / pipe are supported for F_GETFL")
                 })?;
 
                 if anonsocket_fd.is_nonblock() {
