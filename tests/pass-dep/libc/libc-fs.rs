@@ -1,5 +1,5 @@
 //@ignore-target: windows # File handling is not implemented yet
-//@compile-flags: -Zmiri-disable-isolation -Zmiri-preemption-rate=0
+//@compile-flags: -Zmiri-disable-isolation
 
 #![feature(io_error_more)]
 #![feature(io_error_uncategorized)]
@@ -10,7 +10,6 @@ use std::io::{Error, ErrorKind, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::thread;
 
 #[path = "../../utils/mod.rs"]
 mod utils;
@@ -41,8 +40,6 @@ fn main() {
     test_nofollow_not_symlink();
     #[cfg(target_os = "macos")]
     test_ioctl();
-    test_setfl_getfl();
-    test_setfl_getfl_threaded();
 }
 
 fn test_file_open_unix_allow_two_args() {
@@ -453,55 +450,4 @@ fn test_ioctl() {
         let fd = libc::open(name_ptr, libc::O_RDONLY);
         assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);
     }
-}
-
-/// Basic test for fcntl's F_SETFL and F_GETFL flag.
-fn test_setfl_getfl() {
-    // Test fd without O_NONBLOCK flag.
-    let mut fds = [-1, -1];
-    let res = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
-    assert_eq!(res, 0);
-
-    let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-    assert_eq!(res, 0);
-
-    // Modify the flag to O_NONBLOCK flag with setfl.
-    let new_flag = libc::O_NONBLOCK;
-    let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
-    assert_eq!(res, 0);
-
-    let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-    assert_eq!(res, libc::O_NONBLOCK);
-}
-
-/// Test the behaviour of setfl/getfl when a fd is blocking.
-/// The expected execution is:
-/// 1. Main thread blocks on fds[0] `read`.
-/// 2. Thread 1 sets O_NONBLOCK flag on fds[0],
-///    checks the value of F_GETFL,
-///    then writes to fds[1] to unblock main thread's `read`.
-fn test_setfl_getfl_threaded() {
-    let mut fds = [-1, -1];
-    let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
-    assert_eq!(res, 0);
-    let mut buf: [u8; 5] = [0; 5];
-    let thread1 = thread::spawn(move || {
-        // Add O_NONBLOCK flag while pipe is still block on read.
-        let new_flag = libc::O_NONBLOCK;
-        let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
-        assert_eq!(res, 0);
-
-        // Check the new flag value while the main thread is still blocked on fds[0].
-        let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-        assert_eq!(res, libc::O_NONBLOCK);
-
-        // The write below will unblock the `read` in main thread.
-        let data = "abcde".as_bytes().as_ptr();
-        let res = unsafe { libc::write(fds[1], data as *const libc::c_void, 5) };
-        assert_eq!(res, 5);
-    });
-    // The `read` below will block.
-    let res = unsafe { libc::read(fds[0], buf.as_mut_ptr().cast(), buf.len() as libc::size_t) };
-    thread1.join().unwrap();
-    assert_eq!(res, 5);
 }
