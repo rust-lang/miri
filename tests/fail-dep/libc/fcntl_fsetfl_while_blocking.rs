@@ -1,6 +1,6 @@
 //@ignore-target: windows # File handling is not implemented yet
 //~^ ERROR: deadlock: the evaluated program deadlocked
-//@compile-flags: -Zmiri-disable-isolation -Zmiri-preemption-rate=0
+//@compile-flags: -Zmiri-preemption-rate=0
 use std::thread;
 
 /// If an O_NONBLOCK flag is set while the fd is blocking, that fd will not be woken up.
