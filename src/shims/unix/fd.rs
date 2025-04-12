@@ -190,7 +190,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 })?;
 
                 if anonsocket_fd.is_nonblock() {
-                    // socketpair's SOCK_NONBLOCK and pipe's O_NONBLOCK have the same value.
                     interp_ok(this.eval_libc("O_NONBLOCK"))
                 } else {
                     interp_ok(Scalar::from_i32(0))
