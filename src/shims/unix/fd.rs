@@ -204,18 +204,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 // We only support F_SETFL for socketpair and pipe.
                 let anonsocket_fd = fd.downcast::<AnonSocket>().ok_or_else(|| {
-                    err_unsup_format!("fcntl: only socketpair / pipe are supported for F_GETFL")
+                    err_unsup_format!("fcntl: only socketpair / pipe are supported for F_SETFL")
                 })?;
 
-                let cmd_name = "fcntl(fd, F_SETFL, ...)";
-                let [flag] = check_min_vararg_count(cmd_name, varargs)?;
+                let [flag] = check_min_vararg_count("fcntl(fd, F_SETFL, ...)", varargs)?;
                 let flag = this.read_scalar(flag)?.to_i32()?;
 
                 // FIXME: File access mode and file creation flags should be ignored.
                 if flag == this.eval_libc_i32("O_NONBLOCK") {
                     anonsocket_fd.set_nonblock();
                 } else {
-                    throw_unsup_format!("fcntl: only O_NONBLOCK are supported for F_GETFL")
+                    throw_unsup_format!("fcntl: only O_NONBLOCK is supported for F_SETFL")
                 }
                 interp_ok(Scalar::from_i32(0))
             }
