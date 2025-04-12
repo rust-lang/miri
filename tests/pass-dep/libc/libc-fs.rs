@@ -474,34 +474,34 @@ fn test_setfl_getfl() {
     assert_eq!(res, libc::O_NONBLOCK);
 }
 
-// Test the behaviour of setfl/getfl when a fd is blocking.
-// The expected execution is:
-// 1. Main thread blocks on fds[0] `read`.
-// 2. Thread 1 set O_NONBLOCK  flag on fds[0], then check the value of F_GETFL.
-// 3. Thread 2 writes to fds[1] to unblock the `read` in main thread.
+/// Test the behaviour of setfl/getfl when a fd is blocking.
+/// The expected execution is:
+/// 1. Main thread blocks on fds[0] `read`.
+/// 2. Thread 1 sets O_NONBLOCK flag on fds[0],
+///    checks the value of F_GETFL,
+///    then writes to fds[1] to unblock main thread's `read`.
 fn test_setfl_getfl_threaded() {
     let mut fds = [-1, -1];
     let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
     assert_eq!(res, 0);
     let mut buf: [u8; 5] = [0; 5];
-    // This `read` will block.
     let thread1 = thread::spawn(move || {
         // Add O_NONBLOCK flag while pipe is still block on read.
         let new_flag = libc::O_NONBLOCK;
         let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
         assert_eq!(res, 0);
+
         // Check the new flag value while the main thread is still blocked on fds[0].
         let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
         assert_eq!(res, libc::O_NONBLOCK);
-    });
-    let thread2 = thread::spawn(move || {
-        // This thread will unblock the `read` on main thread.
+
+        // The write below will unblock the `read` in main thread.
         let data = "abcde".as_bytes().as_ptr();
         let res = unsafe { libc::write(fds[1], data as *const libc::c_void, 5) };
         assert_eq!(res, 5);
     });
+    // The `read` below will block.
     let res = unsafe { libc::read(fds[0], buf.as_mut_ptr().cast(), buf.len() as libc::size_t) };
     thread1.join().unwrap();
-    thread2.join().unwrap();
     assert_eq!(res, 5);
 }
