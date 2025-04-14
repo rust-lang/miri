@@ -13,7 +13,6 @@ pub trait Foo {
 }
 
 impl Foo for Cell<i32> {
-
     // local write after foreign read
     fn lw_fr(&mut self, val: i32) {
         self.set(val);
@@ -38,8 +37,7 @@ impl Foo for Cell<i32> {
 }
 
 fn main() {
-
-    let mut x : Cell<i32> = Cell::new(42);
+    let mut x: Cell<i32> = Cell::new(42);
 
     // Expands to something like
     //

@@ -146,7 +146,8 @@ impl<'tcx> NewPermission {
         // in the case of a protected reference: protected references are always considered
         // "freeze" in their reservation phase.
         let (initial_state, should_do_initial_read) = match mutability {
-            Mutability::Mut if ty_is_unpin => (Permission::new_reserved(ty_is_freeze, is_protected), true),
+            Mutability::Mut if ty_is_unpin =>
+                (Permission::new_reserved(ty_is_freeze, is_protected), true),
             Mutability::Not if ty_is_freeze => (Permission::new_frozen(), true),
             Mutability::Not if !ty_is_freeze => (Permission::new_cell(), false),
             // Raw pointers never enter this function so they are not handled.
