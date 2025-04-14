@@ -312,6 +312,17 @@ impl Permission {
         self.inner.compatible_with_protector()
     }
 
+    /// What kind of access to perform before releasing the protector.
+    pub fn protector_end_access(&self) -> Option<AccessKind> {
+        Some(match self.inner {
+            // Do not do perform access if it is a `Cell`, as this
+            // can cause data races when using thread-safe data types.
+            Cell => return None,
+            Active => AccessKind::Write,
+            _ => AccessKind::Read,
+        })
+    }
+
     /// Apply the transition to the inner PermissionPriv.
     pub fn perform_access(
         kind: AccessKind,

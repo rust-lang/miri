@@ -865,13 +865,9 @@ impl<'tcx> Tree {
                 let idx = self.tag_mapping.get(&tag).unwrap();
                 // Only visit initialized permissions
                 if let Some(p) = perms.get(idx)
+                    && let Some(access_kind) =  p.permission.protector_end_access()
                     && p.initialized
-                    // Do not do perform access if it is a `Cell`, as this
-                    // can cause data races when using thread-safe data types.
-                    && !p.permission.is_cell()
-                {
-                    let access_kind =
-                        if p.permission.is_active() { AccessKind::Write } else { AccessKind::Read };
+                 {
                     let access_cause = diagnostics::AccessCause::FnExit(access_kind);
                     TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, perms }
                         .traverse_nonchildren(
