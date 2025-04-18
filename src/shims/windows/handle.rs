@@ -4,7 +4,7 @@ use std::mem::variant_count;
 use rustc_abi::HasDataLayout;
 
 use crate::concurrency::thread::ThreadNotFound;
-use crate::shims::files::FdNum;
+use crate::shims::files::{FdNum, NullOutput};
 use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -234,9 +234,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let stderr = this.eval_windows("c", "STD_ERROR_HANDLE").to_i32()?;
 
         let fd_num = if which == stdin {
-            this.machine.fds.insert_new(io::stdin())
+            if this.machine.mute_stdout_stderr {
+                this.machine.fds.insert_new(NullOutput)
+            } else {
+                this.machine.fds.insert_new(io::stdin())
+            }
         } else if which == stdout {
-            this.machine.fds.insert_new(io::stdout())
+            if this.machine.mute_stdout_stderr {
+                this.machine.fds.insert_new(NullOutput)
+            } else {
+                this.machine.fds.insert_new(io::stdout())
+            }
         } else if which == stderr {
             this.machine.fds.insert_new(io::stderr())
         } else {
