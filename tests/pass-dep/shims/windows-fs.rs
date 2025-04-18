@@ -15,7 +15,7 @@ use windows_sys::Wdk::Storage::FileSystem::{NtReadFile, NtWriteFile};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_IO_DEVICE, GENERIC_READ,
     GENERIC_WRITE, GetLastError, RtlNtStatusToDosError, STATUS_ACCESS_DENIED,
-    STATUS_IO_DEVICE_ERROR, STATUS_SUCCESS
+    STATUS_IO_DEVICE_ERROR, STATUS_SUCCESS,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_ALWAYS, CREATE_NEW, CreateFileW, DeleteFileW,
