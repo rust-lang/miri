@@ -17,6 +17,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
+use super::NewPermission;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError,
@@ -615,17 +616,34 @@ impl<'tcx> Tree {
     /// Insert a new tag in the tree
     pub fn new_child(
         &mut self,
+        this: &MiriInterpCx<'tcx>,
+        place: &MPlaceTy<'tcx>,
+        size: Size,
+        base_offset: Size,
         parent_tag: BorTag,
         new_tag: BorTag,
-        default_initial_perm: Permission,
+        perm: NewPermission,
         reborrow_range: AllocRange,
         span: Span,
-        prot: bool,
     ) -> InterpResult<'tcx> {
-        assert!(!self.tag_mapping.contains_key(&new_tag));
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
+        let default_initial_perm = match perm {
+            NewPermission::Uniform { initial_state, .. } => initial_state,
+            NewPermission::FreezeSensitive { freeze_perm, .. } => freeze_perm,
+        };
+        let prot = perm.protector().is_some();
+
+        if let NewPermission::FreezeSensitive { freeze_perm, nonfreeze_perm, .. } = perm {
+            // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
+            // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
+            assert!(
+                freeze_perm.strongest_idempotent_foreign_access(prot)
+                    <= nonfreeze_perm.strongest_idempotent_foreign_access(prot)
+            );
+        }
         let strongest_idempotent = default_initial_perm.strongest_idempotent_foreign_access(prot);
+
         // Create the node
         self.nodes.insert(
             idx,
@@ -638,15 +656,39 @@ impl<'tcx> Tree {
                 debug_info: NodeDebugInfo::new(new_tag, default_initial_perm, span),
             },
         );
+
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
-        // Initialize perms
-        let perm = LocationState::new_init(default_initial_perm, strongest_idempotent);
-        for (_perms_range, perms) in self.rperms.iter_mut(reborrow_range.start, reborrow_range.size)
-        {
-            perms.insert(idx, perm);
-        }
 
+        match perm {
+            NewPermission::Uniform { .. } => {
+                // Initialize perms
+                let perm = LocationState::new_init(default_initial_perm, strongest_idempotent);
+
+                for (_perms_range, perms) in
+                    self.rperms.iter_mut(reborrow_range.start, reborrow_range.size)
+                {
+                    perms.insert(idx, perm);
+                }
+            }
+            NewPermission::FreezeSensitive { freeze_perm, nonfreeze_perm, .. } => {
+                this.visit_freeze_sensitive(place, size, |mut range, frozen| {
+                    // Adjust range.
+                    range.start += base_offset;
+
+                    // We are only ever `Frozen` inside the frozen bits.
+                    let perm = if frozen { freeze_perm } else { nonfreeze_perm };
+                    let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
+
+                    // Initialize perms
+                    let perm = LocationState::new_init(perm, strongest_idempotent);
+                    for (_perms_range, perms) in self.rperms.iter_mut(range.start, range.size) {
+                        perms.insert(idx, perm);
+                    }
+                    interp_ok(())
+                })?;
+            }
+        }
         // Inserting the new perms might have broken the SIFA invariant (see `foreign_access_skipping.rs`).
         // We now weaken the recorded SIFA for our parents, until the invariant is restored.
         // We could weaken them all to `LocalAccess`, but it is more efficient to compute the SIFA
