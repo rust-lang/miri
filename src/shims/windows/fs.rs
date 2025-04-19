@@ -1,5 +1,6 @@
 use std::fs::{Metadata, OpenOptions};
 use std::io;
+use std::io::{ErrorKind, SeekFrom};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -390,6 +391,253 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
     }
+
+    fn NtWriteFile(
+        &mut self,
+        handle: &OpTy<'tcx>,          // HANDLE
+        event: &OpTy<'tcx>,           // HANDLE
+        apc_routine: &OpTy<'tcx>,     // PIO_APC_ROUTINE
+        apc_ctx: &OpTy<'tcx>,         // PVOID
+        io_status_block: &OpTy<'tcx>, // PIO_STATUS_BLOCK
+        buf: &OpTy<'tcx>,             // PVOID
+        n: &OpTy<'tcx>,               // ULONG
+        byte_offset: &OpTy<'tcx>,     // PLARGE_INTEGER
+        key: &OpTy<'tcx>,             // PULONG
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns NTSTATUS (u32 on Windows)
+        let this = self.eval_context_mut();
+        let handle = this.read_handle(handle, "NtWriteFile")?;
+        let event = this.read_handle(event, "NtWriteFile")?;
+        let apc_routine = this.read_pointer(apc_routine)?;
+        let apc_ctx = this.read_pointer(apc_ctx)?;
+        let buf = this.read_pointer(buf)?;
+        let count = this.read_scalar(n)?.to_u32()? as usize;
+        let byte_offset = this.read_target_usize(byte_offset)?; // is actually a pointer
+        let key = this.read_pointer(key)?;
+        let io_status_block =
+            this.deref_pointer_as(io_status_block, this.windows_ty_layout("IO_STATUS_BLOCK"))?;
+
+        if event != Handle::Null {
+            throw_unsup_format!(
+                "`NtWriteFile` `Event` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_routine)? {
+            throw_unsup_format!(
+                "`NtWriteFile` `ApcRoutine` parameter is not null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_ctx)? {
+            throw_unsup_format!(
+                "`NtWriteFile` `ApcContext` parameter is not null, which is unsupported"
+            );
+        }
+
+        if byte_offset != 0 {
+            throw_unsup_format!(
+                "`NtWriteFile` `ByteOffset` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(key)? {
+            throw_unsup_format!("`NtWriteFile` `Key` parameter is not null, which is unsupported");
+        }
+
+        let fd = match handle {
+            Handle::File(fd) => fd,
+            _ => this.invalid_handle("NtWriteFile")?,
+        };
+
+        let Some(desc) = this.machine.fds.get(fd) else { this.invalid_handle("NtWriteFile")? };
+
+        let io_status = {
+            let anon = this.project_field_named(&io_status_block, "Anonymous")?;
+            this.project_field_named(&anon, "Status")?
+        };
+        let io_status_info = this.project_field_named(&io_status_block, "Information")?;
+
+        let finish = {
+            let io_status = io_status.clone();
+            let io_status_info = io_status_info.clone();
+            callback!(
+                @capture<'tcx> {
+                    count: usize,
+                    io_status: MPlaceTy<'tcx>,
+                    io_status_info: MPlaceTy<'tcx>,
+                }
+                |this, result: Result<usize, IoError>| {
+                    match result {
+                        Ok(read_size) => {
+                            assert!(read_size <= count);
+                            // This must fit since `count` fits.
+                            this.write_int(u64::try_from(read_size).unwrap(), &io_status_info)?;
+                            this.write_int(0, &io_status)
+                        }
+                        Err(e) => {
+                            this.write_int(0, &io_status_info)?;
+                            this.write_int(error_kind_to_ntstatus(e) as i32, &io_status)
+                        }
+                }}
+            )
+        };
+
+        desc.write(this.machine.communicate(), buf, count, this, finish)?;
+
+        // Return whether this was a success. 0 is success.
+        interp_ok(this.read_scalar(&io_status)?)
+    }
+
+    fn NtReadFile(
+        &mut self,
+        handle: &OpTy<'tcx>,          // HANDLE
+        event: &OpTy<'tcx>,           // HANDLE
+        apc_routine: &OpTy<'tcx>,     // PIO_APC_ROUTINE
+        apc_ctx: &OpTy<'tcx>,         // PVOID
+        io_status_block: &OpTy<'tcx>, // PIO_STATUS_BLOCK
+        buf: &OpTy<'tcx>,             // PVOID
+        n: &OpTy<'tcx>,               // ULONG
+        byte_offset: &OpTy<'tcx>,     // PLARGE_INTEGER
+        key: &OpTy<'tcx>,             // PULONG
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns NTSTATUS (u32 on Windows)
+        let this = self.eval_context_mut();
+        let handle = this.read_handle(handle, "NtReadFile")?;
+        let event = this.read_handle(event, "NtReadFile")?;
+        let apc_routine = this.read_pointer(apc_routine)?;
+        let apc_ctx = this.read_pointer(apc_ctx)?;
+        let buf = this.read_pointer(buf)?;
+        let count = this.read_scalar(n)?.to_u32()? as usize;
+        let byte_offset = this.read_target_usize(byte_offset)?; // is actually a pointer
+        let key = this.read_pointer(key)?;
+        let io_status_block =
+            this.deref_pointer_as(io_status_block, this.windows_ty_layout("IO_STATUS_BLOCK"))?;
+
+        if event != Handle::Null {
+            throw_unsup_format!("`NtReadFile` `Event` parameter is non-null, which is unsupported");
+        }
+
+        if !this.ptr_is_null(apc_routine)? {
+            throw_unsup_format!(
+                "`NtReadFile` `ApcRoutine` parameter is not null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(apc_ctx)? {
+            throw_unsup_format!(
+                "`NtReadFile` `ApcContext` parameter is not null, which is unsupported"
+            );
+        }
+
+        if byte_offset != 0 {
+            throw_unsup_format!(
+                "`NtReadFile` `ByteOffset` parameter is non-null, which is unsupported"
+            );
+        }
+
+        if !this.ptr_is_null(key)? {
+            throw_unsup_format!("`NtReadFile` `Key` parameter is not null, which is unsupported");
+        }
+
+        let io_status = {
+            let anon = this.project_field_named(&io_status_block, "Anonymous")?;
+            this.project_field_named(&anon, "Status")?
+        };
+        let io_status_info = this.project_field_named(&io_status_block, "Information")?;
+
+        let finish = {
+            let io_status = io_status.clone();
+            let io_status_info = io_status_info.clone();
+            callback!(
+                @capture<'tcx> {
+                    count: usize,
+                    io_status: MPlaceTy<'tcx>,
+                    io_status_info: MPlaceTy<'tcx>,
+                }
+                |this, result: Result<usize, IoError>| {
+                    match result {
+                        Ok(read_size) => {
+                            assert!(read_size <= count);
+                            // This must fit since `count` fits.
+                            this.write_int(u64::try_from(read_size).unwrap(), &io_status_info)?;
+                            this.write_int(0, &io_status)
+                        }
+                        Err(e) => {
+                            this.write_int(0, &io_status_info)?;
+                            this.write_int(error_kind_to_ntstatus(e) as i32, &io_status)
+                        }
+                }}
+            )
+        };
+
+        let fd = match handle {
+            Handle::File(fd) => fd,
+            _ => this.invalid_handle("NtWriteFile")?,
+        };
+
+        let Some(desc) = this.machine.fds.get(fd) else { this.invalid_handle("NtReadFile")? };
+
+        // TODO: Windows expects this function to return its error, not set the global one
+        desc.read(this.machine.communicate(), buf, count, this, finish)?;
+
+        // Return whether this was a success. 0 is success.
+        interp_ok(this.read_scalar(&io_status)?)
+    }
+
+    fn SetFilePointerEx(
+        &mut self,
+        file: &OpTy<'tcx>,         // HANDLE
+        dist_to_move: &OpTy<'tcx>, // LARGE_INTEGER
+        new_fp: &OpTy<'tcx>,       // PLARGE_INTEGER
+        move_method: &OpTy<'tcx>,  // DWORD
+    ) -> InterpResult<'tcx, Scalar> {
+        // ^ Returns BOOL (i32 on Windows)
+        let this = self.eval_context_mut();
+        let file = this.read_handle(file, "SetFilePointerEx")?;
+        let dist_to_move = this.read_scalar(dist_to_move)?.to_i64()?;
+        let new_fp_ptr = this.read_pointer(new_fp)?;
+        let move_method = this.read_scalar(move_method)?.to_u32()?;
+
+        let fd = match file {
+            Handle::File(fd) => fd,
+            _ => this.invalid_handle("SetFilePointerEx")?,
+        };
+
+        let Some(desc) = this.machine.fds.get(fd) else {
+            throw_unsup_format!("`SetFilePointerEx` is only supported on file backed handles");
+        };
+
+        let file_begin = this.eval_windows_u32("c", "FILE_BEGIN");
+        let file_current = this.eval_windows_u32("c", "FILE_CURRENT");
+        let file_end = this.eval_windows_u32("c", "FILE_END");
+
+        let seek = if move_method == file_begin {
+            SeekFrom::Start(dist_to_move.try_into().unwrap())
+        } else if move_method == file_current {
+            SeekFrom::Current(dist_to_move)
+        } else if move_method == file_end {
+            SeekFrom::End(dist_to_move)
+        } else {
+            throw_unsup_format!("Invalid move method: {move_method}")
+        };
+
+        match desc.seek(this.machine.communicate(), seek)? {
+            Ok(n) => {
+                if !this.ptr_is_null(new_fp_ptr)? {
+                    this.write_scalar(
+                        Scalar::from_i64(n.try_into().unwrap()),
+                        &this.deref_pointer_as(new_fp, this.machine.layouts.i64)?,
+                    )?;
+                }
+                interp_ok(this.eval_windows("c", "TRUE"))
+            }
+            Err(e) => {
+                this.set_last_error(e)?;
+                interp_ok(this.eval_windows("c", "FALSE"))
+            }
+        }
+    }
 }
 
 /// Windows FILETIME is measured in 100-nanosecs since 1601
@@ -418,4 +666,24 @@ fn write_filetime_field<'tcx>(
         &[("dwLowDateTime", low.into()), ("dwHighDateTime", high.into())],
         &cx.project_field_named(val, name)?,
     )
+}
+
+fn error_kind_to_ntstatus(e: IoError) -> u32 {
+    match e {
+        IoError::HostError(e) =>
+            match e.kind() {
+                // STATUS_MEDIA_WRITE_PROTECTED
+                ErrorKind::ReadOnlyFilesystem => 0xC00000A2,
+                // STATUS_FILE_INVALID
+                ErrorKind::InvalidInput => 0xC0000098,
+                // STATUS_DISK_FULL
+                ErrorKind::QuotaExceeded => 0xC000007F,
+                // STATUS_ACCESS_DENIED
+                ErrorKind::PermissionDenied => 0xC0000022,
+                // For the default error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
+                _ => 0xC0000185,
+            },
+        // For the default error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
+        _ => 0xC0000185,
+    }
 }

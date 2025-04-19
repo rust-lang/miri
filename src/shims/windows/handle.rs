@@ -1,9 +1,10 @@
+use std::io;
 use std::mem::variant_count;
 
 use rustc_abi::HasDataLayout;
 
 use crate::concurrency::thread::ThreadNotFound;
-use crate::shims::files::FdNum;
+use crate::shims::files::{FdNum, NullOutput};
 use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -222,6 +223,35 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         throw_machine_stop!(TerminationInfo::Abort(format!(
             "invalid handle passed to `{function_name}`"
         )))
+    }
+
+    fn GetStdHandle(&mut self, which: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        let which = this.read_scalar(which)?.to_i32()?;
+
+        let stdin = this.eval_windows("c", "STD_INPUT_HANDLE").to_i32()?;
+        let stdout = this.eval_windows("c", "STD_OUTPUT_HANDLE").to_i32()?;
+        let stderr = this.eval_windows("c", "STD_ERROR_HANDLE").to_i32()?;
+
+        let fd_num = if which == stdin {
+            if this.machine.mute_stdout_stderr {
+                this.machine.fds.insert_new(NullOutput)
+            } else {
+                this.machine.fds.insert_new(io::stdin())
+            }
+        } else if which == stdout {
+            if this.machine.mute_stdout_stderr {
+                this.machine.fds.insert_new(NullOutput)
+            } else {
+                this.machine.fds.insert_new(io::stdout())
+            }
+        } else if which == stderr {
+            this.machine.fds.insert_new(io::stderr())
+        } else {
+            throw_unsup_format!("Invalid argument to `GetStdHandle`: {which}")
+        };
+        let handle = Handle::File(fd_num);
+        interp_ok(handle.to_scalar(this))
     }
 
     fn CloseHandle(&mut self, handle_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
