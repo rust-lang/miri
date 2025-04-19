@@ -6,6 +6,8 @@ use std::task::Poll;
 use std::time::{Duration, SystemTime};
 
 use either::Either;
+use rand::rngs::StdRng;
+use rand::seq::IndexedRandom;
 use rustc_abi::ExternAbi;
 use rustc_const_eval::CTRL_C_RECEIVED;
 use rustc_data_structures::fx::FxHashMap;
@@ -401,6 +403,8 @@ pub struct ThreadManager<'tcx> {
     thread_local_allocs: FxHashMap<(DefId, ThreadId), StrictPointer>,
     /// A flag that indicates that we should change the active thread.
     yield_active_thread: bool,
+    /// A flag that indicates that we should do round robin scheduling of threads else randomized scheduling is used.
+    round_robin_scheduling: bool,
 }
 
 impl VisitProvenance for ThreadManager<'_> {
@@ -410,6 +414,7 @@ impl VisitProvenance for ThreadManager<'_> {
             thread_local_allocs,
             active_thread: _,
             yield_active_thread: _,
+            round_robin_scheduling: _,
         } = self;
 
         for thread in threads {
@@ -431,6 +436,7 @@ impl<'tcx> Default for ThreadManager<'tcx> {
             threads,
             thread_local_allocs: Default::default(),
             yield_active_thread: false,
+            round_robin_scheduling: false,
         }
     }
 }
@@ -549,6 +555,10 @@ impl<'tcx> ThreadManager<'tcx> {
     /// Get a shared borrow of the currently active thread.
     pub fn active_thread_ref(&self) -> &Thread<'tcx> {
         &self.threads[self.active_thread]
+    }
+
+    pub fn set_round_robin_scheduling(&mut self, round_robin: bool) {
+        self.round_robin_scheduling = round_robin;
     }
 
     /// Mark the thread as detached, which means that no other thread will try
@@ -702,7 +712,11 @@ impl<'tcx> ThreadManager<'tcx> {
     /// used in stateless model checkers such as Loom: run the active thread as
     /// long as we can and switch only when we have to (the active thread was
     /// blocked, terminated, or has explicitly asked to be preempted).
-    fn schedule(&mut self, clock: &MonotonicClock) -> InterpResult<'tcx, SchedulingAction> {
+    fn schedule(
+        &mut self,
+        clock: &MonotonicClock,
+        rng: &mut StdRng,
+    ) -> InterpResult<'tcx, SchedulingAction> {
         // This thread and the program can keep going.
         if self.threads[self.active_thread].state.is_enabled() && !self.yield_active_thread {
             // The currently active thread is still enabled, just continue with it.
@@ -730,19 +744,24 @@ impl<'tcx> ThreadManager<'tcx> {
             .threads
             .iter_enumerated()
             .skip(self.active_thread.index() + 1)
-            .chain(self.threads.iter_enumerated().take(self.active_thread.index()));
-        for (id, thread) in threads {
-            debug_assert_ne!(self.active_thread, id);
-            if thread.state.is_enabled() {
-                info!(
-                    "---------- Now executing on thread `{}` (previous: `{}`) ----------------------------------------",
-                    self.get_thread_display_name(id),
-                    self.get_thread_display_name(self.active_thread)
-                );
-                self.active_thread = id;
-                break;
-            }
+            .chain(self.threads.iter_enumerated().take(self.active_thread.index() + 1))
+            .filter(|(_id, thread)| thread.state.is_enabled())
+            .collect::<Vec<_>>();
+
+        let mut new_thread = threads.first();
+        if !self.round_robin_scheduling {
+            new_thread = threads.choose(rng);
         }
+
+        if let Some((id, _thread)) = new_thread {
+            info!(
+                "---------- Now executing on thread `{}` (previous: `{}`) ----------------------------------------",
+                self.get_thread_display_name(*id),
+                self.get_thread_display_name(self.active_thread)
+            );
+            self.active_thread = *id;
+        }
+
         self.yield_active_thread = false;
         if self.threads[self.active_thread].state.is_enabled() {
             return interp_ok(SchedulingAction::ExecuteStep);
@@ -1152,7 +1171,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.machine.handle_abnormal_termination();
                 throw_machine_stop!(TerminationInfo::Interrupted);
             }
-            match this.machine.threads.schedule(&this.machine.monotonic_clock)? {
+            let rng = this.machine.rng.get_mut();
+            match this.machine.threads.schedule(&this.machine.monotonic_clock, rng)? {
                 SchedulingAction::ExecuteStep => {
                     if !this.step()? {
                         // See if this thread can do something else.

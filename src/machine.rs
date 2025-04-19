@@ -669,7 +669,8 @@ impl<'tcx> MiriMachine<'tcx> {
             cpu_affinity::MAX_CPUS,
             config.num_cpus
         );
-        let threads = ThreadManager::default();
+        let mut threads = ThreadManager::default();
+        threads.set_round_robin_scheduling(config.fixed_scheduling);
         let mut thread_cpu_affinity = FxHashMap::default();
         if matches!(&*tcx.sess.target.os, "linux" | "freebsd" | "android") {
             thread_cpu_affinity
