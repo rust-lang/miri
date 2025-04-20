@@ -234,11 +234,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let stderr = this.eval_windows("c", "STD_ERROR_HANDLE").to_i32()?;
 
         let fd_num = if which == stdin {
-            if this.machine.mute_stdout_stderr {
-                this.machine.fds.insert_new(NullOutput)
-            } else {
-                this.machine.fds.insert_new(io::stdin())
-            }
+            this.machine.fds.insert_new(io::stdin())
         } else if which == stdout {
             if this.machine.mute_stdout_stderr {
                 this.machine.fds.insert_new(NullOutput)
@@ -246,7 +242,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.machine.fds.insert_new(io::stdout())
             }
         } else if which == stderr {
-            this.machine.fds.insert_new(io::stderr())
+            if this.machine.mute_stdout_stderr {
+                this.machine.fds.insert_new(NullOutput)
+            } else {
+                this.machine.fds.insert_new(io::stderr())
+            }
         } else {
             throw_unsup_format!("Invalid argument to `GetStdHandle`: {which}")
         };
