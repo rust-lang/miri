@@ -477,7 +477,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         }
                         Err(e) => {
                             this.write_int(0, &io_status_info)?;
-                            this.write_int(error_kind_to_ntstatus(e) as i32, &io_status)
+                            this.write_int(error_kind_to_ntstatus(e), &io_status)
                         }
                 }}
             )
@@ -565,7 +565,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         }
                         Err(e) => {
                             this.write_int(0, &io_status_info)?;
-                            this.write_int(error_kind_to_ntstatus(e) as i32, &io_status)
+                            this.write_int(error_kind_to_ntstatus(e), &io_status)
                         }
                 }}
             )
@@ -668,12 +668,12 @@ fn write_filetime_field<'tcx>(
     )
 }
 
-fn error_kind_to_ntstatus(e: IoError) -> u32 {
-    match e {
+fn error_kind_to_ntstatus(e: IoError) -> i32 {
+    let raw = match e {
         IoError::HostError(e) =>
             match e.kind() {
                 // STATUS_MEDIA_WRITE_PROTECTED
-                ErrorKind::ReadOnlyFilesystem => 0xC00000A2,
+                ErrorKind::ReadOnlyFilesystem => 0xC00000A2u32,
                 // STATUS_FILE_INVALID
                 ErrorKind::InvalidInput => 0xC0000098,
                 // STATUS_DISK_FULL
@@ -685,5 +685,6 @@ fn error_kind_to_ntstatus(e: IoError) -> u32 {
             },
         // For the default error code we arbitrarily pick 0xC0000185, STATUS_IO_DEVICE_ERROR.
         _ => 0xC0000185,
-    }
+    };
+    raw.cast_signed()
 }
