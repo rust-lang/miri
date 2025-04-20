@@ -20,6 +20,15 @@ use crate::*;
 /// be configured in the real system.
 const MAX_SOCKETPAIR_BUFFER_CAPACITY: usize = 212992;
 
+#[derive(Debug, PartialEq)]
+enum AnonSocketType {
+    Socketpair,
+    // Read end of the pipe.
+    PipeRead,
+    // Write end of the pipe.
+    PipeWrite,
+}
+
 /// One end of a pair of connected unnamed sockets.
 #[derive(Debug)]
 pub struct AnonSocket {
@@ -42,6 +51,8 @@ pub struct AnonSocket {
     blocked_write_tid: RefCell<Vec<ThreadId>>,
     /// Whether this is a non-blocking socket or not.
     is_nonblock: Cell<bool>,
+    // Differentiate between different AnonSocket fd type.
+    fd_type: AnonSocketType,
 }
 
 #[derive(Debug)]
@@ -119,6 +130,17 @@ impl FileDescription for AnonSocket {
     fn as_unix<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
         self
     }
+
+    fn get_flags<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, Scalar>{
+        if self.fd_type == AnonSocketType::Socketpair {
+            interp_ok(ecx.eval_libc("O_RDWR"))
+        } else if self.fd_type == AnonSocketType::PipeRead {
+            interp_ok(ecx.eval_libc("O_RDONLY"))
+        } else {
+            interp_ok(ecx.eval_libc("O_WRONLY"))
+        }
+    }
+    
 }
 
 /// Write to AnonSocket based on the space available and return the written byte size.
@@ -417,6 +439,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
             is_nonblock: Cell::new(is_sock_nonblock),
+            fd_type: AnonSocketType::Socketpair,
         });
         let fd1 = fds.new_ref(AnonSocket {
             readbuf: Some(RefCell::new(Buffer::new())),
@@ -425,6 +448,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
             is_nonblock: Cell::new(is_sock_nonblock),
+            fd_type: AnonSocketType::Socketpair,
         });
 
         // Make the file descriptions point to each other.
@@ -485,6 +509,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
             is_nonblock: Cell::new(is_nonblock),
+            fd_type: AnonSocketType::PipeRead,
         });
         let fd1 = fds.new_ref(AnonSocket {
             readbuf: None,
@@ -493,6 +518,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             blocked_read_tid: RefCell::new(Vec::new()),
             blocked_write_tid: RefCell::new(Vec::new()),
             is_nonblock: Cell::new(is_nonblock),
+            fd_type: AnonSocketType::PipeWrite,
         });
 
         // Make the file descriptions point to each other.
