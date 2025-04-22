@@ -15,7 +15,7 @@ pub const MAX_CPUS: usize = 1024;
 /// A thread's CPU affinity mask determines the set of CPUs on which it is eligible to run.
 // the actual representation depends on the target's endianness and pointer width.
 // See CpuAffinityMask::set for details
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct CpuAffinityMask([u8; Self::CPU_MASK_BYTES]);
 
 impl CpuAffinityMask {
