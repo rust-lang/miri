@@ -143,7 +143,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     );
                 } else if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&id) {
                     let cpuset = cpuset.clone();
-                    let byte_count = set_size.try_into().unwrap();
+                    let byte_count =
+                        Ord::min(cpuset.as_slice().len(), set_size.try_into().unwrap());
                     this.write_bytes_ptr(mask, cpuset.as_slice()[..byte_count].iter().copied())?;
                     this.write_null(dest)?;
                 } else {
