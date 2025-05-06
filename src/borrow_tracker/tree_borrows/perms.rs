@@ -254,10 +254,6 @@ impl Permission {
     pub fn is_disabled(&self) -> bool {
         self.inner == Disabled
     }
-    /// Check if `self` is the post-child-write state of a pointer (is `Active`).
-    pub fn is_active(&self) -> bool {
-        self.inner == Active
-    }
     /// Check if `self` is the never-allow-writes-again state of a pointer (is `Frozen`).
     pub fn is_frozen(&self) -> bool {
         self.inner == Frozen
@@ -395,11 +391,6 @@ impl PermTransition {
         self.from <= self.to
     }
 
-    pub fn from(from: Permission, to: Permission) -> Option<Self> {
-        let t = Self { from: from.inner, to: to.inner };
-        t.is_possible().then_some(t)
-    }
-
     pub fn is_noop(self) -> bool {
         self.from == self.to
     }
@@ -407,11 +398,6 @@ impl PermTransition {
     /// Extract result of a transition (checks that the starting point matches).
     pub fn applied(self, starting_point: Permission) -> Option<Permission> {
         (starting_point.inner == self.from).then_some(Permission { inner: self.to })
-    }
-
-    /// Extract starting point of a transition
-    pub fn started(self) -> Permission {
-        Permission { inner: self.from }
     }
 
     /// Determines if this transition would disable the permission.

@@ -1102,15 +1102,4 @@ impl AccessRelatedness {
     pub fn is_foreign(self) -> bool {
         matches!(self, AccessRelatedness::AncestorAccess | AccessRelatedness::CousinAccess)
     }
-
-    /// Given the AccessRelatedness for the parent node, compute the AccessRelatedness
-    /// for the child node. This function assumes that we propagate away from the initial
-    /// access.
-    pub fn for_child(self) -> Self {
-        use AccessRelatedness::*;
-        match self {
-            AncestorAccess | This => AncestorAccess,
-            StrictChildAccess | CousinAccess => CousinAccess,
-        }
-    }
 }
