@@ -94,6 +94,7 @@ impl PermissionPriv {
     }
 
     /// Reject `ReservedIM` that cannot exist in the presence of a protector.
+    #[cfg(test)]
     fn compatible_with_protector(&self) -> bool {
         // FIXME(TB-Cell): It is unclear what to do here.
         // `Cell` will occur with a protector but won't provide the guarantees
@@ -309,6 +310,7 @@ impl Permission {
     }
 
     /// Reject `ReservedIM` that cannot exist in the presence of a protector.
+    #[cfg(test)]
     pub fn compatible_with_protector(&self) -> bool {
         self.inner.compatible_with_protector()
     }
