@@ -134,7 +134,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 // We only support CPU_LEVEL_WHICH and CPU_WHICH_PID for now.
                 // This is the bare minimum to make the tests pass.
-                // TODO: Support more.
                 if this.ptr_is_null(mask)? {
                     this.set_last_error_and_return(LibcError("EFAULT"), dest)?;
                 } else if level != level_which || which != which_pid {
@@ -148,8 +147,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.write_bytes_ptr(mask, cpuset.as_slice()[..byte_count].iter().copied())?;
                     this.write_null(dest)?;
                 } else {
-                    // The thread whose ID is pid could not be found.
-                    this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+                    // `id` is always that of the active thread, so this is currently unreachable.
+                    unreachable!();
                 }
             }
 
