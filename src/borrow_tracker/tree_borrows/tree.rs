@@ -623,25 +623,22 @@ impl<'tcx> Tree {
         parent_tag: BorTag,
         new_tag: BorTag,
         perm: NewPermission,
-        reborrow_range: AllocRange,
+        // reborrow_range: AllocRange,
         span: Span,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
-        let default_initial_perm = match perm {
-            NewPermission::Uniform { initial_state, .. } => initial_state,
-            NewPermission::FreezeSensitive { freeze_perm, .. } => freeze_perm,
-        };
-        let prot = perm.protector().is_some();
+        let default_initial_perm = perm.freeze_perm;
+        let prot = perm.freeze_protector.is_some();
 
-        if let NewPermission::FreezeSensitive { freeze_perm, nonfreeze_perm, .. } = perm {
-            // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
-            // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
-            assert!(
-                freeze_perm.strongest_idempotent_foreign_access(prot)
-                    <= nonfreeze_perm.strongest_idempotent_foreign_access(prot)
-            );
-        }
+        // if let NewPermission { freeze_perm, nonfreeze_perm, .. } = perm {
+        // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
+        // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
+        assert!(
+            perm.freeze_perm.strongest_idempotent_foreign_access(prot)
+                <= perm.nonfreeze_perm.strongest_idempotent_foreign_access(prot)
+        );
+        // }
         let strongest_idempotent = default_initial_perm.strongest_idempotent_foreign_access(prot);
 
         // Create the node
@@ -661,17 +658,7 @@ impl<'tcx> Tree {
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
 
         match perm {
-            NewPermission::Uniform { .. } => {
-                // Initialize perms
-                let perm = LocationState::new_init(default_initial_perm, strongest_idempotent);
-
-                for (_perms_range, perms) in
-                    self.rperms.iter_mut(reborrow_range.start, reborrow_range.size)
-                {
-                    perms.insert(idx, perm);
-                }
-            }
-            NewPermission::FreezeSensitive { freeze_perm, nonfreeze_perm, .. } => {
+            NewPermission { freeze_perm, nonfreeze_perm, .. } => {
                 this.visit_freeze_sensitive(place, size, |mut range, frozen| {
                     // Adjust range.
                     range.start += base_offset;
