@@ -30,54 +30,54 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Unsafe because of the call to native code.
                 // Because this is calling a C function it is not necessarily sound,
                 // but there is no way around this and we've checked as much as we can.
-                let x = unsafe { ffi::call::<i8>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<i8>(ptr, libffi_args.as_slice()) };
                 Scalar::from_i8(x)
             }
             ty::Int(IntTy::I16) => {
-                let x = unsafe { ffi::call::<i16>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<i16>(ptr, libffi_args.as_slice()) };
                 Scalar::from_i16(x)
             }
             ty::Int(IntTy::I32) => {
-                let x = unsafe { ffi::call::<i32>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<i32>(ptr, libffi_args.as_slice()) };
                 Scalar::from_i32(x)
             }
             ty::Int(IntTy::I64) => {
-                let x = unsafe { ffi::call::<i64>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<i64>(ptr, libffi_args.as_slice()) };
                 Scalar::from_i64(x)
             }
             ty::Int(IntTy::Isize) => {
-                let x = unsafe { ffi::call::<isize>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<isize>(ptr, libffi_args.as_slice()) };
                 Scalar::from_target_isize(x.try_into().unwrap(), this)
             }
             // uints
             ty::Uint(UintTy::U8) => {
-                let x = unsafe { ffi::call::<u8>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<u8>(ptr, libffi_args.as_slice()) };
                 Scalar::from_u8(x)
             }
             ty::Uint(UintTy::U16) => {
-                let x = unsafe { ffi::call::<u16>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<u16>(ptr, libffi_args.as_slice()) };
                 Scalar::from_u16(x)
             }
             ty::Uint(UintTy::U32) => {
-                let x = unsafe { ffi::call::<u32>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<u32>(ptr, libffi_args.as_slice()) };
                 Scalar::from_u32(x)
             }
             ty::Uint(UintTy::U64) => {
-                let x = unsafe { ffi::call::<u64>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<u64>(ptr, libffi_args.as_slice()) };
                 Scalar::from_u64(x)
             }
             ty::Uint(UintTy::Usize) => {
-                let x = unsafe { ffi::call::<usize>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<usize>(ptr, libffi_args.as_slice()) };
                 Scalar::from_target_usize(x.try_into().unwrap(), this)
             }
             // Functions with no declared return type (i.e., the default return)
             // have the output_type `Tuple([])`.
             ty::Tuple(t_list) if t_list.is_empty() => {
-                unsafe { ffi::call::<()>(ptr, libffi_args.as_slice()) };
+                unsafe { do_native_call::<()>(ptr, libffi_args.as_slice()) };
                 return interp_ok(ImmTy::uninit(dest.layout));
             }
             ty::RawPtr(..) => {
-                let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args.as_slice()) };
+                let x = unsafe { do_native_call::<*const ()>(ptr, libffi_args.as_slice()) };
                 let ptr = Pointer::new(Provenance::Wildcard, Size::from_bytes(x.addr()));
                 Scalar::from_pointer(ptr, this)
             }
@@ -88,7 +88,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// Get the pointer to the function of the specified name in the shared object file,
     /// if it exists. The function must be in the shared object file specified: we do *not*
-    /// return pointers to functions in dependencies of the library.  
+    /// return pointers to functions in dependencies of the library.
     fn get_func_ptr_explicitly_from_lib(&mut self, link_name: Symbol) -> Option<CodePtr> {
         let this = self.eval_context_mut();
         // Try getting the function from the shared library.
@@ -192,6 +192,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
     }
+}
+
+unsafe fn do_native_call<T: libffi::high::CType>(ptr: CodePtr, args: &[ffi::Arg<'_>]) -> T {
+    use shims::trace::Supervisor;
+
+    let _ = Supervisor::init();
+    let ret = unsafe {
+        Supervisor::start_ffi().unwrap();
+        let ret = ffi::call(ptr, args);
+        Supervisor::end_ffi().unwrap();
+        ret
+    };
+    let accesses = Supervisor::get_events().unwrap();
+    eprintln!("accesses: {accesses:#018x?}");
+    ret
 }
 
 #[derive(Debug, Clone)]

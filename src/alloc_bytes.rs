@@ -5,6 +5,8 @@ use std::{alloc, slice};
 use rustc_abi::{Align, Size};
 use rustc_middle::mir::interpret::AllocBytes;
 
+use crate::discrete_alloc::MachineAlloc;
+
 /// Allocation bytes that explicitly handle the layout of the data they're storing.
 /// This is necessary to interface with native code that accesses the program store in Miri.
 #[derive(Debug)]
@@ -35,8 +37,11 @@ impl Drop for MiriAllocBytes {
         } else {
             self.layout
         };
+
         // SAFETY: Invariant, `self.ptr` points to memory allocated with `self.layout`.
-        unsafe { alloc::dealloc(self.ptr, alloc_layout) }
+        unsafe {
+            MachineAlloc::dealloc(self.ptr, alloc_layout);
+        }
     }
 }
 
@@ -89,14 +94,18 @@ impl AllocBytes for MiriAllocBytes {
         let size = slice.len();
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
-        let alloc_fn = |layout| unsafe { alloc::alloc(layout) };
+        let alloc_fn = |layout| unsafe { MachineAlloc::alloc(layout) };
         let alloc_bytes = MiriAllocBytes::alloc_with(size.try_into().unwrap(), align, alloc_fn)
             .unwrap_or_else(|()| {
                 panic!("Miri ran out of memory: cannot create allocation of {size} bytes")
             });
+        //eprintln!("alloc_bytes: {alloc_bytes:?} contains {}", unsafe {
+        //    alloc_bytes.ptr.read_volatile()
+        //});
         // SAFETY: `alloc_bytes.ptr` and `slice.as_ptr()` are non-null, properly aligned
         // and valid for the `size`-many bytes to be copied.
         unsafe { alloc_bytes.ptr.copy_from(slice.as_ptr(), size) };
+        //eprintln!("after copy contains {}", unsafe { alloc_bytes.ptr.read_volatile() });
         alloc_bytes
     }
 
@@ -104,7 +113,7 @@ impl AllocBytes for MiriAllocBytes {
         let size = size.bytes();
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
-        let alloc_fn = |layout| unsafe { alloc::alloc_zeroed(layout) };
+        let alloc_fn = |layout| unsafe { MachineAlloc::alloc_zeroed(layout) };
         MiriAllocBytes::alloc_with(size, align, alloc_fn).ok()
     }
 

@@ -305,6 +305,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         .binary_search_by_key(&base_addr, |(addr, _)| *addr)
                         .unwrap_err()
                 };
+                //eprintln!(
+                //    "Inserting into global_state at idx {pos} elems (addr {base_addr:#018x}, id {alloc_id:?})\n======"
+                //);
                 global_state.int_to_ptr_map.insert(pos, (base_addr, alloc_id));
 
                 interp_ok(base_addr)

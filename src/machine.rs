@@ -743,6 +743,8 @@ impl<'tcx> MiriMachine<'tcx> {
                 // undefined behaviour in Miri itself!
                 (
                     unsafe {
+                        discrete_alloc::MachineAlloc::enable();
+                        discrete_alloc::MachineAlloc::set_pagesize(page_size);
                         libloading::Library::new(lib_file_path)
                             .expect("failed to read specified extern shared object file")
                     },
