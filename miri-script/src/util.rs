@@ -62,7 +62,10 @@ impl MiriEnv {
         }
 
         // Hard-code the target dir, since we rely on all binaries ending up in the same spot.
-        sh.set_var("CARGO_TARGET_DIR", path!(miri_dir / "target"));
+        // Cargo provides multiple ways to adjust this and we need to overwrite all of them.
+        let target_dir = path!(miri_dir / "target");
+        sh.set_var("CARGO_TARGET_DIR", &target_dir);
+        sh.set_var("CARGO_BUILD_BUILD_DIR", &target_dir);
 
         // We configure dev builds to not be unusably slow.
         let devel_opt_level =
