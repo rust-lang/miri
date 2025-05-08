@@ -623,7 +623,6 @@ impl<'tcx> Tree {
         parent_tag: BorTag,
         new_tag: BorTag,
         perm: NewPermission,
-        // reborrow_range: AllocRange,
         span: Span,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
@@ -631,16 +630,13 @@ impl<'tcx> Tree {
         let default_initial_perm = perm.freeze_perm;
         let prot = perm.freeze_protector.is_some();
 
-        // if let NewPermission { freeze_perm, nonfreeze_perm, .. } = perm {
         // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
         // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
         assert!(
             perm.freeze_perm.strongest_idempotent_foreign_access(prot)
                 <= perm.nonfreeze_perm.strongest_idempotent_foreign_access(prot)
         );
-        // }
         let strongest_idempotent = default_initial_perm.strongest_idempotent_foreign_access(prot);
-
         // Create the node
         self.nodes.insert(
             idx,
@@ -653,7 +649,6 @@ impl<'tcx> Tree {
                 debug_info: NodeDebugInfo::new(new_tag, default_initial_perm, span),
             },
         );
-
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
 
