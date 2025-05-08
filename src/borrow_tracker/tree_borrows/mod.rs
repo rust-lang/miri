@@ -119,7 +119,7 @@ pub struct NewPermission {
     /// Whether a read access should be performed on the frozen part on a retag.
     freeze_access: bool,
     /// Whether this pointer is part of the arguments of a function call.
-    /// `freeze_protector` is `Some(_)` for all pointers marked `noalias`.
+    /// `protector` is `Some(_)` for all pointers marked `noalias`.
     protector: Option<ProtectorKind>,
     /// Permission for the non-frozen part of the range.
     nonfreeze_perm: Permission,
