@@ -120,7 +120,7 @@ pub struct NewPermission {
     freeze_access: bool,
     /// Whether this pointer is part of the arguments of a function call.
     /// `freeze_protector` is `Some(_)` for all pointers marked `noalias`.
-    freeze_protector: Option<ProtectorKind>,
+    protector: Option<ProtectorKind>,
     /// Permission for the non-frozen part of the range.
     nonfreeze_perm: Permission,
     /// Whether a read access should be performed on the non-frozen
@@ -128,7 +128,6 @@ pub struct NewPermission {
     /// this could cause data races when using thread-safe data types
     /// like `Mutex<T>`.
     nonfreeze_access: bool,
-    // nonfreeze_protector must always be None
 }
 
 impl<'tcx> NewPermission {
@@ -162,7 +161,7 @@ impl<'tcx> NewPermission {
         NewPermission {
             freeze_perm: initial_state,
             freeze_access: true,
-            freeze_protector: protector,
+            protector,
             nonfreeze_perm,
             nonfreeze_access,
         }
@@ -284,7 +283,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ptr_size.bytes()
         );
 
-        if let Some(protect) = new_perm.freeze_protector {
+        if let Some(protect) = new_perm.protector {
             // We register the protection in two different places.
             // This makes creating a protector slower, but checking whether a tag
             // is protected faster.

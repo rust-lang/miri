@@ -628,7 +628,7 @@ impl<'tcx> Tree {
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
         let default_initial_perm = perm.freeze_perm;
-        let prot = perm.freeze_protector.is_some();
+        let prot = perm.protector.is_some();
 
         // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
         // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
