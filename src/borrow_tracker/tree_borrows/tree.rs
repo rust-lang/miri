@@ -652,25 +652,23 @@ impl<'tcx> Tree {
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
 
-        match perm {
-            NewPermission { freeze_perm, nonfreeze_perm, .. } => {
-                this.visit_freeze_sensitive(place, size, |mut range, frozen| {
-                    // Adjust range.
-                    range.start += base_offset;
+        let NewPermission { freeze_perm, nonfreeze_perm, .. } = perm;
+        this.visit_freeze_sensitive(place, size, |mut range, frozen| {
+            // Adjust range.
+            range.start += base_offset;
 
-                    // We are only ever `Frozen` inside the frozen bits.
-                    let perm = if frozen { freeze_perm } else { nonfreeze_perm };
-                    let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
+            // We are only ever `Frozen` inside the frozen bits.
+            let perm = if frozen { freeze_perm } else { nonfreeze_perm };
+            let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
 
-                    // Initialize perms
-                    let perm = LocationState::new_init(perm, strongest_idempotent);
-                    for (_perms_range, perms) in self.rperms.iter_mut(range.start, range.size) {
-                        perms.insert(idx, perm);
-                    }
-                    interp_ok(())
-                })?;
+            // Initialize perms
+            let perm = LocationState::new_init(perm, strongest_idempotent);
+            for (_perms_range, perms) in self.rperms.iter_mut(range.start, range.size) {
+                perms.insert(idx, perm);
             }
-        }
+            interp_ok(())
+        })?;
+
         // Inserting the new perms might have broken the SIFA invariant (see `foreign_access_skipping.rs`).
         // We now weaken the recorded SIFA for our parents, until the invariant is restored.
         // We could weaken them all to `LocalAccess`, but it is more efficient to compute the SIFA

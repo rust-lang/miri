@@ -326,18 +326,15 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         // Some reborrows incur a read access to the parent
-        match new_perm {
-            NewPermission { freeze_access, nonfreeze_access, .. } => {
-                this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
-                    range.start += base_offset;
-                    let access = if frozen { freeze_access } else { nonfreeze_access };
-                    if access {
-                        perform_parent_access(range)?
-                    }
-                    interp_ok(())
-                })?;
+        let NewPermission { freeze_access, nonfreeze_access, .. } = new_perm;
+        this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
+            range.start += base_offset;
+            let access = if frozen { freeze_access } else { nonfreeze_access };
+            if access {
+                perform_parent_access(range)?
             }
-        }
+            interp_ok(())
+        })?;
 
         // Record the parent-child pair in the tree.
         tree_borrows.new_child(
@@ -366,18 +363,15 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         // Also inform the data race model (but only if any bytes are actually affected).
-        match new_perm {
-            NewPermission { freeze_access, nonfreeze_access, .. } => {
-                this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
-                    range.start += base_offset;
-                    let access = if frozen { freeze_access } else { nonfreeze_access };
-                    if range.size.bytes() > 0 && access {
-                        perform_initial_access(range)?
-                    }
-                    interp_ok(())
-                })?;
+        let NewPermission { freeze_access, nonfreeze_access, .. } = new_perm;
+        this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
+            range.start += base_offset;
+            let access = if frozen { freeze_access } else { nonfreeze_access };
+            if range.size.bytes() > 0 && access {
+                perform_initial_access(range)?
             }
-        }
+            interp_ok(())
+        })?;
 
         interp_ok(Some(Provenance::Concrete { alloc_id, tag: new_tag }))
     }
