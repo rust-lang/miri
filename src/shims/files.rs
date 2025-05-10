@@ -203,7 +203,11 @@ pub trait FileDescription: std::fmt::Debug + FileDescriptionExt {
     }
 
     /// Helper function for fcntl(F_SETFL) to set flag value.
-    fn set_flags<'tcx>(&self) -> InterpResult<'tcx> {
+    fn set_flags<'tcx>(
+        &self,
+        _flag: i32,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
         throw_unsup_format!("cannot set flag value for {}", self.name());
     }
 }

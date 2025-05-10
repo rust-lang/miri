@@ -189,11 +189,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     err_unsup_format!("fcntl: only socketpair / pipe are supported for F_GETFL")
                 })?;
 
-                if anonsocket_fd.is_nonblock() {
-                    interp_ok(this.eval_libc("O_NONBLOCK"))
-                } else {
-                    interp_ok(Scalar::from_i32(0))
-                }
+                anonsocket_fd.get_flags(this)
             }
             cmd if cmd == f_setfl => {
                 // Check if this is a valid open file descriptor.
@@ -209,13 +205,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [flag] = check_min_vararg_count("fcntl(fd, F_SETFL, ...)", varargs)?;
                 let flag = this.read_scalar(flag)?.to_i32()?;
 
-                // FIXME: File access mode and file creation flags should be ignored.
-                if flag == this.eval_libc_i32("O_NONBLOCK") {
-                    anonsocket_fd.set_nonblock();
-                } else {
-                    throw_unsup_format!("fcntl: only O_NONBLOCK is supported for F_SETFL")
-                }
-                interp_ok(Scalar::from_i32(0))
+                anonsocket_fd.set_flags(flag, this)
             }
             cmd if this.tcx.sess.target.os == "macos"
                 && cmd == this.eval_libc_i32("F_FULLFSYNC") =>

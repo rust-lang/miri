@@ -71,18 +71,11 @@ impl AnonSocket {
     fn peer_fd(&self) -> &WeakFileDescriptionRef<AnonSocket> {
         self.peer_fd.get().unwrap()
     }
-
-    pub fn is_nonblock(&self) -> bool {
-        self.is_nonblock.get()
-    }
-
-    pub fn set_nonblock(&self) {
-        self.is_nonblock.set(true);
-    }
 }
 
 impl FileDescription for AnonSocket {
     fn name(&self) -> &'static str {
+        // TODO: fix the name here later
         "socketpair"
     }
 
@@ -131,16 +124,45 @@ impl FileDescription for AnonSocket {
         self
     }
 
-    fn get_flags<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, Scalar>{
-        if self.fd_type == AnonSocketType::Socketpair {
-            interp_ok(ecx.eval_libc("O_RDWR"))
-        } else if self.fd_type == AnonSocketType::PipeRead {
-            interp_ok(ecx.eval_libc("O_RDONLY"))
-        } else {
-            interp_ok(ecx.eval_libc("O_WRONLY"))
+    fn get_flags<'tcx>(&self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let mut flags = 0;
+
+        // Add flag for file access mode.
+        match self.fd_type {
+            AnonSocketType::Socketpair => {
+                flags |= ecx.eval_libc_i32("O_RDWR");
+            }
+            AnonSocketType::PipeRead => {
+                flags |= ecx.eval_libc_i32("O_RDONLY");
+            }
+            AnonSocketType::PipeWrite => {
+                flags |= ecx.eval_libc_i32("O_WRONLY");
+            }
         }
+
+        // Add flag for blocking status.
+        if self.is_nonblock.get() {
+            flags |= ecx.eval_libc_i32("O_NONBLOCK");
+        }
+
+        interp_ok(Scalar::from_i32(flags))
     }
-    
+
+    fn set_flags<'tcx>(
+        &self,
+        flag: i32,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        // FIXME: File access mode and file creation flags should be ignored.
+        // TODO: support flag unset 
+        if flag == ecx.eval_libc_i32("O_NONBLOCK") {
+            self.is_nonblock.set(true);
+        } else {
+            throw_unsup_format!("fcntl: only O_NONBLOCK is supported for F_SETFL")
+        }
+
+        interp_ok(Scalar::from_i32(0))
+    }
 }
 
 /// Write to AnonSocket based on the space available and return the written byte size.
@@ -172,7 +194,7 @@ fn anonsocket_write<'tcx>(
     // Let's see if we can write.
     let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(writebuf.borrow().buf.len());
     if available_space == 0 {
-        if self_ref.is_nonblock() {
+        if self_ref.is_nonblock.get() {
             // Non-blocking socketpair with a full buffer.
             return finish.call(ecx, Err(ErrorKind::WouldBlock.into()));
         } else {
@@ -254,7 +276,7 @@ fn anonsocket_read<'tcx>(
             // Socketpair with no peer and empty buffer.
             // 0 bytes successfully read indicates end-of-file.
             return finish.call(ecx, Ok(0));
-        } else if self_ref.is_nonblock() {
+        } else if self_ref.is_nonblock.get() {
             // Non-blocking socketpair with writer and empty buffer.
             // https://linux.die.net/man/2/read
             // EAGAIN or EWOULDBLOCK can be returned for socket,
