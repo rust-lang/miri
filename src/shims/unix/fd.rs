@@ -9,6 +9,7 @@ use rustc_abi::Size;
 use crate::helpers::check_min_vararg_count;
 use crate::shims::files::FileDescription;
 use crate::shims::unix::linux_like::epoll::EpollReadyEvents;
+use crate::shims::unix::unnamed_socket::AnonSocket;
 use crate::shims::unix::*;
 use crate::*;
 
@@ -141,6 +142,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let f_getfd = this.eval_libc_i32("F_GETFD");
         let f_dupfd = this.eval_libc_i32("F_DUPFD");
         let f_dupfd_cloexec = this.eval_libc_i32("F_DUPFD_CLOEXEC");
+        let f_getfl = this.eval_libc_i32("F_GETFL");
+        let f_setfl = this.eval_libc_i32("F_SETFL");
 
         // We only support getting the flags for a descriptor.
         match cmd {
@@ -174,6 +177,45 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 } else {
                     this.set_last_error_and_return_i32(LibcError("EBADF"))
                 }
+            }
+            cmd if cmd == f_getfl => {
+                // Check if this is a valid open file descriptor.
+                let Some(fd) = this.machine.fds.get(fd_num) else {
+                    return this.set_last_error_and_return_i32(LibcError("EBADF"));
+                };
+
+                // We only support F_GETFL for socketpair and pipe.
+                let anonsocket_fd = fd.downcast::<AnonSocket>().ok_or_else(|| {
+                    err_unsup_format!("fcntl: only socketpair / pipe are supported for F_GETFL")
+                })?;
+
+                if anonsocket_fd.is_nonblock() {
+                    interp_ok(this.eval_libc("O_NONBLOCK"))
+                } else {
+                    interp_ok(Scalar::from_i32(0))
+                }
+            }
+            cmd if cmd == f_setfl => {
+                // Check if this is a valid open file descriptor.
+                let Some(fd) = this.machine.fds.get(fd_num) else {
+                    return this.set_last_error_and_return_i32(LibcError("EBADF"));
+                };
+
+                // We only support F_SETFL for socketpair and pipe.
+                let anonsocket_fd = fd.downcast::<AnonSocket>().ok_or_else(|| {
+                    err_unsup_format!("fcntl: only socketpair / pipe are supported for F_SETFL")
+                })?;
+
+                let [flag] = check_min_vararg_count("fcntl(fd, F_SETFL, ...)", varargs)?;
+                let flag = this.read_scalar(flag)?.to_i32()?;
+
+                // FIXME: File access mode and file creation flags should be ignored.
+                if flag == this.eval_libc_i32("O_NONBLOCK") {
+                    anonsocket_fd.set_nonblock();
+                } else {
+                    throw_unsup_format!("fcntl: only O_NONBLOCK is supported for F_SETFL")
+                }
+                interp_ok(Scalar::from_i32(0))
             }
             cmd if this.tcx.sess.target.os == "macos"
                 && cmd == this.eval_libc_i32("F_FULLFSYNC") =>
