@@ -101,6 +101,57 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
 
+            // The "same" kind of api as `sched_getaffinity` but more fine grained control for FreeBSD specifically.
+            "cpuset_getaffinity" => {
+                let [level, which, id, set_size, mask] =
+                    this.check_shim(abi, Conv::C, link_name, args)?;
+
+                let level = this.read_scalar(level)?.to_i32()?;
+                let which = this.read_scalar(which)?.to_i32()?;
+                let id = this.read_scalar(id)?.to_i64()?;
+                let set_size = this.read_target_usize(set_size)?;
+                let mask = this.read_pointer(mask)?;
+
+                let _level_root = this.eval_libc_i32("CPU_LEVEL_ROOT");
+                let _level_cpuset = this.eval_libc_i32("CPU_LEVEL_CPUSET");
+                let level_which = this.eval_libc_i32("CPU_LEVEL_WHICH");
+
+                let _which_tid = this.eval_libc_i32("CPU_WHICH_TID");
+                let which_pid = this.eval_libc_i32("CPU_WHICH_PID");
+                let _which_jail = this.eval_libc_i32("CPU_WHICH_JAIL");
+                let _which_cpuset = this.eval_libc_i32("CPU_WHICH_CPUSET");
+                let _which_irq = this.eval_libc_i32("CPU_WHICH_IRQ");
+
+                // For sched_getaffinity, the current process is identified by -1.
+                // TODO: Use gettid? I'm not that familiar with this api.
+                let id = match id {
+                    -1 => this.active_thread(),
+                    _ =>
+                        throw_unsup_format!(
+                            "`cpuset_getaffinity` is only supported with a pid of -1 (indicating the current process)"
+                        ),
+                };
+
+                // We only support CPU_LEVEL_WHICH and CPU_WHICH_PID for now.
+                // This is the bare minimum to make the tests pass.
+                // TODO: Support more.
+                if this.ptr_is_null(mask)? {
+                    this.set_last_error_and_return(LibcError("EFAULT"), dest)?;
+                } else if level != level_which || which != which_pid {
+                    throw_unsup_format!(
+                        "`cpuset_getaffinity` is only supported with `level` set to CPU_LEVEL_WHICH and `which` set to CPU_WHICH_PID."
+                    );
+                } else if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&id) {
+                    let cpuset = cpuset.clone();
+                    let byte_count = set_size.try_into().unwrap();
+                    this.write_bytes_ptr(mask, cpuset.as_slice()[..byte_count].iter().copied())?;
+                    this.write_null(dest)?;
+                } else {
+                    // The thread whose ID is pid could not be found.
+                    this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+                }
+            }
+
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
