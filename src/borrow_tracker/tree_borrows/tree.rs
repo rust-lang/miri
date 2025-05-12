@@ -10,6 +10,7 @@
 //!   and the relative position of the access;
 //! - idempotency properties asserted in `perms.rs` (for optimizations)
 
+use std::ops::Range;
 use std::{fmt, mem};
 
 use rustc_abi::Size;
@@ -32,7 +33,7 @@ mod tests;
 
 /// Data for a single *location*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct LocationState {
+pub(crate) struct LocationState {
     /// A location is initialized when it is child-accessed for the first time (and the initial
     /// retag initializes the location for the range covered by the type), and it then stays
     /// initialized forever.
@@ -59,7 +60,7 @@ impl LocationState {
     /// to any foreign access yet.
     /// The permission is not allowed to be `Active`.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    fn new_uninit(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
+    pub fn new_uninit(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
         assert!(permission.is_initial() || permission.is_disabled());
         Self { permission, initialized: false, idempotent_foreign_access: sifa }
     }
@@ -67,7 +68,7 @@ impl LocationState {
     /// Constructs a new initial state. It has not yet been subjected
     /// to any foreign access. However, it is already marked as having been accessed.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    fn new_init(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
+    pub fn new_init(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
         Self { permission, initialized: true, idempotent_foreign_access: sifa }
     }
 
@@ -614,15 +615,14 @@ impl Tree {
 
 impl<'tcx> Tree {
     /// Insert a new tag in the tree
-    pub fn new_child(
+    pub(crate) fn new_child(
         &mut self,
-        this: &MiriInterpCx<'tcx>,
-        place: &MPlaceTy<'tcx>,
         size: Size,
         base_offset: Size,
         parent_tag: BorTag,
         new_tag: BorTag,
         perm: NewPermission,
+        perms_map: RangeMap<LocationState>,
         span: Span,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
@@ -652,22 +652,13 @@ impl<'tcx> Tree {
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
 
-        let NewPermission { freeze_perm, nonfreeze_perm, .. } = perm;
-        this.visit_freeze_sensitive(place, size, |mut range, frozen| {
-            // Adjust range.
-            range.start += base_offset;
-
-            // We are only ever `Frozen` inside the frozen bits.
-            let perm = if frozen { freeze_perm } else { nonfreeze_perm };
-            let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
-
-            // Initialize perms
-            let perm = LocationState::new_init(perm, strongest_idempotent);
-            for (_perms_range, perms) in self.rperms.iter_mut(range.start, range.size) {
-                perms.insert(idx, perm);
-            }
-            interp_ok(())
-        })?;
+        for (Range { start, end }, &perm) in perms_map.iter(base_offset, size) {
+            for (_perms_range, perms) in
+                    self.rperms.iter_mut(Size::from_bytes(start), Size::from_bytes(end - start))
+                {
+                    perms.insert(idx, perm);
+                }
+        }
 
         // Inserting the new perms might have broken the SIFA invariant (see `foreign_access_skipping.rs`).
         // We now weaken the recorded SIFA for our parents, until the invariant is restored.

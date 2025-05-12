@@ -1,6 +1,0 @@
-──────────────────────────────────────────────────
-Warning: this tree is indicative only. Some tags may have been hidden.
-0..   4..   8
-| Act | Act |    └─┬──<TAG=root of the allocation>
-| Res | ReIM|      └────<TAG=a>
-──────────────────────────────────────────────────

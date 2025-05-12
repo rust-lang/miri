@@ -3,6 +3,7 @@ use rustc_middle::mir::{Mutability, RetagKind};
 use rustc_middle::ty::layout::HasTypingEnv;
 use rustc_middle::ty::{self, Ty};
 
+use self::tree::LocationState;
 use crate::borrow_tracker::{GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
 use crate::*;
@@ -118,55 +119,17 @@ pub struct NewPermission {
     freeze_perm: Permission,
     /// Whether a read access should be performed on the frozen part on a retag.
     freeze_access: bool,
-    /// Whether this pointer is part of the arguments of a function call.
-    /// `protector` is `Some(_)` for all pointers marked `noalias`.
-    protector: Option<ProtectorKind>,
     /// Permission for the non-frozen part of the range.
     nonfreeze_perm: Permission,
     /// Whether a read access should be performed on the non-frozen
-    /// part on a retag.  This should be `false` for `Cell` because
-    /// this could cause data races when using thread-safe data types
-    /// like `Mutex<T>`.
+    /// part on a retag.
     nonfreeze_access: bool,
+    /// Whether this pointer is part of the arguments of a function call.
+    /// `protector` is `Some(_)` for all pointers marked `noalias`.
+    protector: Option<ProtectorKind>,
 }
 
 impl<'tcx> NewPermission {
-    /// Helper method to create a NewPermission for a reference.
-    fn new(mutability: Mutability, is_protected: bool, protector: ProtectorKind) -> Self {
-        // `nonfreeze_access` is only used in the `FreezeSensitive` constructor.
-        // If we have a mutable reference, then the non-frozen part will
-        // have state `ReservedIM`, which should have an initial read access
-        // performed on it.  If it is a shared reference, then the non-frozen
-        // part will have state `Cell`, which should not have an initial access.
-        let (initial_state, nonfreeze_perm, nonfreeze_access) = match mutability {
-            Mutability::Mut =>
-                (
-                    // As demonstrated by `tests/fail/tree_borrows/reservedim_spurious_write.rs`,
-                    // interior mutability and protectors interact poorly.
-                    // To eliminate the case of Protected Reserved IM we override interior mutability
-                    // in the case of a protected reference: protected references are always considered
-                    // "freeze" in their reservation phase.
-                    //
-                    // If we are creating protected Reserved, which can
-                    // never be ReservedIM, the value of the `ty_is_freeze`
-                    // argument doesn't matter (`ty_is_freeze || true` will always be `true`).
-                    Permission::new_reserved(true, is_protected),
-                    Permission::new_reserved(false, is_protected),
-                    true,
-                ),
-            Mutability::Not => (Permission::new_frozen(), Permission::new_cell(), false),
-        };
-        let protector = is_protected.then_some(protector);
-
-        NewPermission {
-            freeze_perm: initial_state,
-            freeze_access: true,
-            protector,
-            nonfreeze_perm,
-            nonfreeze_access,
-        }
-    }
-
     /// Determine NewPermission of the reference from the type of the pointee.
     fn from_ref_ty(
         pointee: Ty<'tcx>,
@@ -176,12 +139,43 @@ impl<'tcx> NewPermission {
     ) -> Option<Self> {
         let ty_is_unpin = pointee.is_unpin(*cx.tcx, cx.typing_env());
         let is_protected = kind == RetagKind::FnEntry;
-        let protector = ProtectorKind::StrongProtector;
+        let protector = is_protected.then_some(ProtectorKind::StrongProtector);
 
         Some(match mutability {
             Mutability::Mut if ty_is_unpin =>
-                NewPermission::new(mutability, is_protected, protector),
-            Mutability::Not => NewPermission::new(mutability, is_protected, protector),
+            // As demonstrated by `tests/fail/tree_borrows/reservedim_spurious_write.rs`,
+            // interior mutability and protectors interact poorly.
+            // To eliminate the case of Protected Reserved IM we override interior mutability
+            // in the case of a protected reference: protected references are always considered
+            // "freeze" in their reservation phase.
+                NewPermission {
+                    freeze_perm: Permission::new_reserved(
+                        /* ty_is_freeze */ true,
+                        is_protected,
+                    ),
+                    freeze_access: true,
+                    nonfreeze_perm: Permission::new_reserved(
+                        /* ty_is_freeze */ false,
+                        is_protected,
+                    ),
+                    // If we have a mutable reference, then the non-frozen part will
+                    // have state `ReservedIM` or `Reserved`, which can have an initial read access
+                    // performed on it because you cannot have multiple mutable borrows.
+                    nonfreeze_access: true,
+                    protector,
+                },
+            Mutability::Not =>
+                NewPermission {
+                    freeze_perm: Permission::new_frozen(),
+                    freeze_access: true,
+                    nonfreeze_perm: Permission::new_cell(),
+                    // If it is a shared reference, then the non-frozen
+                    // part will have state `Cell`, which should not have an initial access,
+                    // as this can cause data races when using thread-safe data types like
+                    // `Mutex<T>`.
+                    nonfreeze_access: false,
+                    protector,
+                },
             _ => return None,
         })
     }
@@ -198,8 +192,18 @@ impl<'tcx> NewPermission {
         pointee.is_unpin(*cx.tcx, cx.typing_env()).then_some(()).map(|()| {
             // Regular `Unpin` box, give it `noalias` but only a weak protector
             // because it is valid to deallocate it within the function.
-            let protected = kind == RetagKind::FnEntry;
-            NewPermission::new(Mutability::Mut, protected, ProtectorKind::WeakProtector)
+            let is_protected = kind == RetagKind::FnEntry;
+            let protector = is_protected.then_some(ProtectorKind::WeakProtector);
+            NewPermission {
+                freeze_perm: Permission::new_reserved(/* ty_is_freeze */ true, is_protected),
+                freeze_access: true,
+                nonfreeze_perm: Permission::new_reserved(
+                    /* ty_is_freeze */ false,
+                    is_protected,
+                ),
+                nonfreeze_access: true,
+                protector,
+            }
         })
     }
 }
@@ -217,6 +221,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         new_perm: NewPermission,
         new_tag: BorTag,
     ) -> InterpResult<'tcx, Option<Provenance>> {
+        // Make sure the new permissions make sense as the initial permissions of a fresh tag.
+        assert!(new_perm.freeze_perm.is_initial() && new_perm.nonfreeze_perm.is_initial());
         let this = self.eval_context_mut();
         // Ensure we bail out if the pointer goes out-of-bounds (see miri#1050).
         this.check_ptr_access(place.ptr(), ptr_size, CheckInAllocMsg::Dereferenceable)?;
@@ -227,13 +233,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
          -> InterpResult<'tcx> {
             let global = this.machine.borrow_tracker.as_ref().unwrap().borrow();
             let ty = place.layout.ty;
-            let ty_is_freeze = ty.is_freeze(*this.tcx, this.typing_env());
             if global.tracked_pointer_tags.contains(&new_tag) {
+                 let ty_is_freeze = ty.is_freeze(*this.tcx, this.typing_env());
                  let kind_str =
                      if ty_is_freeze {
                          format!("initial state {} (pointee type {ty})", new_perm.freeze_perm)
                      } else {
-                         format!("initial frozen/non-frozen states {}/{} (pointee type {ty})", new_perm.freeze_perm, new_perm.nonfreeze_perm)
+                         format!("initial state {}/{} outside/inside UnsafeCell (pointee type {ty})", new_perm.freeze_perm, new_perm.nonfreeze_perm)
                      };
                 this.emit_diagnostic(NonHaltingDiagnostic::CreatedPointerTag(
                     new_tag.inner(),
@@ -314,64 +320,74 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let span = this.machine.current_span();
         let alloc_extra = this.get_alloc_extra(alloc_id)?;
         let mut tree_borrows = alloc_extra.borrow_tracker_tb().borrow_mut();
+        let prot = new_perm.protector.is_some();
 
-        let mut perform_parent_access = |range: AllocRange| -> InterpResult<'tcx> {
-            tree_borrows.perform_access(
-                orig_tag,
-                Some((range, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
-                this.machine.borrow_tracker.as_ref().unwrap(),
-                alloc_id,
-                this.machine.current_span(),
-            )
-        };
+        // Store initialized permissions and their corresponding range.
+        let mut perms_map: RangeMap<LocationState> = RangeMap::new(
+            base_offset + ptr_size,
+            LocationState::new_uninit(
+                Permission::new_disabled(),
+                foreign_access_skipping::IdempotentForeignAccess::None,
+            ),
+        );
 
-        // Some reborrows incur a read access to the parent
-        let NewPermission { freeze_access, nonfreeze_access, .. } = new_perm;
+        let NewPermission { freeze_perm, freeze_access, nonfreeze_perm, nonfreeze_access, .. } =
+            new_perm;
         this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
+            // Adjust range.
             range.start += base_offset;
-            let access = if frozen { freeze_access } else { nonfreeze_access };
+
+            // We are only ever `Frozen` inside the frozen bits.
+            let (perm, access) = if frozen {
+                (freeze_perm, freeze_access)
+            } else {
+                (nonfreeze_perm, nonfreeze_access)
+            };
+            let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
+
+            // Store Initialized permissions.
+            let perm_init = LocationState::new_init(perm, strongest_idempotent);
+            for (_perm_range, perm) in perms_map.iter_mut(range.start, range.size) {
+                *perm = perm_init;
+            }
+
+            // Some reborrows incur a read access to the parent.
             if access {
-                perform_parent_access(range)?
+                tree_borrows.perform_access(
+                    orig_tag,
+                    Some((range, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    this.machine.borrow_tracker.as_ref().unwrap(),
+                    alloc_id,
+                    this.machine.current_span(),
+                )?
+            }
+
+            // Also inform the data race model (but only if any bytes are actually affected).
+            if range.size.bytes() > 0 && access {
+                if let Some(data_race) = alloc_extra.data_race.as_vclocks_ref() {
+                    data_race.read(
+                        alloc_id,
+                        range,
+                        NaReadType::Retag,
+                        Some(place.layout.ty),
+                        &this.machine,
+                    )?
+                }
             }
             interp_ok(())
         })?;
 
         // Record the parent-child pair in the tree.
         tree_borrows.new_child(
-            this,
-            place,
             ptr_size,
             base_offset,
             orig_tag,
             new_tag,
             new_perm,
+            perms_map,
             span,
         )?;
         drop(tree_borrows);
-
-        let perform_initial_access = |range: AllocRange| -> InterpResult<'tcx> {
-            if let Some(data_race) = alloc_extra.data_race.as_vclocks_ref() {
-                data_race.read(
-                    alloc_id,
-                    range,
-                    NaReadType::Retag,
-                    Some(place.layout.ty),
-                    &this.machine,
-                )?
-            }
-            interp_ok(())
-        };
-
-        // Also inform the data race model (but only if any bytes are actually affected).
-        let NewPermission { freeze_access, nonfreeze_access, .. } = new_perm;
-        this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
-            range.start += base_offset;
-            let access = if frozen { freeze_access } else { nonfreeze_access };
-            if range.size.bytes() > 0 && access {
-                perform_initial_access(range)?
-            }
-            interp_ok(())
-        })?;
 
         interp_ok(Some(Provenance::Concrete { alloc_id, tag: new_tag }))
     }
@@ -560,7 +576,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         // Retag it. With protection! That is the entire point.
-        let new_perm = NewPermission::new(Mutability::Mut, true, ProtectorKind::StrongProtector);
+        let new_perm = NewPermission {
+            // Note: If we are creating a protected Reserved, which can
+            // never be ReservedIM, the value of the `ty_is_freeze`
+            // argument doesn't matter
+            // (`ty_is_freeze || true` in `new_reserved` will always be `true`).
+            freeze_perm: Permission::new_reserved(
+                /* ty_is_freeze */ true, /* protected */ true,
+            ),
+            freeze_access: true,
+            nonfreeze_perm: Permission::new_reserved(
+                /* ty_is_freeze */ false, /* protected */ true,
+            ),
+            nonfreeze_access: true,
+            protector: Some(ProtectorKind::StrongProtector),
+        };
+        // NewPermission::new(Mutability::Mut, true, ProtectorKind::StrongProtector);
         this.tb_retag_place(place, new_perm)
     }
 
