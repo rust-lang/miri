@@ -123,7 +123,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let _which_irq = this.eval_libc_i32("CPU_WHICH_IRQ");
 
                 // For sched_getaffinity, the current process is identified by -1.
-                // TODO: Use gettid? I'm not that familiar with this api.
+                // TODO: Use gettid? I'm (LorrensP-2158466) not that familiar with this api .
                 let id = match id {
                     -1 => this.active_thread(),
                     _ =>
@@ -141,11 +141,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         "`cpuset_getaffinity` is only supported with `level` set to CPU_LEVEL_WHICH and `which` set to CPU_WHICH_PID."
                     );
                 } else if let Some(cpuset) = this.machine.thread_cpu_affinity.get(&id) {
-                    let cpuset = cpuset.clone();
-                    let byte_count =
-                        Ord::min(cpuset.as_slice().len(), set_size.try_into().unwrap());
-                    this.write_bytes_ptr(mask, cpuset.as_slice()[..byte_count].iter().copied())?;
-                    this.write_null(dest)?;
+                    // `cpusetsize` should be big enough so the whole mask can be obtained.
+                    // FreeBSD doesn't actually handle cases where `cpusetsize` is bigger than the kernal mask
+                    // since it doesn't use that value when setting the user mask.
+                    // See https://github.com/freebsd/freebsd-src/blob/909aa6781340f8c0b4ae01c6366bf1556ee2d1be/sys/kern/kern_cpuset.c#L1985
+                    if set_size < (this.machine.num_cpus as u64 + 8 - 1) / 8 {
+                        this.set_last_error_and_return(LibcError("ERANGE"), dest)?;
+                    } else {
+                        let cpuset = cpuset.clone();
+                        let byte_count =
+                            Ord::min(cpuset.as_slice().len(), set_size.try_into().unwrap());
+                        this.write_bytes_ptr(
+                            mask,
+                            cpuset.as_slice()[..byte_count].iter().copied(),
+                        )?;
+                        this.write_null(dest)?;
+                    }
                 } else {
                     // `id` is always that of the active thread, so this is currently unreachable.
                     unreachable!();
