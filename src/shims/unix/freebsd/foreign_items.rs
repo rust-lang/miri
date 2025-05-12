@@ -145,7 +145,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // FreeBSD doesn't actually handle cases where `cpusetsize` is bigger than the kernal mask
                     // since it doesn't use that value when setting the user mask.
                     // See https://github.com/freebsd/freebsd-src/blob/909aa6781340f8c0b4ae01c6366bf1556ee2d1be/sys/kern/kern_cpuset.c#L1985
-                    if set_size < (this.machine.num_cpus as u64 + 8 - 1) / 8 {
+                    if set_size < u64::from(this.machine.num_cpus).div_ceil(8) {
                         this.set_last_error_and_return(LibcError("ERANGE"), dest)?;
                     } else {
                         let cpuset = cpuset.clone();
