@@ -7,7 +7,8 @@ use std::{fs, thread};
 
 fn main() {
     test_fcntl_f_dupfd();
-    test_setfl_getfl();
+    test_socketpair_setfl_getfl();
+    test_pipe_setfl_getfl();
     test_setfl_getfl_threaded();
 }
 
@@ -60,6 +61,33 @@ fn test_socketpair_setfl_getfl() {
     // THe other side remains unchanged.
     let res = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
     assert_eq!(res, libc::O_RDWR);
+}
+
+
+fn test_pipe_setfl_getfl() {
+
+    let mut fds = [-1, -1];
+    let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
+    assert_eq!(res, 0);
+
+    // Test if both sides have O_RDWR.
+    let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
+    assert_eq!(res, libc::O_RDONLY);
+    let res = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
+    assert_eq!(res, libc::O_WRONLY);
+
+    // Add the O_NONBLOCK flag with setfl.
+    let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, libc::O_NONBLOCK) };
+    assert_eq!(res, 0);
+
+    // Test if the O_NONBLOCK flag is successfully added.
+    let new_flag =  libc::O_RDONLY | libc::O_NONBLOCK;
+    let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
+    assert_eq!(res, new_flag);
+
+    // THe other side remains unchanged.
+    let res = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
+    assert_eq!(res, libc::O_WRONLY);
 }
 
 /// Test the behaviour of setfl/getfl when a fd is blocking.
