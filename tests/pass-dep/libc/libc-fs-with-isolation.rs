@@ -35,23 +35,31 @@ fn test_fcntl_f_dupfd() {
     assert_eq!(err.raw_os_error(), Some(libc::EACCES));
 }
 
-/// Basic test for fcntl's F_SETFL and F_GETFL flag.
-fn test_setfl_getfl() {
-    // Test fd without O_NONBLOCK flag.
+/// Basic test for socketpair fcntl's F_SETFL and F_GETFL flag.
+fn test_socketpair_setfl_getfl() {
+
     let mut fds = [-1, -1];
     let res = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
     assert_eq!(res, 0);
 
+    // Test if both sides have O_RDWR.
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
+    assert_eq!(res, libc::O_RDWR);
+    let res = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
+    assert_eq!(res, libc::O_RDWR);
+
+    // Add the O_NONBLOCK flag with setfl.
+    let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, libc::O_NONBLOCK) };
     assert_eq!(res, 0);
 
-    // Modify the flag to O_NONBLOCK flag with setfl.
-    let new_flag = libc::O_NONBLOCK;
-    let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, new_flag) };
-    assert_eq!(res, 0);
-
+    // Test if the O_NONBLOCK flag is successfully added.
+    let new_flag =  libc::O_RDWR | libc::O_NONBLOCK;
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-    assert_eq!(res, libc::O_NONBLOCK);
+    assert_eq!(res, new_flag);
+
+    // THe other side remains unchanged.
+    let res = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
+    assert_eq!(res, libc::O_RDWR);
 }
 
 /// Test the behaviour of setfl/getfl when a fd is blocking.
