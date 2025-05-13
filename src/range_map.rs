@@ -339,5 +339,4 @@ mod tests {
         let mut map = RangeMap::<i32>::new(Size::from_bytes(0), -1);
         let _ = map.iter_mut(Size::from_bytes(0), Size::from_bytes(0));
     }
-
 }

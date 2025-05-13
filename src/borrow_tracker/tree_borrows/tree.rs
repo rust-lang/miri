@@ -654,10 +654,10 @@ impl<'tcx> Tree {
 
         for (Range { start, end }, &perm) in perms_map.iter(base_offset, size) {
             for (_perms_range, perms) in
-                    self.rperms.iter_mut(Size::from_bytes(start), Size::from_bytes(end - start))
-                {
-                    perms.insert(idx, perm);
-                }
+                self.rperms.iter_mut(Size::from_bytes(start), Size::from_bytes(end - start))
+            {
+                perms.insert(idx, perm);
+            }
         }
 
         // Inserting the new perms might have broken the SIFA invariant (see `foreign_access_skipping.rs`).
