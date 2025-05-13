@@ -75,8 +75,10 @@ impl AnonSocket {
 
 impl FileDescription for AnonSocket {
     fn name(&self) -> &'static str {
-        // TODO: fix the name here later
-        "socketpair"
+        match self.fd_type {
+            AnonSocketType::Socketpair => "socketpair",
+            AnonSocketType::PipeRead | AnonSocketType::PipeWrite => "pipe",
+        }
     }
 
     fn close<'tcx>(
@@ -154,7 +156,7 @@ impl FileDescription for AnonSocket {
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, Scalar> {
         // FIXME: File access mode and file creation flags should be ignored.
-        // TODO: support flag unset 
+        // TODO: support flag unset
         if flag == ecx.eval_libc_i32("O_NONBLOCK") {
             self.is_nonblock.set(true);
         } else {
