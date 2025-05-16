@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::ErrorKind;
 
+use libc::O_NONBLOCK;
+
 use crate::concurrency::VClock;
 use crate::shims::files::{
     EvalContextExt as _, FileDescription, FileDescriptionRef, WeakFileDescriptionRef,
@@ -152,14 +154,25 @@ impl FileDescription for AnonSocket {
 
     fn set_flags<'tcx>(
         &self,
-        flag: i32,
+        mut flag: i32,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, Scalar> {
         // FIXME: File access mode and file creation flags should be ignored.
-        // TODO: support flag unset
-        if flag == ecx.eval_libc_i32("O_NONBLOCK") {
+
+        let o_nonblock = ecx.eval_libc_i32("O_NONBLOCK");
+
+        // TODO: this is kind of bad and subtle, add a comment in the pr
+        if flag & o_nonblock == o_nonblock {
+            // If there is O_NONBLOCK flag
             self.is_nonblock.set(true);
+            flag &= !O_NONBLOCK;
         } else {
+            // If there is no O_NONBLOCK flag
+            self.is_nonblock.set(false);
+        }
+
+        // Fail if there is unsupported flag.
+        if flag & o_nonblock != 0 {
             throw_unsup_format!("fcntl: only O_NONBLOCK is supported for F_SETFL")
         }
 
