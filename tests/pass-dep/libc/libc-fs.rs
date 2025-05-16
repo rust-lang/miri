@@ -1,5 +1,5 @@
 //@ignore-target: windows # File handling is not implemented yet
-//@compile-flags: -Zmiri-disable-isolation -Zmiri-isolation-error=warn-nobacktrace
+//@compile-flags: -Zmiri-disable-isolation
 
 #![feature(io_error_more)]
 #![feature(io_error_uncategorized)]
