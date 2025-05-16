@@ -464,7 +464,7 @@ fn test_readlink() {
     }
 }
 
-// Basic test for `stat`.
+/// Basic test for `stat`.
 fn test_stat() {
     let err = fs::metadata("foo.txt").unwrap_err();
     assert_eq!(err.kind(), ErrorKind::NotFound);
