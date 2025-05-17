@@ -11,6 +11,9 @@ fn main() {
         assert!(libc::fcntl(1, libc::F_DUPFD, 0) >= 0);
     }
 
+    // Although the syscalls below require disable-isolation mode
+    // to properly run, they are tested with isolation mode on to check the error emitted.
+
     // test `readlink`
     let mut buf = vec![0; "foo_link.txt".len() + 1];
     unsafe {
@@ -24,3 +27,4 @@ fn main() {
     // check that it is the right kind of `PermissionDenied`
     assert_eq!(err.raw_os_error(), Some(libc::EACCES));
 }
+
