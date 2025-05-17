@@ -176,9 +176,8 @@ impl MachineAlloc {
                 self.dealloc_multi_page(ptr, layout);
             }
         } else {
-            let pinfo = std::iter::zip(&mut self.pages, &mut self.allocated).find(|(page, _)| {
-                page.addr() == page_addr
-            });
+            let pinfo = std::iter::zip(&mut self.pages, &mut self.allocated)
+                .find(|(page, _)| page.addr() == page_addr);
             let Some((_, pinfo)) = pinfo else {
                 panic!("Freeing in an unallocated page: {ptr:?}\nHolding pages {:?}", self.pages)
             };

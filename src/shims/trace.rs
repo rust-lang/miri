@@ -272,7 +272,9 @@ fn sv_loop(listener: ChildListener, t_event: ipc::IpcSender<MemEvents>) -> ! {
                                 );
                             }
                             _ => {
-                                eprintln!("Process unexpectedly stopped at {signal}; continuing...");
+                                eprintln!(
+                                    "Process unexpectedly stopped at {signal}; continuing..."
+                                );
                                 ptrace::syscall(pid, None).unwrap();
                             }
                         }
@@ -319,7 +321,9 @@ fn sv_loop(listener: ChildListener, t_event: ipc::IpcSender<MemEvents>) -> ! {
                                         let addr = regs.ax();
                                         mappings.push((addr, len as _));
                                     } else {
-                                        eprintln!("Process returned from mmap syscall without entering it? Attempting to continue...");
+                                        eprintln!(
+                                            "Process returned from mmap syscall without entering it? Attempting to continue..."
+                                        );
                                     }
                                 }
                             } else if syscall_nr as i64 == libc::SYS_munmap {
