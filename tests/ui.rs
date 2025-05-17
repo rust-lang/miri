@@ -64,6 +64,7 @@ fn build_native_lib() -> PathBuf {
             "tests/native-lib/scalar_arguments.c",
             "tests/native-lib/ptr_read_access.c",
             "tests/native-lib/ptr_write_access.c",
+            "tests/native-lib/get_c_ptr.c",
             // Ensure we notice serious problems in the C code.
             "-Wall",
             "-Wextra",

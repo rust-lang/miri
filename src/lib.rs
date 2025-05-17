@@ -11,6 +11,7 @@
 #![feature(nonzero_ops)]
 #![feature(strict_overflow_ops)]
 #![feature(pointer_is_aligned_to)]
+#![feature(ptr_metadata)]
 #![feature(unqualified_local_imports)]
 #![feature(derive_coerce_pointee)]
 #![feature(arbitrary_self_types)]
@@ -82,6 +83,7 @@ mod borrow_tracker;
 mod clock;
 mod concurrency;
 mod diagnostics;
+mod discrete_alloc;
 mod eval;
 mod helpers;
 mod intrinsics;

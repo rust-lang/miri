@@ -39,6 +39,12 @@ features = ['unprefixed_malloc_on_supported_platforms']
 libc = "0.2"
 libffi = "4.0.0"
 libloading = "0.8"
+nix = { version = "0.30.1", features = ["mman", "ptrace", "signal"] }
+ipc-channel = "0.19.0"
+serde = { version = "1.0.219", features = ["derive"] }
+
+[target.'cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))'.dependencies]
+iced-x86 = "1.21.0"
 
 [target.'cfg(target_family = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
