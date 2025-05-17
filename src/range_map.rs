@@ -72,7 +72,7 @@ impl<T> RangeMap<T> {
         // The first offset that is not included any more.
         let end = offset + len;
         assert!(
-            end <= self.v.last().unwrap().range.end,
+            end <= self.v.last().map(|x| x.range.end).unwrap_or(0),
             "iterating beyond the bounds of this RangeMap"
         );
         slice
@@ -326,5 +326,17 @@ mod tests {
     fn out_of_range_iter() {
         let map = RangeMap::<i32>::new(Size::from_bytes(20), -1);
         let _ = map.iter(Size::from_bytes(11), Size::from_bytes(11));
+    }
+
+    #[test]
+    fn empty_map_iter() {
+        let map = RangeMap::<i32>::new(Size::from_bytes(0), -1);
+        let _ = map.iter(Size::from_bytes(0), Size::from_bytes(0));
+    }
+
+    #[test]
+    fn empty_map_iter_mut() {
+        let mut map = RangeMap::<i32>::new(Size::from_bytes(0), -1);
+        let _ = map.iter_mut(Size::from_bytes(0), Size::from_bytes(0));
     }
 }

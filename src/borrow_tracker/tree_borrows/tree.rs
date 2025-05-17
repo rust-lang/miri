@@ -10,6 +10,7 @@
 //!   and the relative position of the access;
 //! - idempotency properties asserted in `perms.rs` (for optimizations)
 
+use std::ops::Range;
 use std::{fmt, mem};
 
 use rustc_abi::Size;
@@ -17,6 +18,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
+use super::NewPermission;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError,
@@ -31,7 +33,7 @@ mod tests;
 
 /// Data for a single *location*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct LocationState {
+pub(crate) struct LocationState {
     /// A location is initialized when it is child-accessed for the first time (and the initial
     /// retag initializes the location for the range covered by the type), and it then stays
     /// initialized forever.
@@ -58,7 +60,7 @@ impl LocationState {
     /// to any foreign access yet.
     /// The permission is not allowed to be `Active`.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    fn new_uninit(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
+    pub fn new_uninit(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
         assert!(permission.is_initial() || permission.is_disabled());
         Self { permission, initialized: false, idempotent_foreign_access: sifa }
     }
@@ -66,7 +68,7 @@ impl LocationState {
     /// Constructs a new initial state. It has not yet been subjected
     /// to any foreign access. However, it is already marked as having been accessed.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    fn new_init(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
+    pub fn new_init(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
         Self { permission, initialized: true, idempotent_foreign_access: sifa }
     }
 
@@ -613,18 +615,27 @@ impl Tree {
 
 impl<'tcx> Tree {
     /// Insert a new tag in the tree
-    pub fn new_child(
+    pub(crate) fn new_child(
         &mut self,
+        size: Size,
+        base_offset: Size,
         parent_tag: BorTag,
         new_tag: BorTag,
-        default_initial_perm: Permission,
-        reborrow_range: AllocRange,
+        perm: NewPermission,
+        perms_map: RangeMap<LocationState>,
         span: Span,
-        prot: bool,
     ) -> InterpResult<'tcx> {
-        assert!(!self.tag_mapping.contains_key(&new_tag));
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
+        let default_initial_perm = perm.freeze_perm;
+        let prot = perm.protector.is_some();
+
+        // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
+        // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
+        assert!(
+            perm.freeze_perm.strongest_idempotent_foreign_access(prot)
+                <= perm.nonfreeze_perm.strongest_idempotent_foreign_access(prot)
+        );
         let strongest_idempotent = default_initial_perm.strongest_idempotent_foreign_access(prot);
         // Create the node
         self.nodes.insert(
@@ -640,11 +651,13 @@ impl<'tcx> Tree {
         );
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
-        // Initialize perms
-        let perm = LocationState::new_init(default_initial_perm, strongest_idempotent);
-        for (_perms_range, perms) in self.rperms.iter_mut(reborrow_range.start, reborrow_range.size)
-        {
-            perms.insert(idx, perm);
+
+        for (Range { start, end }, &perm) in perms_map.iter(base_offset, size) {
+            for (_perms_range, perms) in
+                self.rperms.iter_mut(Size::from_bytes(start), Size::from_bytes(end - start))
+            {
+                perms.insert(idx, perm);
+            }
         }
 
         // Inserting the new perms might have broken the SIFA invariant (see `foreign_access_skipping.rs`).
@@ -1072,16 +1085,5 @@ impl AccessRelatedness {
     /// a transitive child (initial pointer included).
     pub fn is_foreign(self) -> bool {
         matches!(self, AccessRelatedness::AncestorAccess | AccessRelatedness::CousinAccess)
-    }
-
-    /// Given the AccessRelatedness for the parent node, compute the AccessRelatedness
-    /// for the child node. This function assumes that we propagate away from the initial
-    /// access.
-    pub fn for_child(self) -> Self {
-        use AccessRelatedness::*;
-        match self {
-            AncestorAccess | This => AncestorAccess,
-            StrictChildAccess | CousinAccess => CousinAccess,
-        }
     }
 }
