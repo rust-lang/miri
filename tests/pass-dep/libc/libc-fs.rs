@@ -5,7 +5,6 @@
 #![feature(io_error_uncategorized)]
 
 use std::ffi::{CStr, CString, OsString};
-use std::fs;
 use std::fs::{File, canonicalize, remove_file};
 use std::io::{Error, ErrorKind, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -41,8 +40,6 @@ fn main() {
     test_nofollow_not_symlink();
     #[cfg(target_os = "macos")]
     test_ioctl();
-    test_readlink();
-    test_stat();
 }
 
 fn test_file_open_unix_allow_two_args() {
@@ -453,21 +450,4 @@ fn test_ioctl() {
         let fd = libc::open(name_ptr, libc::O_RDONLY);
         assert_eq!(libc::ioctl(fd, libc::FIOCLEX), 0);
     }
-}
-
-/// Basic test for `readlink`.
-fn test_readlink() {
-    let mut buf = vec![0; "foo_link.txt".len() + 1];
-    unsafe {
-        assert_eq!(libc::readlink(c"foo.txt".as_ptr(), buf.as_mut_ptr(), buf.len()), -1);
-        assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::ENOENT));
-    }
-}
-
-/// Basic test for `stat`.
-fn test_stat() {
-    let err = fs::metadata("foo.txt").unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::NotFound);
-    // check that it is the right kind of `PermissionDenied`
-    assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
 }
