@@ -11,7 +11,7 @@ fn main() {
         assert!(libc::fcntl(1, libc::F_DUPFD, 0) >= 0);
     }
 
-    // Although the syscalls below require disable-isolation mode
+    // Although `readlink` and `stat` require disable-isolation mode
     // to properly run, they are tested with isolation mode on to check the error emitted 
     // after the isolation error is thrown.
 
