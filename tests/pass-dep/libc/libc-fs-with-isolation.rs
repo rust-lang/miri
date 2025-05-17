@@ -12,7 +12,7 @@ fn main() {
     }
 
     // Although `readlink` and `stat` require disable-isolation mode
-    // to properly run, they are tested with isolation mode on to check the error emitted 
+    // to properly run, they are tested with isolation mode on to check the error emitted
     // after the isolation error is thrown.
 
     // test `readlink`
@@ -28,4 +28,3 @@ fn main() {
     // check that it is the right kind of `PermissionDenied`
     assert_eq!(err.raw_os_error(), Some(libc::EACCES));
 }
-
