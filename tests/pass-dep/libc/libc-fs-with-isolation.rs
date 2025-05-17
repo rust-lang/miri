@@ -12,7 +12,8 @@ fn main() {
     }
 
     // Although the syscalls below require disable-isolation mode
-    // to properly run, they are tested with isolation mode on to check the error emitted.
+    // to properly run, they are tested with isolation mode on to check the error emitted 
+    // after the isolation error is thrown.
 
     // test `readlink`
     let mut buf = vec![0; "foo_link.txt".len() + 1];
