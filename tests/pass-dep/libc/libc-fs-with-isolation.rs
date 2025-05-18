@@ -57,7 +57,7 @@ fn test_socketpair_setfl_getfl() {
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
     assert_eq!(res, new_flag);
 
-    // Test unset flag
+    // Test if O_NONBLOCK flag can be unset.
     let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, 0) };
     assert_eq!(res, 0);
     let new_flag = libc::O_RDWR;
@@ -75,7 +75,7 @@ fn test_pipe_setfl_getfl() {
     let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
     assert_eq!(res, 0);
 
-    // Test if both sides have O_RDWR.
+    // Both sides should either have O_RONLY or O_WRONLY.
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
     assert_eq!(res, libc::O_RDONLY);
     let res = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
@@ -90,7 +90,7 @@ fn test_pipe_setfl_getfl() {
     let res = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
     assert_eq!(res, new_flag);
 
-    // Test unset flag.
+    // Test if O_NONBLOCK flag can be unset.
     let res = unsafe { libc::fcntl(fds[0], libc::F_SETFL, 0) };
     assert_eq!(res, 0);
     let new_flag = libc::O_RDONLY;
