@@ -7,6 +7,8 @@ use std::{fs, thread};
 
 fn main() {
     test_fcntl_f_dupfd();
+    test_readlink();
+    test_stat();
     test_socketpair_setfl_getfl();
     test_pipe_setfl_getfl();
     test_setfl_getfl_threaded();
@@ -17,19 +19,20 @@ fn test_fcntl_f_dupfd() {
     unsafe {
         assert!(libc::fcntl(1, libc::F_DUPFD, 0) >= 0);
     }
+}
 
-    // Although `readlink` and `stat` require disable-isolation mode
-    // to properly run, they are tested with isolation mode on to check the error emitted
-    // with `-Zmiri-isolation-error=warn-nobacktrace`.
-
-    // test `readlink`
+/// Although `readlink` and `stat` require disable-isolation mode
+/// to properly run, they are tested with isolation mode on to check the error emitted
+/// with `-Zmiri-isolation-error=warn-nobacktrace`.
+fn test_readlink() {
     let mut buf = vec![0; "foo_link.txt".len() + 1];
     unsafe {
         assert_eq!(libc::readlink(c"foo.txt".as_ptr(), buf.as_mut_ptr(), buf.len()), -1);
         assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::EACCES));
     }
+}
 
-    // test `stat`
+fn test_stat() {
     let err = fs::metadata("foo.txt").unwrap_err();
     assert_eq!(err.kind(), ErrorKind::PermissionDenied);
     // check that it is the right kind of `PermissionDenied`
