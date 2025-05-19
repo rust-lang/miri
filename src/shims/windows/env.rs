@@ -207,9 +207,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     #[allow(non_snake_case)]
     fn GetUserProfileDirectoryW(
         &mut self,
-        token: &OpTy<'tcx>, // HANDLE
-        buf: &OpTy<'tcx>,   // LPWSTR
-        size: &OpTy<'tcx>,  // LPDWORD
+        token: &OpTy<'tcx>, // hToken: HANDLE
+        buf: &OpTy<'tcx>,   // lpProfileDir: LPWSTR
+        size: &OpTy<'tcx>,  // lpcchSize: LPDWORD
     ) -> InterpResult<'tcx, Scalar> // returns BOOL
     {
         let this = self.eval_context_mut();
@@ -237,13 +237,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
                 // Of course we cannot use `windows_check_buffer_size` here since this uses
                 // a different method for dealing with a too-small buffer than the other functions...
+                // FIXME: don't even try this if `buf` is null.
                 let (success, len) = this.write_path_to_wide_str(home, buf, size_avail.into())?;
-                // The Windows docs just say that this is written on failure. But std
-                // seems to rely on it always being written.
-                this.write_scalar(Scalar::from_u32(len.try_into().unwrap()), &size)?;
                 if success {
                     Scalar::from_i32(1) // return TRUE
                 } else {
+                    // "If the buffer specified by lpProfileDir is not large enough or lpProfileDir
+                    // is NULL, the function fails and this parameter receives the necessary buffer
+                    // size, including the terminating null character."
+                    this.write_scalar(Scalar::from_u32(len.try_into().unwrap()), &size)?;
+                    // Also set the error code.
                     this.set_last_error(this.eval_windows("c", "ERROR_INSUFFICIENT_BUFFER"))?;
                     Scalar::from_i32(0) // return FALSE
                 }
