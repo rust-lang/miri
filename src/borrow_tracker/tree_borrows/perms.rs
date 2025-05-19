@@ -286,6 +286,11 @@ impl Permission {
     /// is a protector is relevant because being protected takes priority over being
     /// interior mutable)
     pub fn new_reserved(ty_is_freeze: bool, protected: bool) -> Self {
+        // As demonstrated by `tests/fail/tree_borrows/reservedim_spurious_write.rs`,
+        // interior mutability and protectors interact poorly.
+        // To eliminate the case of Protected Reserved IM we override interior mutability
+        // in the case of a protected reference: protected references are always considered
+        // "freeze" in their reservation phase.
         if ty_is_freeze || protected { Self::new_reserved_frz() } else { Self::new_reserved_im() }
     }
 
