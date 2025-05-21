@@ -7,8 +7,6 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::ErrorKind;
 
-use libc::O_NONBLOCK;
-
 use crate::concurrency::VClock;
 use crate::shims::files::{
     EvalContextExt as _, FileDescription, FileDescriptionRef, WeakFileDescriptionRef,
@@ -165,7 +163,7 @@ impl FileDescription for AnonSocket {
         if flag & o_nonblock == o_nonblock {
             // If there is O_NONBLOCK flag
             self.is_nonblock.set(true);
-            flag &= !O_NONBLOCK;
+            flag &= !o_nonblock;
         } else {
             // If there is no O_NONBLOCK flag
             self.is_nonblock.set(false);
