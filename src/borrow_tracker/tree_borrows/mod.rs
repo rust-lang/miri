@@ -326,12 +326,14 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ),
         );
         // Keep track of whether the node has any part that allows for interior mutability.
-        let mut is_frozen = true;
+        let mut has_unsafe_cell = false;
 
-        this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
-            is_frozen = frozen;
+        this.visit_freeze_sensitive(place, ptr_size, |range, frozen| {
+            has_unsafe_cell = has_unsafe_cell || !frozen;
+
             // Adjust range.
-            range.start += base_offset;
+            let mut range_with_offset = range;
+            range_with_offset.start += base_offset;
 
             // We are only ever `Frozen` inside the frozen bits.
             let (perm, access) = if frozen {
@@ -343,7 +345,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // Store initial permissions.
             let perm_init = LocationState::new_init(perm, strongest_idempotent);
-            for (_perm_range, perm) in perms_map.iter_mut(range.start - base_offset, range.size) {
+            for (_perm_range, perm) in perms_map.iter_mut(range.start, range.size) {
                 *perm = perm_init;
             }
 
@@ -351,7 +353,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if access {
                 tree_borrows.perform_access(
                     orig_tag,
-                    Some((range, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    Some((range_with_offset, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
                     this.machine.borrow_tracker.as_ref().unwrap(),
                     alloc_id,
                     this.machine.current_span(),
@@ -363,7 +365,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 if let Some(data_race) = alloc_extra.data_race.as_vclocks_ref() {
                     data_race.read(
                         alloc_id,
-                        range,
+                        range_with_offset,
                         NaReadType::Retag,
                         Some(place.layout.ty),
                         &this.machine,
@@ -382,7 +384,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             new_perm,
             perms_map,
             span,
-            is_frozen,
+            has_unsafe_cell,
         )?;
         drop(tree_borrows);
 

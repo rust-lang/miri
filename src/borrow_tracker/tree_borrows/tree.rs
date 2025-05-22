@@ -624,12 +624,13 @@ impl<'tcx> Tree {
         perm: NewPermission,
         perms_map: RangeMap<LocationState>,
         span: Span,
-        frozen: bool,
+        has_unsafe_cell: bool,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
         // Allow lazily writing to surrounding data if we have a reference to interior mutable data.
-        let default_initial_perm = if frozen { perm.freeze_perm } else { perm.nonfreeze_perm };
+        let default_initial_perm =
+            if has_unsafe_cell { perm.nonfreeze_perm } else { perm.freeze_perm };
         let prot = perm.protector.is_some();
 
         // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
