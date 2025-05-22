@@ -739,6 +739,8 @@ impl<'tcx> MiriMachine<'tcx> {
                 // undefined behaviour in Miri itself!
                 (
                     unsafe {
+                        #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+                        discrete_alloc::MachineAlloc::enable();
                         libloading::Library::new(lib_file_path)
                             .expect("failed to read specified extern shared object file")
                     },
