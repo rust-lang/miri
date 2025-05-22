@@ -15,7 +15,7 @@ use self::shims::unix::solarish::foreign_items as solarish;
 use crate::concurrency::cpu_affinity::CpuAffinityMask;
 use crate::shims::alloc::EvalContextExt as _;
 use crate::shims::unix::*;
-use crate::*;
+use crate::{shim_sig, *};
 
 pub fn is_dyn_sym(name: &str, target_os: &str) -> bool {
     match name {
@@ -112,26 +112,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         match link_name.as_str() {
             // Environment related shims
             "getenv" => {
-                let [name] = this.check_shim_abi(
-                    link_name,
-                    abi,
-                    ExternAbi::C { unwind: false },
-                    [this.machine.layouts.const_raw_ptr.ty],
-                    this.machine.layouts.mut_raw_ptr.ty,
-                    args,
-                )?;
+                let (callee_abi, arg_types, ret_type) =
+                    shim_sig!(this, extern "C" fn((*const _)) -> (*const _));
+                let [name] =
+                    this.check_shim_abi(link_name, abi, callee_abi, arg_types, ret_type, args)?;
                 let result = this.getenv(name)?;
                 this.write_pointer(result, dest)?;
             }
             "unsetenv" => {
-                let [name] = this.check_shim_abi(
-                    link_name,
-                    abi,
-                    ExternAbi::C { unwind: false },
-                    [this.machine.layouts.const_raw_ptr.ty],
-                    this.tcx.types.i32,
-                    args,
-                )?;
+                let (callee_abi, arg_types, ret_type) =
+                    shim_sig!(this, extern "C" fn((*const _)) -> i32);
+                let [name] =
+                    this.check_shim_abi(link_name, abi, callee_abi, arg_types, ret_type, args)?;
                 let result = this.unsetenv(name)?;
                 this.write_scalar(result, dest)?;
             }
@@ -177,14 +169,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "getpid" => {
-                let [] = this.check_shim_abi(
-                    link_name,
-                    abi,
-                    ExternAbi::C { unwind: false },
-                    [],
-                    this.libc_ty_layout("pid_t").ty,
-                    args,
-                )?;
+                let (callee_abi, arg_types, ret_type) = shim_sig!(this, extern "C" fn() -> "pid_t");
+                let [] =
+                    this.check_shim_abi(link_name, abi, callee_abi, arg_types, ret_type, args)?;
                 let result = this.getpid()?;
                 this.write_scalar(result, dest)?;
             }

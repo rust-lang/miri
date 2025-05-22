@@ -1435,3 +1435,36 @@ impl ToU64 for usize {
         self.try_into().unwrap()
     }
 }
+
+#[macro_export]
+macro_rules! shim_sig {
+    ($this:ident, extern $abi:literal fn($($arg:tt),*) -> $ret:tt) => {
+        (
+            std::str::FromStr::from_str($abi).expect("incorrect abi specified"),
+            [$(layout!($this, $arg)),*],
+            layout!($this, $ret)
+        )
+    };
+
+    // default Rust abi
+    ($this:ident, extern $abi:literal fn($($arg:tt),*) -> $ret:tt) => {
+        shim_sig!($this, extern "Rust" fn($($arg),*) -> $ret)
+    };
+}
+
+#[macro_export]
+macro_rules! layout {
+    ($this:ident, ) => {};
+    ($this:ident, (*const _)) => {
+        $this.machine.layouts.const_raw_ptr.ty
+    };
+    ($this:ident, (*mut _)) => {
+        $this.machine.layouts.mut_raw_ptr.ty
+    };
+    ($this:ident, $arg:ident) => {
+        $this.tcx.types.$arg
+    };
+    ($this:ident, $arg:literal) => {
+        $this.libc_ty_layout($arg).ty
+    };
+}
