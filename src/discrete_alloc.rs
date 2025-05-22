@@ -51,7 +51,6 @@ impl MachineAlloc {
     }
 
     /// Returns a vector of page addresses managed by the allocator.
-    #[expect(dead_code)]
     pub fn pages() -> Vec<u64> {
         let alloc = ALLOCATOR.lock().unwrap();
         alloc.pages.clone().into_iter().map(|p| p.addr().to_u64()).collect()
@@ -226,7 +225,6 @@ impl MachineAlloc {
     ///
     /// SAFETY: Accessing memory after this point will result in a segfault
     /// unless it is first unprotected.
-    #[expect(dead_code)]
     pub unsafe fn prepare_ffi() -> Result<(), nix::errno::Errno> {
         let mut alloc = ALLOCATOR.lock().unwrap();
         unsafe {
@@ -238,7 +236,6 @@ impl MachineAlloc {
     /// Deprotects all owned memory by setting it to RW. Erroring here is very
     /// likely unrecoverable, so it may panic if applying those permissions
     /// fails.
-    #[expect(dead_code)]
     pub fn unprep_ffi() {
         let mut alloc = ALLOCATOR.lock().unwrap();
         let default_flags = ProtFlags::PROT_READ | ProtFlags::PROT_WRITE;

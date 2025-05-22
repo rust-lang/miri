@@ -465,13 +465,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// This overapproximates the modifications which external code might make to memory:
     /// We set all reachable allocations as initialized, mark all reachable provenances as exposed
     /// and overwrite them with `Provenance::WILDCARD`.
-    fn prepare_exposed_for_native_call(&mut self) -> InterpResult<'tcx> {
+    fn prepare_exposed_for_native_call(&mut self, _paranoid: bool) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         // We need to make a deep copy of this list, but it's fine; it also serves as scratch space
         // for the search within `prepare_for_native_call`.
         let exposed: Vec<AllocId> =
             this.machine.alloc_addresses.get_mut().exposed.iter().copied().collect();
-        this.prepare_for_native_call(exposed)
+        this.prepare_for_native_call(exposed /*, paranoid*/)
+    }
+
+    /// Makes use of information obtained about memory accesses during FFI to determine which
+    /// provenances should be exposed. Note that if `prepare_exposed_for_native_call` was not
+    /// called before the FFI (with `paranoid` set to false) then some of the writes may be
+    /// lost!
+    #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+    fn apply_events(&mut self, _events: crate::shims::trace::MemEvents) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+        let _exposed: Vec<AllocId> =
+            this.machine.alloc_addresses.get_mut().exposed.iter().copied().collect();
+        interp_ok(())
+        //this.apply_accesses(exposed, events.reads, events.writes)
     }
 }
 
