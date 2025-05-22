@@ -317,32 +317,33 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let mut tree_borrows = alloc_extra.borrow_tracker_tb().borrow_mut();
         let prot = new_perm.protector.is_some();
 
-        // Store initialized permissions and their corresponding range.
+        // Store initial permissions and their corresponding range.
         let mut perms_map: RangeMap<LocationState> = RangeMap::new(
-            base_offset + ptr_size,
+            ptr_size,
             LocationState::new_uninit(
                 Permission::new_disabled(),
                 foreign_access_skipping::IdempotentForeignAccess::None,
             ),
         );
+        // Keep track of whether the node has any part that allows for interior mutability.
+        let mut is_frozen = true;
 
-        let NewPermission { freeze_perm, freeze_access, nonfreeze_perm, nonfreeze_access, .. } =
-            new_perm;
         this.visit_freeze_sensitive(place, ptr_size, |mut range, frozen| {
+            is_frozen = frozen;
             // Adjust range.
             range.start += base_offset;
 
             // We are only ever `Frozen` inside the frozen bits.
             let (perm, access) = if frozen {
-                (freeze_perm, freeze_access)
+                (new_perm.freeze_perm, new_perm.freeze_access)
             } else {
-                (nonfreeze_perm, nonfreeze_access)
+                (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
             };
             let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
 
-            // Store Initialized permissions.
+            // Store initial permissions.
             let perm_init = LocationState::new_init(perm, strongest_idempotent);
-            for (_perm_range, perm) in perms_map.iter_mut(range.start, range.size) {
+            for (_perm_range, perm) in perms_map.iter_mut(range.start - base_offset, range.size) {
                 *perm = perm_init;
             }
 
@@ -381,6 +382,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             new_perm,
             perms_map,
             span,
+            is_frozen,
         )?;
         drop(tree_borrows);
 
@@ -586,7 +588,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             nonfreeze_access: true,
             protector: Some(ProtectorKind::StrongProtector),
         };
-        // NewPermission::new(Mutability::Mut, true, ProtectorKind::StrongProtector);
         this.tb_retag_place(place, new_perm)
     }
 

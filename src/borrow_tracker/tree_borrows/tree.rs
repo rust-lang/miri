@@ -33,7 +33,7 @@ mod tests;
 
 /// Data for a single *location*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct LocationState {
+pub(super) struct LocationState {
     /// A location is initialized when it is child-accessed for the first time (and the initial
     /// retag initializes the location for the range covered by the type), and it then stays
     /// initialized forever.
@@ -615,7 +615,7 @@ impl Tree {
 
 impl<'tcx> Tree {
     /// Insert a new tag in the tree
-    pub(crate) fn new_child(
+    pub(super) fn new_child(
         &mut self,
         size: Size,
         base_offset: Size,
@@ -624,10 +624,12 @@ impl<'tcx> Tree {
         perm: NewPermission,
         perms_map: RangeMap<LocationState>,
         span: Span,
+        frozen: bool,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
-        let default_initial_perm = perm.freeze_perm;
+        // Allow lazily writing to surrounding data if we have a reference to interior mutable data.
+        let default_initial_perm = if frozen { perm.freeze_perm } else { perm.nonfreeze_perm };
         let prot = perm.protector.is_some();
 
         // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
@@ -652,9 +654,10 @@ impl<'tcx> Tree {
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
 
-        for (Range { start, end }, &perm) in perms_map.iter(base_offset, size) {
-            for (_perms_range, perms) in
-                self.rperms.iter_mut(Size::from_bytes(start), Size::from_bytes(end - start))
+        for (Range { start, end }, &perm) in perms_map.iter(Size::from_bytes(0), size) {
+            for (_perms_range, perms) in self
+                .rperms
+                .iter_mut(Size::from_bytes(start) + base_offset, Size::from_bytes(end - start))
             {
                 perms.insert(idx, perm);
             }
