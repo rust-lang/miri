@@ -76,7 +76,7 @@ mod borrow_tracker;
 mod clock;
 mod concurrency;
 mod diagnostics;
-#[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_os = "linux")]
 mod discrete_alloc;
 mod eval;
 mod helpers;
@@ -100,6 +100,7 @@ use rustc_middle::{bug, span_bug};
 use tracing::{info, trace};
 
 // Let bin/miri.rs kill the supervisor process.
+#[cfg(target_os = "linux")]
 pub use crate::shims::trace::kill_sv;
 
 // Type aliases that set the provenance parameter.

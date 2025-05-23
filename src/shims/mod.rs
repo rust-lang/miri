@@ -19,7 +19,7 @@ pub mod os_str;
 pub mod panic;
 pub mod time;
 pub mod tls;
-#[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_os = "linux")]
 pub mod trace;
 
 pub use self::files::FdTable;

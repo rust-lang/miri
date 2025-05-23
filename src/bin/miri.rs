@@ -132,7 +132,9 @@ fn entry_fn(tcx: TyCtxt<'_>) -> (DefId, MiriEntryFnType) {
 
 /// If for whatever reason the supervisor process exists but can't see that
 /// we died, inform it manually.
+#[inline]
 fn exit(return_code: i32) -> ! {
+    #[cfg(target_os = "linux")]
     miri::kill_sv(return_code);
     std::process::exit(return_code)
 }

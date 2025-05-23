@@ -5,7 +5,7 @@ use std::{alloc, slice};
 use rustc_abi::{Align, Size};
 use rustc_middle::mir::interpret::AllocBytes;
 
-#[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_os = "linux")]
 use crate::discrete_alloc::MachineAlloc;
 use crate::helpers::ToU64 as _;
 
@@ -42,9 +42,9 @@ impl Drop for MiriAllocBytes {
 
         // SAFETY: Invariant, `self.ptr` points to memory allocated with `self.layout`.
         unsafe {
-            #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+            #[cfg(target_os = "linux")]
             MachineAlloc::dealloc(self.ptr, alloc_layout);
-            #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+            #[cfg(not(target_os = "linux"))]
             alloc::dealloc(self.ptr, alloc_layout);
         }
     }
@@ -100,11 +100,11 @@ impl AllocBytes for MiriAllocBytes {
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
         let alloc_fn = |layout| unsafe {
-            #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+            #[cfg(target_os = "linux")]
             {
                 MachineAlloc::alloc(layout)
             }
-            #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+            #[cfg(not(target_os = "linux"))]
             {
                 alloc::alloc(layout)
             }
@@ -124,11 +124,11 @@ impl AllocBytes for MiriAllocBytes {
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
         let alloc_fn = |layout| unsafe {
-            #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+            #[cfg(target_os = "linux")]
             {
                 MachineAlloc::alloc_zeroed(layout)
             }
-            #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+            #[cfg(not(target_os = "linux"))]
             {
                 alloc::alloc_zeroed(layout)
             }

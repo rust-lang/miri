@@ -478,7 +478,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// provenances should be exposed. Note that if `prepare_exposed_for_native_call` was not
     /// called before the FFI (with `paranoid` set to false) then some of the writes may be
     /// lost!
-    #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(target_os = "linux")]
     fn apply_events(&mut self, _events: crate::shims::trace::MemEvents) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         let _exposed: Vec<AllocId> =

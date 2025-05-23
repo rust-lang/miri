@@ -181,7 +181,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         // Prepare all exposed memory, depending on whether we have a supervisor process.
-        #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+        #[cfg(target_os = "linux")]
         if super::trace::Supervisor::init().is_ok() {
             this.prepare_exposed_for_native_call(false)?;
         } else {
@@ -189,7 +189,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             //eprintln!("Oh noes!")
             panic!("No ptrace!");
         }
-        #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+        #[cfg(not(target_os = "linux"))]
         this.prepare_exposed_for_native_call(true)?;
 
         // Convert them to `libffi::high::Arg` type.
@@ -200,7 +200,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Call the function and store output, depending on return type in the function signature.
         let ret = this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
-        #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+        #[cfg(target_os = "linux")]
         if let Some(events) = super::trace::Supervisor::get_events() {
             this.apply_events(events)?;
         }
@@ -209,7 +209,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 }
 
-#[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(target_os = "linux")]
 unsafe fn do_native_call<T: libffi::high::CType>(ptr: CodePtr, args: &[ffi::Arg<'_>]) -> T {
     use shims::trace::Supervisor;
 
@@ -221,7 +221,7 @@ unsafe fn do_native_call<T: libffi::high::CType>(ptr: CodePtr, args: &[ffi::Arg<
     }
 }
 
-#[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+#[cfg(not(target_os = "linux"))]
 #[inline(always)]
 unsafe fn do_native_call<T: libffi::high::CType>(ptr: CodePtr, args: &[ffi::Arg<'_>]) -> T {
     unsafe { ffi::call(ptr, args) }
