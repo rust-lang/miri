@@ -18,7 +18,6 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
-use super::NewPermission;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError,
@@ -614,32 +613,28 @@ impl Tree {
 }
 
 impl<'tcx> Tree {
-    /// Insert a new tag in the tree
+    /// Insert a new tag in the tree.
+    ///
+    /// `initial_perms` defines the initial permissions for the part of memory
+    /// that is already considered "initialized" immediately. The ranges in this
+    /// map are relative to `base_offset`.
+    /// `default_perm` defines the initial permission for the rest of the allocation.
     pub(super) fn new_child(
         &mut self,
-        size: Size,
         base_offset: Size,
         parent_tag: BorTag,
         new_tag: BorTag,
-        perm: NewPermission,
-        perms_map: RangeMap<LocationState>,
+        init_perms: RangeMap<Permission>,
+        default_uninit_perm: Permission,
+        protected: bool,
         span: Span,
-        has_unsafe_cell: bool,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
         let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
-        // Allow lazily writing to surrounding data if we have a reference to interior mutable data.
-        let default_initial_perm =
-            if has_unsafe_cell { perm.nonfreeze_perm } else { perm.freeze_perm };
-        let prot = perm.protector.is_some();
+        assert!(default_uninit_perm.is_initial());
 
-        // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
-        // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
-        assert!(
-            perm.freeze_perm.strongest_idempotent_foreign_access(prot)
-                <= perm.nonfreeze_perm.strongest_idempotent_foreign_access(prot)
-        );
-        let strongest_idempotent = default_initial_perm.strongest_idempotent_foreign_access(prot);
+        let default_strongest_idempotent =
+            default_uninit_perm.strongest_idempotent_foreign_access(protected);
         // Create the node
         self.nodes.insert(
             idx,
@@ -647,20 +642,28 @@ impl<'tcx> Tree {
                 tag: new_tag,
                 parent: Some(parent_idx),
                 children: SmallVec::default(),
-                default_initial_perm,
-                default_initial_idempotent_foreign_access: strongest_idempotent,
-                debug_info: NodeDebugInfo::new(new_tag, default_initial_perm, span),
+                default_initial_perm: default_uninit_perm,
+                default_initial_idempotent_foreign_access: default_strongest_idempotent,
+                debug_info: NodeDebugInfo::new(new_tag, default_uninit_perm, span),
             },
         );
         // Register new_tag as a child of parent_tag
         self.nodes.get_mut(parent_idx).unwrap().children.push(idx);
 
-        for (Range { start, end }, &perm) in perms_map.iter(Size::from_bytes(0), size) {
+        for (Range { start, end }, &perm) in init_perms.iter(Size::from_bytes(0), init_perms.size())
+        {
+            assert!(perm.is_initial());
             for (_perms_range, perms) in self
                 .rperms
                 .iter_mut(Size::from_bytes(start) + base_offset, Size::from_bytes(end - start))
             {
-                perms.insert(idx, perm);
+                perms.insert(
+                    idx,
+                    LocationState::new_init(
+                        perm,
+                        perm.strongest_idempotent_foreign_access(protected),
+                    ),
+                );
             }
         }
 
@@ -668,7 +671,7 @@ impl<'tcx> Tree {
         // We now weaken the recorded SIFA for our parents, until the invariant is restored.
         // We could weaken them all to `LocalAccess`, but it is more efficient to compute the SIFA
         // for the new permission statically, and use that.
-        self.update_last_accessed_after_retag(parent_idx, strongest_idempotent);
+        self.update_last_accessed_after_retag(parent_idx, default_strongest_idempotent);
 
         interp_ok(())
     }

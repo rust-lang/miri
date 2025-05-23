@@ -31,6 +31,11 @@ impl<T> RangeMap<T> {
         RangeMap { v }
     }
 
+    pub fn size(&self) -> Size {
+        let size = self.v.last().map(|x| x.range.end).unwrap_or(0);
+        Size::from_bytes(size)
+    }
+
     /// Finds the index containing the given offset.
     fn find_offset(&self, offset: u64) -> usize {
         self.v
@@ -71,10 +76,7 @@ impl<T> RangeMap<T> {
         };
         // The first offset that is not included any more.
         let end = offset + len;
-        assert!(
-            end <= self.v.last().map(|x| x.range.end).unwrap_or(0),
-            "iterating beyond the bounds of this RangeMap"
-        );
+        assert!(end <= self.size().bytes(), "iterating beyond the bounds of this RangeMap");
         slice
             .iter()
             .take_while(move |elem| elem.range.start < end)

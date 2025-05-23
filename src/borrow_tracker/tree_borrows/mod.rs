@@ -3,7 +3,6 @@ use rustc_middle::mir::{Mutability, RetagKind};
 use rustc_middle::ty::layout::HasTypingEnv;
 use rustc_middle::ty::{self, Ty};
 
-use self::tree::LocationState;
 use crate::borrow_tracker::{GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
 use crate::*;
@@ -216,8 +215,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         new_perm: NewPermission,
         new_tag: BorTag,
     ) -> InterpResult<'tcx, Option<Provenance>> {
-        // Make sure the new permissions make sense as the initial permissions of a fresh tag.
-        assert!(new_perm.freeze_perm.is_initial() && new_perm.nonfreeze_perm.is_initial());
         let this = self.eval_context_mut();
         // Ensure we bail out if the pointer goes out-of-bounds (see miri#1050).
         this.check_ptr_access(place.ptr(), ptr_size, CheckInAllocMsg::Dereferenceable)?;
@@ -315,76 +312,81 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let span = this.machine.current_span();
         let alloc_extra = this.get_alloc_extra(alloc_id)?;
         let mut tree_borrows = alloc_extra.borrow_tracker_tb().borrow_mut();
-        let prot = new_perm.protector.is_some();
 
         // Store initial permissions and their corresponding range.
-        let mut perms_map: RangeMap<LocationState> = RangeMap::new(
+        let mut perms_map: RangeMap<Permission> = RangeMap::new(
             ptr_size,
-            LocationState::new_uninit(
-                Permission::new_disabled(),
-                foreign_access_skipping::IdempotentForeignAccess::None,
-            ),
+            Permission::new_disabled(), // this will be overwritten
         );
         // Keep track of whether the node has any part that allows for interior mutability.
+        // FIXME: This misses `PhantomData<UnsafeCell<T>>` which could be considered a marker
+        // for requesting interior mutability.
         let mut has_unsafe_cell = false;
 
         this.visit_freeze_sensitive(place, ptr_size, |range, frozen| {
             has_unsafe_cell = has_unsafe_cell || !frozen;
 
-            // Adjust range.
-            let mut range_with_offset = range;
-            range_with_offset.start += base_offset;
-
             // We are only ever `Frozen` inside the frozen bits.
-            let (perm, access) = if frozen {
+            let (perm_init, access) = if frozen {
                 (new_perm.freeze_perm, new_perm.freeze_access)
             } else {
                 (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
             };
-            let strongest_idempotent = perm.strongest_idempotent_foreign_access(prot);
 
             // Store initial permissions.
-            let perm_init = LocationState::new_init(perm, strongest_idempotent);
             for (_perm_range, perm) in perms_map.iter_mut(range.start, range.size) {
                 *perm = perm_init;
             }
 
             // Some reborrows incur a read access to the parent.
             if access {
+                // Adjust range to be relative to allocation start (rather than to `place`).
+                let mut range_in_alloc = range;
+                range_in_alloc.start += base_offset;
+
                 tree_borrows.perform_access(
                     orig_tag,
-                    Some((range_with_offset, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    Some((range_in_alloc, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
                     this.machine.borrow_tracker.as_ref().unwrap(),
                     alloc_id,
                     this.machine.current_span(),
-                )?
-            }
+                )?;
 
-            // Also inform the data race model (but only if any bytes are actually affected).
-            if range.size.bytes() > 0 && access {
-                if let Some(data_race) = alloc_extra.data_race.as_vclocks_ref() {
-                    data_race.read(
-                        alloc_id,
-                        range_with_offset,
-                        NaReadType::Retag,
-                        Some(place.layout.ty),
-                        &this.machine,
-                    )?
+                // Also inform the data race model (but only if any bytes are actually affected).
+                if range.size.bytes() > 0 {
+                    if let Some(data_race) = alloc_extra.data_race.as_vclocks_ref() {
+                        data_race.read(
+                            alloc_id,
+                            range_in_alloc,
+                            NaReadType::Retag,
+                            Some(place.layout.ty),
+                            &this.machine,
+                        )?
+                    }
                 }
             }
             interp_ok(())
         })?;
 
+        // SIFA of the frozen part must be weaker than SIFA of the non-frozen part, otherwise
+        // `self.update_last_accessed_after_retag` will break the SIFA invariant (see `foreign_access_skipping.rs`).
+        assert!(
+            new_perm.freeze_perm.strongest_idempotent_foreign_access(new_perm.protector.is_some())
+                <= new_perm
+                    .nonfreeze_perm
+                    .strongest_idempotent_foreign_access(new_perm.protector.is_some())
+        );
+
         // Record the parent-child pair in the tree.
         tree_borrows.new_child(
-            ptr_size,
             base_offset,
             orig_tag,
             new_tag,
-            new_perm,
             perms_map,
+            // Allow lazily writing to surrounding data if we found an `UnsafeCell`.
+            if has_unsafe_cell { new_perm.nonfreeze_perm } else { new_perm.freeze_perm },
+            new_perm.protector.is_some(),
             span,
-            has_unsafe_cell,
         )?;
         drop(tree_borrows);
 
