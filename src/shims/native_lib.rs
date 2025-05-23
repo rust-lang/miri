@@ -182,7 +182,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Prepare all exposed memory, depending on whether we have a supervisor process.
         #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
-        this.prepare_exposed_for_native_call(super::trace::Supervisor::init().is_err())?;
+        if super::trace::Supervisor::init().is_ok() {
+            this.prepare_exposed_for_native_call(false)?;
+        } else {
+            //this.prepare_exposed_for_native_call(true)?;
+            //eprintln!("Oh noes!")
+            panic!("No ptrace!");
+        }
         #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
         this.prepare_exposed_for_native_call(true)?;
 

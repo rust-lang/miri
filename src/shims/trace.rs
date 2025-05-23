@@ -7,15 +7,13 @@ use nix::unistd;
 use crate::discrete_alloc;
 use crate::helpers::ToU64;
 
-#[cfg(target_pointer_width = "64")]
-const BITS: u32 = 64;
-#[cfg(target_pointer_width = "32")]
-const BITS: u32 = 32;
-
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const BREAKPT_INSTR: isize = 0xCC;
 #[cfg(target_arch = "aarch64")]
 const BREAKPT_INSTR: isize = 0xD420;
+
+// FIXME: Make this architecture-specific
+const ARCH_MAX_ACCESS_SIZE: u64 = 256;
 
 // We do NOT ever want to block the child from accessing this!!
 static SUPERVISOR: std::sync::Mutex<Option<Supervisor>> = std::sync::Mutex::new(None);
@@ -121,7 +119,7 @@ impl Supervisor {
                             sv_loop(listener, t_event)
                         });
                         eprintln!("{p:?}");
-                        std::process::abort();
+                        std::process::exit(-1);
                     }
                     unistd::ForkResult::Child => {
                         let mut sv = SUPERVISOR.lock().map_err(|_| ())?;
@@ -256,6 +254,9 @@ fn sv_loop(listener: ChildListener, t_event: ipc::IpcSender<MemEvents>) -> ! {
     let mut writes: Vec<Range<u64>> = vec![];
     let mut mappings: Vec<Range<u64>> = vec![];
 
+    // An instance of the Capstone disassembler, so we don't spawn one on every access
+    let cs = get_disasm();
+
     // Memory allocated on the MiriMachine
     let mut ch_pages = vec![];
 
@@ -290,7 +291,7 @@ fn sv_loop(listener: ChildListener, t_event: ipc::IpcSender<MemEvents>) -> ! {
                         match signal {
                             signal::SIGSEGV => {
                                 if let Err(ret) =
-                                    handle_segfault(pid, &ch_pages, &mut reads, &mut writes)
+                                    handle_segfault(pid, &ch_pages, &cs, &mut reads, &mut writes)
                                 {
                                     retcode = ret;
                                     break 'listen;
@@ -441,6 +442,40 @@ fn sv_loop(listener: ChildListener, t_event: ipc::IpcSender<MemEvents>) -> ! {
     std::process::exit(retcode);
 }
 
+fn get_disasm() -> capstone::Capstone {
+    use capstone::prelude::*;
+    let cs_pre = Capstone::new();
+    {
+        #[cfg(target_arch = "x86_64")]
+        {
+            cs_pre.x86().mode(arch::x86::ArchMode::Mode64)
+        }
+        #[cfg(target_arch = "x86")]
+        {
+            cs_pre.x86().mode(arch::x86::ArchMode::Mode32)
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            cs_pre.arm64()
+        }
+        #[cfg(target_arch = "arm")]
+        {
+            cs_pre.arm()
+        }
+        #[cfg(target_arch = "riscv64")]
+        {
+            cs_pre.riscv().mode(arch::riscv::ArchMode::RiscV64)
+        }
+        #[cfg(target_arch = "riscv32")]
+        {
+            cs_pre.riscv().mode(arch::riscv::ArchMode::RiscV32)
+        }
+    }
+    .detail(true)
+    .build()
+    .unwrap()
+}
+
 /// Waits for a specific signal to be triggered.
 fn wait_for_signal(
     pid: unistd::Pid,
@@ -545,9 +580,74 @@ fn handle_munmap(
 fn handle_segfault(
     pid: unistd::Pid,
     ch_pages: &[u64],
+    cs: &capstone::Capstone,
     reads: &mut Vec<Range<u64>>,
     writes: &mut Vec<Range<u64>>,
 ) -> Result<(), i32> {
+    // This is just here to not pollute the main namespace with capstone::prelude::*
+    // and so that we can get a Result instead of just unwrapping on error
+    #[inline]
+    fn capstone_disassemble(
+        instr: &[u8],
+        addr: u64,
+        cs: &capstone::Capstone,
+        reads: &mut Vec<Range<u64>>,
+        writes: &mut Vec<Range<u64>>,
+    ) -> capstone::CsResult<()> {
+        use capstone::prelude::*;
+
+        let insns = cs.disasm_count(instr, 0x1000, 1)?;
+        let ins_detail = cs.insn_detail(&insns[0])?;
+        let arch_detail = ins_detail.arch_detail();
+
+        for op in arch_detail.operands() {
+            match op {
+                arch::ArchOperand::X86Operand(x86_operand) => {
+                    let size: u64 = x86_operand.size.into();
+                    match x86_operand.op_type {
+                        arch::x86::X86OperandType::Mem(_) => {
+                            // It's called a "RegAccessType" but it also applies to memory
+                            let acc_ty = x86_operand.access.unwrap();
+                            if acc_ty.is_readable() {
+                                reads.push(addr..addr.strict_add(size));
+                            }
+                            if acc_ty.is_writable() {
+                                writes.push(addr..addr.strict_add(size));
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                arch::ArchOperand::Arm64Operand(arm64_operand) => {
+                    // Annoyingly, we don't get the size here, so just be pessimistic for now
+                    match arm64_operand.op_type {
+                        arch::arm64::Arm64OperandType::Mem(_arm64_op_mem) => {
+                            //
+                        }
+                        _ => (),
+                    }
+                }
+                arch::ArchOperand::ArmOperand(arm_operand) =>
+                    match arm_operand.op_type {
+                        arch::arm::ArmOperandType::Mem(_) => {
+                            let acc_ty = arm_operand.access.unwrap();
+                            if acc_ty.is_readable() {
+                                reads.push(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE));
+                            }
+                            if acc_ty.is_writable() {
+                                writes.push(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE));
+                            }
+                        }
+                        _ => (),
+                    },
+                arch::ArchOperand::RiscVOperand(_risc_voperand) => todo!(),
+                _ => unimplemented!(),
+            }
+        }
+
+        Ok(())
+    }
+
     let siginfo = ptrace::getsiginfo(pid).unwrap();
     let addr = unsafe { siginfo.si_addr().addr().to_u64() };
     let page_addr = addr.strict_sub(addr.strict_rem(unsafe { PAGE_SIZE }));
@@ -596,51 +696,12 @@ fn handle_segfault(
             );
             ret
         });
-        let mut decoder = iced_x86::Decoder::new(BITS, instr.as_slice(), 0);
-        let mut fac = iced_x86::InstructionInfoFactory::new();
-        let instr = decoder.decode();
-        let memsize = instr.op_code().memory_size().size().to_u64();
-        let mem = fac.info(&instr).used_memory();
 
-        for acc in mem {
-            let mut r = false;
-            let mut w = false;
-            match acc.access() {
-                iced_x86::OpAccess::Read | iced_x86::OpAccess::CondRead => {
-                    r = true;
-                }
-                iced_x86::OpAccess::Write | iced_x86::OpAccess::CondWrite => {
-                    w = true;
-                }
-                iced_x86::OpAccess::ReadWrite | iced_x86::OpAccess::ReadCondWrite => {
-                    r = true;
-                    w = true;
-                }
-                _ => (),
-            }
-            let addr_end = addr.strict_add(memsize);
-            if r {
-                if let Some(idx) = reads.iter().position(|r| r.start <= addr_end && addr <= r.end) {
-                    let mut rg = reads[idx].clone();
-                    rg.start = std::cmp::min(rg.start, addr);
-                    rg.end = std::cmp::max(rg.end, addr_end);
-                    reads[idx] = rg;
-                } else {
-                    reads.push(addr..addr_end);
-                }
-            }
-            if w {
-                if let Some(idx) = writes.iter().position(|r| r.start <= addr_end && addr <= r.end)
-                {
-                    let mut rg = writes[idx].clone();
-                    rg.start = std::cmp::min(rg.start, addr);
-                    rg.end = std::cmp::max(rg.end, addr_end);
-                    writes[idx] = rg;
-                } else {
-                    writes.push(addr..addr_end);
-                }
-            }
+        if capstone_disassemble(&instr, addr, cs, reads, writes).is_err() {
+            reads.push(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE));
+            writes.push(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE));
         }
+
         #[expect(clippy::as_conversions)]
         new_regs.set_ip(mempr_on as usize);
         new_regs.set_sp(unsafe { (&raw mut CLICK_HERE_4_FREE_STACK[512]).addr() });
