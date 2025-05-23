@@ -82,6 +82,15 @@ pub struct Supervisor {
     r_event: ipc::IpcReceiver<MemEvents>,
 }
 
+pub fn kill_sv(code: i32) {
+    if let Ok(mut sv_guard) = SUPERVISOR.lock() {
+        if let Some(sv) = sv_guard.take() {
+            let _ = sv.t_message.send(TraceRequest::Die(code));
+            *sv_guard = Some(sv);
+        }
+    }
+}
+
 impl Supervisor {
     pub fn init() -> Result<(), ()> {
         let ptrace_status = std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope");
@@ -185,7 +194,7 @@ impl Supervisor {
 pub enum TraceRequest {
     BeginFfi(Vec<u64>),
     EndFfi,
-    Die,
+    Die(i32),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -427,7 +436,10 @@ fn sv_loop(listener: ChildListener, t_event: ipc::IpcSender<MemEvents>) -> ! {
                         signal::kill(main_pid, signal::SIGCONT).unwrap();
                     }
 
-                    TraceRequest::Die => break 'listen,
+                    TraceRequest::Die(child_code) => {
+                        retcode = child_code;
+                        break 'listen;
+                    }
                 },
             ExecEvent::Died(child_code) => {
                 if child_code != 0 {

@@ -130,6 +130,13 @@ fn entry_fn(tcx: TyCtxt<'_>) -> (DefId, MiriEntryFnType) {
     }
 }
 
+/// If for whatever reason the supervisor process exists but can't see that
+/// we died, inform it manually.
+fn exit(return_code: i32) -> ! {
+    miri::kill_sv(return_code);
+    std::process::exit(return_code)
+}
+
 impl rustc_driver::Callbacks for MiriCompilerCalls {
     fn config(&mut self, config: &mut Config) {
         config.override_queries = Some(|_, providers| {
@@ -213,7 +220,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     if !many_seeds.keep_going {
                         // `abort_if_errors` would actually not stop, since `par_for_each` waits for the
                         // rest of the to finish, so we just exit immediately.
-                        std::process::exit(return_code);
+                        exit(return_code);
                     }
                     exit_code.store(return_code, Ordering::Relaxed);
                     num_failed.fetch_add(1, Ordering::Relaxed);
@@ -223,7 +230,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             if num_failed > 0 {
                 eprintln!("{num_failed}/{total} SEEDS FAILED", total = many_seeds.seeds.count());
             }
-            std::process::exit(exit_code.0.into_inner());
+            exit(exit_code.0.into_inner());
         } else {
             let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
                 .unwrap_or_else(|| {
@@ -231,7 +238,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     rustc_driver::EXIT_FAILURE
                 });
 
-            std::process::exit(return_code);
+            exit(return_code);
         }
 
         // Unreachable.
@@ -326,7 +333,7 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
 
 fn show_error(msg: &impl std::fmt::Display) -> ! {
     eprintln!("fatal error: {msg}");
-    std::process::exit(1)
+    exit(1)
 }
 
 macro_rules! show_error {
@@ -400,7 +407,7 @@ fn run_compiler_and_exit(
     // Invoke compiler, and handle return code.
     let exit_code =
         rustc_driver::catch_with_exit_code(move || rustc_driver::run_compiler(args, callbacks));
-    std::process::exit(exit_code)
+    exit(exit_code)
 }
 
 /// Parses a comma separated list of `T` from the given string:
@@ -479,7 +486,7 @@ fn main() {
     let env_snapshot = env::vars_os().collect::<Vec<_>>();
 
     let args = rustc_driver::catch_fatal_errors(|| rustc_driver::args::raw_args(&early_dcx))
-        .unwrap_or_else(|_| std::process::exit(rustc_driver::EXIT_FAILURE));
+        .unwrap_or_else(|_| exit(rustc_driver::EXIT_FAILURE));
 
     // Install the ctrlc handler that sets `rustc_const_eval::CTRL_C_RECEIVED`, even if
     // MIRI_BE_RUSTC is set.

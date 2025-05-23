@@ -99,6 +99,9 @@ pub use rustc_const_eval::interpret::{self, AllocMap, Provenance as _};
 use rustc_middle::{bug, span_bug};
 use tracing::{info, trace};
 
+// Let bin/miri.rs kill the supervisor process.
+pub use crate::shims::trace::kill_sv;
+
 // Type aliases that set the provenance parameter.
 pub type Pointer = interpret::Pointer<Option<machine::Provenance>>;
 pub type StrictPointer = interpret::Pointer<machine::Provenance>;
