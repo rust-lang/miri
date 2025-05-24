@@ -739,8 +739,6 @@ impl<'tcx> MiriMachine<'tcx> {
                 // undefined behaviour in Miri itself!
                 (
                     unsafe {
-                        #[cfg(target_os = "linux")]
-                        alloc::discrete_alloc::MachineAlloc::enable();
                         libloading::Library::new(lib_file_path)
                             .expect("failed to read specified extern shared object file")
                     },
@@ -1805,6 +1803,19 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         compute_range: impl FnOnce() -> RangeSet,
     ) -> Cow<'e, RangeSet> {
         Cow::Borrowed(ecx.machine.union_data_ranges.entry(ty).or_insert_with(compute_range))
+    }
+
+    fn get_default_byte_mdata(&self) -> <Self::Bytes as AllocBytes>::ByteMetadata {
+        use crate::alloc::MiriByteMdata;
+
+        #[cfg(target_os = "linux")]
+        if self.native_lib.is_some() {
+            MiriByteMdata::Isolated
+        } else {
+            MiriByteMdata::Global
+        }
+        #[cfg(not(target_os = "linux"))]
+        MiriByteMdata::Global
     }
 }
 

@@ -2,4 +2,4 @@ mod alloc_bytes;
 #[cfg(target_os = "linux")]
 pub mod discrete_alloc;
 
-pub use self::alloc_bytes::MiriAllocBytes;
+pub use self::alloc_bytes::{MiriAllocBytes, MiriByteMdata};

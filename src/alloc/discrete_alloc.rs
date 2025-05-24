@@ -25,38 +25,21 @@ pub struct MachineAlloc {
     allocated: Vec<Box<[u8]>>,
     /// The host (not emulated) page size.
     page_size: usize,
-    /// If false, calls to `alloc()` and `alloc_zeroed()` just wrap the corresponding
-    /// function in the global allocator. Otherwise, uses the pages tracked
-    /// internally.
-    enabled: bool,
 }
 
 // SAFETY: We only point to heap-allocated data
 unsafe impl Send for MachineAlloc {}
 
 impl MachineAlloc {
-    /// Initializes the allocator. `page_size` is set to 4k as a placeholder to
-    /// allow this function to be `const`; it is updated to its real value when
-    /// `enable()` is called.
+    /// Initializes the allocator. `page_size` is set to 0 as a placeholder to
+    /// allow this function to be `const`; it is updated to its real value on
+    /// the first call to `alloc()` or `alloc_zeroed()`.
     const fn empty() -> Self {
         Self {
             pages: Vec::new(),
             huge_allocs: Vec::new(),
             allocated: Vec::new(),
-            page_size: 4096,
-            enabled: true,
-        }
-    }
-
-    /// Enables the allocator. From this point onwards, calls to `alloc()` and
-    /// `alloc_zeroed()` will return `(ptr, false)`.
-    pub fn enable() {
-        let mut alloc = ALLOCATOR.lock().unwrap();
-        alloc.enabled = true;
-        // This needs to specifically be the system pagesize!
-        alloc.page_size = unsafe {
-            // If sysconf errors, better to just panic
-            libc::sysconf(libc::_SC_PAGE_SIZE).try_into().unwrap()
+            page_size: 0,
         }
     }
 
@@ -79,44 +62,34 @@ impl MachineAlloc {
         (size, align)
     }
 
-    /// Allocates memory as described in `Layout`. If `MachineAlloc::enable()`
-    /// has *not* been called yet, this is just a wrapper for `(alloc::alloc(),
-    /// true)`. Otherwise, it will allocate from its own memory pool and
-    /// return `(ptr, false)`. The latter field is meant to correspond with the
-    /// field `alloc_is_global` for `MiriAllocBytes`.
+    /// Allocates memory as described in `Layout`.
     ///
-    /// SAFETY: See alloc::alloc()
+    /// SAFETY: `See alloc::alloc()`
     #[inline]
-    pub unsafe fn alloc(layout: Layout) -> (*mut u8, bool) {
+    pub unsafe fn alloc(layout: Layout) -> *mut u8 {
         let mut alloc = ALLOCATOR.lock().unwrap();
         unsafe {
-            if alloc.enabled {
-                (alloc.alloc_inner(layout, false), false)
-            } else {
-                (alloc::alloc(layout), true)
-            }
+            alloc.alloc_inner(layout, false)
         }
     }
 
-    /// Same as `alloc()`, but zeroes out data before allocating. Instead
-    /// wraps `alloc::alloc_zeroed()` if `MachineAlloc::enable()` has not been
-    /// called yet.
+    /// Same as `alloc()`, but zeroes out data before allocating.
     ///
-    /// SAFETY: See alloc::alloc_zeroed()
-    pub unsafe fn alloc_zeroed(layout: Layout) -> (*mut u8, bool) {
+    /// SAFETY: See `alloc::alloc_zeroed()`
+    pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
         let mut alloc = ALLOCATOR.lock().unwrap();
-        if alloc.enabled {
-            let ptr = unsafe { alloc.alloc_inner(layout, true) };
-            (ptr, false)
-        } else {
-            unsafe { (alloc::alloc_zeroed(layout), true) }
-        }
+        unsafe { alloc.alloc_inner(layout, true) }
     }
 
-    /// SAFETY: The allocator must have been `enable()`d already and
-    /// the `layout` must be valid.
+    /// SAFETY: See `alloc::alloc()`
     unsafe fn alloc_inner(&mut self, layout: Layout, zeroed: bool) -> *mut u8 {
         let (size, align) = MachineAlloc::normalized_layout(layout);
+
+        if self.page_size == 0 {
+            unsafe {
+                self.page_size = libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap();
+            }
+        }
 
         if align > self.page_size || size > self.page_size {
             unsafe { self.alloc_multi_page(layout, zeroed) }
@@ -160,13 +133,10 @@ impl MachineAlloc {
         ret
     }
 
-    /// Deallocates a pointer from the machine allocator. While not unsound,
-    /// attempting to deallocate a pointer if `MachineAlloc` has not been enabled
-    /// will likely result in a panic.
+    /// Deallocates a pointer from the isolated allocator.
     ///
     /// SAFETY: This pointer must have been allocated with `MachineAlloc::alloc()`
-    /// (or `alloc_zeroed()`) which must have returned `(ptr, false)` specifically!
-    /// If it returned `(ptr, true)`, then deallocate it with `alloc::dealloc()` instead.
+    /// (or `alloc_zeroed()`) with the same layout as the one passed.
     pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
         let mut alloc_guard = ALLOCATOR.lock().unwrap();
         // Doing it this way lets us grab 2 mutable references to different fields at once
