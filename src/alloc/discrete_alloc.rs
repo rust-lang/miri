@@ -1,18 +1,34 @@
 use std::alloc::{self, Layout};
 use std::sync;
 
-use crate::helpers::ToU64;
-
 static ALLOCATOR: sync::Mutex<MachineAlloc> = sync::Mutex::new(MachineAlloc::empty());
 
 /// A distinct allocator for interpreter memory contents, allowing us to manage its
 /// memory separately from that of Miri itself. This is very useful for native-lib mode.
 #[derive(Debug)]
 pub struct MachineAlloc {
+    /// Pointers to page-aligned memory that has been claimed by the allocator.
+    /// Every pointer here must point to a page-sized allocation claimed via
+    /// the global allocator.
     pages: Vec<*mut u8>,
+    /// Pointers to multi-page-sized allocations. These must also be page-aligned,
+    /// with a size of `page_size * count` (where `count` is the second element
+    /// of the vector).
     huge_allocs: Vec<(*mut u8, usize)>,
+    /// Metadata about which bytes have been allocated on each page. The length
+    /// of this vector must be the same as that of `pages`, and the length of the
+    /// boxed slice must be exactly `page_size / 8`.
+    ///
+    /// Conceptually, each bit of the `u8` represents the allocation status of one
+    /// byte on the corresponding element of `pages`; in practice, we only allocate
+    /// in 8-byte chunks currently, so the `u8`s are only ever 0 (fully free) or
+    /// 255 (fully allocated).
     allocated: Vec<Box<[u8]>>,
+    /// The host (not emulated) page size.
     page_size: usize,
+    /// If false, calls to `alloc()` and `alloc_zeroed()` just wrap the corresponding
+    /// function in the global allocator. Otherwise, uses the pages tracked
+    /// internally.
     enabled: bool,
 }
 
@@ -20,9 +36,9 @@ pub struct MachineAlloc {
 unsafe impl Send for MachineAlloc {}
 
 impl MachineAlloc {
-    // Allocation-related methods
-
-    /// Initializes the allocator with placeholder 4k pages.
+    /// Initializes the allocator. `page_size` is set to 4k as a placeholder to
+    /// allow this function to be `const`; it is updated to its real value when
+    /// `enable()` is called.
     const fn empty() -> Self {
         Self {
             pages: Vec::new(),
@@ -33,39 +49,29 @@ impl MachineAlloc {
         }
     }
 
-    /// SAFETY: There must be no existing `MiriAllocBytes`
-    pub unsafe fn enable() {
+    /// Enables the allocator. From this point onwards, calls to `alloc()` and
+    /// `alloc_zeroed()` will return `(ptr, false)`.
+    pub fn enable() {
         let mut alloc = ALLOCATOR.lock().unwrap();
         alloc.enabled = true;
         // This needs to specifically be the system pagesize!
         alloc.page_size = unsafe {
-            let ret = libc::sysconf(libc::_SC_PAGE_SIZE);
-            if ret > 0 {
-                ret.try_into().unwrap()
-            } else {
-                4096 // fallback
-            }
+            // If sysconf errors, better to just panic
+            libc::sysconf(libc::_SC_PAGE_SIZE).try_into().unwrap()
         }
     }
 
-    /// Returns a vector of page addresses managed by the allocator.
-    #[expect(dead_code)]
-    pub fn pages() -> Vec<u64> {
-        let alloc = ALLOCATOR.lock().unwrap();
-        alloc.pages.clone().into_iter().map(|p| p.addr().to_u64()).collect()
-    }
-
+    /// Expands the available memory pool by adding one page.
     fn add_page(&mut self) {
         let page_layout =
             unsafe { Layout::from_size_align_unchecked(self.page_size, self.page_size) };
         let page_ptr = unsafe { alloc::alloc(page_layout) };
-        if page_ptr.is_null() {
-            panic!("aligned_alloc failed!!!")
-        }
         self.allocated.push(vec![0u8; self.page_size / 8].into_boxed_slice());
         self.pages.push(page_ptr);
     }
 
+    /// For simplicity, we allocate in multiples of 8 bytes with at least that
+    /// alignment.
     #[inline]
     fn normalized_layout(layout: Layout) -> (usize, usize) {
         let align = if layout.align() < 8 { 8 } else { layout.align() };
@@ -73,6 +79,8 @@ impl MachineAlloc {
         (size, align)
     }
 
+    /// If a requested allocation is greater than one page, we simply allocate
+    /// a fixed number of pages for it.
     #[inline]
     fn huge_normalized_layout(&self, layout: Layout) -> (usize, usize) {
         let size = layout.size().next_multiple_of(self.page_size);
@@ -80,15 +88,31 @@ impl MachineAlloc {
         (size, align)
     }
 
+    /// Allocates memory as described in `Layout`. If `MachineAlloc::enable()`
+    /// has *not* been called yet, this is just a wrapper for `(alloc::alloc(),
+    /// true)`. Otherwise, it will allocate from its own memory pool and
+    /// return `(ptr, false)`. The latter field is meant to correspond with the
+    /// field `alloc_is_global` for `MiriAllocBytes`.
+    ///
     /// SAFETY: See alloc::alloc()
     #[inline]
-    pub unsafe fn alloc(layout: Layout) -> *mut u8 {
+    pub unsafe fn alloc(layout: Layout) -> (*mut u8, bool) {
         let mut alloc = ALLOCATOR.lock().unwrap();
-        unsafe { if alloc.enabled { alloc.alloc_inner(layout) } else { alloc::alloc(layout) } }
+        unsafe {
+            if alloc.enabled {
+                (alloc.alloc_inner(layout), false)
+            } else {
+                (alloc::alloc(layout), true)
+            }
+        }
     }
 
+    /// Same as `alloc()`, but zeroes out data before allocating. Instead
+    /// wraps `alloc::alloc_zeroed()` if `MachineAlloc::enable()` has not been
+    /// called yet.
+    ///
     /// SAFETY: See alloc::alloc_zeroed()
-    pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
+    pub unsafe fn alloc_zeroed(layout: Layout) -> (*mut u8, bool) {
         let mut alloc = ALLOCATOR.lock().unwrap();
         if alloc.enabled {
             let ptr = unsafe { alloc.alloc_inner(layout) };
@@ -97,13 +121,14 @@ impl MachineAlloc {
                     ptr.write_bytes(0, layout.size());
                 }
             }
-            ptr
+            (ptr, false)
         } else {
-            unsafe { alloc::alloc_zeroed(layout) }
+            unsafe { (alloc::alloc_zeroed(layout), true) }
         }
     }
 
-    /// SAFETY: See alloc::alloc()
+    /// SAFETY: The allocator must have been `enable()`d already and
+    /// the `layout` must be valid.
     unsafe fn alloc_inner(&mut self, layout: Layout) -> *mut u8 {
         let (size, align) = MachineAlloc::normalized_layout(layout);
 
@@ -136,7 +161,8 @@ impl MachineAlloc {
         }
     }
 
-    /// SAFETY: See alloc::alloc()
+    /// SAFETY: Same as `alloc_inner()` with the added requirement that `layout`
+    /// must ask for a size larger than the host pagesize.
     unsafe fn alloc_multi_page(&mut self, layout: Layout) -> *mut u8 {
         let (size, align) = self.huge_normalized_layout(layout);
 
@@ -146,38 +172,36 @@ impl MachineAlloc {
         ret
     }
 
-    /// Safety: see alloc::dealloc()
+    /// Deallocates a pointer from the machine allocator. While not unsound,
+    /// attempting to deallocate a pointer if `MachineAlloc` has not been enabled
+    /// will likely result in a panic.
+    ///
+    /// SAFETY: This pointer must have been allocated with `MachineAlloc::alloc()`
+    /// (or `alloc_zeroed()`) which must have returned `(ptr, false)` specifically!
+    /// If it returned `(ptr, true)`, then deallocate it with `alloc::dealloc()` instead.
     pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
-        let mut alloc = ALLOCATOR.lock().unwrap();
-        unsafe {
-            if alloc.enabled {
-                alloc.dealloc_inner(ptr, layout);
-            } else {
-                alloc::dealloc(ptr, layout);
-            }
-        }
-    }
+        let mut alloc_guard = ALLOCATOR.lock().unwrap();
+        // Doing it this way lets us grab 2 mutable references to different fields at once
+        let alloc: &mut MachineAlloc = &mut alloc_guard;
 
-    /// SAFETY: See alloc::dealloc()
-    unsafe fn dealloc_inner(&mut self, ptr: *mut u8, layout: Layout) {
         let (size, align) = MachineAlloc::normalized_layout(layout);
 
         if size == 0 || ptr.is_null() {
             return;
         }
 
-        let ptr_idx = ptr.addr() % self.page_size;
+        let ptr_idx = ptr.addr() % alloc.page_size;
         let page_addr = ptr.addr() - ptr_idx;
 
-        if align > self.page_size || size > self.page_size {
+        if align > alloc.page_size || size > alloc.page_size {
             unsafe {
-                self.dealloc_multi_page(ptr, layout);
+                alloc.dealloc_multi_page(ptr, layout);
             }
         } else {
-            let pinfo = std::iter::zip(&mut self.pages, &mut self.allocated)
+            let pinfo = std::iter::zip(&mut alloc.pages, &mut alloc.allocated)
                 .find(|(page, _)| page.addr() == page_addr);
             let Some((_, pinfo)) = pinfo else {
-                panic!("Freeing in an unallocated page: {ptr:?}\nHolding pages {:?}", self.pages)
+                panic!("Freeing in an unallocated page: {ptr:?}\nHolding pages {:?}", alloc.pages)
             };
             let ptr_idx_pinfo = ptr_idx / 8;
             let size_pinfo = size / 8;
@@ -187,22 +211,23 @@ impl MachineAlloc {
 
         let mut free = vec![];
         let page_layout =
-            unsafe { Layout::from_size_align_unchecked(self.page_size, self.page_size) };
-        for (idx, pinfo) in self.allocated.iter().enumerate() {
+            unsafe { Layout::from_size_align_unchecked(alloc.page_size, alloc.page_size) };
+        for (idx, pinfo) in alloc.allocated.iter().enumerate() {
             if pinfo.iter().all(|p| *p == 0) {
                 free.push(idx);
             }
         }
         free.reverse();
         for idx in free {
-            let _ = self.allocated.remove(idx);
+            let _ = alloc.allocated.remove(idx);
             unsafe {
-                alloc::dealloc(self.pages.remove(idx), page_layout);
+                alloc::dealloc(alloc.pages.remove(idx), page_layout);
             }
         }
     }
 
-    /// SAFETY: See alloc::dealloc()
+    /// SAFETY: Same as `dealloc()` with the added requirement that `layout`
+    /// must ask for a size larger than the host pagesize.
     unsafe fn dealloc_multi_page(&mut self, ptr: *mut u8, layout: Layout) {
         let (idx, _) = self
             .huge_allocs

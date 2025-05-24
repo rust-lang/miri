@@ -70,14 +70,12 @@ extern crate rustc_target;
 #[allow(unused_extern_crates)]
 extern crate rustc_driver;
 
+mod alloc;
 mod alloc_addresses;
-mod alloc_bytes;
 mod borrow_tracker;
 mod clock;
 mod concurrency;
 mod diagnostics;
-#[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
-mod discrete_alloc;
 mod eval;
 mod helpers;
 mod intrinsics;
@@ -108,8 +106,8 @@ pub type OpTy<'tcx> = interpret::OpTy<'tcx, machine::Provenance>;
 pub type PlaceTy<'tcx> = interpret::PlaceTy<'tcx, machine::Provenance>;
 pub type MPlaceTy<'tcx> = interpret::MPlaceTy<'tcx, machine::Provenance>;
 
+pub use crate::alloc::MiriAllocBytes;
 pub use crate::alloc_addresses::{EvalContextExt as _, ProvenanceMode};
-pub use crate::alloc_bytes::MiriAllocBytes;
 pub use crate::borrow_tracker::stacked_borrows::{
     EvalContextExt as _, Item, Permission, Stack, Stacks,
 };

@@ -5,8 +5,8 @@ use std::{alloc, slice};
 use rustc_abi::{Align, Size};
 use rustc_middle::mir::interpret::AllocBytes;
 
-#[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
-use crate::discrete_alloc::MachineAlloc;
+#[cfg(target_os = "linux")]
+use crate::alloc::discrete_alloc::MachineAlloc;
 use crate::helpers::ToU64 as _;
 
 /// Allocation bytes that explicitly handle the layout of the data they're storing.
@@ -20,6 +20,9 @@ pub struct MiriAllocBytes {
     /// * If `self.layout.size() == 0`, then `self.ptr` was allocated with the equivalent layout with size 1.
     /// * Otherwise, `self.ptr` points to memory allocated with `self.layout`.
     ptr: *mut u8,
+    /// Whether this instance of `MiriAllocBytes` had its allocation created by calling `alloc::alloc()`
+    /// (true) or the discrete allocator (false)
+    alloc_is_global: bool,
 }
 
 impl Clone for MiriAllocBytes {
@@ -42,9 +45,15 @@ impl Drop for MiriAllocBytes {
 
         // SAFETY: Invariant, `self.ptr` points to memory allocated with `self.layout`.
         unsafe {
-            #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
-            MachineAlloc::dealloc(self.ptr, alloc_layout);
-            #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+            #[cfg(target_os = "linux")]
+            {
+                if self.alloc_is_global {
+                    alloc::dealloc(self.ptr, alloc_layout);
+                } else {
+                    MachineAlloc::dealloc(self.ptr, alloc_layout);
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
             alloc::dealloc(self.ptr, alloc_layout);
         }
     }
@@ -75,7 +84,7 @@ impl MiriAllocBytes {
     fn alloc_with(
         size: u64,
         align: u64,
-        alloc_fn: impl FnOnce(Layout) -> *mut u8,
+        alloc_fn: impl FnOnce(Layout) -> (*mut u8, bool),
     ) -> Result<MiriAllocBytes, ()> {
         let size = usize::try_from(size).map_err(|_| ())?;
         let align = usize::try_from(align).map_err(|_| ())?;
@@ -83,12 +92,12 @@ impl MiriAllocBytes {
         // When size is 0 we allocate 1 byte anyway, to ensure each allocation has a unique address.
         let alloc_layout =
             if size == 0 { Layout::from_size_align(1, align).unwrap() } else { layout };
-        let ptr = alloc_fn(alloc_layout);
+        let (ptr, alloc_is_global) = alloc_fn(alloc_layout);
         if ptr.is_null() {
             Err(())
         } else {
             // SAFETY: All `MiriAllocBytes` invariants are fulfilled.
-            Ok(Self { ptr, layout })
+            Ok(Self { ptr, layout, alloc_is_global })
         }
     }
 }
@@ -100,13 +109,13 @@ impl AllocBytes for MiriAllocBytes {
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
         let alloc_fn = |layout| unsafe {
-            #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+            #[cfg(target_os = "linux")]
             {
                 MachineAlloc::alloc(layout)
             }
-            #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+            #[cfg(not(target_os = "linux"))]
             {
-                alloc::alloc(layout)
+                (alloc::alloc(layout), true)
             }
         };
         let alloc_bytes = MiriAllocBytes::alloc_with(size.to_u64(), align, alloc_fn)
@@ -124,13 +133,13 @@ impl AllocBytes for MiriAllocBytes {
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
         let alloc_fn = |layout| unsafe {
-            #[cfg(all(unix, any(target_arch = "x86", target_arch = "x86_64")))]
+            #[cfg(target_os = "linux")]
             {
                 MachineAlloc::alloc_zeroed(layout)
             }
-            #[cfg(not(all(unix, any(target_arch = "x86", target_arch = "x86_64"))))]
+            #[cfg(not(target_os = "linux"))]
             {
-                alloc::alloc_zeroed(layout)
+                (alloc::alloc_zeroed(layout), true)
             }
         };
         MiriAllocBytes::alloc_with(size, align, alloc_fn).ok()
