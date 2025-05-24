@@ -12,8 +12,7 @@ pub struct MachineAlloc {
     /// the global allocator.
     pages: Vec<*mut u8>,
     /// Pointers to multi-page-sized allocations. These must also be page-aligned,
-    /// with a size of `page_size * count` (where `count` is the second element
-    /// of the vector).
+    /// with their size stored as the second element of the vector.
     huge_allocs: Vec<(*mut u8, usize)>,
     /// Metadata about which bytes have been allocated on each page. The length
     /// of this vector must be the same as that of `pages`, and the length of the
@@ -45,7 +44,7 @@ impl MachineAlloc {
             huge_allocs: Vec::new(),
             allocated: Vec::new(),
             page_size: 4096,
-            enabled: false,
+            enabled: true,
         }
     }
 
@@ -79,15 +78,6 @@ impl MachineAlloc {
         (size, align)
     }
 
-    /// If a requested allocation is greater than one page, we simply allocate
-    /// a fixed number of pages for it.
-    #[inline]
-    fn huge_normalized_layout(&self, layout: Layout) -> (usize, usize) {
-        let size = layout.size().next_multiple_of(self.page_size);
-        let align = std::cmp::max(layout.align(), self.page_size);
-        (size, align)
-    }
-
     /// Allocates memory as described in `Layout`. If `MachineAlloc::enable()`
     /// has *not* been called yet, this is just a wrapper for `(alloc::alloc(),
     /// true)`. Otherwise, it will allocate from its own memory pool and
@@ -100,7 +90,7 @@ impl MachineAlloc {
         let mut alloc = ALLOCATOR.lock().unwrap();
         unsafe {
             if alloc.enabled {
-                (alloc.alloc_inner(layout), false)
+                (alloc.alloc_inner(layout, alloc::alloc), false)
             } else {
                 (alloc::alloc(layout), true)
             }
@@ -115,12 +105,7 @@ impl MachineAlloc {
     pub unsafe fn alloc_zeroed(layout: Layout) -> (*mut u8, bool) {
         let mut alloc = ALLOCATOR.lock().unwrap();
         if alloc.enabled {
-            let ptr = unsafe { alloc.alloc_inner(layout) };
-            if !ptr.is_null() {
-                unsafe {
-                    ptr.write_bytes(0, layout.size());
-                }
-            }
+            let ptr = unsafe { alloc.alloc_inner(layout, alloc::alloc_zeroed) };
             (ptr, false)
         } else {
             unsafe { (alloc::alloc_zeroed(layout), true) }
@@ -129,11 +114,13 @@ impl MachineAlloc {
 
     /// SAFETY: The allocator must have been `enable()`d already and
     /// the `layout` must be valid.
-    unsafe fn alloc_inner(&mut self, layout: Layout) -> *mut u8 {
+    unsafe fn alloc_inner(&mut self, layout: Layout, sys_allocator: unsafe fn(Layout) -> *mut u8) -> *mut u8 {
         let (size, align) = MachineAlloc::normalized_layout(layout);
 
         if align > self.page_size || size > self.page_size {
-            unsafe { self.alloc_multi_page(layout) }
+            unsafe {
+                self.alloc_multi_page(layout, sys_allocator)
+            }
         } else {
             for (page, pinfo) in std::iter::zip(&mut self.pages, &mut self.allocated) {
                 for idx in (0..self.page_size).step_by(align) {
@@ -157,18 +144,15 @@ impl MachineAlloc {
 
             // We get here only if there's no space in our existing pages
             self.add_page();
-            unsafe { self.alloc_inner(layout) }
+            unsafe { self.alloc_inner(layout, sys_allocator) }
         }
     }
 
     /// SAFETY: Same as `alloc_inner()` with the added requirement that `layout`
     /// must ask for a size larger than the host pagesize.
-    unsafe fn alloc_multi_page(&mut self, layout: Layout) -> *mut u8 {
-        let (size, align) = self.huge_normalized_layout(layout);
-
-        let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
-        let ret = unsafe { alloc::alloc(layout) };
-        self.huge_allocs.push((ret, size));
+    unsafe fn alloc_multi_page(&mut self, layout: Layout, sys_allocator: unsafe fn(Layout) -> *mut u8) -> *mut u8 {
+        let ret = unsafe { sys_allocator(layout) };
+        self.huge_allocs.push((ret, layout.size()));
         ret
     }
 
@@ -236,9 +220,7 @@ impl MachineAlloc {
             .find(|pg| ptr.addr() == pg.1.0.addr())
             .expect("Freeing unallocated pages");
         let ptr = self.huge_allocs.remove(idx).0;
-        let (size, align) = self.huge_normalized_layout(layout);
         unsafe {
-            let layout = Layout::from_size_align_unchecked(size, align);
             alloc::dealloc(ptr, layout);
         }
     }

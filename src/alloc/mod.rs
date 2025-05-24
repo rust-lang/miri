@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 mod alloc_bytes;
 pub mod discrete_alloc;
 
