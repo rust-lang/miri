@@ -114,13 +114,15 @@ impl MachineAlloc {
 
     /// SAFETY: The allocator must have been `enable()`d already and
     /// the `layout` must be valid.
-    unsafe fn alloc_inner(&mut self, layout: Layout, sys_allocator: unsafe fn(Layout) -> *mut u8) -> *mut u8 {
+    unsafe fn alloc_inner(
+        &mut self,
+        layout: Layout,
+        sys_allocator: unsafe fn(Layout) -> *mut u8,
+    ) -> *mut u8 {
         let (size, align) = MachineAlloc::normalized_layout(layout);
 
         if align > self.page_size || size > self.page_size {
-            unsafe {
-                self.alloc_multi_page(layout, sys_allocator)
-            }
+            unsafe { self.alloc_multi_page(layout, sys_allocator) }
         } else {
             for (page, pinfo) in std::iter::zip(&mut self.pages, &mut self.allocated) {
                 for idx in (0..self.page_size).step_by(align) {
@@ -150,7 +152,11 @@ impl MachineAlloc {
 
     /// SAFETY: Same as `alloc_inner()` with the added requirement that `layout`
     /// must ask for a size larger than the host pagesize.
-    unsafe fn alloc_multi_page(&mut self, layout: Layout, sys_allocator: unsafe fn(Layout) -> *mut u8) -> *mut u8 {
+    unsafe fn alloc_multi_page(
+        &mut self,
+        layout: Layout,
+        sys_allocator: unsafe fn(Layout) -> *mut u8,
+    ) -> *mut u8 {
         let ret = unsafe { sys_allocator(layout) };
         self.huge_allocs.push((ret, layout.size()));
         ret
