@@ -55,10 +55,14 @@ impl Drop for MiriAllocBytes {
                 MiriByteMdata::Global => alloc::dealloc(self.ptr, alloc_layout),
                 MiriByteMdata::Isolated => {
                     #[cfg(target_os = "linux")]
-                    {MachineAlloc::dealloc(self.ptr, alloc_layout)}
+                    {
+                        MachineAlloc::dealloc(self.ptr, alloc_layout)
+                    }
                     #[cfg(not(target_os = "linux"))]
-                    {unreachable!()}
-                },
+                    {
+                        unreachable!()
+                    }
+                }
             }
         }
     }
@@ -121,10 +125,14 @@ impl AllocBytes for MiriAllocBytes {
                 MiriByteMdata::Global => alloc::alloc(layout),
                 MiriByteMdata::Isolated => {
                     #[cfg(target_os = "linux")]
-                    {MachineAlloc::alloc(layout)}
+                    {
+                        MachineAlloc::alloc(layout)
+                    }
                     #[cfg(not(target_os = "linux"))]
-                    {unreachable!()}
-                },
+                    {
+                        unreachable!()
+                    }
+                }
             }
         };
         let alloc_bytes = MiriAllocBytes::alloc_with(size.to_u64(), align, dsc, alloc_fn)
@@ -146,10 +154,14 @@ impl AllocBytes for MiriAllocBytes {
                 MiriByteMdata::Global => alloc::alloc_zeroed(layout),
                 MiriByteMdata::Isolated => {
                     #[cfg(target_os = "linux")]
-                    {MachineAlloc::alloc_zeroed(layout)}
+                    {
+                        MachineAlloc::alloc_zeroed(layout)
+                    }
                     #[cfg(not(target_os = "linux"))]
-                    {unreachable!()}
-                },
+                    {
+                        unreachable!()
+                    }
+                }
             }
         };
         MiriAllocBytes::alloc_with(size, align, dsc, alloc_fn).ok()

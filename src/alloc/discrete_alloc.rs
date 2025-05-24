@@ -35,12 +35,7 @@ impl MachineAlloc {
     /// allow this function to be `const`; it is updated to its real value on
     /// the first call to `alloc()` or `alloc_zeroed()`.
     const fn empty() -> Self {
-        Self {
-            pages: Vec::new(),
-            huge_allocs: Vec::new(),
-            allocated: Vec::new(),
-            page_size: 0,
-        }
+        Self { pages: Vec::new(), huge_allocs: Vec::new(), allocated: Vec::new(), page_size: 0 }
     }
 
     /// Expands the available memory pool by adding one page.
@@ -68,9 +63,7 @@ impl MachineAlloc {
     #[inline]
     pub unsafe fn alloc(layout: Layout) -> *mut u8 {
         let mut alloc = ALLOCATOR.lock().unwrap();
-        unsafe {
-            alloc.alloc_inner(layout, false)
-        }
+        unsafe { alloc.alloc_inner(layout, false) }
     }
 
     /// Same as `alloc()`, but zeroes out data before allocating.
@@ -196,6 +189,96 @@ impl MachineAlloc {
         let ptr = self.huge_allocs.remove(idx).0;
         unsafe {
             alloc::dealloc(ptr, layout);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_zeroes(ptr: *mut u8, layout: Layout) {
+        unsafe {
+            for ofs in 0..layout.size() {
+                assert_eq!(0, ptr.offset(ofs as isize).read());
+            }
+        }
+    }
+
+    #[test]
+    fn small_zeroes() {
+        let layout = Layout::from_size_align(256, 32).unwrap();
+        let ptr = unsafe { MachineAlloc::alloc_zeroed(layout) };
+        assert_zeroes(ptr, layout);
+        unsafe {
+            MachineAlloc::dealloc(ptr, layout);
+        }
+    }
+
+    #[test]
+    fn big_zeroes() {
+        let layout = Layout::from_size_align(16 * 1024, 128).unwrap();
+        let ptr = unsafe { MachineAlloc::alloc_zeroed(layout) };
+        assert_zeroes(ptr, layout);
+        unsafe {
+            MachineAlloc::dealloc(ptr, layout);
+        }
+    }
+
+    #[test]
+    fn repeated_allocs() {
+        for sz in (1..=(16 * 1024)).step_by(128) {
+            let layout = Layout::from_size_align(sz, 1).unwrap();
+            let ptr = unsafe { MachineAlloc::alloc_zeroed(layout) };
+            assert_zeroes(ptr, layout);
+            unsafe {
+                ptr.write_bytes(255, sz);
+                MachineAlloc::dealloc(ptr, layout);
+            }
+        }
+    }
+
+    #[test]
+    fn no_overlaps() {
+        // Some random sizes and aligns
+        let mut sizes = vec![32; 10];
+        sizes.append(&mut vec![15; 4]);
+        sizes.append(&mut vec![256; 12]);
+        // Give it some multi-page ones too
+        sizes.append(&mut vec![32*1024; 4]);
+
+        let mut aligns = vec![16; 12];
+        aligns.append(&mut vec![256; 2]);
+        aligns.append(&mut vec![64; 12]);
+        aligns.append(&mut vec![4096; 4]);
+
+        assert_eq!(sizes.len(), aligns.len());
+        let layouts: Vec<_> = std::iter::zip(sizes, aligns)
+            .map(|(sz, al)| Layout::from_size_align(sz, al).unwrap())
+            .collect();
+        let ptrs: Vec<_> = layouts.iter().map(|layout| unsafe { MachineAlloc::alloc_zeroed(*layout) }).collect();
+
+        for (&ptr, &layout) in std::iter::zip(&ptrs, &layouts) {
+            // Make sure we don't allocate overlapping ranges
+            unsafe {
+                assert_zeroes(ptr, layout);
+                ptr.write_bytes(255, layout.size());
+                MachineAlloc::dealloc(ptr, layout);
+            }
+        }
+    }
+
+    #[test]
+    fn check_leaks() {
+        // In case this test gets run on its own, make sure to generate some
+        // noise in the allocator.
+        no_overlaps();
+
+        let alloc = ALLOCATOR.lock().unwrap();
+        for pinfo in &alloc.allocated {
+            for eight_bytes in 0..pinfo.len() {
+                assert_eq!(eight_bytes, 0);
+            }
         }
     }
 }
