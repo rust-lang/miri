@@ -7,8 +7,8 @@ use crate::helpers::ToU64;
 
 static ALLOCATOR: sync::Mutex<MachineAlloc> = sync::Mutex::new(MachineAlloc::empty());
 
-/// A distinct allocator for the `MiriMachine`, allowing us to manage its
-/// memory separately from that of Miri itself.
+/// A distinct allocator for interpreter memory contents, allowing us to manage its
+/// memory separately from that of Miri itself. This is very useful for native-lib mode.
 #[derive(Debug)]
 pub struct MachineAlloc {
     pages: Vec<*mut u8>,
