@@ -5,6 +5,8 @@ use std::{alloc, slice};
 use rustc_abi::{Align, Size};
 use rustc_middle::mir::interpret::AllocBytes;
 
+#[cfg(target_os = "linux")]
+use crate::discrete_alloc::MachineAlloc;
 use crate::helpers::ToU64 as _;
 
 /// Allocation bytes that explicitly handle the layout of the data they're storing.
@@ -37,8 +39,14 @@ impl Drop for MiriAllocBytes {
         } else {
             self.layout
         };
+
         // SAFETY: Invariant, `self.ptr` points to memory allocated with `self.layout`.
-        unsafe { alloc::dealloc(self.ptr, alloc_layout) }
+        unsafe {
+            #[cfg(target_os = "linux")]
+            MachineAlloc::dealloc(self.ptr, alloc_layout);
+            #[cfg(not(target_os = "linux"))]
+            alloc::dealloc(self.ptr, alloc_layout);
+        }
     }
 }
 
@@ -91,7 +99,16 @@ impl AllocBytes for MiriAllocBytes {
         let size = slice.len();
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
-        let alloc_fn = |layout| unsafe { alloc::alloc(layout) };
+        let alloc_fn = |layout| unsafe {
+            #[cfg(target_os = "linux")]
+            {
+                MachineAlloc::alloc(layout)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                alloc::alloc(layout)
+            }
+        };
         let alloc_bytes = MiriAllocBytes::alloc_with(size.to_u64(), align, alloc_fn)
             .unwrap_or_else(|()| {
                 panic!("Miri ran out of memory: cannot create allocation of {size} bytes")
@@ -106,7 +123,16 @@ impl AllocBytes for MiriAllocBytes {
         let size = size.bytes();
         let align = align.bytes();
         // SAFETY: `alloc_fn` will only be used with `size != 0`.
-        let alloc_fn = |layout| unsafe { alloc::alloc_zeroed(layout) };
+        let alloc_fn = |layout| unsafe {
+            #[cfg(target_os = "linux")]
+            {
+                MachineAlloc::alloc_zeroed(layout)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                alloc::alloc_zeroed(layout)
+            }
+        };
         MiriAllocBytes::alloc_with(size, align, alloc_fn).ok()
     }
 

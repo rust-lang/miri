@@ -11,6 +11,7 @@
 #![feature(nonzero_ops)]
 #![feature(strict_overflow_ops)]
 #![feature(pointer_is_aligned_to)]
+#![feature(ptr_metadata)]
 #![feature(unqualified_local_imports)]
 #![feature(derive_coerce_pointee)]
 #![feature(arbitrary_self_types)]
@@ -75,6 +76,8 @@ mod borrow_tracker;
 mod clock;
 mod concurrency;
 mod diagnostics;
+#[cfg(target_os = "linux")]
+mod discrete_alloc;
 mod eval;
 mod helpers;
 mod intrinsics;
@@ -95,6 +98,10 @@ pub use rustc_const_eval::interpret::*;
 pub use rustc_const_eval::interpret::{self, AllocMap, Provenance as _};
 use rustc_middle::{bug, span_bug};
 use tracing::{info, trace};
+
+// Let bin/miri.rs kill the supervisor process.
+#[cfg(target_os = "linux")]
+pub use crate::shims::trace::kill_sv;
 
 // Type aliases that set the provenance parameter.
 pub type Pointer = interpret::Pointer<Option<machine::Provenance>>;
