@@ -1,8 +1,6 @@
 use std::alloc::{self, Layout};
 use std::sync;
 
-use nix::sys::mman::ProtFlags;
-
 use crate::helpers::ToU64;
 
 static ALLOCATOR: sync::Mutex<MachineAlloc> = sync::Mutex::new(MachineAlloc::empty());
@@ -218,54 +216,5 @@ impl MachineAlloc {
             let layout = Layout::from_size_align_unchecked(size, align);
             alloc::dealloc(ptr, layout);
         }
-    }
-
-    // Protection-related methods
-
-    /// Protects all owned memory, preventing accesses.
-    ///
-    /// SAFETY: Accessing memory after this point will result in a segfault
-    /// unless it is first unprotected.
-    #[expect(dead_code)]
-    pub unsafe fn prepare_ffi() -> Result<(), nix::errno::Errno> {
-        let mut alloc = ALLOCATOR.lock().unwrap();
-        unsafe {
-            alloc.mprotect(ProtFlags::PROT_NONE)?;
-        }
-        Ok(())
-    }
-
-    /// Deprotects all owned memory by setting it to RW. Erroring here is very
-    /// likely unrecoverable, so it may panic if applying those permissions
-    /// fails.
-    #[expect(dead_code)]
-    pub fn unprep_ffi() {
-        let mut alloc = ALLOCATOR.lock().unwrap();
-        let default_flags = ProtFlags::PROT_READ | ProtFlags::PROT_WRITE;
-        unsafe {
-            alloc.mprotect(default_flags).unwrap();
-        }
-    }
-
-    /// Applies `prot` to every page managed by the allocator.
-    ///
-    /// SAFETY: Accessing memory in violation of the protection flags will
-    /// trigger a segfault.
-    unsafe fn mprotect(&mut self, prot: ProtFlags) -> Result<(), nix::errno::Errno> {
-        for &pg in &self.pages {
-            unsafe {
-                // We already know only non-null ptrs are pushed to self.pages
-                let addr: std::ptr::NonNull<std::ffi::c_void> =
-                    std::ptr::NonNull::new_unchecked(pg.cast());
-                nix::sys::mman::mprotect(addr, self.page_size, prot)?;
-            }
-        }
-        for &(hpg, size) in &self.huge_allocs {
-            unsafe {
-                let addr = std::ptr::NonNull::new_unchecked(hpg.cast());
-                nix::sys::mman::mprotect(addr, size, prot)?;
-            }
-        }
-        Ok(())
     }
 }
