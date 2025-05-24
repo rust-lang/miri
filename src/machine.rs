@@ -1804,6 +1804,19 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
     ) -> Cow<'e, RangeSet> {
         Cow::Borrowed(ecx.machine.union_data_ranges.entry(ty).or_insert_with(compute_range))
     }
+
+    fn get_default_byte_mdata(&self) -> <Self::Bytes as AllocBytes>::ByteMetadata {
+        use crate::alloc::MiriByteMdata;
+
+        #[cfg(target_os = "linux")]
+        if self.native_lib.is_some() {
+            MiriByteMdata::Isolated
+        } else {
+            MiriByteMdata::Global
+        }
+        #[cfg(not(target_os = "linux"))]
+        MiriByteMdata::Global
+    }
 }
 
 /// Trait for callbacks handling asynchronous machine operations.

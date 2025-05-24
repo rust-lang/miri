@@ -894,12 +894,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if tcx.is_foreign_item(def_id) {
                 throw_unsup_format!("foreign thread-local statics are not supported");
             }
+            let dsc = this.machine.get_default_byte_mdata();
             let alloc = this.ctfe_query(|tcx| tcx.eval_static_initializer(def_id))?;
             // We make a full copy of this allocation.
             let mut alloc = alloc.inner().adjust_from_tcx(
                 &this.tcx,
                 |bytes, align| {
-                    interp_ok(MiriAllocBytes::from_bytes(std::borrow::Cow::Borrowed(bytes), align))
+                    interp_ok(MiriAllocBytes::from_bytes(
+                        std::borrow::Cow::Borrowed(bytes),
+                        align,
+                        dsc,
+                    ))
                 },
                 |ptr| this.global_root_pointer(ptr),
             )?;
