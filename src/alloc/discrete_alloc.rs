@@ -64,6 +64,7 @@ impl MachineAlloc {
     fn add_page(&mut self) {
         let page_layout =
             unsafe { Layout::from_size_align_unchecked(self.page_size, self.page_size) };
+        // We don't overwrite the bytes we hand out so make sure they're zeroed by default!
         let page_ptr = unsafe { alloc::alloc(page_layout) };
         self.allocated.push(vec![0u8; self.page_size / 8].into_boxed_slice());
         self.pages.push(page_ptr);
@@ -90,7 +91,7 @@ impl MachineAlloc {
         let mut alloc = ALLOCATOR.lock().unwrap();
         unsafe {
             if alloc.enabled {
-                (alloc.alloc_inner(layout, alloc::alloc), false)
+                (alloc.alloc_inner(layout, false), false)
             } else {
                 (alloc::alloc(layout), true)
             }
@@ -105,7 +106,7 @@ impl MachineAlloc {
     pub unsafe fn alloc_zeroed(layout: Layout) -> (*mut u8, bool) {
         let mut alloc = ALLOCATOR.lock().unwrap();
         if alloc.enabled {
-            let ptr = unsafe { alloc.alloc_inner(layout, alloc::alloc_zeroed) };
+            let ptr = unsafe { alloc.alloc_inner(layout, true) };
             (ptr, false)
         } else {
             unsafe { (alloc::alloc_zeroed(layout), true) }
@@ -114,15 +115,11 @@ impl MachineAlloc {
 
     /// SAFETY: The allocator must have been `enable()`d already and
     /// the `layout` must be valid.
-    unsafe fn alloc_inner(
-        &mut self,
-        layout: Layout,
-        sys_allocator: unsafe fn(Layout) -> *mut u8,
-    ) -> *mut u8 {
+    unsafe fn alloc_inner(&mut self, layout: Layout, zeroed: bool) -> *mut u8 {
         let (size, align) = MachineAlloc::normalized_layout(layout);
 
         if align > self.page_size || size > self.page_size {
-            unsafe { self.alloc_multi_page(layout, sys_allocator) }
+            unsafe { self.alloc_multi_page(layout, zeroed) }
         } else {
             for (page, pinfo) in std::iter::zip(&mut self.pages, &mut self.allocated) {
                 for idx in (0..self.page_size).step_by(align) {
@@ -138,7 +135,11 @@ impl MachineAlloc {
                             if ret.addr() >= page.addr() + self.page_size {
                                 panic!("Returing {} from page {}", ret.addr(), page.addr());
                             }
-                            return page.offset(idx.try_into().unwrap());
+                            if zeroed {
+                                // No need to zero out more than was specifically requested
+                                ret.write_bytes(0, layout.size());
+                            }
+                            return ret;
                         }
                     }
                 }
@@ -146,18 +147,15 @@ impl MachineAlloc {
 
             // We get here only if there's no space in our existing pages
             self.add_page();
-            unsafe { self.alloc_inner(layout, sys_allocator) }
+            unsafe { self.alloc_inner(layout, zeroed) }
         }
     }
 
     /// SAFETY: Same as `alloc_inner()` with the added requirement that `layout`
     /// must ask for a size larger than the host pagesize.
-    unsafe fn alloc_multi_page(
-        &mut self,
-        layout: Layout,
-        sys_allocator: unsafe fn(Layout) -> *mut u8,
-    ) -> *mut u8 {
-        let ret = unsafe { sys_allocator(layout) };
+    unsafe fn alloc_multi_page(&mut self, layout: Layout, zeroed: bool) -> *mut u8 {
+        let ret =
+            unsafe { if zeroed { alloc::alloc_zeroed(layout) } else { alloc::alloc(layout) } };
         self.huge_allocs.push((ret, layout.size()));
         ret
     }
@@ -197,6 +195,7 @@ impl MachineAlloc {
             let size_pinfo = size / 8;
             // Everything is always aligned to at least 8 bytes so this is ok
             pinfo[ptr_idx_pinfo..ptr_idx_pinfo + size_pinfo].fill(0);
+            // And also zero out the page contents!
         }
 
         let mut free = vec![];
@@ -219,11 +218,10 @@ impl MachineAlloc {
     /// SAFETY: Same as `dealloc()` with the added requirement that `layout`
     /// must ask for a size larger than the host pagesize.
     unsafe fn dealloc_multi_page(&mut self, ptr: *mut u8, layout: Layout) {
-        let (idx, _) = self
+        let idx = self
             .huge_allocs
             .iter()
-            .enumerate()
-            .find(|pg| ptr.addr() == pg.1.0.addr())
+            .position(|pg| ptr.addr() == pg.0.addr())
             .expect("Freeing unallocated pages");
         let ptr = self.huge_allocs.remove(idx).0;
         unsafe {
