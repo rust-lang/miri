@@ -65,6 +65,16 @@ impl Supervisor {
         let stack_ptr = raw_stack_ptr.expose_provenance();
         let start_info = StartFfiInfo { page_ptrs, stack_ptr };
 
+        // SAFETY: We do not access machine memory past this point until the
+        // supervisor is ready to allow it
+        unsafe {
+            if alloc.borrow_mut().prepare_ffi().is_err() {
+                // Don't mess up unwinding by maybe leaving the memory partly protected
+                alloc.borrow_mut().unprep_ffi();
+                panic!("Cannot protect memory for FFI call!");
+            }
+        }
+
         // Send over the info.
         // NB: if we do not wait to receive a blank confirmation response, it is
         // possible that the supervisor is alerted of the SIGSTOP *before* it has
@@ -101,6 +111,9 @@ impl Supervisor {
         // supervisor, we can assume past this point that everything is back to
         // normal
         signal::raise(signal::SIGUSR1).unwrap();
+
+        // This is safe! It just sets memory to normal expected permissions
+        alloc.borrow_mut().unprep_ffi();
 
         // If this is `None`, then `raw_stack_ptr` is None and does not need to
         // be deallocated (and there's no need to worry about the guard, since

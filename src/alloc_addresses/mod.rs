@@ -470,13 +470,46 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// This overapproximates the modifications which external code might make to memory:
     /// We set all reachable allocations as initialized, mark all reachable provenances as exposed
     /// and overwrite them with `Provenance::WILDCARD`.
-    fn prepare_exposed_for_native_call(&mut self) -> InterpResult<'tcx> {
+    fn prepare_exposed_for_native_call(&mut self, _paranoid: bool) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         // We need to make a deep copy of this list, but it's fine; it also serves as scratch space
         // for the search within `prepare_for_native_call`.
         let exposed: Vec<AllocId> =
             this.machine.alloc_addresses.get_mut().exposed.iter().copied().collect();
-        this.prepare_for_native_call(exposed)
+        this.prepare_for_native_call(exposed /*, paranoid*/)
+    }
+
+    /// Makes use of information obtained about memory accesses during FFI to determine which
+    /// provenances should be exposed. Note that if `prepare_exposed_for_native_call` was not
+    /// called before the FFI (with `paranoid` set to false) then some of the writes may be
+    /// lost!
+    #[cfg(target_os = "linux")]
+    fn apply_events(
+        &mut self,
+        events: crate::shims::trace::messages::MemEvents,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let mut reads = vec![];
+        let mut writes = vec![];
+        for acc in events.acc_events {
+            match acc {
+                // Ideally, we'd skip reads that occur after certain bytes were
+                // already written to. However, these are always just conservative
+                // overestimates - Read(range) means "a read maybe happened
+                // spanning at most range" - so we can't make use of this for
+                // now. Maybe we could also skip over reads/writes that hit the
+                // same bytes, but that's best added together with the stuff above.
+                shims::trace::AccessEvent::Read(range) => reads.push(range),
+                shims::trace::AccessEvent::Write(range) => {
+                    writes.push(range);
+                }
+            }
+        }
+        let _exposed: Vec<AllocId> =
+            this.machine.alloc_addresses.get_mut().exposed.iter().copied().collect();
+        interp_ok(())
+        //this.apply_accesses(exposed, events.reads, events.writes)
     }
 }
 
