@@ -192,6 +192,13 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             todo!("GenMC mode not yet implemented");
         };
 
+        #[cfg(target_os = "linux")]
+        if !config.native_lib.is_empty() && !config.force_old_native_lib {
+            // FIXME: This should display a diagnostic / warning on error
+            // SAFETY: No other threads have spawned yet
+            let _ = unsafe { miri::init_sv() };
+        }
+
         if let Some(many_seeds) = self.many_seeds.take() {
             assert!(config.seed.is_none());
             let exit_code = sync::IntoDynSyncSend(AtomicI32::new(rustc_driver::EXIT_SUCCESS));
@@ -227,10 +234,11 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         } else {
             let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
                 .unwrap_or_else(|| {
+                    #[cfg(target_os = "linux")]
+                    miri::register_retcode_sv(rustc_driver::EXIT_FAILURE);
                     tcx.dcx().abort_if_errors();
                     rustc_driver::EXIT_FAILURE
                 });
-
             std::process::exit(return_code);
         }
 
@@ -707,6 +715,8 @@ fn main() {
             } else {
                 show_error!("-Zmiri-native-lib `{}` does not exist", filename);
             }
+        } else if arg == "-Zmiri-force-old-native-lib-mode" {
+            miri_config.force_old_native_lib = true;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-num-cpus=") {
             let num_cpus = param
                 .parse::<u32>()
