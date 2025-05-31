@@ -1,4 +1,4 @@
-use std::alloc::{self, Layout};
+use std::alloc::Layout;
 
 use rustc_index::bit_set::DenseBitSet;
 
@@ -60,12 +60,13 @@ impl IsolatedAlloc {
 
     /// If the allocation is greater than a page, then round to the nearest page #.
     #[inline]
-    fn huge_normalized_layout(layout: Layout, page_size: usize) -> Layout {
+    fn huge_normalized_layout(&self, layout: Layout, page_size: usize) -> (Layout, usize) {
         // Allocate in page-sized chunks
         let size = layout.size().next_multiple_of(page_size);
         // And make sure the align is at least one page
         let align = std::cmp::max(layout.align(), page_size);
-        Layout::from_size_align(size, align).unwrap()
+        let extra_pages = align.strict_div(page_size).saturating_sub(1).strict_mul(page_size);
+        (Layout::from_size_align(size + extra_pages, align).unwrap(), extra_pages)
     }
 
     /// Determined whether a given normalized (size, align) should be sent to
@@ -102,7 +103,7 @@ impl IsolatedAlloc {
         if self.is_huge_alloc(&layout) {
             // SAFETY: Validity of `layout` upheld by caller; we checked that
             // the size and alignment are appropriate for being a huge alloc
-            unsafe { self.alloc_huge(layout, zeroed) }
+            unsafe { self.alloc_huge(layout) }
         } else {
             for (&mut page, pinfo) in std::iter::zip(&mut self.page_ptrs, &mut self.page_infos) {
                 // SAFETY: The value in `self.page_size` is used to allocate
@@ -171,8 +172,20 @@ impl IsolatedAlloc {
 
     /// Expands the available memory pool by adding one page.
     fn add_page(&mut self) -> (*mut u8, &mut DenseBitSet<usize>) {
-        // SAFETY: The system page size, which is the layout size, cannot be 0
-        let page_ptr = unsafe { alloc::alloc(self.page_layout()) };
+        // SAFETY: mmap is safe to call as long as the length is a multiple of
+        // the system page size
+        let page_ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                self.page_layout().size(),
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+            .cast::<u8>()
+        };
+        assert_ne!(page_ptr.addr(), usize::MAX);
         // `page_infos` has to have one bit for each `COMPRESSION_FACTOR`-sized chunk of bytes in the page.
         assert!(self.page_size % COMPRESSION_FACTOR == 0);
         self.page_infos.push(DenseBitSet::new_empty(self.page_size / COMPRESSION_FACTOR));
@@ -183,13 +196,24 @@ impl IsolatedAlloc {
     /// Allocates in multiples of one page on the host system.
     ///
     /// SAFETY: Same as `alloc()`.
-    unsafe fn alloc_huge(&mut self, layout: Layout, zeroed: bool) -> *mut u8 {
-        let layout = IsolatedAlloc::huge_normalized_layout(layout, self.page_size);
-        // SAFETY: Upheld by caller
-        let ret =
-            unsafe { if zeroed { alloc::alloc_zeroed(layout) } else { alloc::alloc(layout) } };
+    unsafe fn alloc_huge(&mut self, layout: Layout) -> *mut u8 {
+        let (layout, ofs) = self.huge_normalized_layout(layout, self.page_size);
+        // SAFETY: Layout size being a multiple of the system pagesize is enforced
+        // by huge_normalized_layout
+        let ret = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                layout.size(),
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+            .cast::<u8>()
+        };
+        assert_ne!(ret.addr(), usize::MAX);
         self.huge_ptrs.push((ret, layout.size()));
-        ret
+        unsafe { ret.add(ofs) }
     }
 
     /// Deallocates a pointer from this allocator.
@@ -218,9 +242,9 @@ impl IsolatedAlloc {
                 let page_ptr = self.page_ptrs.remove(idx);
                 // SAFETY: We checked that there are no outstanding allocations
                 // from us pointing to this page, and we know it was allocated
-                // with this layout
+                // with this layout whose size is the system page size
                 unsafe {
-                    alloc::dealloc(page_ptr, self.page_layout());
+                    assert_eq!(libc::munmap(page_ptr.cast(), self.page_layout().size()), 0);
                 }
             }
         }
@@ -255,7 +279,7 @@ impl IsolatedAlloc {
     /// SAFETY: Same as `dealloc()` with the added requirement that `layout`
     /// must ask for a size larger than the host pagesize.
     unsafe fn dealloc_huge(&mut self, ptr: *mut u8, layout: Layout) {
-        let layout = IsolatedAlloc::huge_normalized_layout(layout, self.page_size);
+        let (layout, _) = self.huge_normalized_layout(layout, self.page_size);
         // Find the pointer matching in address with the one we got
         let idx = self
             .huge_ptrs
@@ -263,10 +287,11 @@ impl IsolatedAlloc {
             .position(|pg| ptr.addr() == pg.0.addr())
             .expect("Freeing unallocated pages");
         // And kick it from the list
-        self.huge_ptrs.remove(idx);
-        // SAFETY: Caller ensures validity of the layout
+        let (un_offset_ptr, _) = self.huge_ptrs.remove(idx);
+        // SAFETY: huge_normalized_layout ensures the validity of the layout
+        // size, and we know the pointer was the original page-aligned one
         unsafe {
-            alloc::dealloc(ptr, layout);
+            assert_eq!(libc::munmap(un_offset_ptr.cast(), layout.size()), 0);
         }
     }
 }
