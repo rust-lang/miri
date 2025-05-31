@@ -13,6 +13,24 @@ LL |     let _val = val;
    = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
    = note: BACKTRACE (of the first span) on thread `unnamed-ID`:
    = note: inside closure at tests/fail/data_race/local_variable_read_race.rs:LL:CC
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `std::sys::pal::PLATFORM::thread::Thread::new` at RUSTLIB/std/src/sys/pal/PLATFORM/thread.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked_::<'_, {closure@tests/fail/data_race/local_variable_read_race.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn_unchecked::<{closure@tests/fail/data_race/local_variable_read_race.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::Builder::spawn::<{closure@tests/fail/data_race/local_variable_read_race.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::spawn::<{closure@tests/fail/data_race/local_variable_read_race.rs:LL:CC}, ()>` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `main`
+  --> tests/fail/data_race/local_variable_read_race.rs:LL:CC
+   |
+LL |       let t1 = std::thread::spawn(|| {
+   |  ______________^
+LL | |         while P.load(Relaxed).is_null() {
+LL | |             std::hint::spin_loop();
+LL | |         }
+...  |
+LL | |         }
+LL | |     });
+   | |______^
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 
