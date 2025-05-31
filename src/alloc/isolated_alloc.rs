@@ -182,7 +182,8 @@ impl IsolatedAlloc {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
                 -1,
                 0,
-            ).cast::<u8>()
+            )
+            .cast::<u8>()
         };
         assert_ne!(page_ptr.addr(), usize::MAX);
         // `page_infos` has to have one bit for each `COMPRESSION_FACTOR`-sized chunk of bytes in the page.
@@ -207,13 +208,12 @@ impl IsolatedAlloc {
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
                 -1,
                 0,
-            ).cast::<u8>()
+            )
+            .cast::<u8>()
         };
         assert_ne!(ret.addr(), usize::MAX);
         self.huge_ptrs.push((ret, layout.size()));
-        unsafe {
-            ret.add(ofs)
-        }
+        unsafe { ret.add(ofs) }
     }
 
     /// Deallocates a pointer from this allocator.
