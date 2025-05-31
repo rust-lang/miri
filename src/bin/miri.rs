@@ -192,6 +192,12 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             todo!("GenMC mode not yet implemented");
         };
 
+        #[cfg(target_os = "linux")]
+        if config.native_lib.is_some() {
+            // SAFETY: No other threads have spawned yet
+            let _ = unsafe { miri::init_sv() };
+        }
+
         if let Some(many_seeds) = self.many_seeds.take() {
             assert!(config.seed.is_none());
             let exit_code = sync::IntoDynSyncSend(AtomicI32::new(rustc_driver::EXIT_SUCCESS));
@@ -227,10 +233,11 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         } else {
             let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
                 .unwrap_or_else(|| {
+                    #[cfg(target_os = "linux")]
+                    miri::register_retcode_sv(rustc_driver::EXIT_FAILURE);
                     tcx.dcx().abort_if_errors();
                     rustc_driver::EXIT_FAILURE
                 });
-
             std::process::exit(return_code);
         }
 

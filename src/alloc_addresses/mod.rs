@@ -470,13 +470,125 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// This overapproximates the modifications which external code might make to memory:
     /// We set all reachable allocations as initialized, mark all reachable provenances as exposed
     /// and overwrite them with `Provenance::WILDCARD`.
-    fn prepare_exposed_for_native_call(&mut self) -> InterpResult<'tcx> {
+    fn prepare_exposed_for_native_call(&mut self, _paranoid: bool) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         // We need to make a deep copy of this list, but it's fine; it also serves as scratch space
         // for the search within `prepare_for_native_call`.
         let exposed: Vec<AllocId> =
             this.machine.alloc_addresses.get_mut().exposed.iter().copied().collect();
-        this.prepare_for_native_call(exposed)
+        this.prepare_for_native_call(exposed /*, paranoid*/)
+    }
+
+    /// Makes use of information obtained about memory accesses during FFI to determine which
+    /// provenances should be exposed. Note that if `prepare_exposed_for_native_call` was not
+    /// called before the FFI (with `paranoid` set to false) then some of the writes may be
+    /// lost!
+    #[cfg(target_os = "linux")]
+    fn apply_events(&mut self, events: crate::shims::trace::MemEvents) -> InterpResult<'tcx> {
+        use rustc_index::bit_set::DenseBitSet;
+
+        let this = self.eval_context_mut();
+
+        // In order to not overexpose provenances, we only want to mark as read
+        // bytes that were read before being written. That's inefficient to track
+        // live as it's happening, but cheaper (relatively) to do here. The alternative
+        // is that we could feed our AccessEvent enum into rustc itself, but that
+        // would come at a larger perf cost in most cases and make the API it
+        // exposes less generic (as right now we can feed it arbitrary reads and
+        // writes and just trust that it logs them down). Therefore, we have this.
+
+        // Each bitset holds alloc_cutoff bits
+        let alloc_cutoff = events.alloc_cutoff;
+        // FIXME: these could be u16s
+        //eprintln!("bare accesses: {:#0x?}", events.acc_events);
+        let mut reads_bitset: Vec<(DenseBitSet<u32>, u64)> = vec![];
+        let mut writes_bitset: Vec<(DenseBitSet<u32>, u64)> = vec![];
+        for acc in events.acc_events {
+            match acc {
+                // Reads have more logic to them since we don't want to count
+                // them at all if a write already occurred but obviously we do
+                // if the write has yet to happen
+                shims::trace::AccessEvent::Read(range) => {
+                    // The tracer ensures access ranges don't go over this alignment
+                    let pg = range.start - range.start % alloc_cutoff.to_u64();
+                    for byte in range {
+                        #[expect(clippy::as_conversions)]
+                        let ofs = (byte - pg) as u32;
+                        // Checks if any of the write-tracking bitsets match the page address
+                        if !writes_bitset.iter().fold(false, |found, (set, p)| {
+                            if found {
+                                true
+                            } else {
+                                // And if yes, whether they have this particular byte
+                                if *p == pg { set.contains(ofs) } else { false }
+                            }
+                        }) {
+                            // If this byte hasn't been written to yet, mark a read
+                            let pos = reads_bitset.iter().position(|(_, p)| *p == pg).unwrap_or({
+                                reads_bitset.push((DenseBitSet::new_empty(alloc_cutoff), pg));
+                                reads_bitset.len() - 1
+                            });
+                            reads_bitset[pos].0.insert(ofs);
+                        }
+                    }
+                }
+                // Writes don't have much going on, but we need to track them
+                // at the same time as reads for this to be useful. We just
+                // insert ranges into the appropriate bitset
+                shims::trace::AccessEvent::Write(range) => {
+                    let pg = range.start - range.start % alloc_cutoff.to_u64();
+                    #[expect(clippy::as_conversions)]
+                    let rg_norm = ((range.start - pg) as u32)..((range.end - pg) as u32);
+                    let pos = writes_bitset.iter().position(|(_, p)| *p == pg).unwrap_or({
+                        writes_bitset.push((DenseBitSet::new_empty(alloc_cutoff), pg));
+                        writes_bitset.len() - 1
+                    });
+                    writes_bitset[pos].0.insert_range(rg_norm);
+                }
+            }
+        }
+        // The rustc side expects a `Vec<Range<u64>>`, not our monstrosity, so
+        // this turns our bitset vector into one of ranges
+        let decompress: fn(Vec<(DenseBitSet<u32>, u64)>, &mut Vec<std::ops::Range<u64>>) =
+            |sets, into| {
+                sets.into_iter().for_each(|(set, p)| {
+                    // Iterates over the indices of 1s and so long as they
+                    // are contiguous, opt_so_far keeps growing
+                    let mut opt_so_far: Option<std::ops::Range<u32>> = None;
+                    #[expect(clippy::as_conversions)]
+                    for bit in set.iter() {
+                        match opt_so_far {
+                            Some(mut so_far) =>
+                                if so_far.end == bit {
+                                    so_far.end = bit + 1;
+                                    opt_so_far = Some(so_far);
+                                } else {
+                                    // When there's a jump, push what we have so far and start anew
+                                    into.push((so_far.start as u64 + p)..(so_far.end as u64 + p));
+                                    opt_so_far = Some(bit..bit + 1);
+                                },
+                            // 1st time we obviously need to insert it
+                            None => opt_so_far = Some(bit..bit + 1),
+                        }
+                    }
+                    // When this set is out of bits, push what's been counted
+                    // (or this set was empty)
+                    #[expect(clippy::as_conversions)]
+                    if let Some(so_far) = opt_so_far {
+                        into.push((so_far.start as u64 + p)..(so_far.end as u64 + p));
+                    }
+                });
+            };
+        let mut reads = vec![];
+        let mut writes = vec![];
+        decompress(reads_bitset, &mut reads);
+        decompress(writes_bitset, &mut writes);
+        //eprintln!("reads: {reads:#0x?}");
+        //eprintln!("writes: {writes:#0x?}");
+        let _exposed: Vec<AllocId> =
+            this.machine.alloc_addresses.get_mut().exposed.iter().copied().collect();
+        interp_ok(())
+        //this.apply_accesses(exposed, events.reads, events.writes)
     }
 }
 
