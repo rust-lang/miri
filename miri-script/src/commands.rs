@@ -568,11 +568,17 @@ impl Command {
             Ok(results)
         };
 
-        if let Some(baseline_file) = save_baseline {
+        if let Some(mut baseline_file) = save_baseline {
+            if !baseline_file.ends_with(".json") {
+                baseline_file.push_str(".json");
+            }
             let results = gather_results()?;
             let baseline = File::create(baseline_file)?;
             serde_json::to_writer_pretty(BufWriter::new(baseline), &results)?;
-        } else if let Some(baseline_file) = load_baseline {
+        } else if let Some(mut baseline_file) = load_baseline {
+            if !baseline_file.ends_with(".json") {
+                baseline_file.push_str(".json");
+            }
             let new_results = gather_results()?;
             let baseline_results: BTreeMap<String, BenchResult> = {
                 let f = File::open(baseline_file)?;
