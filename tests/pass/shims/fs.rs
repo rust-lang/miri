@@ -28,9 +28,9 @@ fn main() {
     test_errors();
     test_from_raw_os_error();
     test_file_clone();
+    test_file_set_len();
     // Windows file handling is very incomplete.
     if cfg!(not(windows)) {
-        test_file_set_len();
         test_file_sync();
         test_rename();
         test_directory();
@@ -87,7 +87,6 @@ fn test_file_partial_reads_writes() {
 
     // Ensure we sometimes do incomplete writes.
     check_nondet(|| {
-        let _ = remove_file(&path1); // FIXME(win, issue #4483): errors if the file already exists
         let mut file = File::create(&path1).unwrap();
         file.write(&[0; 4]).unwrap() == 4
     });
@@ -210,7 +209,10 @@ fn test_file_set_len() {
 
     // Can't use set_len on a file not opened for writing
     let file = OpenOptions::new().read(true).open(&path).unwrap();
-    assert_eq!(ErrorKind::InvalidInput, file.set_len(14).unwrap_err().kind());
+    assert_eq!(
+        if cfg!(windows) { ErrorKind::PermissionDenied } else { ErrorKind::InvalidInput },
+        file.set_len(14).unwrap_err().kind()
+    );
 
     remove_file(&path).unwrap();
 }
