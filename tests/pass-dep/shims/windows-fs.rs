@@ -2,7 +2,7 @@
 //@compile-flags: -Zmiri-disable-isolation
 #![allow(nonstandard_style)]
 
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
@@ -20,8 +20,10 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_ALWAYS, CREATE_NEW, CreateFileW, DeleteFileW,
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_CURRENT,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_ALWAYS, OPEN_EXISTING, SetFilePointerEx,
+    FILE_END_OF_FILE_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileEndOfFileInfo,
+    GetFileInformationByHandle, OPEN_ALWAYS, OPEN_EXISTING, SetFileInformationByHandle,
+    SetFilePointerEx,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -36,6 +38,7 @@ fn main() {
         test_ntstatus_to_dos();
         test_file_read_write();
         test_file_seek();
+        test_set_file_info();
     }
 }
 
@@ -271,6 +274,22 @@ unsafe fn test_file_read_write() {
     assert_eq!(out, STATUS_SUCCESS);
     assert_eq!(buffer, text);
     assert_eq!(GetLastError(), 1234);
+}
+
+unsafe fn test_set_file_info() {
+    let temp = utils::tmp().join("test_set_file.txt");
+    let mut file = fs::File::create(&temp).unwrap();
+    let handle = file.as_raw_handle();
+
+    let info = FILE_END_OF_FILE_INFO { EndOfFile: 20 };
+    let res = SetFileInformationByHandle(
+        handle,
+        FileEndOfFileInfo,
+        ptr::from_ref(&info).cast(),
+        size_of::<FILE_END_OF_FILE_INFO>().try_into().unwrap(),
+    );
+    assert!(res != 0);
+    assert_eq!(file.seek(SeekFrom::End(0)).unwrap(), 20);
 }
 
 unsafe fn test_file_seek() {
