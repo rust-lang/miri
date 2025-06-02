@@ -397,6 +397,31 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interp_ok(())
         })?;
 
+        // We don't know in advance whether some parts of the reborrow will contain unsafe cells,
+        // so we have to go through the whole range before we know if we should set all the permissions
+        // in the range to `nonfreeze_perm` (when precise_interior_mut is false).
+        //
+        // TODO: Is it still correct to do the initial read access before we change the frozen permissions to non-frozen?
+        let precise_interior_mut = this
+            .machine
+            .borrow_tracker
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .borrow_tracker_method
+            .has_precise_interior_mut();
+        if has_unsafe_cell && !precise_interior_mut {
+            for (_perm_range, perm) in perms_map.iter_mut_all() {
+                let nonfreeze_perm = new_perm.nonfreeze_perm;
+                let sifa = nonfreeze_perm.strongest_idempotent_foreign_access(protected);
+                if new_perm.nonfreeze_access {
+                    *perm = LocationState::new_accessed(nonfreeze_perm, sifa);
+                } else {
+                    *perm = LocationState::new_non_accessed(nonfreeze_perm, sifa);
+                }
+            }
+        }
+
         // Record the parent-child pair in the tree.
         tree_borrows.new_child(
             base_offset,

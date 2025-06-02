@@ -1,5 +1,5 @@
 //! A version of `cell_inside_struct` that dumps the tree so that we can see what is happening.
-//@compile-flags: -Zmiri-tree-borrows
+//@compile-flags: -Zmiri-tree-borrows -Zmiri-tb-precise-interior-mut
 #[path = "../../utils/mod.rs"]
 #[macro_use]
 mod utils;

@@ -554,8 +554,12 @@ fn main() {
         } else if arg == "-Zmiri-disable-stacked-borrows" {
             miri_config.borrow_tracker = None;
         } else if arg == "-Zmiri-tree-borrows" {
-            miri_config.borrow_tracker = Some(BorrowTrackerMethod::TreeBorrows);
+            miri_config.borrow_tracker =
+                Some(BorrowTrackerMethod::TreeBorrows { precise_interior_mut: false });
             miri_config.provenance_mode = ProvenanceMode::Strict;
+        } else if arg == "-Zmiri-tb-precise-interior-mut" {
+            // Should this automatically imply "-Zmiri-tree-borrows"?
+            miri_config.tb_precise_interior_mut = true;
         } else if arg == "-Zmiri-disable-data-race-detector" {
             miri_config.data_race_detector = false;
             miri_config.weak_memory_emulation = false;
@@ -725,7 +729,7 @@ fn main() {
         }
     }
     // Tree Borrows implies strict provenance, and is not compatible with native calls.
-    if matches!(miri_config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows)) {
+    if matches!(miri_config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows { .. })) {
         if miri_config.provenance_mode != ProvenanceMode::Strict {
             show_error!(
                 "Tree Borrows does not support integer-to-pointer casts, and hence requires strict provenance"
@@ -734,7 +738,17 @@ fn main() {
         if miri_config.native_lib.is_some() {
             show_error!("Tree Borrows is not compatible with calling native functions");
         }
+        miri_config.borrow_tracker = Some(BorrowTrackerMethod::TreeBorrows {
+            precise_interior_mut: miri_config.tb_precise_interior_mut,
+        });
+    // "-Zmiri_tb_precise_interior_mut" doesn't have any affect if we are not using Tree Borrows.
+    } else if miri_config.tb_precise_interior_mut {
+        // This should be a warning instead?
+        show_error!(
+            "`-Zmiri_tb_precise_interior_mut` only has an effect when using Tree Borrows `-Zmiri-tree-borrows`"
+        );
     }
+
     // Native calls and strict provenance are not compatible.
     if miri_config.native_lib.is_some() && miri_config.provenance_mode == ProvenanceMode::Strict {
         show_error!("strict provenance is not compatible with calling native functions");
