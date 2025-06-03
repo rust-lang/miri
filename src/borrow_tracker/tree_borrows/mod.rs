@@ -367,10 +367,40 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
 
-            // Some reborrows incur a read access to the parent.
-            if access {
+            interp_ok(())
+        })?;
+
+        // We don't know in advance whether some parts of the reborrow will contain `UnsafeCell`s,
+        // so we have to go through the whole range before we know if we should set all the permissions
+        // in the range to `nonfreeze_perm` (when precise_interior_mut is false).
+        let precise_interior_mut = this
+            .machine
+            .borrow_tracker
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .borrow_tracker_method
+            .has_precise_interior_mut();
+
+        for (perm_range, perm) in perms_map.iter_mut_all() {
+            // If there is an `UnsafeCell` somewhere in the range and precise tracking is disabled,
+            // we treat the whole range as an `UnsafeCell`.
+            if has_unsafe_cell && !precise_interior_mut {
+                let nonfreeze_perm = new_perm.nonfreeze_perm;
+                let sifa = nonfreeze_perm.strongest_idempotent_foreign_access(protected);
+                if new_perm.nonfreeze_access {
+                    *perm = LocationState::new_accessed(nonfreeze_perm, sifa);
+                } else {
+                    *perm = LocationState::new_non_accessed(nonfreeze_perm, sifa);
+                }
+            }
+            if perm.is_accessed() {
+                // Some reborrows incur a read access to the parent.
                 // Adjust range to be relative to allocation start (rather than to `place`).
-                let mut range_in_alloc = range;
+                let mut range_in_alloc = AllocRange {
+                    start: Size::from_bytes(perm_range.start),
+                    size: Size::from_bytes(perm_range.end - perm_range.start),
+                };
                 range_in_alloc.start += base_offset;
 
                 tree_borrows.perform_access(
@@ -382,7 +412,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
 
                 // Also inform the data race model (but only if any bytes are actually affected).
-                if range.size.bytes() > 0 {
+                if range_in_alloc.size.bytes() > 0 {
                     if let Some(data_race) = alloc_extra.data_race.as_vclocks_ref() {
                         data_race.read(
                             alloc_id,
@@ -392,32 +422,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             &this.machine,
                         )?
                     }
-                }
-            }
-            interp_ok(())
-        })?;
-
-        // We don't know in advance whether some parts of the reborrow will contain unsafe cells,
-        // so we have to go through the whole range before we know if we should set all the permissions
-        // in the range to `nonfreeze_perm` (when precise_interior_mut is false).
-        //
-        // TODO: Is it still correct to do the initial read access before we change the frozen permissions to non-frozen?
-        let precise_interior_mut = this
-            .machine
-            .borrow_tracker
-            .as_ref()
-            .unwrap()
-            .borrow()
-            .borrow_tracker_method
-            .has_precise_interior_mut();
-        if has_unsafe_cell && !precise_interior_mut {
-            for (_perm_range, perm) in perms_map.iter_mut_all() {
-                let nonfreeze_perm = new_perm.nonfreeze_perm;
-                let sifa = nonfreeze_perm.strongest_idempotent_foreign_access(protected);
-                if new_perm.nonfreeze_access {
-                    *perm = LocationState::new_accessed(nonfreeze_perm, sifa);
-                } else {
-                    *perm = LocationState::new_non_accessed(nonfreeze_perm, sifa);
                 }
             }
         }
