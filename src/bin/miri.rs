@@ -555,11 +555,11 @@ fn main() {
             miri_config.borrow_tracker = None;
         } else if arg == "-Zmiri-tree-borrows" {
             miri_config.borrow_tracker =
-                Some(BorrowTrackerMethod::TreeBorrows { precise_interior_mut: false });
+                Some(BorrowTrackerMethod::TreeBorrows { precise_interior_mut: true });
             miri_config.provenance_mode = ProvenanceMode::Strict;
-        } else if arg == "-Zmiri-tb-precise-interior-mut" {
+        } else if arg == "-Zmiri-disable-tb-precise-interior-mut" {
             // Should this automatically imply "-Zmiri-tree-borrows"?
-            miri_config.tb_precise_interior_mut = true;
+            miri_config.tb_precise_interior_mut = false;
         } else if arg == "-Zmiri-disable-data-race-detector" {
             miri_config.data_race_detector = false;
             miri_config.weak_memory_emulation = false;
@@ -741,12 +741,6 @@ fn main() {
         miri_config.borrow_tracker = Some(BorrowTrackerMethod::TreeBorrows {
             precise_interior_mut: miri_config.tb_precise_interior_mut,
         });
-    // "-Zmiri_tb_precise_interior_mut" doesn't have any affect if we are not using Tree Borrows.
-    } else if miri_config.tb_precise_interior_mut {
-        // This should be a warning instead?
-        show_error!(
-            "`-Zmiri_tb_precise_interior_mut` only has an effect when using Tree Borrows `-Zmiri-tree-borrows`"
-        );
     }
 
     // Native calls and strict provenance are not compatible.

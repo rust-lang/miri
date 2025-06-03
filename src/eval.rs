@@ -208,7 +208,7 @@ impl Default for MiriConfig {
             address_reuse_cross_thread_rate: 0.1,
             fixed_scheduling: false,
             force_intrinsic_fallback: false,
-            tb_precise_interior_mut: false,
+            tb_precise_interior_mut: true,
         }
     }
 }
