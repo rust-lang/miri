@@ -1,5 +1,6 @@
-//! A version of `cell_inside_struct` that dumps the tree so that we can see what is happening.
-//@compile-flags: -Zmiri-tree-borrows
+//! The same as `tests/fail/tree-borrows/cell-inside-struct` but with
+//! precise tracking of interior mutability disabled.
+//@compile-flags: -Zmiri-tree-borrows -Zmiri-disable-tb-precise-interior-mut
 #[path = "../../utils/mod.rs"]
 #[macro_use]
 mod utils;
@@ -27,7 +28,7 @@ pub fn main() {
         // Writing to `field2`, which is interior mutable, should be allowed.
         (*a).field2.set(10);
 
-        // Writing to `field1`, which is frozen, should not be allowed.
-        (*a).field1 = 88; //~ ERROR: /write access through .* is forbidden/
+        // Writing to `field1` should be allowed because it also has the `Cell` permission.
+        (*a).field1 = 88;
     }
 }
