@@ -384,20 +384,21 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 } else {
                     (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
                 };
+                let sifa = perm.strongest_idempotent_foreign_access(protected);
+                // NOTE: Currently, `access` is false if and only if `perm` is Cell, so this `if`
+                // doesn't not change whether any code is UB or not. We could just always use
+                // `new_accessed` and everything would stay the same. But that seems conceptually
+                // odd, so we keep the initial "accessed" bit of the `LocationState` in sync with whether
+                // a read access is performed below.
+                let new_loc = if access {
+                    LocationState::new_accessed(perm, sifa)
+                } else {
+                    LocationState::new_non_accessed(perm, sifa)
+                };
 
                 // Store initial permissions.
                 for (_loc_range, loc) in perms_map.iter_mut(range.start, range.size) {
-                    let sifa = perm.strongest_idempotent_foreign_access(protected);
-                    // NOTE: Currently, `access` is false if and only if `perm` is Cell, so this `if`
-                    // doesn't not change whether any code is UB or not. We could just always use
-                    // `new_accessed` and everything would stay the same. But that seems conceptually
-                    // odd, so we keep the initial "accessed" bit of the `LocationState` in sync with whether
-                    // a read access is performed below.
-                    if access {
-                        *loc = LocationState::new_accessed(perm, sifa);
-                    } else {
-                        *loc = LocationState::new_non_accessed(perm, sifa);
-                    }
+                    *loc = new_loc;
                 }
 
                 interp_ok(())
