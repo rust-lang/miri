@@ -352,8 +352,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .get_tree_borrows_params()
             .precise_interior_mut;
 
-        let default_perm =
-        if !precise_interior_mut {
+        let default_perm = if !precise_interior_mut {
             // NOTE: Using `ty_is_freeze` is not as precise as going through the range
             // and computing `has_unsafe_cell`.  It can happen that `has_unsafe_cell`
             // is false, but `!ty_is_freeze` is true.
