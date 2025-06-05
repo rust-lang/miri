@@ -568,7 +568,7 @@ fn main() {
                     }));
             } else {
                 show_error!(
-                    "`-Zmiri-tree-borrows` must also be set when setting `-Zmiri-tree-borrows-no-precise-interior-mut"
+                    "`-Zmiri-tree-borrows` must also be set before the `-Zmiri-tree-borrows-no-precise-interior-mut` flag"
                 );
             }
         } else if arg == "-Zmiri-disable-data-race-detector" {

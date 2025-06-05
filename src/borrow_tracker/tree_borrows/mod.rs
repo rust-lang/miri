@@ -342,10 +342,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         assert!(new_perm.freeze_access);
 
         let protected = new_perm.protector.is_some();
-        // NOTE: Using `ty_is_freeze` is not as precise as going through the range
-        // and computing `has_unsafe_cell`.  It can happen that `has_unsafe_cell`
-        // is false, but `!ty_is_freeze` is true.
-        let ty_is_freeze = place.layout.ty.is_freeze(*this.tcx, this.typing_env());
         let precise_interior_mut = this
             .machine
             .borrow_tracker
@@ -356,7 +352,12 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .get_tree_borrows_params()
             .precise_interior_mut;
 
+        let default_perm =
         if !precise_interior_mut {
+            // NOTE: Using `ty_is_freeze` is not as precise as going through the range
+            // and computing `has_unsafe_cell`.  It can happen that `has_unsafe_cell`
+            // is false, but `!ty_is_freeze` is true.
+            let ty_is_freeze = place.layout.ty.is_freeze(*this.tcx, this.typing_env());
             let (perm, access) = if ty_is_freeze {
                 (new_perm.freeze_perm, new_perm.freeze_access)
             } else {
@@ -372,6 +373,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             for (_loc_range, loc) in perms_map.iter_mut_all() {
                 *loc = new_loc;
             }
+
+            perm
         } else {
             this.visit_freeze_sensitive(place, ptr_size, |range, frozen| {
                 has_unsafe_cell = has_unsafe_cell || !frozen;
@@ -400,7 +403,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 interp_ok(())
             })?;
-        }
+
+            // Allow lazily writing to surrounding data if we found an `UnsafeCell`.
+            if has_unsafe_cell { new_perm.nonfreeze_perm } else { new_perm.freeze_perm }
+        };
 
         for (perm_range, perm) in perms_map.iter_mut_all() {
             if perm.is_accessed() {
@@ -441,12 +447,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             orig_tag,
             new_tag,
             perms_map,
-            // Allow lazily writing to surrounding data if we found an `UnsafeCell`.
-            if has_unsafe_cell || (!precise_interior_mut && !ty_is_freeze) {
-                new_perm.nonfreeze_perm
-            } else {
-                new_perm.freeze_perm
-            },
+            default_perm,
             protected,
             span,
         )?;
