@@ -167,8 +167,6 @@ pub struct MiriConfig {
     pub fixed_scheduling: bool,
     /// Always prefer the intrinsic fallback body over the native Miri implementation.
     pub force_intrinsic_fallback: bool,
-    /// Whether Tree Borrows should perform more precise tracking of interior mutable data.
-    pub tb_precise_interior_mut: bool,
 }
 
 impl Default for MiriConfig {
@@ -208,7 +206,6 @@ impl Default for MiriConfig {
             address_reuse_cross_thread_rate: 0.1,
             fixed_scheduling: false,
             force_intrinsic_fallback: false,
-            tb_precise_interior_mut: true,
         }
     }
 }

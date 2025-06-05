@@ -342,37 +342,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         assert!(new_perm.freeze_access);
 
         let protected = new_perm.protector.is_some();
-        this.visit_freeze_sensitive(place, ptr_size, |range, frozen| {
-            has_unsafe_cell = has_unsafe_cell || !frozen;
-
-            // We are only ever `Frozen` inside the frozen bits.
-            let (perm, access) = if frozen {
-                (new_perm.freeze_perm, new_perm.freeze_access)
-            } else {
-                (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
-            };
-
-            // Store initial permissions.
-            for (_loc_range, loc) in perms_map.iter_mut(range.start, range.size) {
-                let sifa = perm.strongest_idempotent_foreign_access(protected);
-                // NOTE: Currently, `access` is false if and only if `perm` is Cell, so this `if`
-                // doesn't not change whether any code is UB or not. We could just always use
-                // `new_accessed` and everything would stay the same. But that seems conceptually
-                // odd, so we keep the initial "accessed" bit of the `LocationState` in sync with whether
-                // a read access is performed below.
-                if access {
-                    *loc = LocationState::new_accessed(perm, sifa);
-                } else {
-                    *loc = LocationState::new_non_accessed(perm, sifa);
-                }
-            }
-
-            interp_ok(())
-        })?;
-
-        // We don't know in advance whether some parts of the reborrow will contain `UnsafeCell`s,
-        // so we have to go through the whole range before we know if we should set all the permissions
-        // in the range to `nonfreeze_perm` (when precise_interior_mut is false).
+        // NOTE: Using `ty_is_freeze` is not as precise as going through the range
+        // and computing `has_unsafe_cell`.  It can happen that `has_unsafe_cell`
+        // is false, but `!ty_is_freeze` is true.
+        let ty_is_freeze = place.layout.ty.is_freeze(*this.tcx, this.typing_env());
         let precise_interior_mut = this
             .machine
             .borrow_tracker
@@ -380,20 +353,56 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .unwrap()
             .borrow()
             .borrow_tracker_method
-            .has_precise_interior_mut();
+            .get_tree_borrows_params()
+            .precise_interior_mut;
+
+        if !precise_interior_mut {
+            let (perm, access) = if ty_is_freeze {
+                (new_perm.freeze_perm, new_perm.freeze_access)
+            } else {
+                (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
+            };
+            let sifa = perm.strongest_idempotent_foreign_access(protected);
+            let new_loc = if access {
+                LocationState::new_accessed(perm, sifa)
+            } else {
+                LocationState::new_non_accessed(perm, sifa)
+            };
+
+            for (_loc_range, loc) in perms_map.iter_mut_all() {
+                *loc = new_loc;
+            }
+        } else {
+            this.visit_freeze_sensitive(place, ptr_size, |range, frozen| {
+                has_unsafe_cell = has_unsafe_cell || !frozen;
+
+                // We are only ever `Frozen` inside the frozen bits.
+                let (perm, access) = if frozen {
+                    (new_perm.freeze_perm, new_perm.freeze_access)
+                } else {
+                    (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
+                };
+
+                // Store initial permissions.
+                for (_loc_range, loc) in perms_map.iter_mut(range.start, range.size) {
+                    let sifa = perm.strongest_idempotent_foreign_access(protected);
+                    // NOTE: Currently, `access` is false if and only if `perm` is Cell, so this `if`
+                    // doesn't not change whether any code is UB or not. We could just always use
+                    // `new_accessed` and everything would stay the same. But that seems conceptually
+                    // odd, so we keep the initial "accessed" bit of the `LocationState` in sync with whether
+                    // a read access is performed below.
+                    if access {
+                        *loc = LocationState::new_accessed(perm, sifa);
+                    } else {
+                        *loc = LocationState::new_non_accessed(perm, sifa);
+                    }
+                }
+
+                interp_ok(())
+            })?;
+        }
 
         for (perm_range, perm) in perms_map.iter_mut_all() {
-            // If there is an `UnsafeCell` somewhere in the range and precise tracking is disabled,
-            // we treat the whole range as an `UnsafeCell`.
-            if has_unsafe_cell && !precise_interior_mut {
-                let nonfreeze_perm = new_perm.nonfreeze_perm;
-                let sifa = nonfreeze_perm.strongest_idempotent_foreign_access(protected);
-                if new_perm.nonfreeze_access {
-                    *perm = LocationState::new_accessed(nonfreeze_perm, sifa);
-                } else {
-                    *perm = LocationState::new_non_accessed(nonfreeze_perm, sifa);
-                }
-            }
             if perm.is_accessed() {
                 // Some reborrows incur a read access to the parent.
                 // Adjust range to be relative to allocation start (rather than to `place`).
@@ -433,7 +442,11 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             new_tag,
             perms_map,
             // Allow lazily writing to surrounding data if we found an `UnsafeCell`.
-            if has_unsafe_cell { new_perm.nonfreeze_perm } else { new_perm.freeze_perm },
+            if has_unsafe_cell || (!precise_interior_mut && !ty_is_freeze) {
+                new_perm.nonfreeze_perm
+            } else {
+                new_perm.freeze_perm
+            },
             protected,
             span,
         )?;

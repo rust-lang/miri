@@ -35,7 +35,7 @@ use std::sync::{Arc, Once};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, ValidationMode,
+    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -555,11 +555,22 @@ fn main() {
             miri_config.borrow_tracker = None;
         } else if arg == "-Zmiri-tree-borrows" {
             miri_config.borrow_tracker =
-                Some(BorrowTrackerMethod::TreeBorrows { precise_interior_mut: true });
+                Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams {
+                    precise_interior_mut: true,
+                }));
             miri_config.provenance_mode = ProvenanceMode::Strict;
-        } else if arg == "-Zmiri-disable-tb-precise-interior-mut" {
+        } else if arg == "-Zmiri-tree-borrows-no-precise-interior-mut" {
             // Should this automatically imply "-Zmiri-tree-borrows"?
-            miri_config.tb_precise_interior_mut = false;
+            if matches!(miri_config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows { .. })) {
+                miri_config.borrow_tracker =
+                    Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams {
+                        precise_interior_mut: false,
+                    }));
+            } else {
+                show_error!(
+                    "`-Zmiri-tree-borrows` must also be set when setting `-Zmiri-tree-borrows-no-precise-interior-mut"
+                );
+            }
         } else if arg == "-Zmiri-disable-data-race-detector" {
             miri_config.data_race_detector = false;
             miri_config.weak_memory_emulation = false;
@@ -738,9 +749,6 @@ fn main() {
         if miri_config.native_lib.is_some() {
             show_error!("Tree Borrows is not compatible with calling native functions");
         }
-        miri_config.borrow_tracker = Some(BorrowTrackerMethod::TreeBorrows {
-            precise_interior_mut: miri_config.tb_precise_interior_mut,
-        });
     }
 
     // Native calls and strict provenance are not compatible.

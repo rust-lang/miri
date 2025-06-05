@@ -1,6 +1,6 @@
 //! The same as `tests/fail/tree-borrows/cell-inside-struct` but with
 //! precise tracking of interior mutability disabled.
-//@compile-flags: -Zmiri-tree-borrows -Zmiri-disable-tb-precise-interior-mut
+//@compile-flags: -Zmiri-tree-borrows -Zmiri-tree-borrows-no-precise-interior-mut
 #[path = "../../utils/mod.rs"]
 #[macro_use]
 mod utils;

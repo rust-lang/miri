@@ -226,7 +226,12 @@ pub enum BorrowTrackerMethod {
     /// Stacked Borrows, as implemented in borrow_tracker/stacked_borrows
     StackedBorrows,
     /// Tree borrows, as implemented in borrow_tracker/tree_borrows
-    TreeBorrows { precise_interior_mut: bool },
+    TreeBorrows(TreeBorrowsParams),
+}
+/// Parameters that Tree Borrows can take.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TreeBorrowsParams {
+    pub precise_interior_mut: bool,
 }
 
 impl BorrowTrackerMethod {
@@ -238,10 +243,10 @@ impl BorrowTrackerMethod {
         ))
     }
 
-    pub fn has_precise_interior_mut(self) -> bool {
+    pub fn get_tree_borrows_params(self) -> TreeBorrowsParams {
         match self {
-            BorrowTrackerMethod::TreeBorrows { precise_interior_mut } => precise_interior_mut,
-            _ => false,
+            BorrowTrackerMethod::TreeBorrows(params) => params,
+            _ => panic!("can only be called when `BorrowTrackerMethod` is `TreeBorrows`"),
         }
     }
 }
