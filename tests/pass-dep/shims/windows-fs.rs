@@ -294,7 +294,8 @@ unsafe fn test_dup_handle() {
     let mut file = fs::File::from_raw_handle(second_handle);
     file.write(b"Test").unwrap();
     // Duplicated permissions, so reading fails on the second file
-    assert_eq!(file.read(&mut [0]).unwrap_err().kind(), ErrorKind::PermissionDenied);
+    let err = file.read(&mut [0]).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::PermissionDenied, "I/O Error wrong kind: {:?}", err);
 }
 
 unsafe fn test_file_seek() {
