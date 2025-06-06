@@ -560,7 +560,6 @@ fn main() {
                 }));
             miri_config.provenance_mode = ProvenanceMode::Strict;
         } else if arg == "-Zmiri-tree-borrows-no-precise-interior-mut" {
-            // Should this automatically imply "-Zmiri-tree-borrows"?
             if matches!(miri_config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows { .. })) {
                 miri_config.borrow_tracker =
                     Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams {

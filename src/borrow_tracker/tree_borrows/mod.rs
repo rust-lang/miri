@@ -353,9 +353,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .precise_interior_mut;
 
         let default_perm = if !precise_interior_mut {
-            // NOTE: Using `ty_is_freeze` is not as precise as going through the range
-            // and computing `has_unsafe_cell`.  It can happen that `has_unsafe_cell`
-            // is false, but `!ty_is_freeze` is true.
+            // NOTE: Using `ty_is_freeze` doesn't give the same result as going through the range
+            // and computing `has_unsafe_cell`.  This is because of zero-sized `UnsafeCell`, for which
+            // `has_unsafe_cell` is false, but `!ty_is_freeze` is true.
             let ty_is_freeze = place.layout.ty.is_freeze(*this.tcx, this.typing_env());
             let (perm, access) = if ty_is_freeze {
                 (new_perm.freeze_perm, new_perm.freeze_access)
