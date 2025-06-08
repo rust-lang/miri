@@ -21,7 +21,7 @@ help: the accessed tag <TAG> later transitioned to Active due to a child write a
 LL |             *x = 1;
    |             ^^^^^^
    = help: this transition corresponds to the first write to a 2-phase borrowed mutable reference
-help: the accessed tag <TAG> later transitioned to Frozen due to a reborrow (acting as a foreign read access) at offsets [OFFSET]
+help: the accessed tag <TAG> later transitioned to Frozen due to a reborrow to create <TAG> (acting as a foreign read access) at offsets [OFFSET]
   --> tests/fail/async-shared-mutable.rs:LL:CC
    |
 LL |     let _: Pin<&_> = f.as_ref(); // Or: `f.as_mut().into_ref()`.

@@ -12,5 +12,5 @@ fn main() {
     unsafe { *xraw0 = 42 }; // unfreeze
     foo(pair_xref);
     //~[stack]^ ERROR: /retag .* tag does not exist in the borrow stack/
-    //~[tree]| ERROR: /reborrow through .* is forbidden/
+    //~[tree]| ERROR: /reborrow to create .* through .* is forbidden/
 }

@@ -9,7 +9,7 @@
 struct Foo(u64);
 impl Foo {
     fn add(&mut self, n: u64) -> u64 {
-        //~^ ERROR: /reborrow through .* is forbidden/
+        //~^ ERROR: /reborrow to create .* through .* is forbidden/
         self.0 + n
     }
 }

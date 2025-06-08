@@ -17,7 +17,7 @@ help: the accessed tag <TAG> later transitioned to Active due to a child write a
 LL |         *ptr = 0; // Write
    |         ^^^^^^^^
    = help: this transition corresponds to the first write to a 2-phase borrowed mutable reference
-help: the accessed tag <TAG> later transitioned to Frozen due to a reborrow (acting as a foreign read access) at offsets [0x0..0x1]
+help: the accessed tag <TAG> later transitioned to Frozen due to a reborrow to create <TAG> (acting as a foreign read access) at offsets [0x0..0x1]
   --> tests/fail/tree_borrows/parent_read_freezes_raw_mut.rs:LL:CC
    |
 LL |         assert_eq!(root, 0); // Parent Read
