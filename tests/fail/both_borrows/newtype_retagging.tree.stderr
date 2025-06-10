@@ -18,7 +18,7 @@ help: the protected tag <TAG> was created here, in the initial state Reserved
    |
 LL | fn dealloc_while_running(_n: Newtype<'_>, dealloc: impl FnOnce()) {
    |                          ^^
-help: the protected tag <TAG> later transitioned to Reserved (conflicted) due to a reborrow (acting as a foreign read access) at offsets [0x0..0x4]
+help: the protected tag <TAG> later transitioned to Reserved (conflicted) due to a reborrow to create <TAG> (acting as a foreign read access) at offsets [0x0..0x4]
   --> tests/fail/both_borrows/newtype_retagging.rs:LL:CC
    |
 LL |             || drop(Box::from_raw(ptr)),

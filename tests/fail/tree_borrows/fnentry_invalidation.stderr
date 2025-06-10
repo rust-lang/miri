@@ -17,7 +17,7 @@ help: the accessed tag <TAG> later transitioned to Active due to a child write a
 LL |         *z = 1;
    |         ^^^^^^
    = help: this transition corresponds to the first write to a 2-phase borrowed mutable reference
-help: the accessed tag <TAG> later transitioned to Frozen due to a reborrow (acting as a foreign read access) at offsets [0x0..0x4]
+help: the accessed tag <TAG> later transitioned to Frozen due to a reborrow to create <TAG> (acting as a foreign read access) at offsets [0x0..0x4]
   --> tests/fail/tree_borrows/fnentry_invalidation.rs:LL:CC
    |
 LL |     x.do_bad();

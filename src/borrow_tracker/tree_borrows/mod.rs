@@ -420,7 +420,11 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 tree_borrows.perform_access(
                     orig_tag,
-                    Some((range_in_alloc, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    Some((
+                        range_in_alloc,
+                        AccessKind::Read,
+                        diagnostics::AccessCause::Reborrow(new_tag),
+                    )),
                     this.machine.borrow_tracker.as_ref().unwrap(),
                     alloc_id,
                     this.machine.current_span(),

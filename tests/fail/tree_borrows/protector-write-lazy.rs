@@ -31,5 +31,5 @@ fn main() {
     let funky_ptr_lazy_on_fst_elem = the_other_function(ref_to_fst_elem, ptr_to_vec);
     // now we try to use the funky lazy pointer.
     // It should be UB, since the write-on-protector-end should disable it.
-    unsafe { println!("Value of funky: {}", *funky_ptr_lazy_on_fst_elem) } //~ ERROR: /reborrow through .* is forbidden/
+    unsafe { println!("Value of funky: {}", *funky_ptr_lazy_on_fst_elem) } //~ ERROR: /reborrow to create .* through .* is forbidden/
 }
