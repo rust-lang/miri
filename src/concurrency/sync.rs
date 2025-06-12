@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use rustc_abi::Size;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_index::{Idx, IndexVec};
+use rustc_index::IndexVec;
 
 use super::init_once::InitOnce;
 use super::vector_clock::VClock;
@@ -157,8 +157,6 @@ impl VisitProvenance for RwLockRef {
     }
 }
 
-declare_id!(CondvarId);
-
 /// The conditional variable state.
 #[derive(Default, Debug)]
 struct Condvar {
@@ -169,6 +167,25 @@ struct Condvar {
     /// Contains the clock of the last thread to
     /// perform a condvar-signal.
     clock: VClock,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct CondvarRef(Rc<RefCell<Condvar>>);
+
+impl CondvarRef {
+    fn new() -> Self {
+        CondvarRef(Rc::new(RefCell::new(Condvar::default())))
+    }
+
+    pub fn is_awaited(&self) -> bool {
+        !self.0.borrow().waiters.is_empty()
+    }
+}
+
+impl VisitProvenance for CondvarRef {
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
+        // RwLockRef contains no provenance.
+    }
 }
 
 /// The futex state.
@@ -210,7 +227,6 @@ struct FutexWaiter {
 /// The state of all synchronization objects.
 #[derive(Default, Debug)]
 pub struct SynchronizationObjects {
-    condvars: IndexVec<CondvarId, Condvar>,
     pub(super) init_onces: IndexVec<InitOnceId, InitOnce>,
 }
 
@@ -245,8 +261,8 @@ impl SynchronizationObjects {
         RwLockRef::new()
     }
 
-    pub fn condvar_create(&mut self) -> CondvarId {
-        self.condvars.push(Default::default())
+    pub fn condvar_create(&mut self) -> CondvarRef {
+        CondvarRef::new()
     }
 
     pub fn init_once_create(&mut self) -> InitOnceId {
@@ -663,19 +679,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         );
     }
 
-    /// Is the conditional variable awaited?
-    #[inline]
-    fn condvar_is_awaited(&mut self, id: CondvarId) -> bool {
-        let this = self.eval_context_mut();
-        !this.machine.sync.condvars[id].waiters.is_empty()
-    }
-
     /// Release the mutex and let the current thread wait on the given condition variable.
     /// Once it is signaled, the mutex will be acquired and `retval_succ` will be written to `dest`.
     /// If the timeout happens first, `retval_timeout` will be written to `dest`.
     fn condvar_wait(
         &mut self,
-        condvar: CondvarId,
+        condvar_ref: CondvarRef,
         mutex_ref: MutexRef,
         timeout: Option<(TimeoutClock, TimeoutAnchor, Duration)>,
         retval_succ: Scalar,
@@ -695,14 +704,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
         let thread = this.active_thread();
-        let waiters = &mut this.machine.sync.condvars[condvar].waiters;
-        waiters.push_back(thread);
+
+        condvar_ref.0.borrow_mut().waiters.push_back(thread);
         this.block_thread(
-            BlockReason::Condvar(condvar),
+            BlockReason::Condvar,
             timeout,
             callback!(
                 @capture<'tcx> {
-                    condvar: CondvarId,
+                    condvar_ref: CondvarRef,
                     mutex_ref: MutexRef,
                     retval_succ: Scalar,
                     retval_timeout: Scalar,
@@ -714,7 +723,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             // The condvar was signaled. Make sure we get the clock for that.
                             if let Some(data_race) = this.machine.data_race.as_vclocks_ref() {
                                 data_race.acquire_clock(
-                                    &this.machine.sync.condvars[condvar].clock,
+                                    &condvar_ref.0.borrow().clock,
                                     &this.machine.threads,
                                 );
                             }
@@ -725,7 +734,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         UnblockKind::TimedOut => {
                             // We have to remove the waiter from the queue again.
                             let thread = this.active_thread();
-                            let waiters = &mut this.machine.sync.condvars[condvar].waiters;
+                            let waiters = &mut condvar_ref.0.borrow_mut().waiters;
                             waiters.retain(|waiter| *waiter != thread);
                             // Now get back the lock.
                             this.condvar_reacquire_mutex(mutex_ref, retval_timeout, dest)
@@ -739,18 +748,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// Wake up some thread (if there is any) sleeping on the conditional
     /// variable. Returns `true` iff any thread was woken up.
-    fn condvar_signal(&mut self, id: CondvarId) -> InterpResult<'tcx, bool> {
+    fn condvar_signal(&mut self, condvar_ref: &CondvarRef) -> InterpResult<'tcx, bool> {
         let this = self.eval_context_mut();
-        let condvar = &mut this.machine.sync.condvars[id];
 
         // Each condvar signal happens-before the end of the condvar wake
         if let Some(data_race) = this.machine.data_race.as_vclocks_ref() {
-            data_race.release_clock(&this.machine.threads, |clock| condvar.clock.clone_from(clock));
+            data_race.release_clock(&this.machine.threads, |clock| {
+                condvar_ref.0.borrow_mut().clock.clone_from(clock)
+            });
         }
-        let Some(waiter) = condvar.waiters.pop_front() else {
+        let Some(waiter) = condvar_ref.0.borrow_mut().waiters.pop_front() else {
             return interp_ok(false);
         };
-        this.unblock_thread(waiter, BlockReason::Condvar(id))?;
+        this.unblock_thread(waiter, BlockReason::Condvar)?;
         interp_ok(true)
     }
 

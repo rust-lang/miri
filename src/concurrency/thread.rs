@@ -97,7 +97,7 @@ pub enum BlockReason {
     /// Blocked on a mutex.
     Mutex,
     /// Blocked on a condition variable.
-    Condvar(CondvarId),
+    Condvar,
     /// Blocked on a reader-writer lock.
     RwLock,
     /// Blocked on a Futex variable.
