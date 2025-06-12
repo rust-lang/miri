@@ -604,8 +604,8 @@ impl Command {
 
     fn install(features: Vec<String>, flags: Vec<String>) -> Result<()> {
         let e = MiriEnv::new()?;
-        e.install_to_sysroot(e.miri_dir.clone(), &features, &flags)?;
-        e.install_to_sysroot(path!(e.miri_dir / "cargo-miri"), &[], &flags)?;
+        e.install_to_sysroot(".", &features, &flags)?;
+        e.install_to_sysroot("cargo-miri", &[], &flags)?;
         Ok(())
     }
 

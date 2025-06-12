@@ -139,16 +139,16 @@ impl MiriEnv {
         )
     }
 
-    /// Make sure the `features` you pass here exist for the specified `path`. For example, the
+    /// Make sure the `features` you pass here exist for the specified `crate_dir`. For example, the
     /// "--features" parameter of [crate::Command]s is intended only for the "miri" root crate.
     pub fn install_to_sysroot(
         &self,
-        path: impl AsRef<OsStr>,
+        crate_dir: impl AsRef<OsStr>,
         features: &[String],
         args: impl IntoIterator<Item = impl AsRef<OsStr>>,
     ) -> Result<()> {
         let MiriEnv { sysroot, toolchain, cargo_extra_flags, .. } = self;
-        let path = path!(self.miri_dir / path.as_ref());
+        let path = path!(self.miri_dir / crate_dir.as_ref());
         let features = features_to_args(features);
         // Install binaries to the miri toolchain's `sysroot` so they do not interact with other toolchains.
         // (Not using `cargo_cmd` as `install` is special and doesn't use `--manifest-path`.)
