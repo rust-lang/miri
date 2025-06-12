@@ -372,9 +372,9 @@ enum ClockId {
     Monotonic,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct PthreadCondvar {
-    id: CondvarId,
+    condvar_ref: CondvarRef,
     clock: ClockId,
 }
 
@@ -384,9 +384,9 @@ fn cond_create<'tcx>(
     clock: ClockId,
 ) -> InterpResult<'tcx, PthreadCondvar> {
     let cond = ecx.deref_pointer_as(cond_ptr, ecx.libc_ty_layout("pthread_cond_t"))?;
-    let id = ecx.machine.sync.condvar_create();
-    let data = PthreadCondvar { id, clock };
-    ecx.lazy_sync_init(&cond, cond_init_offset(ecx)?, data)?;
+    let condvar_ref = ecx.machine.sync.condvar_create();
+    let data = PthreadCondvar { condvar_ref, clock };
+    ecx.lazy_sync_init(&cond, cond_init_offset(ecx)?, data.clone())?;
     interp_ok(data)
 }
 
@@ -412,7 +412,7 @@ where
             }
             // This used the static initializer. The clock there is always CLOCK_REALTIME.
             let id = ecx.machine.sync.condvar_create();
-            interp_ok(PthreadCondvar { id, clock: ClockId::Realtime })
+            interp_ok(PthreadCondvar { condvar_ref: id, clock: ClockId::Realtime })
         },
     )
 }
@@ -817,15 +817,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     fn pthread_cond_signal(&mut self, cond_op: &OpTy<'tcx>) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_mut();
-        let id = cond_get_data(this, cond_op)?.id;
-        this.condvar_signal(id)?;
+        let condvar = cond_get_data(this, cond_op)?.condvar_ref.clone();
+        this.condvar_signal(&condvar)?;
         interp_ok(())
     }
 
     fn pthread_cond_broadcast(&mut self, cond_op: &OpTy<'tcx>) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_mut();
-        let id = cond_get_data(this, cond_op)?.id;
-        while this.condvar_signal(id)? {}
+        let condvar = cond_get_data(this, cond_op)?.condvar_ref.clone();
+        while this.condvar_signal(&condvar)? {}
         interp_ok(())
     }
 
@@ -837,11 +837,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let data = *cond_get_data(this, cond_op)?;
+        let data = cond_get_data(this, cond_op)?.clone();
         let mutex_ref = mutex_get_data(this, mutex_op)?.mutex_ref.clone();
 
         this.condvar_wait(
-            data.id,
+            data.condvar_ref,
             mutex_ref,
             None, // no timeout
             Scalar::from_i32(0),
@@ -861,7 +861,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let data = *cond_get_data(this, cond_op)?;
+        let data = cond_get_data(this, cond_op)?.clone();
         let mutex_ref = mutex_get_data(this, mutex_op)?.mutex_ref.clone();
 
         // Extract the timeout.
@@ -884,7 +884,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         this.condvar_wait(
-            data.id,
+            data.condvar_ref,
             mutex_ref,
             Some((timeout_clock, TimeoutAnchor::Absolute, duration)),
             Scalar::from_i32(0),
@@ -900,8 +900,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Reading the field also has the side-effect that we detect double-`destroy`
         // since we make the field uninit below.
-        let id = cond_get_data(this, cond_op)?.id;
-        if this.condvar_is_awaited(id) {
+        let condvar = &cond_get_data(this, cond_op)?.condvar_ref;
+        if condvar.is_awaited() {
             throw_ub_format!("destroying an awaited conditional variable");
         }
 
