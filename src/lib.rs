@@ -128,9 +128,7 @@ pub use crate::concurrency::data_race::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, EvalContextExt as _,
 };
 pub use crate::concurrency::init_once::{EvalContextExt as _, InitOnceRef};
-pub use crate::concurrency::sync::{
-    CondvarRef, EvalContextExt as _, MutexRef, RwLockRef, SynchronizationObjects,
-};
+pub use crate::concurrency::sync::{CondvarRef, EvalContextExt as _, MutexRef, RwLockRef};
 pub use crate::concurrency::thread::{
     BlockReason, DynUnblockCallback, EvalContextExt as _, StackEmptyCallback, ThreadId,
     ThreadManager, TimeoutAnchor, TimeoutClock, UnblockKind,

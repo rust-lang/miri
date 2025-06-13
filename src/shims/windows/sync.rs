@@ -37,10 +37,9 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             &init_once,
             init_offset,
             || throw_ub_format!("`INIT_ONCE` can't be moved after first use"),
-            |this| {
+            |_| {
                 // TODO: check that this is still all-zero.
-                let init_once = this.machine.sync.init_once_create();
-                interp_ok(WindowsInitOnce { init_once })
+                interp_ok(WindowsInitOnce { init_once: InitOnceRef::new() })
             },
         )
     }

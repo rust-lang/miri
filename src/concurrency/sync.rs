@@ -10,7 +10,6 @@ use rustc_abi::Size;
 use rustc_data_structures::fx::FxHashMap;
 
 use super::vector_clock::VClock;
-use crate::concurrency::init_once::InitOnceRef;
 use crate::*;
 
 /// The mutex state.
@@ -202,10 +201,6 @@ struct FutexWaiter {
     bitset: u32,
 }
 
-/// The state of all synchronization objects.
-#[derive(Default, Debug)]
-pub struct SynchronizationObjects {}
-
 // Private extension trait for local helper methods
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
@@ -226,23 +221,6 @@ pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.write_scalar(retval, &dest)?;
         }
         interp_ok(())
-    }
-}
-
-impl SynchronizationObjects {
-    pub fn mutex_create(&mut self) -> MutexRef {
-        MutexRef::new()
-    }
-    pub fn rwlock_create(&mut self) -> RwLockRef {
-        RwLockRef::new()
-    }
-
-    pub fn condvar_create(&mut self) -> CondvarRef {
-        CondvarRef::new()
-    }
-
-    pub fn init_once_create(&mut self) -> InitOnceRef {
-        InitOnceRef::new()
     }
 }
 
