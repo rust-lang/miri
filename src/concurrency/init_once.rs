@@ -1,9 +1,8 @@
-use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::rc::Rc;
 
 use super::thread::DynUnblockCallback;
 use super::vector_clock::VClock;
+use crate::concurrency::sync::sync_obj_ref;
 use crate::*;
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
@@ -23,34 +22,35 @@ pub(super) struct InitOnce {
     clock: VClock,
 }
 
-#[derive(Default, Clone)]
-pub struct InitOnceRef(Rc<RefCell<InitOnce>>);
-
-impl InitOnceRef {
-    pub fn new() -> Self {
-        InitOnceRef(Rc::new(RefCell::new(InitOnce::default())))
-    }
-
+impl InitOnce {
     #[inline]
     pub fn status(&self) -> InitOnceStatus {
-        self.0.borrow().status
+        self.status
     }
 
     /// Begin initializing this InitOnce. Must only be called after checking that it is currently
     /// uninitialized.
     #[inline]
-    pub fn begin(&self) {
+    pub fn begin(&mut self) {
         assert_eq!(
             self.status(),
             InitOnceStatus::Uninitialized,
             "beginning already begun or complete init once"
         );
-        self.0.borrow_mut().status = InitOnceStatus::Begun;
+        self.status = InitOnceStatus::Begun;
     }
 }
 
-impl VisitProvenance for InitOnceRef {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
+sync_obj_ref! {
+    InitOnceRef -> InitOnce;
+
+    pub fn status(&self) -> InitOnceStatus {
+        self.0.borrow().status()
+    }
+
+    pub fn begin(&self) {
+        self.0.borrow_mut().begin();
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
