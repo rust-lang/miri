@@ -171,8 +171,7 @@ fn mutex_create<'tcx>(
     kind: MutexKind,
 ) -> InterpResult<'tcx, PthreadMutex> {
     let mutex = ecx.deref_pointer_as(mutex_ptr, ecx.libc_ty_layout("pthread_mutex_t"))?;
-    let id = ecx.machine.sync.mutex_create();
-    let data = PthreadMutex { mutex_ref: id, kind };
+    let data = PthreadMutex { mutex_ref: MutexRef::new(), kind };
     ecx.lazy_sync_init(&mutex, mutex_init_offset(ecx)?, data.clone())?;
     interp_ok(data)
 }
@@ -193,8 +192,7 @@ where
         || throw_ub_format!("`pthread_mutex_t` can't be moved after first use"),
         |ecx| {
             let kind = mutex_kind_from_static_initializer(ecx, &mutex)?;
-            let id = ecx.machine.sync.mutex_create();
-            interp_ok(PthreadMutex { mutex_ref: id, kind })
+            interp_ok(PthreadMutex { mutex_ref: MutexRef::new(), kind })
         },
     )
 }
@@ -278,8 +276,7 @@ where
             )? {
                 throw_unsup_format!("unsupported static initializer used for `pthread_rwlock_t`");
             }
-            let rwlock_ref = ecx.machine.sync.rwlock_create();
-            interp_ok(PthreadRwLock { rwlock_ref })
+            interp_ok(PthreadRwLock { rwlock_ref: RwLockRef::new() })
         },
     )
 }
@@ -384,8 +381,7 @@ fn cond_create<'tcx>(
     clock: ClockId,
 ) -> InterpResult<'tcx, PthreadCondvar> {
     let cond = ecx.deref_pointer_as(cond_ptr, ecx.libc_ty_layout("pthread_cond_t"))?;
-    let condvar_ref = ecx.machine.sync.condvar_create();
-    let data = PthreadCondvar { condvar_ref, clock };
+    let data = PthreadCondvar { condvar_ref: CondvarRef::new(), clock };
     ecx.lazy_sync_init(&cond, cond_init_offset(ecx)?, data.clone())?;
     interp_ok(data)
 }
@@ -411,8 +407,7 @@ where
                 throw_unsup_format!("unsupported static initializer used for `pthread_cond_t`");
             }
             // This used the static initializer. The clock there is always CLOCK_REALTIME.
-            let id = ecx.machine.sync.condvar_create();
-            interp_ok(PthreadCondvar { condvar_ref: id, clock: ClockId::Realtime })
+            interp_ok(PthreadCondvar { condvar_ref: CondvarRef::new(), clock: ClockId::Realtime })
         },
     )
 }
