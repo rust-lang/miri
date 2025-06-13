@@ -23,33 +23,44 @@ pub(super) struct InitOnce {
     clock: VClock,
 }
 
-#[derive(Default, Clone)]
-pub struct InitOnceRef(Rc<RefCell<InitOnce>>);
-
-impl InitOnceRef {
-    pub fn new() -> Self {
-        InitOnceRef(Rc::new(RefCell::new(InitOnce::default())))
-    }
-
+impl InitOnce {
     #[inline]
     pub fn status(&self) -> InitOnceStatus {
-        self.0.borrow().status
+        self.status
     }
 
     /// Begin initializing this InitOnce. Must only be called after checking that it is currently
     /// uninitialized.
     #[inline]
-    pub fn begin(&self) {
+    pub fn begin(&mut self) {
         assert_eq!(
             self.status(),
             InitOnceStatus::Uninitialized,
             "beginning already begun or complete init once"
         );
-        self.0.borrow_mut().status = InitOnceStatus::Begun;
+        self.status = InitOnceStatus::Begun;
+    }
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct InitOnceRef(Rc<RefCell<InitOnce>>);
+
+impl InitOnceRef {
+    pub fn new() -> Self {
+        Self(Rc::new(RefCell::new(Default::default())))
+    }
+
+    pub fn status(&self) -> InitOnceStatus {
+        self.0.borrow().status()
+    }
+
+    pub fn begin(&self) {
+        self.0.borrow_mut().begin();
     }
 }
 
 impl VisitProvenance for InitOnceRef {
+    // InitOnce contains no provenance.
     fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 

@@ -13,39 +13,6 @@ use super::vector_clock::VClock;
 use crate::concurrency::init_once::InitOnceRef;
 use crate::*;
 
-/// We cannot use the `newtype_index!` macro because we have to use 0 as a
-/// sentinel value meaning that the identifier is not assigned. This is because
-/// the pthreads static initializers initialize memory with zeros (see the
-/// `src/shims/sync.rs` file).
-#[allow(unused)]
-macro_rules! declare_id {
-    ($name: ident) => {
-        /// 0 is used to indicate that the id was not yet assigned and,
-        /// therefore, is not a valid identifier.
-        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-        pub struct $name(std::num::NonZero<u32>);
-
-        impl $crate::VisitProvenance for $name {
-            fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
-        }
-
-        impl Idx for $name {
-            fn new(idx: usize) -> Self {
-                // We use 0 as a sentinel value (see the comment above) and,
-                // therefore, need to shift by one when converting from an index
-                // into a vector.
-                let shifted_idx = u32::try_from(idx).unwrap().strict_add(1);
-                $name(std::num::NonZero::new(shifted_idx).unwrap())
-            }
-            fn index(self) -> usize {
-                // See the comment in `Self::new`.
-                // (This cannot underflow because `self.0` is `NonZero<u32>`.)
-                usize::try_from(self.0.get() - 1).unwrap()
-            }
-        }
-    };
-}
-
 /// The mutex state.
 #[derive(Default, Debug)]
 struct Mutex {
@@ -59,24 +26,29 @@ struct Mutex {
     clock: VClock,
 }
 
+impl Mutex {
+    /// Get the id of the thread that currently owns this lock, or `None` if it is not locked.
+    pub fn owner(&self) -> Option<ThreadId> {
+        self.owner
+    }
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct MutexRef(Rc<RefCell<Mutex>>);
 
 impl MutexRef {
-    fn new() -> Self {
-        MutexRef(Rc::new(RefCell::new(Mutex::default())))
+    pub fn new() -> Self {
+        Self(Rc::new(RefCell::new(Default::default())))
     }
 
-    /// Get the id of the thread that currently owns this lock, or `None` if it is not locked.
     pub fn owner(&self) -> Option<ThreadId> {
-        self.0.borrow().owner
+        self.0.borrow().owner()
     }
 }
 
 impl VisitProvenance for MutexRef {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
-        // Mutex contains no provenance.
-    }
+    // Mutex contains no provenance.
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
 /// The read-write lock state.
@@ -137,8 +109,8 @@ impl RwLock {
 pub struct RwLockRef(Rc<RefCell<RwLock>>);
 
 impl RwLockRef {
-    fn new() -> Self {
-        RwLockRef(Rc::new(RefCell::new(RwLock::default())))
+    pub fn new() -> Self {
+        Self(Rc::new(RefCell::new(Default::default())))
     }
 
     pub fn is_locked(&self) -> bool {
@@ -151,9 +123,8 @@ impl RwLockRef {
 }
 
 impl VisitProvenance for RwLockRef {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
-        // RwLockRef contains no provenance.
-    }
+    // RwLock contains no provenance.
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
 /// The conditional variable state.
@@ -168,23 +139,28 @@ struct Condvar {
     clock: VClock,
 }
 
+impl Condvar {
+    pub fn is_awaited(&self) -> bool {
+        !self.waiters.is_empty()
+    }
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct CondvarRef(Rc<RefCell<Condvar>>);
 
 impl CondvarRef {
-    fn new() -> Self {
-        CondvarRef(Rc::new(RefCell::new(Condvar::default())))
+    pub fn new() -> Self {
+        Self(Rc::new(RefCell::new(Default::default())))
     }
 
     pub fn is_awaited(&self) -> bool {
-        !self.0.borrow().waiters.is_empty()
+        self.0.borrow().is_awaited()
     }
 }
 
 impl VisitProvenance for CondvarRef {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
-        // RwLockRef contains no provenance.
-    }
+    // Condvar contains no provenance.
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
 /// The futex state.
@@ -199,19 +175,22 @@ struct Futex {
     clock: VClock,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct FutexRef(Rc<RefCell<Futex>>);
 
 impl FutexRef {
+    pub fn new() -> Self {
+        Self(Rc::new(RefCell::new(Default::default())))
+    }
+
     pub fn waiters(&self) -> usize {
         self.0.borrow().waiters.len()
     }
 }
 
 impl VisitProvenance for FutexRef {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
-        // No provenance in `Futex`.
-    }
+    // Futex contains no provenance.
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
 /// A thread waiting on a futex.
