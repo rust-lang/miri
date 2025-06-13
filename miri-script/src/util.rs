@@ -226,13 +226,13 @@ impl MiriEnv {
         Ok(())
     }
 
-    pub fn clippy(&self, crate_dir: impl AsRef<OsStr>, args: &[String]) -> Result<()> {
-        self.cargo_cmd(crate_dir, "clippy", &[]).arg("--all-targets").args(args).run()?;
+    pub fn clippy(&self, crate_dir: impl AsRef<OsStr>, features: &[String], args: &[String]) -> Result<()> {
+        self.cargo_cmd(crate_dir, "clippy", features).arg("--all-targets").args(args).run()?;
         Ok(())
     }
 
-    pub fn test(&self, crate_dir: impl AsRef<OsStr>, args: &[String]) -> Result<()> {
-        self.cargo_cmd(crate_dir, "test", &[]).args(args).run()?;
+    pub fn test(&self, crate_dir: impl AsRef<OsStr>, features: &[String], args: &[String]) -> Result<()> {
+        self.cargo_cmd(crate_dir, "test", features).args(args).run()?;
         Ok(())
     }
 

@@ -72,7 +72,7 @@ impl MiriEnv {
 }
 
 impl Command {
-    fn auto_actions() -> Result<()> {
+    fn auto_actions(features: Vec<String>) -> Result<()> {
         if env::var_os("MIRI_AUTO_OPS").is_some_and(|x| x == "no") {
             return Ok(());
         }
@@ -91,7 +91,7 @@ impl Command {
             Self::fmt(vec![])?;
         }
         if auto_clippy {
-            Self::clippy(vec![])?;
+            Self::clippy(features, vec![])?;
         }
 
         Ok(())
@@ -160,14 +160,14 @@ impl Command {
     pub fn exec(self) -> Result<()> {
         // First, and crucially only once, run the auto-actions -- but not for all commands.
         match &self {
-            Command::Install { .. }
-            | Command::Build { .. }
-            | Command::Check { .. }
-            | Command::Test { .. }
-            | Command::Run { .. }
-            | Command::Fmt { .. }
-            | Command::Doc { .. }
-            | Command::Clippy { .. } => Self::auto_actions()?,
+            Command::Install { features, .. }
+            | Command::Build { features, .. }
+            | Command::Check { features, .. }
+            | Command::Test { features, .. }
+            | Command::Run { features, .. }
+            | Command::Doc { features, .. }
+            | Command::Clippy { features, .. } => Self::auto_actions(features.clone())?,
+            | Command::Fmt { .. } => Self::auto_actions(vec![])?,
             | Command::Toolchain { .. }
             | Command::Bench { .. }
             | Command::RustcPull { .. }
@@ -179,13 +179,13 @@ impl Command {
             Command::Install { features, flags } => Self::install(features, flags),
             Command::Build { features, flags } => Self::build(features, flags),
             Command::Check { features, flags } => Self::check(features, flags),
-            Command::Test { bless, flags, target, coverage, features } =>
-                Self::test(bless, flags, target, coverage, features),
+            Command::Test { bless, target, coverage, features, flags } =>
+                Self::test(bless, target, coverage, features, flags),
             Command::Run { dep, verbose, target, edition, features, flags } =>
                 Self::run(dep, verbose, target, edition, features, flags),
             Command::Doc { features, flags } => Self::doc(features, flags),
             Command::Fmt { flags } => Self::fmt(flags),
-            Command::Clippy { flags } => Self::clippy(flags),
+            Command::Clippy { features, flags } => Self::clippy(features, flags),
             Command::Bench { target, no_install, save_baseline, load_baseline, benches } =>
                 Self::bench(target, no_install, save_baseline, load_baseline, benches),
             Command::Toolchain { flags } => Self::toolchain(flags),
@@ -630,20 +630,20 @@ impl Command {
         Ok(())
     }
 
-    fn clippy(flags: Vec<String>) -> Result<()> {
+    fn clippy(features: Vec<String>, flags: Vec<String>) -> Result<()> {
         let e = MiriEnv::new()?;
-        e.clippy(".", &flags)?;
-        e.clippy("cargo-miri", &flags)?;
-        e.clippy("miri-script", &flags)?;
+        e.clippy(".", &features, &flags)?;
+        e.clippy("cargo-miri", &[], &flags)?;
+        e.clippy("miri-script", &[], &flags)?;
         Ok(())
     }
 
     fn test(
         bless: bool,
-        mut flags: Vec<String>,
         target: Option<String>,
         coverage: bool,
         features: Vec<String>,
+        mut flags: Vec<String>,
     ) -> Result<()> {
         let mut e = MiriEnv::new()?;
 
@@ -674,7 +674,7 @@ impl Command {
 
         // Then test, and let caller control flags.
         // Only in root project as `cargo-miri` has no tests.
-        e.test(".", &flags)?;
+        e.test(".", &features, &flags)?;
 
         if let Some(coverage) = &coverage {
             coverage.show_coverage_report(&e, &features)?;

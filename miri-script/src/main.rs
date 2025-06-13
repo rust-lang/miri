@@ -44,6 +44,10 @@ pub enum Command {
     },
     /// Check Miri with Clippy.
     Clippy {
+        /// Pass features to cargo invocations on the "miri" crate in the root. This option does
+        /// **not** apply to other crates, so e.g. these features won't be used on "cargo-miri".
+        #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+        features: Vec<String>,
         /// Flags that are passed through to `cargo clippy`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         flags: Vec<String>,
@@ -174,7 +178,7 @@ impl Command {
             | Self::Doc { flags, .. }
             | Self::Fmt { flags }
             | Self::Toolchain { flags }
-            | Self::Clippy { flags }
+            | Self::Clippy { flags, .. }
             | Self::Run { flags, .. }
             | Self::Test { flags, .. } => {
                 flags.extend(remainder);
