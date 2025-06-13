@@ -103,7 +103,7 @@ pub enum BlockReason {
     /// Blocked on a Futex variable.
     Futex,
     /// Blocked on an InitOnce.
-    InitOnce(InitOnceId),
+    InitOnce,
     /// Blocked on epoll.
     Epoll,
     /// Blocked on eventfd.
