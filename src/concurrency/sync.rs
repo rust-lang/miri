@@ -8,16 +8,16 @@ use std::time::Duration;
 
 use rustc_abi::Size;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_index::IndexVec;
 
-use super::init_once::InitOnce;
 use super::vector_clock::VClock;
+use crate::concurrency::init_once::InitOnceRef;
 use crate::*;
 
 /// We cannot use the `newtype_index!` macro because we have to use 0 as a
 /// sentinel value meaning that the identifier is not assigned. This is because
 /// the pthreads static initializers initialize memory with zeros (see the
 /// `src/shims/sync.rs` file).
+#[allow(unused)]
 macro_rules! declare_id {
     ($name: ident) => {
         /// 0 is used to indicate that the id was not yet assigned and,
@@ -45,7 +45,6 @@ macro_rules! declare_id {
         }
     };
 }
-pub(super) use declare_id;
 
 /// The mutex state.
 #[derive(Default, Debug)]
@@ -226,9 +225,7 @@ struct FutexWaiter {
 
 /// The state of all synchronization objects.
 #[derive(Default, Debug)]
-pub struct SynchronizationObjects {
-    pub(super) init_onces: IndexVec<InitOnceId, InitOnce>,
-}
+pub struct SynchronizationObjects {}
 
 // Private extension trait for local helper methods
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -265,8 +262,8 @@ impl SynchronizationObjects {
         CondvarRef::new()
     }
 
-    pub fn init_once_create(&mut self) -> InitOnceId {
-        self.init_onces.push(Default::default())
+    pub fn init_once_create(&mut self) -> InitOnceRef {
+        InitOnceRef::new()
     }
 }
 

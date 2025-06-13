@@ -122,7 +122,7 @@ pub use crate::concurrency::cpu_affinity::MAX_CPUS;
 pub use crate::concurrency::data_race::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, EvalContextExt as _,
 };
-pub use crate::concurrency::init_once::{EvalContextExt as _, InitOnceId};
+pub use crate::concurrency::init_once::{EvalContextExt as _, InitOnceRef};
 pub use crate::concurrency::sync::{
     CondvarRef, EvalContextExt as _, MutexRef, RwLockRef, SynchronizationObjects,
 };
