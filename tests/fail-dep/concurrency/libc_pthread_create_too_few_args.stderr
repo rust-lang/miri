@@ -5,6 +5,8 @@ error: Undefined Behavior: calling a function with more arguments than it expect
    = help: this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior
    = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
    = note: BACKTRACE on thread `unnamed-ID`:
+   = note: thread `unnamed-ID` was spawned by thread `main`
+   = note: inside `main` at tests/fail-dep/concurrency/libc_pthread_create_too_few_args.rs:LL:CC
 
 error: aborting due to 1 previous error
 
