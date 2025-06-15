@@ -795,14 +795,12 @@ fn main() {
 
     debug!("rustc arguments: {:?}", rustc_args);
     debug!("crate arguments: {:?}", miri_config.args);
-
     #[cfg(target_os = "linux")]
     if !miri_config.native_lib.is_empty() && !miri_config.force_old_native_lib {
         // FIXME: This should display a diagnostic / warning on error
         // SAFETY: No other threads have spawned yet
         let _ = unsafe { miri::init_sv() };
     }
-
     run_compiler_and_exit(
         &rustc_args,
         &mut MiriCompilerCalls::new(miri_config, many_seeds, genmc_config),

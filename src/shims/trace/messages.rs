@@ -12,7 +12,7 @@
 //! ```
 //! `TraceRequest::OverrideRetcode` can be sent at any point in the above, including
 //! before or after all of them.
-//! 
+//!
 //! NB: sending these events out of order, skipping steps, etc. will result in
 //! unspecified behaviour from the supervisor process, so use the abstractions
 //! in `super::child` (namely `start_ffi()` and `end_ffi()`) to handle this. It is

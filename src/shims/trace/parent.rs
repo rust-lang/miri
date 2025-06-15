@@ -125,8 +125,6 @@ pub enum ExecEvent {
 pub struct ChildListener {
     /// The matching channel for the child's `Supervisor` struct.
     pub message_rx: ipc::IpcReceiver<TraceRequest>,
-    /// The main child process' pid.
-    pub pid: unistd::Pid,
     /// Whether an FFI call is currently ongoing.
     pub attached: bool,
     /// If `Some`, overrides the return code with the given value.
@@ -179,11 +177,8 @@ impl Iterator for ChildListener {
                                     return Some(ExecEvent::Status(pid, signal));
                                 }
                             } else {
-                                // Log that this happened and pass along the signal.
-                                // If we don't do the kill, the child will instead
-                                // act as if it never received this signal!
-                                eprintln!("Ignoring PtraceEvent {signal:?}");
-                                signal::kill(pid, signal).unwrap();
+                                // Just pass along the signal
+                                ptrace::cont(pid, signal).unwrap();
                             },
                         // Child was stopped at the given signal. Same logic as for
                         // WaitStatus::PtraceEvent
@@ -196,8 +191,7 @@ impl Iterator for ChildListener {
                                     return Some(ExecEvent::Status(pid, signal));
                                 }
                             } else {
-                                eprintln!("Ignoring Stopped {signal:?}");
-                                signal::kill(pid, signal).unwrap();
+                                ptrace::cont(pid, signal).unwrap();
                             },
                         _ => (),
                     },
@@ -242,6 +236,7 @@ enum ExecError {
 /// created before the fork - like statics - are the same).
 pub fn sv_loop(
     listener: ChildListener,
+    init_pid: unistd::Pid,
     event_tx: ipc::IpcSender<MemEvents>,
     confirm_tx: ipc::IpcSender<Confirmation>,
     page_size: usize,
@@ -256,18 +251,18 @@ pub fn sv_loop(
     // An instance of the Capstone disassembler, so we don't spawn one on every access
     let cs = get_disasm();
 
-    // The pid of the process that we forked from, used by default if we don't
-    // have a reason to use another one.
-    let main_pid = listener.pid;
+    // The pid of the last process we interacted with, used by default if we don't have a
+    // reason to use a different one
+    let mut curr_pid = init_pid;
 
     // There's an initial sigstop we need to deal with
-    wait_for_signal(main_pid, signal::SIGSTOP, false).map_err(|e| {
+    wait_for_signal(Some(curr_pid), signal::SIGSTOP, false).map_err(|e| {
         match e {
             ExecError::Died(code) => code,
             ExecError::Shrug => None,
         }
     })?;
-    ptrace::cont(main_pid, None).unwrap();
+    ptrace::cont(curr_pid, None).unwrap();
 
     for evt in listener {
         match evt {
@@ -283,9 +278,11 @@ pub fn sv_loop(
                 // raise a SIGSTOP. We need it to be signal-stopped *and waited for* in
                 // order to do most ptrace operations!
                 confirm_tx.send(Confirmation).unwrap();
-                wait_for_signal(main_pid, signal::SIGSTOP, false).unwrap();
+                // We can't trust simply calling `Pid::this()` in the child process to give the right
+                // PID for us, so we get it this way
+                curr_pid = wait_for_signal(None, signal::SIGSTOP, false).unwrap();
 
-                ptrace::syscall(main_pid, None).unwrap();
+                ptrace::syscall(curr_pid, None).unwrap();
             }
             // end_ffi was called by the child
             ExecEvent::End => {
@@ -296,7 +293,7 @@ pub fn sv_loop(
                 ch_stack = None;
 
                 // No need to monitor syscalls anymore, they'd just be ignored
-                ptrace::cont(main_pid, None).unwrap();
+                ptrace::cont(curr_pid, None).unwrap();
             }
             // Child process was stopped by a signal
             ExecEvent::Status(pid, signal) =>
@@ -370,41 +367,45 @@ fn get_disasm() -> capstone::Capstone {
 
 /// Waits for `wait_signal`. If `init_cont`, it will first do a `ptrace::cont`.
 /// We want to avoid that in some cases, like at the beginning of FFI.
+///
+/// If `pid` is `None`, only one wait will be done and `init_cont` should be false.
 fn wait_for_signal(
-    pid: unistd::Pid,
+    pid: Option<unistd::Pid>,
     wait_signal: signal::Signal,
     init_cont: bool,
-) -> Result<(), ExecError> {
+) -> Result<unistd::Pid, ExecError> {
     if init_cont {
-        ptrace::cont(pid, None).unwrap();
+        ptrace::cont(pid.unwrap(), None).unwrap();
     }
     // Repeatedly call `waitid` until we get the signal we want, or the process dies
     loop {
-        let stat =
-            wait::waitid(wait::Id::Pid(pid), WAIT_FLAGS).map_err(|_| ExecError::Died(None))?;
-        let signal = match stat {
+        let wait_id = match pid {
+            Some(pid) => wait::Id::Pid(pid),
+            None => wait::Id::All,
+        };
+        let stat = wait::waitid(wait_id, WAIT_FLAGS).map_err(|_| ExecError::Died(None))?;
+        let (signal, pid) = match stat {
             // Report the cause of death, if we know it
             wait::WaitStatus::Exited(_, code) => {
                 //eprintln!("Exited sig1 {code}");
                 return Err(ExecError::Died(Some(code)));
             }
             wait::WaitStatus::Signaled(_, _, _) => return Err(ExecError::Died(None)),
-            wait::WaitStatus::Stopped(_, signal) => signal,
-            wait::WaitStatus::PtraceEvent(_, signal, _) => signal,
+            wait::WaitStatus::Stopped(pid, signal) => (signal, pid),
+            wait::WaitStatus::PtraceEvent(pid, signal, _) => (signal, pid),
             // This covers PtraceSyscall and variants that are impossible with
             // the flags set (e.g. WaitStatus::StillAlive)
             _ => {
-                ptrace::cont(pid, None).unwrap();
+                ptrace::cont(pid.unwrap(), None).unwrap();
                 continue;
             }
         };
         if signal == wait_signal {
-            break;
+            return Ok(pid);
         } else {
             ptrace::cont(pid, None).map_err(|_| ExecError::Died(None))?;
         }
     }
-    Ok(())
 }
 
 /// Grabs the access that caused a segfault and logs it down if it's to our memory,
@@ -582,7 +583,7 @@ fn handle_segfault(
         ptrace::setregs(pid, new_regs).unwrap();
 
         // Our mempr_* functions end with a raise(SIGSTOP)
-        wait_for_signal(pid, signal::SIGSTOP, true)?;
+        wait_for_signal(Some(pid), signal::SIGSTOP, true)?;
 
         // Step 1 instruction
         ptrace::setregs(pid, regs_bak).unwrap();
@@ -625,7 +626,7 @@ fn handle_segfault(
         new_regs.set_ip(mempr_on as usize);
         new_regs.set_sp(stack_ptr);
         ptrace::setregs(pid, new_regs).unwrap();
-        wait_for_signal(pid, signal::SIGSTOP, true)?;
+        wait_for_signal(Some(pid), signal::SIGSTOP, true)?;
 
         ptrace::setregs(pid, regs_bak).unwrap();
         ptrace::syscall(pid, None).unwrap();

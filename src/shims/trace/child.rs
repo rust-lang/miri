@@ -25,6 +25,7 @@ pub struct Supervisor {
 }
 
 /// Marker representing that an error occurred during creation of the supervisor.
+#[derive(Debug)]
 pub struct SvInitError;
 
 impl Supervisor {
@@ -185,12 +186,8 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                 // The child process is free to unwind, so we won't to avoid doubly freeing
                 // system resources
                 let init = std::panic::catch_unwind(|| {
-                    let listener = ChildListener {
-                        message_rx,
-                        pid: child,
-                        attached: false,
-                        override_retcode: None,
-                    };
+                    let listener =
+                        ChildListener { message_rx, attached: false, override_retcode: None };
                     // Trace as many things as possible, to be able to handle them as needed
                     let options = ptrace::Options::PTRACE_O_TRACESYSGOOD
                         | ptrace::Options::PTRACE_O_TRACECLONE
@@ -199,8 +196,8 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                     match ptrace::seize(child, options) {
                         // Ptrace works :D
                         Ok(_) => {
-                            let code =
-                                sv_loop(listener, event_tx, confirm_tx, page_size).unwrap_err();
+                            let code = sv_loop(listener, child, event_tx, confirm_tx, page_size)
+                                .unwrap_err();
                             // If a return code of 0 is not explicitly given, assume something went
                             // wrong and return 1
                             std::process::exit(code.unwrap_or(1))
@@ -236,7 +233,7 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
 /// Instruct the supervisor process to return a particular code. Useful if for
 /// whatever reason this code fails to be intercepted normally. In the case of
 /// `abort_if_errors()` used in `bin/miri.rs`, the return code is erroneously
-/// given as a if this is not used.
+/// given as a 0 if this is not used.
 pub fn register_retcode_sv(code: i32) {
     let mut sv_guard = SUPERVISOR.lock().unwrap();
     if let Some(sv) = sv_guard.take() {
