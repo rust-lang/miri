@@ -266,6 +266,18 @@ impl IsolatedAlloc {
             alloc::dealloc(ptr, layout);
         }
     }
+
+    /// Returns a vector of page addresses managed by the allocator.
+    pub fn pages(&self) -> Vec<usize> {
+        let mut pages: Vec<_> =
+            self.page_ptrs.clone().into_iter().map(|p| p.expose_provenance()).collect();
+        self.huge_ptrs.iter().for_each(|(ptr, size)| {
+            for i in 0..size / self.page_size {
+                pages.push(unsafe { ptr.add(i * self.page_size).expose_provenance() });
+            }
+        });
+        pages
+    }
 }
 
 #[cfg(test)]
