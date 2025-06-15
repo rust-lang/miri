@@ -403,7 +403,7 @@ fn wait_for_signal(
         if signal == wait_signal {
             return Ok(pid);
         } else {
-            ptrace::cont(pid, None).map_err(|_| ExecError::Died(None))?;
+            ptrace::cont(pid, signal).map_err(|_| ExecError::Died(None))?;
         }
     }
 }
