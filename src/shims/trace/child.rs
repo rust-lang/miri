@@ -100,7 +100,7 @@ impl Supervisor {
     /// one passed to it also.
     pub unsafe fn end_ffi(
         mut sv_guard: std::sync::MutexGuard<'static, Option<Supervisor>>,
-        _alloc: Rc<RefCell<IsolatedAlloc>>,
+        alloc: Rc<RefCell<IsolatedAlloc>>,
         raw_stack_ptr: Option<*mut [u8; FAKE_STACK_SIZE]>,
     ) -> Option<MemEvents> {
         // We can't use IPC channels here to signal that FFI mode has ended,
@@ -228,6 +228,12 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                 // SAFETY: prctl PR_SET_PDEATHSIG is always safe to call.
                 let ret = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 assert_eq!(ret, 0);
+                // Set up the pagesize used in the memory protection functions.
+                // SAFETY: sysconf(_SC_PAGESIZE) is always safe and doesn't error
+                super::parent::PAGE_SIZE.store(
+                    libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 // First make sure the parent succeeded with ptracing us!
                 signal::raise(signal::SIGSTOP).unwrap();
                 // If we're the child process, save the supervisor info.
