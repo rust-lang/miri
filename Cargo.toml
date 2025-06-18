@@ -67,6 +67,7 @@ default = ["stack-cache"]
 genmc = []
 stack-cache = []
 stack-cache-consistency-check = ["stack-cache"]
+tracing = []
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
