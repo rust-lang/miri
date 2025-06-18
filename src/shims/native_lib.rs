@@ -224,9 +224,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if super::trace::Supervisor::poll() {
             this.prepare_exposed_for_native_call(false)?;
         } else {
-            //this.prepare_exposed_for_native_call(true)?;
-            //eprintln!("Oh noes!");
-            panic!("No ptrace!");
+            this.prepare_exposed_for_native_call(true)?;
         }
         #[cfg(not(target_os = "linux"))]
         this.prepare_exposed_for_native_call(true)?;
@@ -246,7 +244,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.apply_events(events)?;
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = maybe_memevents; // Suppress the unused warning
+        let _ = maybe_memevents; // Suppress the unused warning.
 
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
@@ -267,15 +265,15 @@ unsafe fn do_native_call<T: libffi::high::CType>(
 
     unsafe {
         if let Some(alloc) = alloc {
-            // SAFETY: We don't touch the machine memory past this point
+            // SAFETY: We don't touch the machine memory past this point.
             let (guard, stack_ptr) = Supervisor::start_ffi(alloc.clone());
-            // SAFETY: Upheld by caller
+            // SAFETY: Upheld by caller.
             let ret = ffi::call(ptr, args);
             // SAFETY: We got the guard and stack pointer from start_ffi, and
-            // the allocator is the same
+            // the allocator is the same.
             (ret, Supervisor::end_ffi(guard, alloc, stack_ptr))
         } else {
-            // SAFETY: Upheld by caller
+            // SAFETY: Upheld by caller.
             (ffi::call(ptr, args), None)
         }
     }
