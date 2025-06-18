@@ -7,10 +7,9 @@
 #![allow(warnings)]
 #![cfg(feature = "tracing")]
 
-// these are here and not in src/lib.rs since it is a direct dependency of tracing_chrome.rs and
+// this is here and not in src/lib.rs since it is a direct dependency of tracing_chrome.rs and
 // should not be included if the "tracing" feature is disabled
 extern crate tracing_core;
-extern crate tracing_subscriber;
 
 
 use tracing_core::{field::Field, span, Event, Subscriber};
