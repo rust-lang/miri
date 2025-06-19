@@ -179,6 +179,10 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
     // SAFETY: Calling sysconf(_SC_PAGESIZE) is always safe and cannot error.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.try_into().unwrap();
 
+    // Set up the pagesize used in the memory protection functions.
+    // SAFETY: sysconf(_SC_PAGESIZE) is always safe and doesn't error
+    super::parent::PAGE_SIZE.store(page_size, std::sync::atomic::Ordering::Relaxed);
+
     unsafe {
         // TODO: Maybe use clone3() instead for better signalling of when the child exits?
         // SAFETY: Caller upholds that only one thread exists.
@@ -200,8 +204,7 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                     match ptrace::seize(child, options) {
                         // Ptrace works :D
                         Ok(_) => {
-                            let code = sv_loop(listener, child, event_tx, confirm_tx, page_size)
-                                .unwrap_err();
+                            let code = sv_loop(listener, child, event_tx, confirm_tx).unwrap_err();
                             // If a return code of 0 is not explicitly given, assume something went
                             // wrong and return 1.
                             std::process::exit(code.unwrap_or(1))
@@ -228,12 +231,6 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                 // SAFETY: prctl PR_SET_PDEATHSIG is always safe to call.
                 let ret = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 assert_eq!(ret, 0);
-                // Set up the pagesize used in the memory protection functions.
-                // SAFETY: sysconf(_SC_PAGESIZE) is always safe and doesn't error
-                super::parent::PAGE_SIZE.store(
-                    libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 // First make sure the parent succeeded with ptracing us!
                 signal::raise(signal::SIGSTOP).unwrap();
                 // If we're the child process, save the supervisor info.

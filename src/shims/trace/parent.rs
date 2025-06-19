@@ -238,8 +238,10 @@ pub fn sv_loop(
     init_pid: unistd::Pid,
     event_tx: ipc::IpcSender<MemEvents>,
     confirm_tx: ipc::IpcSender<Confirmation>,
-    page_size: usize,
 ) -> Result<!, Option<i32>> {
+    let page_size = PAGE_SIZE.load(std::sync::atomic::Ordering::Relaxed);
+    assert_ne!(page_size, 0);
+
     // Things that we return to the child process.
     let mut acc_events = Vec::new();
 
@@ -289,6 +291,7 @@ pub fn sv_loop(
                 event_tx.send(MemEvents { acc_events }).unwrap();
                 // And reset our values.
                 acc_events = Vec::new();
+                ch_pages = Vec::new();
                 ch_stack = None;
 
                 // No need to monitor syscalls anymore, they'd just be ignored.
@@ -550,6 +553,12 @@ fn handle_segfault(
         // - Parse executed code to estimate size & type of access
         // - Reprotect the memory
         // - Continue
+
+        // Zero out the stack
+        for a in (ch_stack..ch_stack.strict_add(FAKE_STACK_SIZE)).step_by(ARCH_WORD_SIZE) {
+            ptrace::write(pid, std::ptr::with_exposed_provenance_mut(a), 0).unwrap();
+        }
+
         let stack_ptr = ch_stack.strict_add(FAKE_STACK_SIZE / 2);
         let regs_bak = ptrace::getregs(pid).unwrap();
         let mut new_regs = regs_bak;
@@ -590,6 +599,11 @@ fn handle_segfault(
         // for any uncertainty + we don't want it `cont()`ing randomly by accident
         // Also, don't let it continue with unprotected memory if something errors!
         let _ = wait::waitid(wait::Id::Pid(pid), WAIT_FLAGS).map_err(|_| ExecError::Died(None))?;
+
+        // Zero it out again to be safe
+        for a in (ch_stack..ch_stack.strict_add(FAKE_STACK_SIZE)).step_by(ARCH_WORD_SIZE) {
+            ptrace::write(pid, std::ptr::with_exposed_provenance_mut(a), 0).unwrap();
+        }
 
         // Save registers and grab the bytes that were executed. This would
         // be really nasty if it was a jump or similar but those thankfully
