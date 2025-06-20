@@ -219,8 +219,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
 
-        // Prepare all exposed memory.
-        this.prepare_exposed_for_native_call()?;
+        // Prepare all exposed memory, depending on whether we have a supervisor process.
+        #[cfg(target_os = "linux")]
+        if super::trace::Supervisor::poll() {
+            this.prepare_exposed_for_native_call(false)?;
+        } else {
+            this.prepare_exposed_for_native_call(true)?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        this.prepare_exposed_for_native_call(true)?;
 
         // Convert them to `libffi::high::Arg` type.
         let libffi_args = libffi_args
@@ -229,7 +236,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .collect::<Vec<libffi::high::Arg<'_>>>();
 
         // Call the function and store output, depending on return type in the function signature.
-        let (ret, _) = this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
+        let (ret, maybe_memevents) =
+            this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
+
+        #[cfg(target_os = "linux")]
+        if let Some(events) = maybe_memevents {
+            this.apply_events(events)?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = maybe_memevents; // Suppress the unused warning.
 
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
@@ -250,15 +265,15 @@ unsafe fn do_native_call<T: libffi::high::CType>(
 
     unsafe {
         if let Some(alloc) = alloc {
-            // SAFETY: We don't touch the machine memory past this point
+            // SAFETY: We don't touch the machine memory past this point.
             let (guard, stack_ptr) = Supervisor::start_ffi(alloc.clone());
-            // SAFETY: Upheld by caller
+            // SAFETY: Upheld by caller.
             let ret = ffi::call(ptr, args);
             // SAFETY: We got the guard and stack pointer from start_ffi, and
-            // the allocator is the same
+            // the allocator is the same.
             (ret, Supervisor::end_ffi(guard, alloc, stack_ptr))
         } else {
-            // SAFETY: Upheld by caller
+            // SAFETY: Upheld by caller.
             (ffi::call(ptr, args), None)
         }
     }
