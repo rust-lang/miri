@@ -51,6 +51,7 @@
 // Some "regular" crates we want to share with rustc
 extern crate either;
 extern crate tracing;
+extern crate tracing_subscriber;
 
 // The rustc crates we need
 extern crate rustc_abi;
@@ -62,6 +63,7 @@ extern crate rustc_data_structures;
 extern crate rustc_errors;
 extern crate rustc_hir;
 extern crate rustc_index;
+extern crate rustc_log;
 extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
@@ -88,6 +90,7 @@ mod operator;
 mod provenance_gc;
 mod range_map;
 mod shims;
+mod trace;
 
 // Establish a "crate-wide prelude": we often import `crate::*`.
 // Make all those symbols available in the same place as our own.
@@ -159,6 +162,7 @@ pub use crate::shims::os_str::EvalContextExt as _;
 pub use crate::shims::panic::{CatchUnwindData, EvalContextExt as _};
 pub use crate::shims::time::EvalContextExt as _;
 pub use crate::shims::tls::TlsData;
+pub use crate::trace::setup::{TracingGuard, init_early_loggers, init_late_loggers};
 
 /// Insert rustc arguments at the beginning of the argument list that Miri wants to be
 /// set per default, for maximal validation power.
