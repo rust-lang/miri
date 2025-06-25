@@ -28,16 +28,16 @@ begingroup "Building Miri"
 export RUSTFLAGS="-D warnings"
 export CARGO_INCREMENTAL=0
 export CARGO_EXTRA_FLAGS="--locked"
+# We enable all features (except tracing) to make sure the Stacked Borrows consistency check runs.
+export FEATURES="--features=genmc,stack-cache,stack-cache-consistency-check"
 
 # Determine configuration for installed build (used by test-cargo-miri and `./miri bench`).
 echo "Installing release version of Miri"
-time ./miri install
+time ./miri install "$FEATURES"
 
 # Prepare debug build for direct `./miri` invocations.
-# We enable all features to make sure the Stacked Borrows consistency check runs.
 echo "Building debug version of Miri"
-export CARGO_EXTRA_FLAGS="$CARGO_EXTRA_FLAGS --all-features"
-time ./miri build # the build that all the `./miri test` below will use
+time ./miri build "$FEATURES" # the build that all the `./miri test` below will use
 
 endgroup
 
@@ -61,9 +61,9 @@ function run_tests {
 
   ## ui test suite
   if [ -n "${GC_STRESS-}" ]; then
-    time MIRIFLAGS="${MIRIFLAGS-} -Zmiri-provenance-gc=1" ./miri test $TARGET_FLAG
+    time MIRIFLAGS="${MIRIFLAGS-} -Zmiri-provenance-gc=1" ./miri test "$FEATURES" $TARGET_FLAG
   else
-    time ./miri test $TARGET_FLAG
+    time ./miri test "$FEATURES" $TARGET_FLAG
   fi
 
   ## advanced tests
@@ -74,12 +74,12 @@ function run_tests {
     # them. Also error locations change so we don't run the failing tests.
     # We explicitly enable debug-assertions here, they are disabled by -O but we have tests
     # which exist to check that we panic on debug assertion failures.
-    time MIRIFLAGS="${MIRIFLAGS-} -O -Zmir-opt-level=4 -Cdebug-assertions=yes" MIRI_SKIP_UI_CHECKS=1 ./miri test $TARGET_FLAG tests/{pass,panic}
+    time MIRIFLAGS="${MIRIFLAGS-} -O -Zmir-opt-level=4 -Cdebug-assertions=yes" MIRI_SKIP_UI_CHECKS=1 ./miri test "$FEATURES" $TARGET_FLAG tests/{pass,panic}
   fi
   if [ -n "${MANY_SEEDS-}" ]; then
     # Run many-seeds tests. (Also tests `./miri run`.)
     time for FILE in tests/many-seeds/*.rs; do
-      ./miri run "-Zmiri-many-seeds=0..$MANY_SEEDS" $TARGET_FLAG "$FILE"
+      ./miri run "$FEATURES" $TARGET_FLAG "-Zmiri-many-seeds=0..$MANY_SEEDS" "$FILE"
     done
   fi
   if [ -n "${TEST_BENCH-}" ]; then
@@ -87,7 +87,7 @@ function run_tests {
     time HYPERFINE="hyperfine -w0 -r1 --show-output" ./miri bench $TARGET_FLAG --no-install
   fi
   # Smoke-test `./miri run --dep`.
-  ./miri run $TARGET_FLAG --dep tests/pass-dep/getrandom.rs
+  ./miri run "$FEATURES" $TARGET_FLAG --dep tests/pass-dep/getrandom.rs
 
   ## test-cargo-miri
   # On Windows, there is always "python", not "python3" or "python2".
@@ -125,7 +125,7 @@ function run_tests_minimal {
     exit 1
   fi
 
-  time ./miri test $TARGET_FLAG "$@"
+  time ./miri test "$FEATURES" $TARGET_FLAG "$@"
 
   # Ensure that a small smoke test of cargo-miri works.
   time cargo miri run --manifest-path test-cargo-miri/no-std-smoke/Cargo.toml $TARGET_FLAG
