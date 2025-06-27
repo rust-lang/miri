@@ -163,15 +163,15 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         if tcx.sess.dcx().has_errors_or_delayed_bugs().is_some() {
             tcx.dcx().fatal("miri cannot be run on programs that fail compilation");
         }
+        if !tcx.crate_types().contains(&CrateType::Executable) {
+            tcx.dcx().fatal("miri only makes sense on bin crates");
+        }
 
         let early_dcx = EarlyDiagCtxt::new(tcx.sess.opts.error_format);
         let tracing_guard = init_late_loggers(&early_dcx, tcx);
         if self.tracing_guard.is_none() {
             // Either tracing_guard or self.tracing_guard are None, due to LOGGER_INITED.call_once().
             self.tracing_guard = tracing_guard;
-        }
-        if !tcx.crate_types().contains(&CrateType::Executable) {
-            tcx.dcx().fatal("miri only makes sense on bin crates");
         }
 
         let (entry_def_id, entry_type) = entry_fn(tcx);
