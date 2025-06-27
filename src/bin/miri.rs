@@ -200,7 +200,13 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             todo!("GenMC mode not yet implemented");
         };
 
-        let exit_code = if let Some(many_seeds) = self.many_seeds.take() {
+        fn exit(exit_code: i32) -> ! {
+            // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
+            deinit_loggers();
+            std::process::exit(exit_code);
+        }
+
+        if let Some(many_seeds) = self.many_seeds.take() {
             assert!(config.seed.is_none());
             let exit_code = sync::IntoDynSyncSend(AtomicI32::new(rustc_driver::EXIT_SUCCESS));
             let num_failed = sync::IntoDynSyncSend(AtomicU32::new(0));
@@ -219,11 +225,9 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                 if return_code != rustc_driver::EXIT_SUCCESS {
                     eprintln!("FAILING SEED: {seed}");
                     if !many_seeds.keep_going {
-                        // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
-                        deinit_loggers();
                         // `abort_if_errors` would actually not stop, since `par_for_each` waits for the
                         // rest of the to finish, so we just exit immediately.
-                        std::process::exit(return_code);
+                        exit(return_code);
                     }
                     exit_code.store(return_code, Ordering::Relaxed);
                     num_failed.fetch_add(1, Ordering::Relaxed);
@@ -233,19 +237,17 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             if num_failed > 0 {
                 eprintln!("{num_failed}/{total} SEEDS FAILED", total = many_seeds.seeds.count());
             }
-            exit_code.0.into_inner()
+            exit(exit_code.0.into_inner());
         } else {
-            miri::eval_entry(tcx, entry_def_id, entry_type, &config, None).unwrap_or_else(|| {
-                #[cfg(target_os = "linux")]
-                miri::register_retcode_sv(rustc_driver::EXIT_FAILURE);
-                tcx.dcx().abort_if_errors();
-                rustc_driver::EXIT_FAILURE
-            })
+            let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
+                .unwrap_or_else(|| {
+                    #[cfg(target_os = "linux")]
+                    miri::register_retcode_sv(rustc_driver::EXIT_FAILURE);
+                    tcx.dcx().abort_if_errors();
+                    rustc_driver::EXIT_FAILURE
+                });
+            exit(return_code);
         };
-
-        // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
-        deinit_loggers();
-        std::process::exit(exit_code);
 
         // Unreachable.
     }
