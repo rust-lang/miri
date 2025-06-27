@@ -10,6 +10,7 @@
 
 // Some "regular" crates we want to share with rustc
 extern crate tracing;
+extern crate tracing_subscriber;
 
 // The rustc crates we need
 extern crate rustc_abi;
@@ -18,10 +19,13 @@ extern crate rustc_driver;
 extern crate rustc_hir;
 extern crate rustc_hir_analysis;
 extern crate rustc_interface;
+extern crate rustc_log;
 extern crate rustc_metadata;
 extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
+
+mod trace;
 
 use std::env;
 use std::num::NonZero;
@@ -35,8 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, TracingGuard, TreeBorrowsParams, ValidationMode,
-    init_early_loggers, init_late_loggers,
+    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -58,6 +61,8 @@ use rustc_session::config::{CrateType, ErrorOutputType, OptLevel};
 use rustc_session::search_paths::PathKind;
 use rustc_span::def_id::DefId;
 use tracing::debug;
+
+use crate::trace::logger_setup::{TracingGuard, init_early_loggers, init_late_loggers};
 
 struct MiriCompilerCalls {
     miri_config: Option<MiriConfig>,
