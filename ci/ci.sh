@@ -32,8 +32,9 @@ export CARGO_EXTRA_FLAGS="--locked"
 export FEATURES="--features=genmc,stack-cache,stack-cache-consistency-check"
 
 # Determine configuration for installed build (used by test-cargo-miri and `./miri bench`).
+# $FEATURES is not passed here as "stack-cache-consistency-check" makes things quite slow.
 echo "Installing release version of Miri"
-time ./miri install "$FEATURES"
+time ./miri install
 
 # Prepare debug build for direct `./miri` invocations.
 echo "Building debug version of Miri"
