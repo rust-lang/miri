@@ -10,6 +10,6 @@ match_arm_blocks = false
 match_arm_leading_pipes = "Preserve"
 
 ignore = [
-    # this file is copy-pasted from the tracing_chrome crate and should remain like the original
+    # This file is copy-pasted from the tracing_chrome crate and should remain like the original.
     "src/trace/tracing_chrome.rs"
 ]

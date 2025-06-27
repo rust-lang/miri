@@ -162,7 +162,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         let early_dcx = EarlyDiagCtxt::new(tcx.sess.opts.error_format);
         let tracing_guard = init_late_loggers(&early_dcx, tcx);
         if self.tracing_guard.is_none() {
-            // either tracing_guard or self.tracing_guard are None, due to LOGGER_INITED.call_once()
+            // Either tracing_guard or self.tracing_guard are None, due to LOGGER_INITED.call_once().
             self.tracing_guard = tracing_guard;
         }
         if !tcx.crate_types().contains(&CrateType::Executable) {

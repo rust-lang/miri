@@ -65,8 +65,8 @@ harness = false
 
 [features]
 default = ["stack-cache"]
-# when adding a new feature that is relevant for some tests,
-# make sure to add it to the FEATURES variable in `ci/ci.sh`
+# When adding a new feature that is relevant for some tests,
+# make sure to add it to the FEATURES variable in `ci/ci.sh`.
 genmc = []
 stack-cache = []
 stack-cache-consistency-check = ["stack-cache"]
