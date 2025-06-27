@@ -34,8 +34,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
@@ -62,15 +62,15 @@ use rustc_session::search_paths::PathKind;
 use rustc_span::def_id::DefId;
 use tracing::debug;
 
-use crate::trace::logger_setup::{TracingGuard, init_early_loggers, init_late_loggers};
+use crate::trace::logger_setup::{
+    DeinitLoggersOnDrop, deinit_loggers, init_early_loggers, init_late_loggers,
+};
 
 struct MiriCompilerCalls {
     miri_config: Option<MiriConfig>,
     many_seeds: Option<ManySeedsConfig>,
     /// Settings for using GenMC with Miri.
     genmc_config: Option<GenmcConfig>,
-    /// Kept here to be dropped before calling [std::process::exit].
-    tracing_guard: Option<TracingGuard>,
 }
 
 struct ManySeedsConfig {
@@ -83,9 +83,8 @@ impl MiriCompilerCalls {
         miri_config: MiriConfig,
         many_seeds: Option<ManySeedsConfig>,
         genmc_config: Option<GenmcConfig>,
-        tracing_guard: Option<TracingGuard>,
     ) -> Self {
-        Self { miri_config: Some(miri_config), many_seeds, genmc_config, tracing_guard }
+        Self { miri_config: Some(miri_config), many_seeds, genmc_config }
     }
 }
 
@@ -168,11 +167,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         }
 
         let early_dcx = EarlyDiagCtxt::new(tcx.sess.opts.error_format);
-        let tracing_guard = init_late_loggers(&early_dcx, tcx);
-        if self.tracing_guard.is_none() {
-            // Either tracing_guard or self.tracing_guard are None, due to LOGGER_INITED.call_once().
-            self.tracing_guard = tracing_guard;
-        }
+        init_late_loggers(&early_dcx, tcx);
 
         let (entry_def_id, entry_type) = entry_fn(tcx);
         let mut config = self.miri_config.take().expect("after_analysis must only be called once");
@@ -205,11 +200,10 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             todo!("GenMC mode not yet implemented");
         };
 
-        if let Some(many_seeds) = self.many_seeds.take() {
+        let exit_code = if let Some(many_seeds) = self.many_seeds.take() {
             assert!(config.seed.is_none());
             let exit_code = sync::IntoDynSyncSend(AtomicI32::new(rustc_driver::EXIT_SUCCESS));
             let num_failed = sync::IntoDynSyncSend(AtomicU32::new(0));
-            let tracing_guard = sync::IntoDynSyncSend(Mutex::new(self.tracing_guard.take()));
             sync::par_for_each_in(many_seeds.seeds.clone(), |seed| {
                 let mut config = config.clone();
                 config.seed = Some((*seed).into());
@@ -226,9 +220,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     eprintln!("FAILING SEED: {seed}");
                     if !many_seeds.keep_going {
                         // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
-                        if let Ok(mut lock) = tracing_guard.try_lock() {
-                            std::mem::drop((*lock).take());
-                        }
+                        deinit_loggers();
                         // `abort_if_errors` would actually not stop, since `par_for_each` waits for the
                         // rest of the to finish, so we just exit immediately.
                         std::process::exit(return_code);
@@ -241,22 +233,19 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             if num_failed > 0 {
                 eprintln!("{num_failed}/{total} SEEDS FAILED", total = many_seeds.seeds.count());
             }
-            // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
-            std::mem::drop(tracing_guard);
-            std::process::exit(exit_code.0.into_inner());
+            exit_code.0.into_inner()
         } else {
-            let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
-                .unwrap_or_else(|| {
-                    #[cfg(target_os = "linux")]
-                    miri::register_retcode_sv(rustc_driver::EXIT_FAILURE);
-                    tcx.dcx().abort_if_errors();
-                    rustc_driver::EXIT_FAILURE
-                });
+            miri::eval_entry(tcx, entry_def_id, entry_type, &config, None).unwrap_or_else(|| {
+                #[cfg(target_os = "linux")]
+                miri::register_retcode_sv(rustc_driver::EXIT_FAILURE);
+                tcx.dcx().abort_if_errors();
+                rustc_driver::EXIT_FAILURE
+            })
+        };
 
-            // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
-            std::mem::drop(self.tracing_guard.take());
-            std::process::exit(return_code);
-        }
+        // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
+        deinit_loggers();
+        std::process::exit(exit_code);
 
         // Unreachable.
     }
@@ -761,7 +750,8 @@ fn main() -> ExitCode {
     // Init loggers the Miri way. Do so after arguments have been parsed, so no tracing file is
     // created if argument parsing fails, and also so that we don't have to worry about dropping
     // the guard before calling std::process::exit() in show_error!().
-    let tracing_guard = init_early_loggers(&early_dcx);
+    init_early_loggers(&early_dcx);
+    let _deinit_loggers_on_drop = DeinitLoggersOnDrop;
 
     debug!("rustc arguments: {:?}", rustc_args);
     debug!("crate arguments: {:?}", miri_config.args);
@@ -777,6 +767,6 @@ fn main() -> ExitCode {
     }
     run_compiler_return_exit_code(
         &rustc_args,
-        &mut MiriCompilerCalls::new(miri_config, many_seeds, genmc_config, tracing_guard),
+        &mut MiriCompilerCalls::new(miri_config, many_seeds, genmc_config),
     )
 }
