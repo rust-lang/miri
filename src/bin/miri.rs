@@ -358,7 +358,7 @@ macro_rules! show_error {
 /// Does not call [std::process::exit] directly, but rather returns an [ExitCode],
 /// to allow the tracing guard to be dropped before exiting.
 #[must_use]
-fn run_compiler_and_exit(
+fn run_compiler_return_exit_code(
     args: &[String],
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
 ) -> ExitCode {
@@ -478,7 +478,7 @@ fn main() -> ExitCode {
         }
 
         // We cannot use `rustc_driver::main` as we want it to use `args` as the CLI arguments.
-        return run_compiler_and_exit(&args, &mut MiriBeRustCompilerCalls { target_crate });
+        return run_compiler_return_exit_code(&args, &mut MiriBeRustCompilerCalls { target_crate });
     }
 
     // Add an ICE bug report hook.
@@ -770,7 +770,7 @@ fn main() -> ExitCode {
         // are async-signal-safe, as is accessing atomics
         let _ = unsafe { miri::init_sv() };
     }
-    run_compiler_and_exit(
+    run_compiler_return_exit_code(
         &rustc_args,
         &mut MiriCompilerCalls::new(miri_config, many_seeds, genmc_config, tracing_guard),
     )
