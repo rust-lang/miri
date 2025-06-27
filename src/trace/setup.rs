@@ -6,11 +6,21 @@ use rustc_middle::ty::TyCtxt;
 use rustc_session::{CtfeBacktrace, EarlyDiagCtxt};
 use tracing_subscriber::Registry;
 
+/// The tracing layer from `tracing-chrome` starts a thread in the background that saves data to
+/// file and closes the file when stopped. If the thread is not stopped properly, the file will be
+/// missing end terminators (`]` for JSON arrays) and other data may also not be flushed. Therefore
+/// we need to keep a guard that, when [Drop]ped, will send a signal to stop the thread. Make sure
+/// to manually drop this guard, if you are exiting the program with [std::process::exit]!
 #[must_use]
 pub struct TracingGuard {
     #[cfg(feature = "tracing")]
     _chrome: super::tracing_chrome::FlushGuard,
     _no_construct: (),
+}
+
+// This ensures TracingGuard is always a drop-type, even when the `_chrome` field is disabled.
+impl Drop for TracingGuard {
+    fn drop(&mut self) {}
 }
 
 fn rustc_logger_config() -> rustc_log::LoggerConfig {

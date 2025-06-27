@@ -64,6 +64,7 @@ struct MiriCompilerCalls {
     many_seeds: Option<ManySeedsConfig>,
     /// Settings for using GenMC with Miri.
     genmc_config: Option<GenmcConfig>,
+    /// Kept here to be dropped before calling [std::process::exit].
     tracing_guard: Option<TracingGuard>,
 }
 
@@ -219,9 +220,9 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                 if return_code != rustc_driver::EXIT_SUCCESS {
                     eprintln!("FAILING SEED: {seed}");
                     if !many_seeds.keep_going {
-                        // drop the tracing guard before exiting, so tracing calls are flushed correctly
+                        // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
                         if let Ok(mut lock) = tracing_guard.try_lock() {
-                            let _guard_being_dropped = (*lock).take();
+                            std::mem::drop((*lock).take());
                         }
                         // `abort_if_errors` would actually not stop, since `par_for_each` waits for the
                         // rest of the to finish, so we just exit immediately.
@@ -235,8 +236,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             if num_failed > 0 {
                 eprintln!("{num_failed}/{total} SEEDS FAILED", total = many_seeds.seeds.count());
             }
-            // drop the tracing guard before exiting, so tracing calls are flushed correctly
-            #[allow(clippy::drop_non_drop)]
+            // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
             std::mem::drop(tracing_guard);
             std::process::exit(exit_code.0.into_inner());
         } else {
@@ -248,8 +248,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     rustc_driver::EXIT_FAILURE
                 });
 
-            // drop the tracing guard before exiting, so tracing calls are flushed correctly
-            #[allow(clippy::drop_non_drop)]
+            // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
             std::mem::drop(self.tracing_guard.take());
             std::process::exit(return_code);
         }
