@@ -1,14 +1,15 @@
-//! This file is taken unmodified from the following link, except for file attributes at the top:
+//! This file is taken unmodified from the following link, except for file attributes and
+//! `extern crate` at the top. It is licensed under MIT.
 //! https://github.com/thoren-d/tracing-chrome/blob/7e2625ab4aeeef2f0ef9bde9d6258dd181c04472/src/lib.rs
 //! Depending on the tracing-chrome crate from crates.io is unfortunately not possible, since it
 //! depends on `tracing_core` which conflicts with rustc_private's `tracing_core` (meaning it would
-//! not be possible to use the [ChromeLayer] in a context that expects a [Layer] from from
+//! not be possible to use the [ChromeLayer] in a context that expects a [Layer] from
 //! rustc_private's `tracing_core` version).
 #![allow(warnings)]
 #![cfg(feature = "tracing")]
 
-// this is here and not in src/lib.rs since it is a direct dependency of tracing_chrome.rs and
-// should not be included if the "tracing" feature is disabled
+// This is here and not in src/lib.rs since it is a direct dependency of tracing_chrome.rs and
+// should not be included if the "tracing" feature is disabled.
 extern crate tracing_core;
 
 
