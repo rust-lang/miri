@@ -704,16 +704,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// variable. Returns `true` iff any thread was woken up.
     fn condvar_signal(&mut self, condvar_ref: &CondvarRef) -> InterpResult<'tcx, bool> {
         let this = self.eval_context_mut();
+        let mut condvar = condvar_ref.0.borrow_mut();
 
         // Each condvar signal happens-before the end of the condvar wake
         if let Some(data_race) = this.machine.data_race.as_vclocks_ref() {
-            data_race.release_clock(&this.machine.threads, |clock| {
-                condvar_ref.0.borrow_mut().clock.clone_from(clock)
-            });
+            data_race.release_clock(&this.machine.threads, |clock| condvar.clock.clone_from(clock));
         }
-        let Some(waiter) = condvar_ref.0.borrow_mut().waiters.pop_front() else {
+        let Some(waiter) = condvar.waiters.pop_front() else {
             return interp_ok(false);
         };
+        drop(condvar);
         this.unblock_thread(waiter, BlockReason::Condvar)?;
         interp_ok(true)
     }
