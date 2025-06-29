@@ -2,6 +2,7 @@ name: "Miri CI setup"
 description: "Sets up Miri CI"
 inputs:
   toolchain_flags:
+    description: extra flags to pass to rustup-toolchain-install-master
     required: false
     default: ''
 runs:
@@ -31,12 +32,15 @@ runs:
             ~/.cargo/bin
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '.github/workflows/**/*.yml') }}
+          # Bump the version when something here changes that needs a cache reset.
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}-v2
           restore-keys: cargo-${{ runner.os }}
 
       - name: Install rustup-toolchain-install-master
         if: steps.cache.outputs.cache-hit != 'true'
-        run: cargo install -f rustup-toolchain-install-master hyperfine
+        run: |
+          cargo install -f rustup-toolchain-install-master --git https://github.com/RalfJung/rustup-toolchain-install-master --branch dev-targets
+          cargo install -f hyperfine
         shell: bash
 
       - name: Install nightly toolchain
