@@ -30,6 +30,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         unwind: mir::UnwindAction,
     ) -> InterpResult<'tcx, Option<ty::Instance<'tcx>>> {
         let this = self.eval_context_mut();
+        let intrinsic_name = this.tcx.item_name(instance.def_id());
 
         // Force use of fallback body, if available.
         if this.machine.force_intrinsic_fallback
@@ -41,11 +42,23 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }));
         }
 
+        // Overwrite some core engine intrinsics that are used to catch UB -- we have better
+        // errors if we detect this UB ourselves.
+        match intrinsic_name {
+            sym::assert_inhabited
+            | sym::assert_zero_valid
+            | sym::assert_mem_uninitialized_valid => {
+                // Make these a NOP.
+                this.return_to_block(ret)?;
+                return interp_ok(None);
+            }
+            _ => {}
+        }
+
         // See if the core engine can handle this intrinsic.
         if this.eval_intrinsic(instance, args, dest, ret)? {
             return interp_ok(None);
         }
-        let intrinsic_name = this.tcx.item_name(instance.def_id());
         let intrinsic_name = intrinsic_name.as_str();
 
         // FIXME: avoid allocating memory
