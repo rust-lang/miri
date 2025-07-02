@@ -233,8 +233,8 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         } else {
             let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
                 .unwrap_or_else(|| {
-                    //#[cfg(target_os = "linux")]
-                    //miri::native_lib::register_retcode_sv(rustc_driver::EXIT_FAILURE);
+                    #[cfg(trace)]
+                    miri::native_lib::register_retcode_sv(rustc_driver::EXIT_FAILURE);
                     tcx.dcx().abort_if_errors();
                     rustc_driver::EXIT_FAILURE
                 });
@@ -750,7 +750,7 @@ fn main() {
 
     debug!("rustc arguments: {:?}", rustc_args);
     debug!("crate arguments: {:?}", miri_config.args);
-    #[cfg(target_os = "linux")]
+    #[cfg(trace)]
     if !miri_config.native_lib.is_empty() && miri_config.native_lib_enable_tracing {
         // FIXME: This should display a diagnostic / warning on error
         // SAFETY: If any other threads exist at this point (namely for the ctrlc
@@ -758,7 +758,7 @@ fn main() {
         // thread in an async-signal-unsafe way such as by accessing shared
         // semaphores, etc.; the handler only calls `sleep()` and `exit()`, which
         // are async-signal-safe, as is accessing atomics
-        //let _ = unsafe { miri::native_lib::init_sv() };
+        let _ = unsafe { miri::native_lib::init_sv() };
     }
     run_compiler_and_exit(
         &rustc_args,

@@ -530,7 +530,7 @@ pub struct MiriMachine<'tcx> {
     pub(crate) rng: RefCell<StdRng>,
 
     /// The allocator used for the machine's `AllocBytes` in native-libs mode.
-    #[cfg(target_os = "linux")]
+    #[cfg(trace)]
     pub(crate) allocator: Option<Rc<RefCell<crate::alloc::isolated_alloc::IsolatedAlloc>>>,
 
     /// The allocation IDs to report when they are being allocated
@@ -718,7 +718,7 @@ impl<'tcx> MiriMachine<'tcx> {
             local_crates,
             extern_statics: FxHashMap::default(),
             rng: RefCell::new(rng),
-            #[cfg(target_os = "linux")]
+            #[cfg(trace)]
             allocator: if !config.native_lib.is_empty() {
                 Some(Rc::new(RefCell::new(crate::alloc::isolated_alloc::IsolatedAlloc::new())))
             } else { None },
@@ -924,7 +924,7 @@ impl VisitProvenance for MiriMachine<'_> {
             backtrace_style: _,
             local_crates: _,
             rng: _,
-            #[cfg(target_os = "linux")]
+            #[cfg(trace)]
             allocator: _,
             tracked_alloc_ids: _,
             track_alloc_accesses: _,
@@ -1819,12 +1819,12 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
     fn get_default_alloc_params(&self) -> <Self::Bytes as AllocBytes>::AllocParams {
         use crate::alloc::MiriAllocParams;
 
-        #[cfg(target_os = "linux")]
+        #[cfg(trace)]
         match &self.allocator {
             Some(alloc) => MiriAllocParams::Isolated(alloc.clone()),
             None => MiriAllocParams::Global,
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(trace))]
         MiriAllocParams::Global
     }
 }

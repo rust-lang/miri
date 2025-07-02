@@ -41,7 +41,7 @@ pub enum TraceRequest {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct StartFfiInfo {
     /// A vector of page addresses. These should have been automatically obtained
-    /// with `IsolatedAlloc::pages` and prepared with `IsolatedAlloc::prepare_ffi`.
+    /// with `IsolatedAlloc::pages` and prepared with `IsolatedAlloc::start_ffi`.
     pub page_ptrs: Vec<usize>,
     /// The address of an allocation that can serve as a temporary stack.
     /// This should be a leaked `Box<[u8; CALLBACK_STACK_SIZE]>` cast to an int.

@@ -8,21 +8,19 @@ use super::CALLBACK_STACK_SIZE;
 use super::messages::{AccessEvent, Confirmation, MemEvents, StartFfiInfo, TraceRequest};
 
 /// The flags to use when calling `waitid()`.
-/// Since bitwise or on the nix version of these flags is implemented as a trait,
-/// this cannot be const directly so we do it this way.
 const WAIT_FLAGS: wait::WaitPidFlag =
-    wait::WaitPidFlag::from_bits_truncate(libc::WUNTRACED | libc::WEXITED);
+    wait::WaitPidFlag::WUNTRACED.union(wait::WaitPidFlag::WEXITED);
 
 /// Arch-specific maximum size a single access might perform. x86 value is set
 /// assuming nothing bigger than AVX-512 is available.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const ARCH_MAX_ACCESS_SIZE: usize = 64;
 /// The largest arm64 simd instruction operates on 16 bytes.
-#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+#[cfg(target_arch = "aarch64")]
 const ARCH_MAX_ACCESS_SIZE: usize = 16;
 
 /// The default word size on a given platform, in bytes.
-#[cfg(any(target_arch = "x86", target_arch = "arm"))]
+#[cfg(target_arch = "x86")]
 const ARCH_WORD_SIZE: usize = 4;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const ARCH_WORD_SIZE: usize = 8;
@@ -51,7 +49,7 @@ trait ArchIndependentRegs {
 }
 
 // It's fine / desirable behaviour for values to wrap here, we care about just
-// preserving the bit pattern.
+// preserving the bit pattern. All of these casts are to/from usize-sized types.
 #[cfg(target_arch = "x86_64")]
 #[expect(clippy::as_conversions)]
 #[rustfmt::skip]
@@ -140,9 +138,7 @@ impl Iterator for ChildListener {
                         // Child was killed by a signal, without giving a code.
                         wait::WaitStatus::Signaled(_, _, _) =>
                             return Some(ExecEvent::Died(self.override_retcode)),
-                        // Child entered a syscall. Since we're always technically
-                        // tracing, only pass this along if we're actively
-                        // monitoring the child.
+                        // Child entered or exited a syscall.
                         wait::WaitStatus::PtraceSyscall(pid) =>
                             if self.attached {
                                 return Some(ExecEvent::Syscall(pid));
@@ -211,6 +207,12 @@ impl Iterator for ChildListener {
 #[derive(Debug)]
 pub struct ExecEnd(pub Option<i32>);
 
+/// Whether to call `ptrace::cont()` immediately. Used exclusively by `wait_for_signal`.
+enum InitialCont {
+    Yes,
+    No,
+}
+
 /// This is the main loop of the supervisor process. It runs in a separate
 /// process from the rest of Miri (but because we fork, addresses for anything
 /// created before the fork - like statics - are the same).
@@ -239,7 +241,7 @@ pub fn sv_loop(
     let mut curr_pid = init_pid;
 
     // There's an initial sigstop we need to deal with.
-    wait_for_signal(Some(curr_pid), signal::SIGSTOP, false)?;
+    wait_for_signal(Some(curr_pid), signal::SIGSTOP, InitialCont::No)?;
     ptrace::cont(curr_pid, None).unwrap();
 
     for evt in listener {
@@ -258,7 +260,7 @@ pub fn sv_loop(
                 confirm_tx.send(Confirmation).unwrap();
                 // We can't trust simply calling `Pid::this()` in the child process to give the right
                 // PID for us, so we get it this way.
-                curr_pid = wait_for_signal(None, signal::SIGSTOP, false).unwrap();
+                curr_pid = wait_for_signal(None, signal::SIGSTOP, InitialCont::No).unwrap();
 
                 ptrace::syscall(curr_pid, None).unwrap();
             }
@@ -324,8 +326,6 @@ fn get_disasm() -> capstone::Capstone {
         {cs_pre.x86().mode(arch::x86::ArchMode::Mode32)}
         #[cfg(target_arch = "aarch64")]
         {cs_pre.arm64().mode(arch::arm64::ArchMode::Arm)}
-        #[cfg(target_arch = "arm")]
-        {cs_pre.arm().mode(arch::arm::ArchMode::Arm)}
     }
     .detail(true)
     .build()
@@ -339,9 +339,9 @@ fn get_disasm() -> capstone::Capstone {
 fn wait_for_signal(
     pid: Option<unistd::Pid>,
     wait_signal: signal::Signal,
-    init_cont: bool,
+    init_cont: InitialCont,
 ) -> Result<unistd::Pid, ExecEnd> {
-    if init_cont {
+    if matches!(init_cont, InitialCont::Yes) {
         ptrace::cont(pid.unwrap(), None).unwrap();
     }
     // Repeatedly call `waitid` until we get the signal we want, or the process dies.
@@ -460,28 +460,6 @@ fn handle_segfault(
                         _ => (),
                     }
                 }
-                #[cfg(target_arch = "arm")]
-                arch::ArchOperand::ArmOperand(arm_operand) =>
-                    match arm_operand.op_type {
-                        arch::arm::ArmOperandType::Mem(_) => {
-                            // We don't get info on the size of the access, but
-                            // we're at least told if it's a vector instruction.
-                            let size = if arm_operand.vector_index.is_some() {
-                                ARCH_MAX_ACCESS_SIZE
-                            } else {
-                                ARCH_WORD_SIZE
-                            };
-                            let push = addr..addr.strict_add(size);
-                            let acc_ty = arm_operand.access.unwrap();
-                            if acc_ty.is_readable() {
-                                acc_events.push(AccessEvent::Read(push.clone()));
-                            }
-                            if acc_ty.is_writable() {
-                                acc_events.push(AccessEvent::Write(push));
-                            }
-                        }
-                        _ => (),
-                    },
                 _ => unimplemented!(),
             }
         }
@@ -515,7 +493,7 @@ fn handle_segfault(
     //   global atomic variables. This is what we use the temporary callback stack for.
     // - Step 1 instruction
     // - Parse executed code to estimate size & type of access
-    // - Reprotect the memory by executing `mempr_on` in the child.
+    // - Reprotect the memory by executing `mempr_on` in the child, using the callback stack again.
     // - Continue
 
     // Ensure the stack is properly zeroed out!
@@ -552,7 +530,7 @@ fn handle_segfault(
     ptrace::setregs(pid, new_regs).unwrap();
 
     // Our mempr_* functions end with a raise(SIGSTOP).
-    wait_for_signal(Some(pid), signal::SIGSTOP, true)?;
+    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes)?;
 
     // Step 1 instruction.
     ptrace::setregs(pid, regs_bak).unwrap();
@@ -573,6 +551,12 @@ fn handle_segfault(
     let regs_bak = ptrace::getregs(pid).unwrap();
     new_regs = regs_bak;
     let ip_poststep = regs_bak.ip();
+
+    // Ensure that we've actually gone forwards.
+    assert!(ip_poststep > ip_prestep);
+    // But not by too much. 64 bytes should be "big enough" on ~any architecture.
+    assert!(ip_prestep.strict_add(64) > ip_poststep);
+
     // We need to do reads/writes in word-sized chunks.
     let diff = (ip_poststep.strict_sub(ip_prestep)).div_ceil(ARCH_WORD_SIZE);
     let instr = (ip_prestep..ip_prestep.strict_add(diff)).fold(vec![], |mut ret, ip| {
@@ -587,10 +571,7 @@ fn handle_segfault(
     });
 
     // Now figure out the size + type of access and log it down.
-    // This will mark down e.g. the same area being read multiple times,
-    // since it's more efficient to compress the accesses at the end.
     if capstone_disassemble(&instr, addr, cs, acc_events).is_err() {
-        // Read goes first because we need to be pessimistic.
         acc_events.push(AccessEvent::Read(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE)));
         acc_events.push(AccessEvent::Write(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE)));
     }
@@ -600,7 +581,7 @@ fn handle_segfault(
     new_regs.set_ip(mempr_on as usize);
     new_regs.set_sp(stack_ptr);
     ptrace::setregs(pid, new_regs).unwrap();
-    wait_for_signal(Some(pid), signal::SIGSTOP, true)?;
+    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes)?;
 
     ptrace::setregs(pid, regs_bak).unwrap();
     ptrace::syscall(pid, None).unwrap();

@@ -318,7 +318,7 @@ impl IsolatedAlloc {
     ///
     /// SAFETY: Accessing memory after this point will result in a segfault
     /// unless it is first unprotected.
-    pub unsafe fn prepare_ffi(&mut self) -> Result<(), nix::errno::Errno> {
+    pub unsafe fn start_ffi(&mut self) -> Result<(), nix::errno::Errno> {
         let prot = mman::ProtFlags::PROT_NONE;
         unsafe { self.mprotect(prot) }
     }
@@ -326,7 +326,7 @@ impl IsolatedAlloc {
     /// Deprotects all owned memory by setting it to RW. Erroring here is very
     /// likely unrecoverable, so it may panic if applying those permissions
     /// fails.
-    pub fn unprep_ffi(&mut self) {
+    pub fn end_ffi(&mut self) {
         let prot = mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE;
         unsafe {
             self.mprotect(prot).unwrap();

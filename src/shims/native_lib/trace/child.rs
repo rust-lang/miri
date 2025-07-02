@@ -49,11 +49,11 @@ impl Supervisor {
     ) -> (std::sync::MutexGuard<'static, Option<Supervisor>>, Option<*mut [u8; CALLBACK_STACK_SIZE]>)
     {
         let mut sv_guard = SUPERVISOR.lock().unwrap();
-        // If the supervisor is not initialised for whatever reason, fast-fail.
+        // If the supervisor is not initialised for whatever reason, fast-return.
         // This might be desired behaviour, as even on platforms where ptracing
         // is not implemented it enables us to enforce that only one FFI call
         // happens at a time.
-        let Some(sv) = sv_guard.take() else {
+        let Some(sv) = sv_guard.as_mut() else {
             return (sv_guard, None);
         };
 
@@ -68,9 +68,9 @@ impl Supervisor {
         // SAFETY: We do not access machine memory past this point until the
         // supervisor is ready to allow it.
         unsafe {
-            if alloc.borrow_mut().prepare_ffi().is_err() {
+            if alloc.borrow_mut().start_ffi().is_err() {
                 // Don't mess up unwinding by maybe leaving the memory partly protected
-                alloc.borrow_mut().unprep_ffi();
+                alloc.borrow_mut().end_ffi();
                 panic!("Cannot protect memory for FFI call!");
             }
         }
@@ -82,7 +82,6 @@ impl Supervisor {
         // enforce an ordering for these events.
         sv.message_tx.send(TraceRequest::StartFfi(start_info)).unwrap();
         sv.confirm_rx.recv().unwrap();
-        *sv_guard = Some(sv);
         // We need to be stopped for the supervisor to be able to make certain
         // modifications to our memory - simply waiting on the recv() doesn't
         // count.
@@ -113,20 +112,19 @@ impl Supervisor {
         signal::raise(signal::SIGUSR1).unwrap();
 
         // This is safe! It just sets memory to normal expected permissions.
-        alloc.borrow_mut().unprep_ffi();
+        alloc.borrow_mut().end_ffi();
 
         // If this is `None`, then `raw_stack_ptr` is None and does not need to
         // be deallocated (and there's no need to worry about the guard, since
         // it contains nothing).
-        let sv = sv_guard.take()?;
+        let sv = sv_guard.as_mut()?;
         // SAFETY: Caller upholds that this pointer was allocated as a box with
         // this type.
         unsafe {
             drop(Box::from_raw(raw_stack_ptr.unwrap()));
         }
         // On the off-chance something really weird happens, don't block forever.
-        let ret = sv
-            .event_rx
+        sv.event_rx
             .try_recv_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| {
                 match e {
@@ -135,10 +133,7 @@ impl Supervisor {
                         eprintln!("Waiting for accesses from supervisor timed out!"),
                 }
             })
-            .ok();
-        // Do *not* leave the supervisor empty, or else we might get another fork...
-        *sv_guard = Some(sv);
-        ret
+            .ok()
     }
 }
 
@@ -148,10 +143,18 @@ impl Supervisor {
 /// receiving back events through `get_events`.
 ///
 /// # Safety
-/// The invariants for `fork()` must be upheld by the caller.
+/// The invariants for `fork()` must be upheld by the caller, namely either:
+/// - Other threads do not exist, or;
+/// - If they do exist, either those threads or the resulting child process
+///   only ever act in [async-signal-safe](https://www.man7.org/linux/man-pages/man7/signal-safety.7.html) ways.
 pub unsafe fn init_sv() -> Result<(), SvInitError> {
     // FIXME: Much of this could be reimplemented via the mitosis crate if we upstream the
     // relevant missing bits.
+
+    // Not on a properly supported architecture!
+    if cfg!(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))) {
+        return Err(SvInitError);
+    }
 
     // On Linux, this will check whether ptrace is fully disabled by the Yama module.
     // If Yama isn't running or we're not on Linux, we'll still error later, but
@@ -244,8 +247,7 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
 /// given as a 0 if this is not used.
 pub fn register_retcode_sv(code: i32) {
     let mut sv_guard = SUPERVISOR.lock().unwrap();
-    if let Some(sv) = sv_guard.take() {
+    if let Some(sv) = sv_guard.as_mut() {
         sv.message_tx.send(TraceRequest::OverrideRetcode(code)).unwrap();
-        *sv_guard = Some(sv);
     }
 }
