@@ -1,4 +1,9 @@
 //! Implements calling functions from a native library.
+
+// FIXME: disabled since it fails to build on many targets.
+//#[cfg(target_os = "linux")]
+//pub mod trace;
+
 use std::ops::Deref;
 
 use libffi::high::call as ffi;
@@ -8,7 +13,14 @@ use rustc_middle::mir::interpret::Pointer;
 use rustc_middle::ty::{self as ty, IntTy, UintTy};
 use rustc_span::Symbol;
 
+//#[cfg(target_os = "linux")]
+//use self::trace::Supervisor;
 use crate::*;
+
+//#[cfg(target_os = "linux")]
+//type CallResult<'tcx> = InterpResult<'tcx, (ImmTy<'tcx>, Option<self::trace::messages::MemEvents>)>;
+//#[cfg(not(target_os = "linux"))]
+type CallResult<'tcx> = InterpResult<'tcx, (ImmTy<'tcx>, Option<!>)>;
 
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
@@ -19,71 +31,93 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
         libffi_args: Vec<libffi::high::Arg<'a>>,
-    ) -> InterpResult<'tcx, ImmTy<'tcx>> {
+    ) -> CallResult<'tcx> {
         let this = self.eval_context_mut();
+        //#[cfg(target_os = "linux")]
+        //let alloc = this.machine.allocator.as_ref().unwrap();
+
+        // SAFETY: We don't touch the machine memory past this point.
+        //#[cfg(target_os = "linux")]
+        //let (guard, stack_ptr) = unsafe { Supervisor::start_ffi(alloc) };
 
         // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
         // as the specified primitive integer type
-        let scalar = match dest.layout.ty.kind() {
-            // ints
-            ty::Int(IntTy::I8) => {
-                // Unsafe because of the call to native code.
-                // Because this is calling a C function it is not necessarily sound,
-                // but there is no way around this and we've checked as much as we can.
-                let x = unsafe { ffi::call::<i8>(ptr, libffi_args.as_slice()) };
-                Scalar::from_i8(x)
-            }
-            ty::Int(IntTy::I16) => {
-                let x = unsafe { ffi::call::<i16>(ptr, libffi_args.as_slice()) };
-                Scalar::from_i16(x)
-            }
-            ty::Int(IntTy::I32) => {
-                let x = unsafe { ffi::call::<i32>(ptr, libffi_args.as_slice()) };
-                Scalar::from_i32(x)
-            }
-            ty::Int(IntTy::I64) => {
-                let x = unsafe { ffi::call::<i64>(ptr, libffi_args.as_slice()) };
-                Scalar::from_i64(x)
-            }
-            ty::Int(IntTy::Isize) => {
-                let x = unsafe { ffi::call::<isize>(ptr, libffi_args.as_slice()) };
-                Scalar::from_target_isize(x.try_into().unwrap(), this)
-            }
-            // uints
-            ty::Uint(UintTy::U8) => {
-                let x = unsafe { ffi::call::<u8>(ptr, libffi_args.as_slice()) };
-                Scalar::from_u8(x)
-            }
-            ty::Uint(UintTy::U16) => {
-                let x = unsafe { ffi::call::<u16>(ptr, libffi_args.as_slice()) };
-                Scalar::from_u16(x)
-            }
-            ty::Uint(UintTy::U32) => {
-                let x = unsafe { ffi::call::<u32>(ptr, libffi_args.as_slice()) };
-                Scalar::from_u32(x)
-            }
-            ty::Uint(UintTy::U64) => {
-                let x = unsafe { ffi::call::<u64>(ptr, libffi_args.as_slice()) };
-                Scalar::from_u64(x)
-            }
-            ty::Uint(UintTy::Usize) => {
-                let x = unsafe { ffi::call::<usize>(ptr, libffi_args.as_slice()) };
-                Scalar::from_target_usize(x.try_into().unwrap(), this)
-            }
-            // Functions with no declared return type (i.e., the default return)
-            // have the output_type `Tuple([])`.
-            ty::Tuple(t_list) if (*t_list).deref().is_empty() => {
-                unsafe { ffi::call::<()>(ptr, libffi_args.as_slice()) };
-                return interp_ok(ImmTy::uninit(dest.layout));
-            }
-            ty::RawPtr(..) => {
-                let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args.as_slice()) };
-                let ptr = Pointer::new(Provenance::Wildcard, Size::from_bytes(x.addr()));
-                Scalar::from_pointer(ptr, this)
-            }
-            _ => throw_unsup_format!("unsupported return type for native call: {:?}", link_name),
+        let res = 'res: {
+            let scalar = match dest.layout.ty.kind() {
+                // ints
+                ty::Int(IntTy::I8) => {
+                    // Unsafe because of the call to native code.
+                    // Because this is calling a C function it is not necessarily sound,
+                    // but there is no way around this and we've checked as much as we can.
+                    let x = unsafe { ffi::call::<i8>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_i8(x)
+                }
+                ty::Int(IntTy::I16) => {
+                    let x = unsafe { ffi::call::<i16>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_i16(x)
+                }
+                ty::Int(IntTy::I32) => {
+                    let x = unsafe { ffi::call::<i32>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_i32(x)
+                }
+                ty::Int(IntTy::I64) => {
+                    let x = unsafe { ffi::call::<i64>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_i64(x)
+                }
+                ty::Int(IntTy::Isize) => {
+                    let x = unsafe { ffi::call::<isize>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_target_isize(x.try_into().unwrap(), this)
+                }
+                // uints
+                ty::Uint(UintTy::U8) => {
+                    let x = unsafe { ffi::call::<u8>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_u8(x)
+                }
+                ty::Uint(UintTy::U16) => {
+                    let x = unsafe { ffi::call::<u16>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_u16(x)
+                }
+                ty::Uint(UintTy::U32) => {
+                    let x = unsafe { ffi::call::<u32>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_u32(x)
+                }
+                ty::Uint(UintTy::U64) => {
+                    let x = unsafe { ffi::call::<u64>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_u64(x)
+                }
+                ty::Uint(UintTy::Usize) => {
+                    let x = unsafe { ffi::call::<usize>(ptr, libffi_args.as_slice()) };
+                    Scalar::from_target_usize(x.try_into().unwrap(), this)
+                }
+                // Functions with no declared return type (i.e., the default return)
+                // have the output_type `Tuple([])`.
+                ty::Tuple(t_list) if (*t_list).deref().is_empty() => {
+                    unsafe { ffi::call::<()>(ptr, libffi_args.as_slice()) };
+                    break 'res interp_ok(ImmTy::uninit(dest.layout));
+                }
+                ty::RawPtr(..) => {
+                    let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args.as_slice()) };
+                    let ptr = Pointer::new(Provenance::Wildcard, Size::from_bytes(x.addr()));
+                    Scalar::from_pointer(ptr, this)
+                }
+                _ =>
+                    break 'res Err(err_unsup_format!(
+                        "unsupported return type for native call: {:?}",
+                        link_name
+                    ))
+                    .into(),
+            };
+            interp_ok(ImmTy::from_scalar(scalar, dest.layout))
         };
-        interp_ok(ImmTy::from_scalar(scalar, dest.layout))
+
+        // SAFETY: We got the guard and stack pointer from start_ffi, and
+        // the allocator is the same
+        //#[cfg(target_os = "linux")]
+        //let events = unsafe { Supervisor::end_ffi(alloc, guard, stack_ptr) };
+        //#[cfg(not(target_os = "linux"))]
+        let events = None;
+
+        interp_ok((res?, events))
     }
 
     /// Get the pointer to the function of the specified name in the shared object file,
@@ -164,7 +198,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let mut libffi_args = Vec::<CArg>::with_capacity(args.len());
         for arg in args.iter() {
             if !matches!(arg.layout.backend_repr, BackendRepr::Scalar(_)) {
-                throw_unsup_format!("only scalar argument types are support for native calls")
+                throw_unsup_format!("only scalar argument types are supported for native calls")
             }
             let imm = this.read_immediate(arg)?;
             libffi_args.push(imm_to_carg(&imm, this)?);
@@ -179,24 +213,63 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // The first time this happens, print a warning.
                 if !this.machine.native_call_mem_warned.replace(true) {
                     // Newly set, so first time we get here.
-                    this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem);
+                    this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem {
+                        //#[cfg(target_os = "linux")]
+                        //tracing: self::trace::Supervisor::is_enabled(),
+                        //#[cfg(not(target_os = "linux"))]
+                        tracing: false,
+                    });
                 }
 
                 this.expose_provenance(prov)?;
             }
         }
-
-        // Prepare all exposed memory.
-        this.prepare_exposed_for_native_call()?;
-
-        // Convert them to `libffi::high::Arg` type.
+        // Convert arguments to `libffi::high::Arg` type.
         let libffi_args = libffi_args
             .iter()
             .map(|arg| arg.arg_downcast())
             .collect::<Vec<libffi::high::Arg<'_>>>();
 
+        // Prepare all exposed memory (both previously exposed, and just newly exposed since a
+        // pointer was passed as argument).
+        this.visit_reachable_allocs(this.exposed_allocs(), |this, alloc_id, info| {
+            // If there is no data behind this pointer, skip this.
+            if !matches!(info.kind, AllocKind::LiveData) {
+                return interp_ok(());
+            }
+            // It's okay to get raw access, what we do does not correspond to any actual
+            // AM operation, it just approximates the state to account for the native call.
+            let alloc = this.get_alloc_raw(alloc_id)?;
+            // Also expose the provenance of the interpreter-level allocation, so it can
+            // be read by FFI. The `black_box` is defensive programming as LLVM likes
+            // to (incorrectly) optimize away ptr2int casts whose result is unused.
+            std::hint::black_box(alloc.get_bytes_unchecked_raw().expose_provenance());
+            // Expose all provenances in this allocation, since the native code can do $whatever.
+            for prov in alloc.provenance().provenances() {
+                this.expose_provenance(prov)?;
+            }
+
+            // Prepare for possible write from native code if mutable.
+            if info.mutbl.is_mut() {
+                let alloc = &mut this.get_alloc_raw_mut(alloc_id)?.0;
+                alloc.prepare_for_native_access();
+                // Also expose *mutable* provenance for the interpreter-level allocation.
+                std::hint::black_box(alloc.get_bytes_unchecked_raw_mut().expose_provenance());
+            }
+
+            interp_ok(())
+        })?;
+
         // Call the function and store output, depending on return type in the function signature.
-        let ret = this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
+        let (ret, maybe_memevents) =
+            this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
+
+        if cfg!(target_os = "linux")
+            && let Some(events) = maybe_memevents
+        {
+            trace!("Registered FFI events:\n{events:#0x?}");
+        }
+
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
     }
@@ -274,7 +347,8 @@ fn imm_to_carg<'tcx>(v: &ImmTy<'tcx>, cx: &impl HasDataLayout) -> InterpResult<'
             CArg::USize(v.to_scalar().to_target_usize(cx)?.try_into().unwrap()),
         ty::RawPtr(..) => {
             let s = v.to_scalar().to_pointer(cx)?.addr();
-            // This relies on the `expose_provenance` in `prepare_for_native_call`.
+            // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
+            // above.
             CArg::RawPtr(std::ptr::with_exposed_provenance_mut(s.bytes_usize()))
         }
         _ => throw_unsup_format!("unsupported argument type for native call: {}", v.layout.ty),
