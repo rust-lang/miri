@@ -1,8 +1,5 @@
 //! Implements calling functions from a native library.
 
-#[cfg(trace)]
-pub mod trace;
-
 use std::ops::Deref;
 
 use libffi::high::call as ffi;
@@ -12,14 +9,26 @@ use rustc_middle::mir::interpret::Pointer;
 use rustc_middle::ty::{self as ty, IntTy, UintTy};
 use rustc_span::Symbol;
 
-#[cfg(trace)]
+#[cfg_attr(
+    all(
+        target_os = "linux",
+        target_env = "gnu",
+        any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
+    ),
+    path = "trace/mod.rs"
+)]
+#[cfg_attr(
+    not(all(
+        target_os = "linux",
+        target_env = "gnu",
+        any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
+    )),
+    path = "trace_stub.rs"
+)]
+pub mod trace;
+
 use self::trace::Supervisor;
 use crate::*;
-
-#[cfg(trace)]
-type CallResult<'tcx> = InterpResult<'tcx, (ImmTy<'tcx>, Option<self::trace::messages::MemEvents>)>;
-#[cfg(not(trace))]
-type CallResult<'tcx> = InterpResult<'tcx, (ImmTy<'tcx>, Option<!>)>;
 
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
@@ -30,13 +39,11 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
         libffi_args: Vec<libffi::high::Arg<'a>>,
-    ) -> CallResult<'tcx> {
+    ) -> trace::CallResult<'tcx> {
         let this = self.eval_context_mut();
-        #[cfg(trace)]
         let alloc = this.machine.allocator.as_ref().unwrap();
 
         // SAFETY: We don't touch the machine memory past this point.
-        #[cfg(trace)]
         let (guard, stack_ptr) = unsafe { Supervisor::start_ffi(alloc) };
 
         // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
@@ -111,10 +118,8 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // SAFETY: We got the guard and stack pointer from start_ffi, and
         // the allocator is the same
-        #[cfg(trace)]
         let events = unsafe { Supervisor::end_ffi(alloc, guard, stack_ptr) };
-        #[cfg(not(trace))]
-        let events = None;
+        //let events = None;
 
         interp_ok((res?, events))
     }
@@ -213,10 +218,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 if !this.machine.native_call_mem_warned.replace(true) {
                     // Newly set, so first time we get here.
                     this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem {
-                        #[cfg(trace)]
                         tracing: self::trace::Supervisor::is_enabled(),
-                        #[cfg(not(trace))]
-                        tracing: false,
                     });
                 }
 

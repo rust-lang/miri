@@ -304,14 +304,13 @@ impl IsolatedAlloc {
 
     /// Returns a vector of page addresses managed by the allocator.
     pub fn pages(&self) -> Vec<usize> {
-        let mut pages: Vec<usize> =
-            self.page_ptrs.iter().map(|p| p.expose_provenance().get()).collect();
-        for (ptr, size) in self.huge_ptrs.iter() {
-            for i in 0..size / self.page_size {
-                pages.push(ptr.expose_provenance().get().strict_add(i * self.page_size));
-            }
-        }
-        pages
+        let pages = self.page_ptrs.iter().map(|p| p.expose_provenance().get());
+        let pages = pages.chain(self.huge_ptrs.iter().flat_map(|(ptr, size)| {
+            (0..size / self.page_size)
+                .map(|i| ptr.expose_provenance().get().strict_add(i * self.page_size))
+        }));
+
+        pages.collect()
     }
 
     /// Protects all owned memory as `PROT_NONE`, preventing accesses.

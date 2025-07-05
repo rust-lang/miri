@@ -6,3 +6,8 @@ pub use self::child::{Supervisor, init_sv, register_retcode_sv};
 
 /// The size of the temporary stack we use for callbacks that the server executes in the client.
 const CALLBACK_STACK_SIZE: usize = 1024;
+
+pub(super) type CallResult<'tcx> = rustc_const_eval::interpret::InterpResult<
+    'tcx,
+    (crate::ImmTy<'tcx>, Option<messages::MemEvents>),
+>;

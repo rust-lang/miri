@@ -233,8 +233,6 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         } else {
             let return_code = miri::eval_entry(tcx, entry_def_id, entry_type, &config, None)
                 .unwrap_or_else(|| {
-                    #[cfg(trace)]
-                    miri::native_lib::register_retcode_sv(rustc_driver::EXIT_FAILURE);
                     tcx.dcx().abort_if_errors();
                     rustc_driver::EXIT_FAILURE
                 });
@@ -337,6 +335,7 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
 fn exit(exit_code: i32) -> ! {
     // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
     deinit_loggers();
+    miri::native_lib::register_retcode_sv(exit_code);
     std::process::exit(exit_code);
 }
 
@@ -750,9 +749,8 @@ fn main() {
 
     debug!("rustc arguments: {:?}", rustc_args);
     debug!("crate arguments: {:?}", miri_config.args);
-    #[cfg(trace)]
     if !miri_config.native_lib.is_empty() && miri_config.native_lib_enable_tracing {
-        // FIXME: This should display a diagnostic / warning on error
+        // FIXME(ptrace): This should display a diagnostic / warning on error
         // SAFETY: If any other threads exist at this point (namely for the ctrlc
         // handler), they will not interact with anything on the main rustc/Miri
         // thread in an async-signal-unsafe way such as by accessing shared
