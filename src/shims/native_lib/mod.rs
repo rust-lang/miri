@@ -10,14 +10,6 @@ use rustc_middle::ty::{self as ty, IntTy, UintTy};
 use rustc_span::Symbol;
 
 #[cfg_attr(
-    all(
-        target_os = "linux",
-        target_env = "gnu",
-        any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
-    ),
-    path = "trace/mod.rs"
-)]
-#[cfg_attr(
     not(all(
         target_os = "linux",
         target_env = "gnu",
@@ -41,10 +33,12 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         libffi_args: Vec<libffi::high::Arg<'a>>,
     ) -> trace::CallResult<'tcx> {
         let this = self.eval_context_mut();
+        #[cfg(target_os = "linux")]
         let alloc = this.machine.allocator.as_ref().unwrap();
 
         // SAFETY: We don't touch the machine memory past this point.
-        let (guard, stack_ptr) = unsafe { Supervisor::start_ffi(alloc) };
+        #[cfg(target_os = "linux")]
+        let guard = unsafe { Supervisor::start_ffi(alloc) };
 
         // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
         // as the specified primitive integer type
@@ -118,8 +112,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // SAFETY: We got the guard and stack pointer from start_ffi, and
         // the allocator is the same
-        let events = unsafe { Supervisor::end_ffi(alloc, guard, stack_ptr) };
-        //let events = None;
+        let events = unsafe { Supervisor::end_ffi(guard) };
 
         interp_ok((res?, events))
     }

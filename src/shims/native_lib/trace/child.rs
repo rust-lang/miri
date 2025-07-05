@@ -10,6 +10,11 @@ use super::messages::{Confirmation, MemEvents, StartFfiInfo, TraceRequest};
 use super::parent::{ChildListener, sv_loop};
 use crate::alloc::isolated_alloc::IsolatedAlloc;
 
+/// A handle to the single, shared supervisor process across all `MiriMachine`s.
+/// Since it would be very difficult to trace multiple FFI calls in parallel, we
+/// need to ensure that either (a) only one `MiriMachine` is performing an FFI call
+/// at any given time, or (b) there are distinct supervisor and child processes for
+/// each machine. The former was chosen here.
 static SUPERVISOR: std::sync::Mutex<Option<Supervisor>> = std::sync::Mutex::new(None);
 
 /// The main means of communication between the child and parent process,
@@ -22,6 +27,12 @@ pub struct Supervisor {
     confirm_rx: ipc::IpcReceiver<Confirmation>,
     /// Receiver for memory acceses that ocurred during the FFI call.
     event_rx: ipc::IpcReceiver<MemEvents>,
+}
+
+pub struct SvFfiGuard<'a> {
+    alloc: &'a Rc<RefCell<IsolatedAlloc>>,
+    sv_guard: std::sync::MutexGuard<'static, Option<Supervisor>>,
+    cb_stack: Option<*mut [u8; CALLBACK_STACK_SIZE]>,
 }
 
 /// Marker representing that an error occurred during creation of the supervisor.
@@ -46,7 +57,7 @@ impl Supervisor {
     /// after the desired call has concluded.
     pub unsafe fn start_ffi(
         alloc: &Rc<RefCell<IsolatedAlloc>>,
-    ) -> (std::sync::MutexGuard<'static, Option<Supervisor>>, Option<*mut [u8; CALLBACK_STACK_SIZE]>)
+    ) -> SvFfiGuard<'_>
     {
         let mut sv_guard = SUPERVISOR.lock().unwrap();
         // If the supervisor is not initialised for whatever reason, fast-return.
@@ -54,12 +65,16 @@ impl Supervisor {
         // is not implemented it enables us to enforce that only one FFI call
         // happens at a time.
         let Some(sv) = sv_guard.as_mut() else {
-            return (sv_guard, None);
+            return SvFfiGuard {
+                alloc,
+                sv_guard,
+                cb_stack: None,
+            };
         };
 
         // Get pointers to all the pages the supervisor must allow accesses in
         // and prepare the callback stack.
-        let page_ptrs = alloc.borrow().pages();
+        let page_ptrs = alloc.borrow().pages().collect();
         let raw_stack_ptr: *mut [u8; CALLBACK_STACK_SIZE] =
             Box::leak(Box::new([0u8; CALLBACK_STACK_SIZE])).as_mut_ptr().cast();
         let stack_ptr = raw_stack_ptr.expose_provenance();
@@ -86,7 +101,11 @@ impl Supervisor {
         // modifications to our memory - simply waiting on the recv() doesn't
         // count.
         signal::raise(signal::SIGSTOP).unwrap();
-        (sv_guard, Some(raw_stack_ptr))
+        SvFfiGuard {
+            alloc,
+            sv_guard,
+            cb_stack: Some(raw_stack_ptr),
+        }
     }
 
     /// Undoes FFI-related preparations, allowing Miri to continue as normal, then
@@ -98,10 +117,12 @@ impl Supervisor {
     /// received by a prior call to `start_ffi`, and the allocator must be the
     /// one passed to it also.
     pub unsafe fn end_ffi(
-        alloc: &Rc<RefCell<IsolatedAlloc>>,
-        mut sv_guard: std::sync::MutexGuard<'static, Option<Supervisor>>,
-        raw_stack_ptr: Option<*mut [u8; CALLBACK_STACK_SIZE]>,
+        guard: SvFfiGuard<'_>,
     ) -> Option<MemEvents> {
+        let alloc = guard.alloc;
+        let mut sv_guard = guard.sv_guard;
+        let cb_stack = guard.cb_stack;
+
         // We can't use IPC channels here to signal that FFI mode has ended,
         // since they might allocate memory which could get us stuck in a SIGTRAP
         // with no easy way out! While this could be worked around, it is much
@@ -121,7 +142,7 @@ impl Supervisor {
         // SAFETY: Caller upholds that this pointer was allocated as a box with
         // this type.
         unsafe {
-            drop(Box::from_raw(raw_stack_ptr.unwrap()));
+            drop(Box::from_raw(cb_stack.unwrap()));
         }
         // On the off-chance something really weird happens, don't block forever.
         sv.event_rx
@@ -130,7 +151,7 @@ impl Supervisor {
                 match e {
                     ipc::TryRecvError::IpcError(_) => (),
                     ipc::TryRecvError::Empty =>
-                        eprintln!("Waiting for accesses from supervisor timed out!"),
+                        panic!("Waiting for accesses from supervisor timed out!"),
                 }
             })
             .ok()
@@ -141,6 +162,10 @@ impl Supervisor {
 /// supervisor process could not be created successfully; else, the caller
 /// is now the child process and can communicate via `start_ffi`/`end_ffi`,
 /// receiving back events through `get_events`.
+/// 
+/// When forking to initialise the supervisor, the child raises a `SIGSTOP`; if
+/// the parent successfully ptraces the child, it will allow it to resume. Else,
+/// the child will be killed by the parent.
 ///
 /// # Safety
 /// The invariants for `fork()` must be upheld by the caller, namely either:
@@ -150,11 +175,6 @@ impl Supervisor {
 pub unsafe fn init_sv() -> Result<(), SvInitError> {
     // FIXME: Much of this could be reimplemented via the mitosis crate if we upstream the
     // relevant missing bits.
-
-    // Not on a properly supported architecture!
-    if cfg!(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))) {
-        return Err(SvInitError);
-    }
 
     // On Linux, this will check whether ptrace is fully disabled by the Yama module.
     // If Yama isn't running or we're not on Linux, we'll still error later, but

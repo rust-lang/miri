@@ -354,6 +354,10 @@ fn run_compiler_and_exit(
     args: &[String],
     callbacks: &mut (dyn rustc_driver::Callbacks + Send),
 ) -> ! {
+    // Install the ctrlc handler that sets `rustc_const_eval::CTRL_C_RECEIVED`, even if
+    // MIRI_BE_RUSTC is set.
+    rustc_driver::install_ctrlc_handler();
+
     // Invoke compiler, catch any unwinding panics and handle return code.
     let exit_code =
         rustc_driver::catch_with_exit_code(move || rustc_driver::run_compiler(args, callbacks));
@@ -437,10 +441,6 @@ fn main() {
 
     let args = rustc_driver::catch_fatal_errors(|| rustc_driver::args::raw_args(&early_dcx))
         .unwrap_or_else(|_| std::process::exit(rustc_driver::EXIT_FAILURE));
-
-    // Install the ctrlc handler that sets `rustc_const_eval::CTRL_C_RECEIVED`, even if
-    // MIRI_BE_RUSTC is set.
-    rustc_driver::install_ctrlc_handler();
 
     // If the environment asks us to actually be rustc, then do that.
     if let Some(crate_kind) = env::var_os("MIRI_BE_RUSTC") {
@@ -751,11 +751,7 @@ fn main() {
     debug!("crate arguments: {:?}", miri_config.args);
     if !miri_config.native_lib.is_empty() && miri_config.native_lib_enable_tracing {
         // FIXME(ptrace): This should display a diagnostic / warning on error
-        // SAFETY: If any other threads exist at this point (namely for the ctrlc
-        // handler), they will not interact with anything on the main rustc/Miri
-        // thread in an async-signal-unsafe way such as by accessing shared
-        // semaphores, etc.; the handler only calls `sleep()` and `exit()`, which
-        // are async-signal-safe, as is accessing atomics
+        // SAFETY: No other threads are running
         let _ = unsafe { miri::native_lib::init_sv() };
     }
     run_compiler_and_exit(

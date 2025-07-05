@@ -1,7 +1,8 @@
 //! Houses the types that are directly sent across the IPC channels.
+//! 
 //!
-//! The overall structure of a traced FFI call, from the child process's POV, is
-//! as follows:
+//! After initialisation is done, the overall structure of a traced FFI call from
+//! the child process's POV is as follows:
 //! ```
 //! message_tx.send(TraceRequest::StartFfi);
 //! confirm_rx.recv();

@@ -10,12 +10,10 @@ impl Supervisor {
     }
 
     #[inline(always)]
-    pub unsafe fn start_ffi<T>(_: T) -> ((), ()) {
-        ((), ())
-    }
+    pub unsafe fn start_ffi<T>(_: T) {}
 
     #[inline(always)]
-    pub unsafe fn end_ffi<T, U, V>(_: T, _: U, _: V) -> Option<!> {
+    pub unsafe fn end_ffi<T>(_: T) -> Option<!> {
         None
     }
 }
