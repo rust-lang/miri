@@ -16,8 +16,7 @@ impl Supervisor {
     }
 }
 
-#[expect(clippy::missing_safety_doc)]
-#[allow(dead_code)]
+#[allow(dead_code, clippy::missing_safety_doc)]
 #[inline(always)]
 pub unsafe fn init_sv() -> Result<(), !> {
     Ok(())
