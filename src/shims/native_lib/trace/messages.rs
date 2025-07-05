@@ -1,5 +1,8 @@
 //! Houses the types that are directly sent across the IPC channels.
-//! 
+//!
+//! When forking to initialise the supervisor during `init_sv`, the child raises
+//! a `SIGSTOP`; if the parent successfully ptraces the child, it will allow it
+//! to resume. Else, the child will be killed by the parent.
 //!
 //! After initialisation is done, the overall structure of a traced FFI call from
 //! the child process's POV is as follows:

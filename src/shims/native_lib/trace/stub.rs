@@ -1,5 +1,6 @@
-pub type CallResult<'tcx> =
-    rustc_const_eval::interpret::InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<!>)>;
+use rustc_const_eval::interpret::InterpResult;
+
+pub type CallResult<'tcx> = InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<!>)>;
 
 pub struct Supervisor;
 
@@ -8,14 +9,13 @@ impl Supervisor {
     pub fn is_enabled() -> bool {
         false
     }
+}
 
-    #[inline(always)]
-    pub unsafe fn start_ffi<T>(_: T) {}
-
-    #[inline(always)]
-    pub unsafe fn end_ffi<T>(_: T) -> Option<!> {
-        None
-    }
+pub fn do_ffi<'tcx, T>(
+    _: T,
+    f: impl FnOnce() -> InterpResult<'tcx, crate::ImmTy<'tcx>>,
+) -> CallResult<'tcx> {
+    f().map(|v| (v, None))
 }
 
 #[expect(clippy::missing_safety_doc)]

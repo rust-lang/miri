@@ -15,11 +15,10 @@ use rustc_span::Symbol;
         target_env = "gnu",
         any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
     )),
-    path = "trace_stub.rs"
+    path = "trace/stub.rs"
 )]
 pub mod trace;
 
-use self::trace::Supervisor;
 use crate::*;
 
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -35,14 +34,13 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         #[cfg(target_os = "linux")]
         let alloc = this.machine.allocator.as_ref().unwrap();
-
-        // SAFETY: We don't touch the machine memory past this point.
-        #[cfg(target_os = "linux")]
-        let guard = unsafe { Supervisor::start_ffi(alloc) };
+        #[cfg(not(target_os = "linux"))]
+        // Placeholder value.
+        let alloc = ();
 
         // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
         // as the specified primitive integer type
-        let res = 'res: {
+        let ffi_fn = || {
             let scalar = match dest.layout.ty.kind() {
                 // ints
                 ty::Int(IntTy::I8) => {
@@ -93,7 +91,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // have the output_type `Tuple([])`.
                 ty::Tuple(t_list) if (*t_list).deref().is_empty() => {
                     unsafe { ffi::call::<()>(ptr, libffi_args.as_slice()) };
-                    break 'res interp_ok(ImmTy::uninit(dest.layout));
+                    return interp_ok(ImmTy::uninit(dest.layout));
                 }
                 ty::RawPtr(..) => {
                     let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args.as_slice()) };
@@ -101,7 +99,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Scalar::from_pointer(ptr, this)
                 }
                 _ =>
-                    break 'res Err(err_unsup_format!(
+                    return Err(err_unsup_format!(
                         "unsupported return type for native call: {:?}",
                         link_name
                     ))
@@ -110,11 +108,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interp_ok(ImmTy::from_scalar(scalar, dest.layout))
         };
 
-        // SAFETY: We got the guard and stack pointer from start_ffi, and
-        // the allocator is the same
-        let events = unsafe { Supervisor::end_ffi(guard) };
-
-        interp_ok((res?, events))
+        trace::do_ffi(alloc, ffi_fn)
     }
 
     /// Get the pointer to the function of the specified name in the shared object file,

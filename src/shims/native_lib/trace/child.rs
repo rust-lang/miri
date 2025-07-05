@@ -15,6 +15,9 @@ use crate::alloc::isolated_alloc::IsolatedAlloc;
 /// need to ensure that either (a) only one `MiriMachine` is performing an FFI call
 /// at any given time, or (b) there are distinct supervisor and child processes for
 /// each machine. The former was chosen here.
+///
+/// This should only contain a `None` if the supervisor has not (yet) been initialised;
+/// otherwise, if `init_sv` was called and did not error, this will always be nonempty.
 static SUPERVISOR: std::sync::Mutex<Option<Supervisor>> = std::sync::Mutex::new(None);
 
 /// The main means of communication between the child and parent process,
@@ -55,21 +58,14 @@ impl Supervisor {
     ///
     /// SAFETY: The resulting guard must be dropped *via `end_ffi`* immediately
     /// after the desired call has concluded.
-    pub unsafe fn start_ffi(
-        alloc: &Rc<RefCell<IsolatedAlloc>>,
-    ) -> SvFfiGuard<'_>
-    {
+    pub unsafe fn start_ffi(alloc: &Rc<RefCell<IsolatedAlloc>>) -> SvFfiGuard<'_> {
         let mut sv_guard = SUPERVISOR.lock().unwrap();
         // If the supervisor is not initialised for whatever reason, fast-return.
         // This might be desired behaviour, as even on platforms where ptracing
         // is not implemented it enables us to enforce that only one FFI call
         // happens at a time.
         let Some(sv) = sv_guard.as_mut() else {
-            return SvFfiGuard {
-                alloc,
-                sv_guard,
-                cb_stack: None,
-            };
+            return SvFfiGuard { alloc, sv_guard, cb_stack: None };
         };
 
         // Get pointers to all the pages the supervisor must allow accesses in
@@ -101,11 +97,7 @@ impl Supervisor {
         // modifications to our memory - simply waiting on the recv() doesn't
         // count.
         signal::raise(signal::SIGSTOP).unwrap();
-        SvFfiGuard {
-            alloc,
-            sv_guard,
-            cb_stack: Some(raw_stack_ptr),
-        }
+        SvFfiGuard { alloc, sv_guard, cb_stack: Some(raw_stack_ptr) }
     }
 
     /// Undoes FFI-related preparations, allowing Miri to continue as normal, then
@@ -116,9 +108,7 @@ impl Supervisor {
     /// SAFETY: The `sv_guard` and `raw_stack_ptr` passed must be the same ones
     /// received by a prior call to `start_ffi`, and the allocator must be the
     /// one passed to it also.
-    pub unsafe fn end_ffi(
-        guard: SvFfiGuard<'_>,
-    ) -> Option<MemEvents> {
+    pub unsafe fn end_ffi(guard: SvFfiGuard<'_>) -> Option<MemEvents> {
         let alloc = guard.alloc;
         let mut sv_guard = guard.sv_guard;
         let cb_stack = guard.cb_stack;
@@ -162,10 +152,6 @@ impl Supervisor {
 /// supervisor process could not be created successfully; else, the caller
 /// is now the child process and can communicate via `start_ffi`/`end_ffi`,
 /// receiving back events through `get_events`.
-/// 
-/// When forking to initialise the supervisor, the child raises a `SIGSTOP`; if
-/// the parent successfully ptraces the child, it will allow it to resume. Else,
-/// the child will be killed by the parent.
 ///
 /// # Safety
 /// The invariants for `fork()` must be upheld by the caller, namely either:
