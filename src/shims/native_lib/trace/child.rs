@@ -53,8 +53,8 @@ impl Supervisor {
     ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let mut sv_guard = SUPERVISOR.lock().unwrap();
         // If the supervisor is not initialised for whatever reason, fast-return.
-        // This might be desired behaviour, as even on platforms where ptracing
-        // is not implemented it enables us to enforce that only one FFI call
+        // As a side-effect, even on platforms where ptracing
+        // is not implemented, we enforce that only one FFI call
         // happens at a time.
         let Some(sv) = sv_guard.as_mut() else { return f().map(|v| (v, None)) };
 
