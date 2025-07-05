@@ -751,10 +751,11 @@ fn main() {
     debug!("rustc arguments: {:?}", rustc_args);
     debug!("crate arguments: {:?}", miri_config.args);
     if !miri_config.native_lib.is_empty() && miri_config.native_lib_enable_tracing {
-        // FIXME(ptrace): This should display a diagnostic / warning on error
         // SAFETY: No other threads are running
         #[cfg(target_os = "linux")]
-        let _ = unsafe { miri::native_lib::init_sv() };
+        if unsafe { miri::native_lib::init_sv() }.is_err() {
+            eprintln!("warning: The native-lib tracer could not be started. Is this a Linux system, and does Miri have permissions to ptrace?");
+        }
     }
     run_compiler_and_exit(
         &rustc_args,
