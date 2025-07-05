@@ -302,7 +302,7 @@ impl IsolatedAlloc {
         }
     }
 
-    /// Returns a vector of page addresses managed by the allocator.
+    /// Returns a list of page addresses managed by the allocator.
     pub fn pages(&self) -> impl Iterator<Item = usize> {
         let pages = self.page_ptrs.iter().map(|p| p.expose_provenance().get());
         pages.chain(self.huge_ptrs.iter().flat_map(|(ptr, size)| {
