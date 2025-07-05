@@ -176,8 +176,7 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                 // The child process is free to unwind, so we won't to avoid doubly freeing
                 // system resources.
                 let init = std::panic::catch_unwind(|| {
-                    let listener =
-                        ChildListener { message_rx, attached: false, override_retcode: None };
+                    let listener = ChildListener::new(message_rx, confirm_tx.clone());
                     // Trace as many things as possible, to be able to handle them as needed.
                     let options = ptrace::Options::PTRACE_O_TRACESYSGOOD
                         | ptrace::Options::PTRACE_O_TRACECLONE
@@ -231,5 +230,6 @@ pub fn register_retcode_sv(code: i32) {
     let mut sv_guard = SUPERVISOR.lock().unwrap();
     if let Some(sv) = sv_guard.as_mut() {
         sv.message_tx.send(TraceRequest::OverrideRetcode(code)).unwrap();
+        sv.confirm_rx.recv().unwrap();
     }
 }

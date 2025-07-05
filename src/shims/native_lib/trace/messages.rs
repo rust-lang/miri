@@ -15,7 +15,8 @@
 //! let events = event_rx.recv();
 //! ```
 //! `TraceRequest::OverrideRetcode` can be sent at any point in the above, including
-//! before or after all of them.
+//! before or after all of them. `confirm_rx.recv()` is to be called after, to ensure
+//! that the child does not exit before the supervisor has registered the return code.
 //!
 //! NB: sending these events out of order, skipping steps, etc. will result in
 //! unspecified behaviour from the supervisor process, so use the abstractions
@@ -36,6 +37,8 @@ pub enum TraceRequest {
     StartFfi(StartFfiInfo),
     /// Manually overrides the code that the supervisor will return upon exiting.
     /// Once set, it is permanent. This can be called again to change the value.
+    ///
+    /// After sending this, the child must wait to receive a `Confirmation`.
     OverrideRetcode(i32),
 }
 

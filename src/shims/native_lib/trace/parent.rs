@@ -12,14 +12,6 @@ use crate::shims::native_lib::{AccessEvent, AccessRange, MemEvents};
 const WAIT_FLAGS: wait::WaitPidFlag =
     wait::WaitPidFlag::WUNTRACED.union(wait::WaitPidFlag::WEXITED);
 
-/// Arch-specific maximum size a single access might perform. x86 value is set
-/// assuming nothing bigger than AVX-512 is available.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-const ARCH_MAX_ACCESS_SIZE: usize = 64;
-/// The largest arm64 simd instruction operates on 16 bytes.
-#[cfg(target_arch = "aarch64")]
-const ARCH_MAX_ACCESS_SIZE: usize = 16;
-
 /// The default word size on a given platform, in bytes.
 #[cfg(target_arch = "x86")]
 const ARCH_WORD_SIZE: usize = 4;
@@ -105,11 +97,24 @@ pub enum ExecEvent {
 /// A listener for the FFI start info channel along with relevant state.
 pub struct ChildListener {
     /// The matching channel for the child's `Supervisor` struct.
-    pub message_rx: ipc::IpcReceiver<TraceRequest>,
+    message_rx: ipc::IpcReceiver<TraceRequest>,
+    /// ...
+    confirm_tx: ipc::IpcSender<Confirmation>,
     /// Whether an FFI call is currently ongoing.
-    pub attached: bool,
+    attached: bool,
     /// If `Some`, overrides the return code with the given value.
-    pub override_retcode: Option<i32>,
+    override_retcode: Option<i32>,
+    /// Last code obtained from a child exiting.
+    last_code: Option<i32>,
+}
+
+impl ChildListener {
+    pub fn new(
+        message_rx: ipc::IpcReceiver<TraceRequest>,
+        confirm_tx: ipc::IpcSender<Confirmation>,
+    ) -> Self {
+        Self { message_rx, confirm_tx, attached: false, override_retcode: None, last_code: None }
+    }
 }
 
 impl Iterator for ChildListener {
@@ -129,13 +134,9 @@ impl Iterator for ChildListener {
                 Ok(stat) =>
                     match stat {
                         // Child exited normally with a specific code set.
-                        wait::WaitStatus::Exited(_, code) => {
-                            let code = self.override_retcode.unwrap_or(code);
-                            return Some(ExecEvent::Died(Some(code)));
-                        }
+                        wait::WaitStatus::Exited(_, code) => self.last_code = Some(code),
                         // Child was killed by a signal, without giving a code.
-                        wait::WaitStatus::Signaled(_, _, _) =>
-                            return Some(ExecEvent::Died(self.override_retcode)),
+                        wait::WaitStatus::Signaled(_, _, _) => self.last_code = None,
                         // Child entered or exited a syscall.
                         wait::WaitStatus::PtraceSyscall(pid) =>
                             if self.attached {
@@ -173,10 +174,8 @@ impl Iterator for ChildListener {
                             },
                         _ => (),
                     },
-                // This case should only trigger if all children died and we
-                // somehow missed that, but it's best we not allow any room
-                // for deadlocks.
-                Err(_) => return Some(ExecEvent::Died(None)),
+                // This case should only trigger when all children died.
+                Err(_) => return Some(ExecEvent::Died(self.override_retcode.or(self.last_code))),
             }
 
             // Similarly, do a non-blocking poll of the IPC channel.
@@ -190,7 +189,10 @@ impl Iterator for ChildListener {
                             self.attached = true;
                             return Some(ExecEvent::Start(info));
                         },
-                    TraceRequest::OverrideRetcode(code) => self.override_retcode = Some(code),
+                    TraceRequest::OverrideRetcode(code) => {
+                        self.override_retcode = Some(code);
+                        self.confirm_tx.send(Confirmation).unwrap();
+                    }
                 }
             }
 
@@ -406,8 +408,6 @@ fn handle_segfault(
                     match x86_operand.op_type {
                         // We only care about memory accesses
                         arch::x86::X86OperandType::Mem(_) => {
-                            use crate::shims::native_lib::AccessRange;
-
                             let push = AccessRange {
                                 addr,
                                 min_size: x86_operand.size.into(),
@@ -421,54 +421,13 @@ fn handle_segfault(
                             if acc_ty.is_writable() {
                                 acc_events.push(AccessEvent::Write(push));
                             }
+
+                            return Ok(());
                         }
                         _ => (),
                     }
                 }
-                #[cfg(target_arch = "aarch64")]
-                arch::ArchOperand::Arm64Operand(arm64_operand) => {
-                    // Annoyingly, we don't always get the size here, so just be pessimistic for now.
-                    match arm64_operand.op_type {
-                        arch::arm64::Arm64OperandType::Mem(_) => {
-                            let mut is_vas = true;
-                            // B = 1 byte, H = 2 bytes, S = 4 bytes, D = 8 bytes, Q = 16 bytes.
-                            let max_size = match arm64_operand.vas {
-                                // Not an fp/simd instruction.
-                                arch::arm64::Arm64Vas::ARM64_VAS_INVALID => {
-                                    is_vas = false;
-                                    ARCH_WORD_SIZE
-                                }
-                                // 1 byte.
-                                arch::arm64::Arm64Vas::ARM64_VAS_1B => 1,
-                                // 2 bytes.
-                                arch::arm64::Arm64Vas::ARM64_VAS_1H => 2,
-                                // 4 bytes.
-                                arch::arm64::Arm64Vas::ARM64_VAS_4B
-                                | arch::arm64::Arm64Vas::ARM64_VAS_2H
-                                | arch::arm64::Arm64Vas::ARM64_VAS_1S => 4,
-                                // 8 bytes.
-                                arch::arm64::Arm64Vas::ARM64_VAS_8B
-                                | arch::arm64::Arm64Vas::ARM64_VAS_4H
-                                | arch::arm64::Arm64Vas::ARM64_VAS_2S
-                                | arch::arm64::Arm64Vas::ARM64_VAS_1D => 8,
-                                // 16 bytes.
-                                arch::arm64::Arm64Vas::ARM64_VAS_16B
-                                | arch::arm64::Arm64Vas::ARM64_VAS_8H
-                                | arch::arm64::Arm64Vas::ARM64_VAS_4S
-                                | arch::arm64::Arm64Vas::ARM64_VAS_2D
-                                | arch::arm64::Arm64Vas::ARM64_VAS_1Q => 16,
-                            };
-                            let min_size = if is_vas { max_size } else { 1 };
-                            let push = AccessRange { addr, max_size, min_size };
-                            // FIXME: This now has access type info in the latest
-                            // git version of capstone because this pissed me off
-                            // and I added it. Change this when it updates.
-                            acc_events.push(AccessEvent::Read(push.clone()));
-                            acc_events.push(AccessEvent::Write(push));
-                        }
-                        _ => (),
-                    }
-                }
+                // FIXME: arm64
                 _ => unimplemented!(),
             }
         }
@@ -580,11 +539,7 @@ fn handle_segfault(
     });
 
     // Now figure out the size + type of access and log it down.
-    if capstone_disassemble(&instr, addr, cs, acc_events).is_err() {
-        let fallback = AccessRange { addr, max_size: ARCH_MAX_ACCESS_SIZE, min_size: 0 };
-        acc_events.push(AccessEvent::Read(fallback.clone()));
-        acc_events.push(AccessEvent::Write(fallback));
-    }
+    capstone_disassemble(&instr, addr, cs, acc_events).expect("Failed to disassemble instruction");
 
     // Reprotect everything and continue.
     #[expect(clippy::as_conversions)]
