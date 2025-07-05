@@ -19,10 +19,8 @@
 //!
 //! NB: sending these events out of order, skipping steps, etc. will result in
 //! unspecified behaviour from the supervisor process, so use the abstractions
-//! in `super::child` (namely `start_ffi()` and `end_ffi()`) to handle this. It is
+//! in `super::child` (namely `do_ffi()`) to handle this. It is
 //! trivially easy to cause a deadlock or crash by messing this up!
-
-use std::ops::Range;
 
 /// An IPC request sent by the child process to the parent.
 ///
@@ -58,27 +56,3 @@ pub struct StartFfiInfo {
 /// The sender for this channel should live on the parent process.
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Confirmation;
-
-/// The final results of an FFI trace, containing every relevant event detected
-/// by the tracer. Sent by the supervisor after receiving a `SIGUSR1` signal.
-///
-/// The sender for this channel should live on the parent process.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct MemEvents {
-    /// An ordered list of memory accesses that occurred. These should be assumed
-    /// to be overcautious; that is, if the size of an access is uncertain it is
-    /// pessimistically rounded up, and if the type (read/write/both) is uncertain
-    /// it is reported as whatever would be safest to assume; i.e. a read + maybe-write
-    /// becomes a read + write, etc.
-    pub acc_events: Vec<AccessEvent>,
-}
-
-/// A single memory access, conservatively overestimated
-/// in case of ambiguity.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub enum AccessEvent {
-    /// A read may have occurred on no more than the specified address range.
-    Read(Range<usize>),
-    /// A write may have occurred on no more than the specified address range.
-    Write(Range<usize>),
-}

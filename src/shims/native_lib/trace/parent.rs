@@ -5,7 +5,8 @@ use nix::sys::{ptrace, signal, wait};
 use nix::unistd;
 
 use super::CALLBACK_STACK_SIZE;
-use super::messages::{AccessEvent, Confirmation, MemEvents, StartFfiInfo, TraceRequest};
+use super::messages::{Confirmation, StartFfiInfo, TraceRequest};
+use crate::shims::native_lib::{AccessEvent, AccessRange, MemEvents};
 
 /// The flags to use when calling `waitid()`.
 const WAIT_FLAGS: wait::WaitPidFlag =
@@ -49,41 +50,38 @@ trait ArchIndependentRegs {
 }
 
 // It's fine / desirable behaviour for values to wrap here, we care about just
-// preserving the bit pattern. All of these casts are to/from usize-sized types.
+// preserving the bit pattern.
 #[cfg(target_arch = "x86_64")]
-#[expect(clippy::as_conversions)]
 #[rustfmt::skip]
 impl ArchIndependentRegs for libc::user_regs_struct {
     #[inline]
-    fn ip(&self) -> usize { self.rip as _ }
+    fn ip(&self) -> usize { self.rip.try_into().unwrap() }
     #[inline]
-    fn set_ip(&mut self, ip: usize) { self.rip = ip as _ }
+    fn set_ip(&mut self, ip: usize) { self.rip = ip.try_into().unwrap() }
     #[inline]
-    fn set_sp(&mut self, sp: usize) { self.rsp = sp as _ }
+    fn set_sp(&mut self, sp: usize) { self.rsp = sp.try_into().unwrap() }
 }
 
 #[cfg(target_arch = "x86")]
-#[expect(clippy::as_conversions)]
 #[rustfmt::skip]
 impl ArchIndependentRegs for libc::user_regs_struct {
     #[inline]
-    fn ip(&self) -> usize { self.eip as _ }
+    fn ip(&self) -> usize { self.eip.try_into().unwrap() }
     #[inline]
-    fn set_ip(&mut self, ip: usize) { self.eip = ip as _ }
+    fn set_ip(&mut self, ip: usize) { self.eip = ip.try_into().unwrap() }
     #[inline]
-    fn set_sp(&mut self, sp: usize) { self.esp = sp as _ }
+    fn set_sp(&mut self, sp: usize) { self.esp = sp.try_into().unwrap() }
 }
 
 #[cfg(target_arch = "aarch64")]
-#[expect(clippy::as_conversions)]
 #[rustfmt::skip]
 impl ArchIndependentRegs for libc::user_regs_struct {
     #[inline]
-    fn ip(&self) -> usize { self.pc as _ }
+    fn ip(&self) -> usize { self.pc.try_into().unwrap() }
     #[inline]
-    fn set_ip(&mut self, ip: usize) { self.pc = ip as _ }
+    fn set_ip(&mut self, ip: usize) { self.pc = ip.try_into().unwrap() }
     #[inline]
-    fn set_sp(&mut self, sp: usize) { self.sp = sp as _ }
+    fn set_sp(&mut self, sp: usize) { self.sp = sp.try_into().unwrap() }
 }
 
 /// A unified event representing something happening on the child process. Wraps
@@ -246,7 +244,7 @@ pub fn sv_loop(
 
     for evt in listener {
         match evt {
-            // start_ffi was called by the child, so prep memory.
+            // Child started ffi, so prep memory.
             ExecEvent::Start(ch_info) => {
                 // All the pages that the child process is "allowed to" access.
                 ch_pages = ch_info.page_ptrs;
@@ -254,7 +252,7 @@ pub fn sv_loop(
                 ch_stack = Some(ch_info.stack_ptr);
 
                 // We received the signal and are no longer in the main listener loop,
-                // so we can let the child move on to the end of start_ffi where it will
+                // so we can let the child move on to the end of the ffi prep where it will
                 // raise a SIGSTOP. We need it to be signal-stopped *and waited for* in
                 // order to do most ptrace operations!
                 confirm_tx.send(Confirmation).unwrap();
@@ -264,7 +262,7 @@ pub fn sv_loop(
 
                 ptrace::syscall(curr_pid, None).unwrap();
             }
-            // end_ffi was called by the child.
+            // Child wants to end tracing.
             ExecEvent::End => {
                 // Hand over the access info we traced.
                 event_tx.send(MemEvents { acc_events }).unwrap();
@@ -408,7 +406,13 @@ fn handle_segfault(
                     match x86_operand.op_type {
                         // We only care about memory accesses
                         arch::x86::X86OperandType::Mem(_) => {
-                            let push = addr..addr.strict_add(usize::from(x86_operand.size));
+                            use crate::shims::native_lib::AccessRange;
+
+                            let push = AccessRange {
+                                addr,
+                                min_size: x86_operand.size.into(),
+                                max_size: x86_operand.size.into(),
+                            };
                             // It's called a "RegAccessType" but it also applies to memory
                             let acc_ty = x86_operand.access.unwrap();
                             if acc_ty.is_readable() {
@@ -426,10 +430,14 @@ fn handle_segfault(
                     // Annoyingly, we don't always get the size here, so just be pessimistic for now.
                     match arm64_operand.op_type {
                         arch::arm64::Arm64OperandType::Mem(_) => {
+                            let mut is_vas = true;
                             // B = 1 byte, H = 2 bytes, S = 4 bytes, D = 8 bytes, Q = 16 bytes.
-                            let size = match arm64_operand.vas {
+                            let max_size = match arm64_operand.vas {
                                 // Not an fp/simd instruction.
-                                arch::arm64::Arm64Vas::ARM64_VAS_INVALID => ARCH_WORD_SIZE,
+                                arch::arm64::Arm64Vas::ARM64_VAS_INVALID => {
+                                    is_vas = false;
+                                    ARCH_WORD_SIZE
+                                }
                                 // 1 byte.
                                 arch::arm64::Arm64Vas::ARM64_VAS_1B => 1,
                                 // 2 bytes.
@@ -450,7 +458,8 @@ fn handle_segfault(
                                 | arch::arm64::Arm64Vas::ARM64_VAS_2D
                                 | arch::arm64::Arm64Vas::ARM64_VAS_1Q => 16,
                             };
-                            let push = addr..addr.strict_add(size);
+                            let min_size = if is_vas { max_size } else { 1 };
+                            let push = AccessRange { addr, max_size, min_size };
                             // FIXME: This now has access type info in the latest
                             // git version of capstone because this pissed me off
                             // and I added it. Change this when it updates.
@@ -572,8 +581,9 @@ fn handle_segfault(
 
     // Now figure out the size + type of access and log it down.
     if capstone_disassemble(&instr, addr, cs, acc_events).is_err() {
-        acc_events.push(AccessEvent::Read(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE)));
-        acc_events.push(AccessEvent::Write(addr..addr.strict_add(ARCH_MAX_ACCESS_SIZE)));
+        let fallback = AccessRange { addr, max_size: ARCH_MAX_ACCESS_SIZE, min_size: 0 };
+        acc_events.push(AccessEvent::Read(fallback.clone()));
+        acc_events.push(AccessEvent::Write(fallback));
     }
 
     // Reprotect everything and continue.

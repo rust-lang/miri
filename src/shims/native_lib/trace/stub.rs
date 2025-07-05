@@ -1,7 +1,5 @@
 use rustc_const_eval::interpret::InterpResult;
 
-pub type CallResult<'tcx> = InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<!>)>;
-
 pub struct Supervisor;
 
 impl Supervisor {
@@ -9,20 +7,22 @@ impl Supervisor {
     pub fn is_enabled() -> bool {
         false
     }
-}
 
-pub fn do_ffi<'tcx, T>(
-    _: T,
-    f: impl FnOnce() -> InterpResult<'tcx, crate::ImmTy<'tcx>>,
-) -> CallResult<'tcx> {
-    f().map(|v| (v, None))
+    pub fn do_ffi<'tcx, T>(
+        _: T,
+        f: impl FnOnce() -> InterpResult<'tcx, crate::ImmTy<'tcx>>,
+    ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<super::MemEvents>)> {
+        f().map(|v| (v, None))
+    }
 }
 
 #[expect(clippy::missing_safety_doc)]
+#[allow(dead_code)]
 #[inline(always)]
 pub unsafe fn init_sv() -> Result<(), !> {
     Ok(())
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 pub fn register_retcode_sv<T>(_: T) {}

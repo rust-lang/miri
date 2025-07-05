@@ -21,6 +21,46 @@ pub mod trace;
 
 use crate::*;
 
+/// The final results of an FFI trace, containing every relevant event detected
+/// by the tracer. Sent by the supervisor after receiving a `SIGUSR1` signal.
+///
+/// The sender for this channel should live on the parent process.
+#[allow(dead_code)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub struct MemEvents {
+    /// An ordered list of memory accesses that occurred. These should be assumed
+    /// to be overcautious; that is, if the size of an access is uncertain it is
+    /// pessimistically rounded up, and if the type (read/write/both) is uncertain
+    /// it is reported as whatever would be safest to assume; i.e. a read + maybe-write
+    /// becomes a read + write, etc.
+    pub acc_events: Vec<AccessEvent>,
+}
+
+/// A single memory access.
+#[allow(dead_code)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub enum AccessEvent {
+    /// A read may have occurred on no more than the specified address range.
+    Read(AccessRange),
+    /// A write may have occurred on no more than the specified address range.
+    Write(AccessRange),
+}
+
+/// The actual size of a performed access, bounded by size.
+#[allow(dead_code)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
+pub struct AccessRange {
+    /// The base address in memory where an access occurred.
+    pub addr: usize,
+    /// The smallest size this access could have been.
+    pub min_size: usize,
+    /// The largest size this access could have been.
+    pub max_size: usize,
+}
+
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Call native host function and return the output as an immediate.
@@ -30,7 +70,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
         libffi_args: Vec<libffi::high::Arg<'a>>,
-    ) -> trace::CallResult<'tcx> {
+    ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let this = self.eval_context_mut();
         #[cfg(target_os = "linux")]
         let alloc = this.machine.allocator.as_ref().unwrap();
@@ -108,7 +148,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interp_ok(ImmTy::from_scalar(scalar, dest.layout))
         };
 
-        trace::do_ffi(alloc, ffi_fn)
+        trace::Supervisor::do_ffi(alloc, ffi_fn)
     }
 
     /// Get the pointer to the function of the specified name in the shared object file,

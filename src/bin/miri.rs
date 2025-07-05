@@ -335,6 +335,7 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
 fn exit(exit_code: i32) -> ! {
     // Drop the tracing guard before exiting, so tracing calls are flushed correctly.
     deinit_loggers();
+    #[cfg(target_os = "linux")]
     miri::native_lib::register_retcode_sv(exit_code);
     std::process::exit(exit_code);
 }
@@ -752,6 +753,7 @@ fn main() {
     if !miri_config.native_lib.is_empty() && miri_config.native_lib_enable_tracing {
         // FIXME(ptrace): This should display a diagnostic / warning on error
         // SAFETY: No other threads are running
+        #[cfg(target_os = "linux")]
         let _ = unsafe { miri::native_lib::init_sv() };
     }
     run_compiler_and_exit(

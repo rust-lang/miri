@@ -4,11 +4,13 @@ use std::rc::Rc;
 use ipc_channel::ipc;
 use nix::sys::{ptrace, signal};
 use nix::unistd;
+use rustc_const_eval::interpret::InterpResult;
 
 use super::CALLBACK_STACK_SIZE;
-use super::messages::{Confirmation, MemEvents, StartFfiInfo, TraceRequest};
+use super::messages::{Confirmation, StartFfiInfo, TraceRequest};
 use super::parent::{ChildListener, sv_loop};
 use crate::alloc::isolated_alloc::IsolatedAlloc;
+use crate::shims::native_lib::MemEvents;
 
 /// A handle to the single, shared supervisor process across all `MiriMachine`s.
 /// Since it would be very difficult to trace multiple FFI calls in parallel, we
@@ -32,12 +34,6 @@ pub struct Supervisor {
     event_rx: ipc::IpcReceiver<MemEvents>,
 }
 
-pub struct SvFfiGuard<'a> {
-    alloc: &'a Rc<RefCell<IsolatedAlloc>>,
-    sv_guard: std::sync::MutexGuard<'static, Option<Supervisor>>,
-    cb_stack: Option<*mut [u8; CALLBACK_STACK_SIZE]>,
-}
-
 /// Marker representing that an error occurred during creation of the supervisor.
 #[derive(Debug)]
 pub struct SvInitError;
@@ -48,25 +44,19 @@ impl Supervisor {
         SUPERVISOR.lock().unwrap().is_some()
     }
 
-    /// Begins preparations for doing an FFI call. This should be called at
-    /// the last possible moment before entering said call. `alloc` points to
-    /// the allocator which handed out the memory used for this machine.
-    ///
+    /// Performs an arbitrary FFI call, enabling tracing from the supervisor.
     /// As this locks the supervisor via a mutex, no other threads may enter FFI
-    /// until this one returns and its guard is dropped via `end_ffi`. The
-    /// pointer returned should be passed to `end_ffi` to avoid a memory leak.
-    ///
-    /// SAFETY: The resulting guard must be dropped *via `end_ffi`* immediately
-    /// after the desired call has concluded.
-    pub unsafe fn start_ffi(alloc: &Rc<RefCell<IsolatedAlloc>>) -> SvFfiGuard<'_> {
+    /// until this function returns.
+    pub fn do_ffi<'tcx>(
+        alloc: &Rc<RefCell<IsolatedAlloc>>,
+        f: impl FnOnce() -> InterpResult<'tcx, crate::ImmTy<'tcx>>,
+    ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let mut sv_guard = SUPERVISOR.lock().unwrap();
         // If the supervisor is not initialised for whatever reason, fast-return.
         // This might be desired behaviour, as even on platforms where ptracing
         // is not implemented it enables us to enforce that only one FFI call
         // happens at a time.
-        let Some(sv) = sv_guard.as_mut() else {
-            return SvFfiGuard { alloc, sv_guard, cb_stack: None };
-        };
+        let Some(sv) = sv_guard.as_mut() else { return f().map(|v| (v, None)) };
 
         // Get pointers to all the pages the supervisor must allow accesses in
         // and prepare the callback stack.
@@ -97,21 +87,8 @@ impl Supervisor {
         // modifications to our memory - simply waiting on the recv() doesn't
         // count.
         signal::raise(signal::SIGSTOP).unwrap();
-        SvFfiGuard { alloc, sv_guard, cb_stack: Some(raw_stack_ptr) }
-    }
 
-    /// Undoes FFI-related preparations, allowing Miri to continue as normal, then
-    /// gets the memory accesses and changes performed during the FFI call. Note
-    /// that this may include some spurious accesses done by `libffi` itself in
-    /// the process of executing the function call.
-    ///
-    /// SAFETY: The `sv_guard` and `raw_stack_ptr` passed must be the same ones
-    /// received by a prior call to `start_ffi`, and the allocator must be the
-    /// one passed to it also.
-    pub unsafe fn end_ffi(guard: SvFfiGuard<'_>) -> Option<MemEvents> {
-        let alloc = guard.alloc;
-        let mut sv_guard = guard.sv_guard;
-        let cb_stack = guard.cb_stack;
+        let res = f();
 
         // We can't use IPC channels here to signal that FFI mode has ended,
         // since they might allocate memory which could get us stuck in a SIGTRAP
@@ -125,17 +102,14 @@ impl Supervisor {
         // This is safe! It just sets memory to normal expected permissions.
         alloc.borrow_mut().end_ffi();
 
-        // If this is `None`, then `raw_stack_ptr` is None and does not need to
-        // be deallocated (and there's no need to worry about the guard, since
-        // it contains nothing).
-        let sv = sv_guard.as_mut()?;
         // SAFETY: Caller upholds that this pointer was allocated as a box with
         // this type.
         unsafe {
-            drop(Box::from_raw(cb_stack.unwrap()));
+            drop(Box::from_raw(raw_stack_ptr));
         }
         // On the off-chance something really weird happens, don't block forever.
-        sv.event_rx
+        let events = sv
+            .event_rx
             .try_recv_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| {
                 match e {
@@ -144,14 +118,16 @@ impl Supervisor {
                         panic!("Waiting for accesses from supervisor timed out!"),
                 }
             })
-            .ok()
+            .ok();
+
+        res.map(|v| (v, events))
     }
 }
 
 /// Initialises the supervisor process. If this function errors, then the
 /// supervisor process could not be created successfully; else, the caller
-/// is now the child process and can communicate via `start_ffi`/`end_ffi`,
-/// receiving back events through `get_events`.
+/// is now the child process and can communicate via `do_ffi`, receiving back
+/// events at the end.
 ///
 /// # Safety
 /// The invariants for `fork()` must be upheld by the caller, namely either:
