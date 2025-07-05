@@ -1,9 +1,5 @@
 //! Implements calling functions from a native library.
 
-// FIXME: disabled since it fails to build on many targets.
-//#[cfg(target_os = "linux")]
-//pub mod trace;
-
 use std::ops::Deref;
 
 use libffi::high::call as ffi;
@@ -13,14 +9,57 @@ use rustc_middle::mir::interpret::Pointer;
 use rustc_middle::ty::{self as ty, IntTy, UintTy};
 use rustc_span::Symbol;
 
-//#[cfg(target_os = "linux")]
-//use self::trace::Supervisor;
+#[cfg_attr(
+    not(all(
+        target_os = "linux",
+        target_env = "gnu",
+        any(target_arch = "x86", target_arch = "x86_64")
+    )),
+    path = "trace/stub.rs"
+)]
+pub mod trace;
+
 use crate::*;
 
-//#[cfg(target_os = "linux")]
-//type CallResult<'tcx> = InterpResult<'tcx, (ImmTy<'tcx>, Option<self::trace::messages::MemEvents>)>;
-//#[cfg(not(target_os = "linux"))]
-type CallResult<'tcx> = InterpResult<'tcx, (ImmTy<'tcx>, Option<!>)>;
+/// The final results of an FFI trace, containing every relevant event detected
+/// by the tracer. Sent by the supervisor after receiving a `SIGUSR1` signal.
+///
+/// The sender for this channel should live on the parent process.
+#[allow(dead_code)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub struct MemEvents {
+    /// An ordered list of memory accesses that occurred. These should be assumed
+    /// to be overcautious; that is, if the size of an access is uncertain it is
+    /// pessimistically rounded up, and if the type (read/write/both) is uncertain
+    /// it is reported as whatever would be safest to assume; i.e. a read + maybe-write
+    /// becomes a read + write, etc.
+    pub acc_events: Vec<AccessEvent>,
+}
+
+/// A single memory access.
+#[allow(dead_code)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub enum AccessEvent {
+    /// A read may have occurred on no more than the specified address range.
+    Read(AccessRange),
+    /// A write may have occurred on no more than the specified address range.
+    Write(AccessRange),
+}
+
+/// The actual size of a performed access, bounded by size.
+#[allow(dead_code)]
+#[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
+pub struct AccessRange {
+    /// The base address in memory where an access occurred.
+    pub addr: usize,
+    /// The smallest size this access could have been.
+    pub min_size: usize,
+    /// The largest size this access could have been.
+    pub max_size: usize,
+}
 
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
@@ -31,18 +70,17 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
         libffi_args: Vec<libffi::high::Arg<'a>>,
-    ) -> CallResult<'tcx> {
+    ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let this = self.eval_context_mut();
-        //#[cfg(target_os = "linux")]
-        //let alloc = this.machine.allocator.as_ref().unwrap();
-
-        // SAFETY: We don't touch the machine memory past this point.
-        //#[cfg(target_os = "linux")]
-        //let (guard, stack_ptr) = unsafe { Supervisor::start_ffi(alloc) };
+        #[cfg(target_os = "linux")]
+        let alloc = this.machine.allocator.as_ref().unwrap();
+        #[cfg(not(target_os = "linux"))]
+        // Placeholder value.
+        let alloc = ();
 
         // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
         // as the specified primitive integer type
-        let res = 'res: {
+        let ffi_fn = || {
             let scalar = match dest.layout.ty.kind() {
                 // ints
                 ty::Int(IntTy::I8) => {
@@ -93,7 +131,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // have the output_type `Tuple([])`.
                 ty::Tuple(t_list) if (*t_list).deref().is_empty() => {
                     unsafe { ffi::call::<()>(ptr, libffi_args.as_slice()) };
-                    break 'res interp_ok(ImmTy::uninit(dest.layout));
+                    return interp_ok(ImmTy::uninit(dest.layout));
                 }
                 ty::RawPtr(..) => {
                     let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args.as_slice()) };
@@ -101,7 +139,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Scalar::from_pointer(ptr, this)
                 }
                 _ =>
-                    break 'res Err(err_unsup_format!(
+                    return Err(err_unsup_format!(
                         "unsupported return type for native call: {:?}",
                         link_name
                     ))
@@ -110,14 +148,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interp_ok(ImmTy::from_scalar(scalar, dest.layout))
         };
 
-        // SAFETY: We got the guard and stack pointer from start_ffi, and
-        // the allocator is the same
-        //#[cfg(target_os = "linux")]
-        //let events = unsafe { Supervisor::end_ffi(alloc, guard, stack_ptr) };
-        //#[cfg(not(target_os = "linux"))]
-        let events = None;
-
-        interp_ok((res?, events))
+        trace::Supervisor::do_ffi(alloc, ffi_fn)
     }
 
     /// Get the pointer to the function of the specified name in the shared object file,
@@ -214,10 +245,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 if !this.machine.native_call_mem_warned.replace(true) {
                     // Newly set, so first time we get here.
                     this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem {
-                        //#[cfg(target_os = "linux")]
-                        //tracing: self::trace::Supervisor::is_enabled(),
-                        //#[cfg(not(target_os = "linux"))]
-                        tracing: false,
+                        tracing: self::trace::Supervisor::is_enabled(),
                     });
                 }
 
