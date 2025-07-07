@@ -21,7 +21,7 @@ mod vendoring {
     use super::GENMC_LOCAL_PATH_STR;
 
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
-    pub(crate) const GENMC_COMMIT: &str = "3791d9a97baeb96e8c8375002fb390a789ba28b0";
+    pub(crate) const GENMC_COMMIT: &str = "e362c6f73f3567f972cbefb1323973e7120c9cf6";
     pub(crate) const GENMC_VENDORED_PATH_STR: &str = "./vendored/genmc/";
 
     pub(crate) fn vendor_genmc() -> PathBuf {
