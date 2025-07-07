@@ -1431,3 +1431,25 @@ impl ToU64 for usize {
         self.try_into().unwrap()
     }
 }
+
+/// This struct is needed to enforce `#[must_use]` on values produced by [enter_trace_span] even
+/// when the "tracing" feature is not enabled.
+#[must_use]
+pub struct MaybeEnteredSpan {
+    #[cfg(feature = "tracing")]
+    pub _entered_span: tracing::span::EnteredSpan,
+}
+
+/// Enters a [tracing::info_span] only if the "tracing" feature is enabled, otherwise does nothing.
+/// This is like [rustc_const_eval::enter_trace_span] except that it does not depend on the
+/// [Machine] trait to check if tracing is enabled, because from the Miri codebase we can directly
+/// check whether the "tracing" feature is enabled, unlike from the rustc_const_eval codebase.
+#[macro_export]
+macro_rules! enter_trace_span {
+    ($($tt:tt)*) => {
+        $crate::helpers::MaybeEnteredSpan {
+            #[cfg(feature = "tracing")]
+            _entered_span: tracing::info_span!($($tt)*).entered()
+        }
+    }
+}
