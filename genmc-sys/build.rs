@@ -8,7 +8,7 @@ const GENMC_MODEL_CHECKER: &str = "model_checker";
 
 const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 
-// FIXME(genmc,cmake): decide whether to keep debug enabled or not (without this: calling BUG() ==> UB)
+// FIXME(GenMC, build): decide whether to keep debug enabled or not (without this: calling BUG() ==> UB)
 const ENABLE_GENMC_DEBUG: bool = true;
 
 #[cfg(feature = "vendor_genmc")]
@@ -94,17 +94,17 @@ fn build_cxx_bridge(genmc_path: &Path) {
 
     let mut bridge = cxx_build::bridge("src/lib.rs");
 
-    // TODO GENMC: make sure GenMC uses the same compiler / settings as the cxx_bridge
-    // TODO GENMC: can we use c++23? Does CXX support that? Does rustc CI support that?
+    // FIXME(GenMC, build): make sure GenMC uses the same compiler / settings as the cxx_bridge
+    // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     bridge
         .opt_level(2)
-        .debug(true)
-        .warnings(false) // TODO GENMC: try to fix some of those warnings
+        .debug(true) // Same settings that GenMC uses ("-O2 -g")
+        .warnings(false) // NOTE: enabling this produces a lot of warnings.
         .std("c++20")
         .include(genmc_common_include_path)
         .include(model_checker_include_path)
         .include("./src_cpp")
-        .define("PACKAGE_BUGREPORT", "\"FIXME(GenMC) determine what to do with this!!\"") // FIXME(GenMC): HACK to get stuff to compile
+        .define("PACKAGE_BUGREPORT", "\"FIXME(GenMC) determine what to do with this!!\"") // FIXME(GenMC): HACK to get stuff to compile (this is normally defined by cmake)
         .file("./src_cpp/MiriInterface.hpp")
         .file("./src_cpp/MiriInterface.cpp");
 
@@ -128,12 +128,12 @@ fn build_genmc_model_checker(genmc_path: &Path) {
     let cmakelists_path = genmc_path.join("CMakeLists.txt");
 
     let mut config = cmake::Config::new(cmakelists_path);
-    config.profile("RelWithDebInfo"); // FIXME(genmc,cmake): decide on profile to use
+    config.profile("RelWithDebInfo"); // FIXME(GenMC,cmake): decide on profile to use
     if ENABLE_GENMC_DEBUG {
         config.define("GENMC_DEBUG", "ON");
     }
 
-    // FIXME(HACK): Required for unknown reasons on older cmake (version 3.22.1, works without this with version 3.31.6)
+    // FIXME(GenMC,HACK): Required for unknown reasons on older cmake (version 3.22.1, works without this with version 3.31.6)
     //              Without this, the files are written into the source directory by the cmake configure step, and then
     //              the build step cannot find these files, because it correctly tries using the `target` directory.
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -167,12 +167,12 @@ fn main() {
         vendoring::vendor_genmc()
     };
 
-    // FIXME(genmc, performance): these *should* be able to build in parallel:
+    // FIXME(GenMC, performance): these *should* be able to build in parallel:
     // Build all required components:
     build_cxx_bridge(&genmc_path);
     build_genmc_model_checker(&genmc_path);
 
-    // FIXME(build): Cloning the GenMC repo triggers a rebuild on the next build (since the directory changed during the first build)
+    // FIXME(GenMC, build): Cloning the GenMC repo triggers a rebuild on the next build (since the directory changed during the first build)
 
     // Only rebuild if anything changes:
     println!("cargo::rerun-if-changed={RUST_CXX_BRIDGE_FILE_PATH}");

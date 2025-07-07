@@ -7,12 +7,12 @@ use super::GenmcParams;
 pub struct GenmcConfig {
     pub(super) params: GenmcParams,
     do_estimation: bool,
-    // FIXME: add remaining options.
+    // FIXME(GenMC): add remaining options.
 }
 
 impl GenmcConfig {
     /// Function for parsing command line options for GenMC mode.
-    /// 
+    ///
     /// All GenMC arguments start with the string "-Zmiri-genmc".
     /// Passing any GenMC argument will enable GenMC mode.
     ///
@@ -25,5 +25,6 @@ impl GenmcConfig {
             return; // this corresponds to "-Zmiri-genmc"
         }
         // FIXME(GenMC): implement remaining parameters.
+        todo!();
     }
 }

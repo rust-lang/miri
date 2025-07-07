@@ -2,7 +2,6 @@
 
 #include "genmc-sys/src/lib.rs.h"
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 auto MiriGenMCShim::createHandle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
