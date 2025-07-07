@@ -71,7 +71,7 @@ pub enum AtomicRwOrd {
 }
 
 /// Valid atomic read orderings, subset of atomic::Ordering.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum AtomicReadOrd {
     Relaxed,
     Acquire,
@@ -719,7 +719,8 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         // Only metadata on the location itself is used.
 
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            let old_val = this.run_for_validation_ref(|this| this.read_scalar(place)).discard_err();
+            // FIXME(GenMC): Inform GenMC what a non-atomic read here would return, to support mixed atomics/non-atomics
+            let old_val = None;
             return genmc_ctx.atomic_load(
                 this,
                 place.ptr().addr(),
@@ -751,21 +752,10 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         // This is also a very special exception where we just ignore an error -- if this read
         // was UB e.g. because the memory is uninitialized, we don't want to know!
         let old_val = this.run_for_validation_mut(|this| this.read_scalar(dest)).discard_err();
-
         // Inform GenMC about the atomic store.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            if genmc_ctx.atomic_store(
-                this,
-                dest.ptr().addr(),
-                dest.layout.size,
-                val,
-                old_val,
-                atomic,
-            )? {
-                // The store might be the latest store in coherence order (determined by GenMC).
-                // If it is, we need to update the value in Miri's memory:
-                this.allow_data_races_mut(|this| this.write_scalar(val, dest))?;
-            }
+            // FIXME(GenMC): Inform GenMC what a non-atomic read here would return, to support mixed atomics/non-atomics
+            genmc_ctx.atomic_store(this, dest.ptr().addr(), dest.layout.size, val, atomic)?;
             return interp_ok(());
         }
         this.allow_data_races_mut(move |this| this.write_scalar(val, dest))?;
@@ -789,6 +779,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // Inform GenMC about the atomic rmw operation.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+            // FIXME(GenMC): Inform GenMC what a non-atomic read here would return, to support mixed atomics/non-atomics
             let (old_val, new_val) = genmc_ctx.atomic_rmw_op(
                 this,
                 place.ptr().addr(),
@@ -796,11 +787,8 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
                 atomic,
                 (op, not),
                 rhs.to_scalar(),
-                old.to_scalar(),
             )?;
-            if let Some(new_val) = new_val {
-                this.allow_data_races_mut(|this| this.write_scalar(new_val, place))?;
-            }
+            this.allow_data_races_mut(|this| this.write_scalar(new_val, place))?;
             return interp_ok(ImmTy::from_scalar(old_val, old.layout));
         }
 
@@ -830,19 +818,14 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // Inform GenMC about the atomic atomic exchange.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            let (old_val, new_val) = genmc_ctx.atomic_exchange(
+            // FIXME(GenMC): Inform GenMC what a non-atomic read here would return, to support mixed atomics/non-atomics
+            let (old_val, _is_success) = genmc_ctx.atomic_exchange(
                 this,
                 place.ptr().addr(),
                 place.layout.size,
                 new,
                 atomic,
-                old,
             )?;
-            // The store might be the latest store in coherence order (determined by GenMC).
-            // If it is, we need to update the value in Miri's memory:
-            if let Some(new_val) = new_val {
-                this.allow_data_races_mut(|this| this.write_scalar(new_val, place))?;
-            }
             return interp_ok(old_val);
         }
 
@@ -868,6 +851,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // Inform GenMC about the atomic min/max operation.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+            // FIXME(GenMC): Inform GenMC what a non-atomic read here would return, to support mixed atomics/non-atomics
             let (old_val, new_val) = genmc_ctx.atomic_min_max_op(
                 this,
                 place.ptr().addr(),
@@ -876,13 +860,8 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
                 min,
                 old.layout.backend_repr.is_signed(),
                 rhs.to_scalar(),
-                old.to_scalar(),
             )?;
-            // The store might be the latest store in coherence order (determined by GenMC).
-            // If it is, we need to update the value in Miri's memory:
-            if let Some(new_val) = new_val {
-                this.allow_data_races_mut(|this| this.write_scalar(new_val, place))?;
-            }
+            this.allow_data_races_mut(|this| this.write_scalar(new_val, place))?;
             return interp_ok(ImmTy::from_scalar(old_val, old.layout));
         }
 
@@ -924,7 +903,6 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         this.atomic_access_check(place, AtomicAccessType::Rmw)?;
 
-        // // FIXME(GenMC): this comment is wrong:
         // Failure ordering cannot be stronger than success ordering, therefore first attempt
         // to read with the failure ordering and if successful then try again with the success
         // read ordering and write in the success case.
@@ -933,24 +911,20 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // Inform GenMC about the atomic atomic compare exchange.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            let (old_value, is_co_maximal_write, cmpxchg_success) = genmc_ctx
-                .atomic_compare_exchange(
-                    this,
-                    place.ptr().addr(),
-                    place.layout.size,
-                    this.read_scalar(expect_old)?,
-                    new,
-                    success,
-                    fail,
-                    can_fail_spuriously,
-                    old.to_scalar(),
-                )?;
-            // The store might be the latest store in coherence order (determined by GenMC).
-            // If it is, we need to update the value in Miri's memory:
-            if is_co_maximal_write {
+            let (old, cmpxchg_success) = genmc_ctx.atomic_compare_exchange(
+                this,
+                place.ptr().addr(),
+                place.layout.size,
+                this.read_scalar(expect_old)?,
+                new,
+                success,
+                fail,
+                can_fail_spuriously,
+            )?;
+            if cmpxchg_success {
                 this.allow_data_races_mut(|this| this.write_scalar(new, place))?;
             }
-            return interp_ok(Immediate::ScalarPair(old_value, Scalar::from_bool(cmpxchg_success)));
+            return interp_ok(Immediate::ScalarPair(old, Scalar::from_bool(cmpxchg_success)));
         }
 
         // `binary_op` will bail if either of them is not a scalar.
@@ -1016,7 +990,6 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         if let Some(data_race) = this.machine.data_race.as_vclocks_ref() {
             data_race.acquire_clock(clock, &this.machine.threads);
         }
-        // TODO GENMC: does GenMC need to be informed about this?
     }
 }
 

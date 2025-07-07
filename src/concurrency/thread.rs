@@ -16,7 +16,7 @@ use rustc_middle::mir::Mutability;
 use rustc_middle::ty::layout::TyAndLayout;
 use rustc_span::Span;
 
-use crate::concurrency::{GenmcEvalContextExt as _, GlobalDataRaceHandler};
+use crate::concurrency::GlobalDataRaceHandler;
 use crate::shims::tls;
 use crate::*;
 
@@ -110,13 +110,10 @@ pub enum BlockReason {
     Eventfd,
     /// Blocked on unnamed_socket.
     UnnamedSocket,
-    /// Blocked on a GenMC `assume` statement (GenMC mode only).
-    GenmcAssume,
 }
 
 /// The state of a thread.
-// TODO GENMC: is this ok to be pub?
-pub enum ThreadState<'tcx> {
+enum ThreadState<'tcx> {
     /// The thread is enabled and can be executed.
     Enabled,
     /// The thread is blocked on something.
@@ -138,16 +135,15 @@ impl<'tcx> std::fmt::Debug for ThreadState<'tcx> {
 }
 
 impl<'tcx> ThreadState<'tcx> {
-    // TODO GENMC: is it ok if these are pub?
-    pub fn is_enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         matches!(self, ThreadState::Enabled)
     }
 
-    pub fn is_terminated(&self) -> bool {
+    fn is_terminated(&self) -> bool {
         matches!(self, ThreadState::Terminated)
     }
 
-    pub fn is_blocked_on(&self, reason: BlockReason) -> bool {
+    fn is_blocked_on(&self, reason: BlockReason) -> bool {
         matches!(*self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
     }
 }
@@ -211,11 +207,6 @@ impl<'tcx> Thread<'tcx> {
     /// Get the name of the current thread if it was set.
     fn thread_name(&self) -> Option<&[u8]> {
         self.thread_name.as_deref()
-    }
-
-    pub fn get_state(&self) -> &ThreadState<'tcx> {
-        // TODO GENMC: should this implementation detail be exposed?
-        &self.state
     }
 
     /// Get the name of the current thread for display purposes; will include thread ID if not set.
@@ -352,9 +343,8 @@ impl VisitProvenance for Frame<'_, Provenance, FrameExtra<'_>> {
 }
 
 /// The moment in time when a blocked thread should be woken up.
-// TODO GENMC: is this ok to be pub?
 #[derive(Debug)]
-pub enum Timeout {
+enum Timeout {
     Monotonic(Instant),
     RealTime(SystemTime),
 }
@@ -501,11 +491,6 @@ impl<'tcx> ThreadManager<'tcx> {
         &mut self.threads[self.active_thread].stack
     }
 
-    /// TODO GENMC: this function can probably be removed once the GenmcCtx code is finished:
-    pub fn get_thread_stack(&self, id: ThreadId) -> &[Frame<'tcx, Provenance, FrameExtra<'tcx>>] {
-        &self.threads[id].stack
-    }
-
     pub fn all_stacks(
         &self,
     ) -> impl Iterator<Item = (ThreadId, &[Frame<'tcx, Provenance, FrameExtra<'tcx>>])> {
@@ -535,19 +520,9 @@ impl<'tcx> ThreadManager<'tcx> {
         self.active_thread
     }
 
-    pub fn threads_ref(&self) -> &IndexVec<ThreadId, Thread<'tcx>> {
-        // TODO GENMC: should this implementation detail be exposed?
-        &self.threads
-    }
-
     /// Get the total number of threads that were ever spawn by this program.
     pub fn get_total_thread_count(&self) -> usize {
         self.threads.len()
-    }
-
-    /// Get the total of threads that are currently enabled, i.e., could continue executing.
-    pub fn get_enabled_thread_count(&self) -> usize {
-        self.threads.iter().filter(|t| t.state.is_enabled()).count()
     }
 
     /// Get the total of threads that are currently live, i.e., not yet terminated.
@@ -592,8 +567,6 @@ impl<'tcx> ThreadManager<'tcx> {
     /// > The handle is valid until closed, even after the thread it represents has been terminated.
     fn detach_thread(&mut self, id: ThreadId, allow_terminated_joined: bool) -> InterpResult<'tcx> {
         trace!("detaching {:?}", id);
-
-        tracing::info!("GenMC: TODO GENMC: does GenMC need special handling for detached threads?");
 
         let is_ub = if allow_terminated_joined && self.threads[id].state.is_terminated() {
             // "Detached" in particular means "not yet joined". Redundant detaching is still UB.
@@ -703,6 +676,11 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     #[inline]
     fn run_on_stack_empty(&mut self) -> InterpResult<'tcx, Poll<()>> {
         let this = self.eval_context_mut();
+        // Inform GenMC that a thread has finished all user code. GenMC needs to know this for scheduling.
+        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+            let thread_id = this.active_thread();
+            genmc_ctx.handle_thread_stack_empty(thread_id);
+        }
         let mut callback = this
             .active_thread_mut()
             .on_stack_empty
@@ -710,11 +688,6 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             .expect("`on_stack_empty` not set up, or already running");
         let res = callback(this)?;
         this.active_thread_mut().on_stack_empty = Some(callback);
-        // Inform GenMC that a thread has finished all user code. GenMC needs to know this for scheduling.
-        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            let thread_id = this.active_thread();
-            genmc_ctx.handle_thread_stack_empty(&this.machine.threads, thread_id);
-        }
         interp_ok(res)
     }
 
@@ -728,10 +701,9 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// If GenMC mode is active, the scheduling is instead handled by GenMC.
     fn schedule(&mut self) -> InterpResult<'tcx, SchedulingAction> {
         let this = self.eval_context_mut();
-
-        // In GenMC mode, we let GenMC do the scheduling.
-        if this.machine.data_race.as_genmc_ref().is_some() {
-            let next_thread_id = this.genmc_schedule_thread()?;
+        // In GenMC mode, we let GenMC do the scheduling
+        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+            let next_thread_id = genmc_ctx.schedule_thread(this)?;
 
             let thread_manager = &mut this.machine.threads;
             thread_manager.active_thread = next_thread_id;
@@ -741,7 +713,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             return interp_ok(SchedulingAction::ExecuteStep);
         }
 
-        // We are not in GenMC mode, so we control the scheduling.
+        // We are not in GenMC mode, so we control the schedule
         let thread_manager = &mut this.machine.threads;
         let clock = &this.machine.monotonic_clock;
         let rng = this.machine.rng.get_mut();
@@ -889,12 +861,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             GlobalDataRaceHandler::Vclocks(data_race) =>
                 data_race.thread_created(&this.machine.threads, new_thread_id, current_span),
             GlobalDataRaceHandler::Genmc(genmc_ctx) =>
-                genmc_ctx.handle_thread_create(
-                    &this.machine.threads,
-                    start_routine,
-                    &func_arg,
-                    new_thread_id,
-                )?,
+                genmc_ctx.handle_thread_create(&this.machine.threads, new_thread_id)?,
         }
         // Write the current thread-id, switch to the next thread later
         // to treat this write operation as occurring on the current thread.
@@ -947,10 +914,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let thread = this.active_thread_mut();
         assert!(thread.stack.is_empty(), "only threads with an empty stack can be terminated");
         thread.state = ThreadState::Terminated;
-
-        // TODO GENMC (QUESTION): Can we move this down to where the GenmcCtx is?
-        if let Some(data_race) = this.machine.data_race.as_vclocks_mut() {
-            data_race.thread_terminated(&this.machine.threads);
+        match &mut this.machine.data_race {
+            GlobalDataRaceHandler::None => {}
+            GlobalDataRaceHandler::Vclocks(data_race) =>
+                data_race.thread_terminated(&this.machine.threads),
+            GlobalDataRaceHandler::Genmc(genmc_ctx) =>
+                genmc_ctx.handle_thread_finish(&this.machine.threads)?,
         }
         // Deallocate TLS.
         let gone_thread = this.active_thread();
@@ -982,13 +951,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
         }
-
-        // Inform GenMC that the thread finished.
-        // This needs to happen once all accesses to the thread are done, including freeing any TLS statics.
-        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            genmc_ctx.handle_thread_finish(&this.machine.threads);
-        }
-
         // Unblock joining threads.
         let unblock_reason = BlockReason::Join(gone_thread);
         let threads = &this.machine.threads.threads;
@@ -1112,11 +1074,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 "{:?} blocked on {:?} when trying to join",
                 thread_mgr.active_thread, joined_thread_id
             );
-            if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-                info!("GenMC: informing GenMC about blocked thread join.");
-                genmc_ctx.handle_thread_join(thread_mgr.active_thread, joined_thread_id)?;
-            }
-
             // The joined thread is still running, we need to wait for it.
             // Once we get unblocked, perform the appropriate synchronization and write the return value.
             let dest = return_dest.clone();
@@ -1247,7 +1204,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         use rand::Rng as _;
 
         let this = self.eval_context_mut();
-
         if !this.machine.threads.fixed_scheduling
             && this.machine.rng.get_mut().random_bool(this.machine.preemption_rate)
         {
@@ -1278,7 +1234,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 SchedulingAction::ExecuteTimeoutCallback => {
                     this.run_timeout_callback()?;
                 }
-                // TODO GENMC: do we need to sleep in GenMC Mode?
                 SchedulingAction::Sleep(duration) => {
                     this.machine.monotonic_clock.sleep(duration);
                 }

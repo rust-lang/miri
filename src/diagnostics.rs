@@ -31,8 +31,8 @@ pub enum TerminationInfo {
     },
     Int2PtrWithStrictProvenance,
     Deadlock,
-    /// In GenMC mode, an execution can get blocked in certain cases. This is not an error.
-    GenmcBlockedExecution,
+    /// In GenMC mode, an execution can get stuck in certain cases. This is not an error.
+    GenmcStuckExecution,
     MultipleSymbolDefinitions {
         link_name: Symbol,
         first: SpanData,
@@ -77,7 +77,7 @@ impl fmt::Display for TerminationInfo {
             StackedBorrowsUb { msg, .. } => write!(f, "{msg}"),
             TreeBorrowsUb { title, .. } => write!(f, "{title}"),
             Deadlock => write!(f, "the evaluated program deadlocked"),
-            GenmcBlockedExecution => write!(f, "GenMC determined that the execution is blocked"),
+            GenmcStuckExecution => write!(f, "GenMC determined that the execution got stuck"),
             MultipleSymbolDefinitions { link_name, .. } =>
                 write!(f, "multiple definitions of symbol `{link_name}`"),
             SymbolShimClashing { link_name, .. } =>
@@ -243,12 +243,11 @@ pub fn report_error<'tcx>(
                 labels.push(format!("this thread got stuck here"));
                 None
             }
-            GenmcBlockedExecution => {
+            GenmcStuckExecution => {
                 // This case should only happen in GenMC mode. We treat it like a normal program exit.
-                // Leak checks should not be performed, since some threads might not have run to completion.
                 assert!(ecx.machine.data_race.as_genmc_ref().is_some());
-                tracing::info!("GenMC: found blocked execution");
-                return Some((0, false));
+                tracing::info!("GenMC: found stuck execution");
+                return Some((0, true));
             }
             MultipleSymbolDefinitions { .. } | SymbolShimClashing { .. } => None,
         };
