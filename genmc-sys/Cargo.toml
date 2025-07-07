@@ -4,9 +4,9 @@ version = "0.11.0" # NOTE: should match the GenMC version
 edition = "2024"
 
 [features]
-default = ["vendor_genmc"]
-# If vendoring is disabled, a local GenMC repo must be available in the "./genmc" path.
-vendor_genmc = ["dep:git2"]
+default = ["download_genmc"]
+# If downloading is disabled, a local GenMC repo must be available in the "./genmc" path.
+download_genmc = ["dep:git2"]
 
 [dependencies]
 cxx = { version = "1.0.160", features = ["c++20"] }
