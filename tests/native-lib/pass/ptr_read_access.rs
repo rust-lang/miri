@@ -1,3 +1,10 @@
+//revisions: trace notrace
+//@[trace] only-target: linux
+//@[trace] only-target: gnu
+//@[trace] only-target: x86
+//@[trace] only-on-host
+//@[trace] compile-flags: -Zmiri-native-lib-enable-tracing
+
 fn main() {
     test_access_pointer();
     test_access_simple();
