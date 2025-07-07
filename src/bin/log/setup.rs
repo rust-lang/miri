@@ -66,8 +66,12 @@ fn init_logger_once(early_dcx: &EarlyDiagCtxt) {
 
             #[cfg(feature = "tracing")]
             {
-                let (chrome_layer, chrome_guard) =
-                    super::tracing_chrome::ChromeLayerBuilder::new().include_args(true).build();
+                let (chrome_layer, chrome_guard) = super::tracing_chrome::ChromeLayerBuilder::new()
+                        .include_args(true)
+                        // "frame" spans indicate stack frames in the interpreted program:
+                        // let's make them appear on a separate trace line than other spans.
+                        .trace_style(super::tracing_chrome::TraceStyle::ThreadedWithExceptions { separate_span_names: vec!["frame".to_string()] })
+                        .build();
                 rustc_driver::init_logger_with_additional_layer(
                     early_dcx,
                     rustc_logger_config(),
