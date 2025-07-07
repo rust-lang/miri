@@ -966,7 +966,6 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "colored 3.0.0",
- "cxx",
  "directories",
  "genmc-sys",
  "getrandom 0.3.3",

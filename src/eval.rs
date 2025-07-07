@@ -261,10 +261,9 @@ impl<'tcx> MainThreadState<'tcx> {
                 match state.on_stack_empty(this)? {
                     Poll::Pending => {} // just keep going
                     Poll::Ready(()) => {
-                        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+                        if this.machine.data_race.as_genmc_ref().is_some() {
                             // In GenMC mode, we don't yield at the end of the main thread.
                             // Instead, the `GenmcCtx` will ensure that unfinished threads get a chance to run at this point.
-                            genmc_ctx.handle_main_thread_stack_empty(&this.machine.threads);
                             *self = Done;
                         } else {
                             // Give background threads a chance to finish by yielding the main thread a

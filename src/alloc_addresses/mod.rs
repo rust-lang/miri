@@ -33,7 +33,6 @@ pub struct GlobalStateInner {
     /// sorted by address. We cannot use a `HashMap` since we can be given an address that is offset
     /// from the base address, and we need to find the `AllocId` it belongs to. This is not the
     /// *full* inverse of `base_addr`; dead allocations have been removed.
-    /// TODO GENMC: keep dead allocations in GenMC mode?
     int_to_ptr_map: Vec<(u64, AllocId)>,
     /// The base address for each allocation.  We cannot put that into
     /// `AllocExtra` because function pointers also have a base address, and
@@ -99,8 +98,7 @@ impl GlobalStateInner {
 
 /// Shifts `addr` to make it aligned with `align` by rounding `addr` to the smallest multiple
 /// of `align` that is larger or equal to `addr`
-/// FIXME(GenMC): is it ok to make this public?
-pub(crate) fn align_addr(addr: u64, align: u64) -> u64 {
+fn align_addr(addr: u64, align: u64) -> u64 {
     match addr % align {
         0 => addr,
         rem => addr.strict_add(align) - rem,
@@ -121,7 +119,8 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Miri's address assignment leaks state across thread boundaries, which is incompatible
         // with GenMC execution. So we instead let GenMC assign addresses to allocations.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            return genmc_ctx.handle_alloc(this, alloc_id, info.size, info.align, memory_kind);
+            let addr = genmc_ctx.handle_alloc(&this.machine, info.size, info.align, memory_kind)?;
+            return interp_ok(addr);
         }
 
         let mut rng = this.machine.rng.borrow_mut();
@@ -263,10 +262,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // We only use this provenance if it has been exposed, or if the caller requested also non-exposed allocations
         if !only_exposed_allocations || global_state.exposed.contains(&alloc_id) {
             // This must still be live, since we remove allocations from `int_to_ptr_map` when they get freed.
-            // In GenMC mode, we keep all allocations, so this check doesn't apply there.
-            debug_assert!(
-                this.machine.data_race.as_genmc_ref().is_some() || this.is_alloc_live(alloc_id)
-            );
+            debug_assert!(this.is_alloc_live(alloc_id));
             Some(alloc_id)
         } else {
             None
@@ -497,15 +493,11 @@ impl<'tcx> MiriMachine<'tcx> {
         let addr = *global_state.base_addr.get(&dead_id).unwrap();
         let pos =
             global_state.int_to_ptr_map.binary_search_by_key(&addr, |(addr, _)| *addr).unwrap();
-
-        // TODO GENMC(DOCUMENTATION):
-        if self.data_race.as_genmc_ref().is_none() {
-            let removed = global_state.int_to_ptr_map.remove(pos);
-            assert_eq!(removed, (addr, dead_id)); // double-check that we removed the right thing
-            // We can also remove it from `exposed`, since this allocation can anyway not be returned by
-            // `alloc_id_from_addr` any more.
-            global_state.exposed.remove(&dead_id);
-        }
+        let removed = global_state.int_to_ptr_map.remove(pos);
+        assert_eq!(removed, (addr, dead_id)); // double-check that we removed the right thing
+        // We can also remove it from `exposed`, since this allocation can anyway not be returned by
+        // `alloc_id_from_addr` any more.
+        global_state.exposed.remove(&dead_id);
         // Also remember this address for future reuse.
         let thread = self.threads.active_thread();
         global_state.reuse.add_addr(rng, addr, size, align, kind, thread, || {

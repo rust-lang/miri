@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
+    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -193,34 +193,9 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         }
 
         if let Some(genmc_config) = &self.genmc_config {
-            let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
-                miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
-            };
+            let _genmc_ctx = Rc::new(GenmcCtx::new(&config, genmc_config));
 
-            if genmc_config.do_estimation()
-                && miri_genmc::run_genmc_mode(
-                    &config,
-                    genmc_config,
-                    eval_entry_once,
-                    miri_genmc::Mode::Estimation,
-                )
-                .is_some()
-            {
-                tcx.dcx().abort_if_errors();
-            }
-
-            let return_code = miri_genmc::run_genmc_mode(
-                &config,
-                genmc_config,
-                eval_entry_once,
-                miri_genmc::Mode::Verification,
-            )
-            .unwrap_or_else(|| {
-                tcx.dcx().abort_if_errors();
-                rustc_driver::EXIT_FAILURE
-            });
-
-            exit(return_code);
+            todo!("GenMC mode not yet implemented");
         };
 
         if let Some(many_seeds) = self.many_seeds.take() {
@@ -633,6 +608,7 @@ fn main() {
                 // FIXME(GenMC): Currently, GenMC mode is incompatible with aliasing model checking.
                 miri_config.borrow_tracker = None;
             }
+            miri_config.borrow_tracker = None;
             GenmcConfig::parse_arg(&mut genmc_config, trimmed_arg);
         } else if let Some(param) = arg.strip_prefix("-Zmiri-env-forward=") {
             miri_config.forwarded_env_vars.push(param.to_owned());
@@ -769,9 +745,9 @@ fn main() {
 
     // Validate settings for data race detection and GenMC mode.
     assert_eq!(genmc_config.is_some(), miri_config.genmc_mode);
-    if miri_config.genmc_mode {
+    if genmc_config.is_some() {
         if !miri_config.data_race_detector {
-            fatal_error!("Cannot disable data race detection in GenMC mode");
+            fatal_error!("Cannot disable data race detection in GenMC mode (currently)");
         } else if !miri_config.weak_memory_emulation {
             fatal_error!("Cannot disable weak memory emulation in GenMC mode");
         }
