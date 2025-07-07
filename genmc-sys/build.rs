@@ -11,8 +11,8 @@ const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 // FIXME(GenMC, build): decide whether to keep debug enabled or not (without this: calling BUG() ==> UB)
 const ENABLE_GENMC_DEBUG: bool = true;
 
-#[cfg(feature = "vendor_genmc")]
-mod vendoring {
+#[cfg(feature = "download_genmc")]
+mod downloading {
     use std::path::PathBuf;
     use std::str::FromStr;
 
@@ -22,13 +22,13 @@ mod vendoring {
 
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     pub(crate) const GENMC_COMMIT: &str = "bd4496acaf0994b2515f58f75d21ad8dd15f6603";
-    pub(crate) const GENMC_VENDORED_PATH_STR: &str = "./vendored/genmc/";
+    pub(crate) const GENMC_DOWNLOAD_PATH_STR: &str = "./downloaded/genmc/";
 
-    pub(crate) fn vendor_genmc() -> PathBuf {
-        let Ok(genmc_vendored_path) = PathBuf::from_str(GENMC_VENDORED_PATH_STR);
+    pub(crate) fn download_genmc() -> PathBuf {
+        let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH_STR);
 
-        let repo = Repository::open(&genmc_vendored_path).unwrap_or_else(|open_err| {
-            match Repository::clone(GENMC_GITHUB_URL, &genmc_vendored_path) {
+        let repo = Repository::open(&genmc_download_path).unwrap_or_else(|open_err| {
+            match Repository::clone(GENMC_GITHUB_URL, &genmc_download_path) {
                 Ok(repo) => {
                     repo
                 }
@@ -68,7 +68,7 @@ mod vendoring {
         assert_eq!(head_commit.id(), commit.id());
         println!("cargo::warning=Successfully set checked out commit {head_commit:?}");
 
-        genmc_vendored_path
+        genmc_download_path
     }
 
     fn checkout_commit(repo: &Repository, refname: &str) {
@@ -152,19 +152,18 @@ fn build_genmc_model_checker(genmc_path: &Path) {
 }
 
 fn main() {
-    // Select between local GenMC repo, or vendoring GenMC from a specific commit.
+    // Select between local GenMC repo, or downloading GenMC from a specific commit.
     let Ok(genmc_local_path) = PathBuf::from_str(GENMC_LOCAL_PATH_STR);
     let genmc_path = if genmc_local_path.exists() {
         genmc_local_path
     } else {
-        #[cfg(not(feature = "vendor_genmc"))]
+        #[cfg(not(feature = "download_genmc"))]
         panic!(
-            "GenMC not found in path '{}', and vendoring GenMC is disabled.",
-            genmc_local_path.to_string_lossy()
+            "GenMC not found in path '{GENMC_LOCAL_PATH_STR}', and downloading GenMC is disabled."
         );
 
-        #[cfg(feature = "vendor_genmc")]
-        vendoring::vendor_genmc()
+        #[cfg(feature = "download_genmc")]
+        downloading::download_genmc()
     };
 
     // FIXME(GenMC, performance): these *should* be able to build in parallel:
