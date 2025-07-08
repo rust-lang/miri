@@ -337,7 +337,13 @@ fn main() -> Result<()> {
         ui(Mode::Pass, "tests/native-lib/pass", &target, WithoutDependencies, tmpdir.path())?;
         ui(Mode::Fail, "tests/native-lib/fail", &target, WithoutDependencies, tmpdir.path())?;
     }
-    if cfg!(feature = "genmc") {
+
+    // We only enable GenMC tests when the `genmc` feature is enabled, but also only on platforms we support:
+    if cfg!(all(
+        feature = "genmc",
+        any(target_os = "linux", target_os = "macos"),
+        target_pointer_width = "64"
+    )) {
         ui(Mode::Pass, "tests/genmc/pass", &target, WithDependencies, tmpdir.path())?;
         ui(Mode::Fail, "tests/genmc/fail", &target, WithDependencies, tmpdir.path())?;
     }

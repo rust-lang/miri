@@ -8,7 +8,15 @@ mod vector_clock;
 pub mod weak_memory;
 
 // Import either the real genmc adapter or a dummy module.
-#[cfg_attr(not(feature = "genmc"), path = "genmc/dummy.rs")]
+// On unsupported platforms, we still include the dummy module, even if the `genmc` feature is enabled.
+#[cfg_attr(
+    not(all(
+        feature = "genmc",
+        any(target_os = "linux", target_os = "macos"),
+        target_pointer_width = "64"
+    )),
+    path = "genmc/dummy.rs"
+)]
 mod genmc;
 
 pub use self::data_race_handler::{AllocDataRaceHandler, GlobalDataRaceHandler};
