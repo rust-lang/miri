@@ -228,9 +228,19 @@ impl VisitProvenance for GenmcCtx {
 
 impl GenmcConfig {
     pub fn parse_arg(_genmc_config: &mut Option<GenmcConfig>, trimmed_arg: &str) {
-        unimplemented!(
-            "GenMC feature im Miri is disabled, cannot handle argument: \"-Zmiri-genmc{trimmed_arg}\""
-        );
+        if cfg!(all(
+            feature = "genmc",
+            any(target_os = "linux", target_os = "macos"),
+            target_pointer_width = "64"
+        )) {
+            unimplemented!(
+                "GenMC feature im Miri is disabled, cannot handle argument: \"-Zmiri-genmc{trimmed_arg}\""
+            );
+        } else {
+            unimplemented!(
+                "GenMC mode is not supported on this platform, cannot handle argument: \"-Zmiri-genmc{trimmed_arg}\""
+            );
+        }
     }
 
     pub fn should_print_graph(&self, _rep: usize) -> bool {
