@@ -9,10 +9,11 @@ pub mod weak_memory;
 
 // Import either the real genmc adapter or a dummy module.
 // On unsupported platforms, we still include the dummy module, even if the `genmc` feature is enabled.
+// FIXME(genmc,macos): Add `target_os = "macos"` once `https://github.com/dtolnay/cxx/issues/1535` is fixed.
 #[cfg_attr(
     not(all(
         feature = "genmc",
-        any(target_os = "linux", target_os = "macos"),
+        target_os = "linux",
         target_pointer_width = "64"
     )),
     path = "genmc/dummy.rs"
