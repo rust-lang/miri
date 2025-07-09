@@ -40,6 +40,17 @@ mod downloading {
             }
         });
 
+        let statuses = repo.statuses(None).expect("should be able to get repository status");
+        if !statuses.is_empty() {
+            println!("cargo::error=Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH_STR}' has been modified");
+            for entry in statuses.iter() {
+                println!("cargo::error=  {} is {:?}", entry.path().unwrap_or("unknown"), entry.status());
+            }
+            println!("cargo::error=This repository should only be modified by the 'genmc-sys' build script to load a specific commit ('{GENMC_COMMIT}')");
+            println!("cargo::error=HINT: For local development, place a GenMC repository in the path '{GENMC_LOCAL_PATH_STR}'");
+            std::process::exit(1);
+        }
+
         // Check if there are any updates:
         let commit = if let Ok(oid) = Oid::from_str(GENMC_COMMIT)
             && let Ok(commit) = repo.find_commit(oid)
