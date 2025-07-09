@@ -9,8 +9,7 @@ default = ["download_genmc"]
 download_genmc = ["dep:git2"]
 
 [dependencies]
-# cxx = { version = "1.0.160", features = ["c++20"] }
-cxx = { git = "https://github.com/Patrick-6/cxx.git", rev = "e16e210970fe1a5d17e5f9651f2f1d83590586eb" }
+cxx = { version = "1.0.160", features = ["c++20"] }
 
 [build-dependencies]
 cmake = "0.1.54"
