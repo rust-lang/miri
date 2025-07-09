@@ -182,13 +182,10 @@ fn main() {
     build_cxx_bridge(&genmc_path);
     build_genmc_model_checker(&genmc_path);
 
-    // FIXME(GenMC, build): Cloning the GenMC repo triggers a rebuild on the next build (since the directory changed during the first build)
-
     // Only rebuild if anything changes:
+    // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
+    // Adding that path here would also trigger an unnecessary rebuild after the repo is cloned (since cargo detects that as a file modification).
     println!("cargo::rerun-if-changed={RUST_CXX_BRIDGE_FILE_PATH}");
     println!("cargo::rerun-if-changed=./src_cpp");
-    let genmc_src_paths = [genmc_path.join("model_checker"), genmc_path.join("common")];
-    for genmc_src_path in genmc_src_paths {
-        println!("cargo::rerun-if-changed={}", genmc_src_path.display());
-    }
+    println!("cargo::rerun-if-changed={GENMC_LOCAL_PATH_STR}");
 }
