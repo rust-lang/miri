@@ -42,12 +42,22 @@ mod downloading {
 
         let statuses = repo.statuses(None).expect("should be able to get repository status");
         if !statuses.is_empty() {
-            println!("cargo::error=Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH_STR}' has been modified");
+            println!(
+                "cargo::error=Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH_STR}' has been modified"
+            );
             for entry in statuses.iter() {
-                println!("cargo::error=  {} is {:?}", entry.path().unwrap_or("unknown"), entry.status());
+                println!(
+                    "cargo::error=  {} is {:?}",
+                    entry.path().unwrap_or("unknown"),
+                    entry.status()
+                );
             }
-            println!("cargo::error=This repository should only be modified by the 'genmc-sys' build script to load a specific commit ('{GENMC_COMMIT}')");
-            println!("cargo::error=HINT: For local development, place a GenMC repository in the path '{GENMC_LOCAL_PATH_STR}'");
+            println!(
+                "cargo::error=This repository should only be modified by the 'genmc-sys' build script to load a specific commit ('{GENMC_COMMIT}')"
+            );
+            println!(
+                "cargo::error=HINT: For local development, place a GenMC repository in the path '{GENMC_LOCAL_PATH_STR}'"
+            );
             std::process::exit(1);
         }
 
@@ -177,7 +187,6 @@ fn main() {
         downloading::download_genmc()
     };
 
-    // FIXME(GenMC, performance): these *should* be able to build in parallel:
     // Build all required components:
     build_cxx_bridge(&genmc_path);
     build_genmc_model_checker(&genmc_path);
