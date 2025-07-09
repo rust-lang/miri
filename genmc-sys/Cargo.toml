@@ -13,5 +13,5 @@ cxx = { version = "1.0.160", features = ["c++20"] }
 
 [build-dependencies]
 cmake = "0.1.54"
-git2 = { version = "0.20.2", optional = true }
+git2 = { version = "0.20.2", optional = true, default-features = false, features = ["https"] }
 cxx-build = { version = "1.0.160", features = ["parallel"] }
