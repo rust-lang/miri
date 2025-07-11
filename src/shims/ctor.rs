@@ -31,22 +31,35 @@ impl<'tcx> GlobalCtorState<'tcx> {
                     let this = this.eval_context_mut();
 
                     // Lookup constructors from the relevant magic link section.
-                    let link_section = match this.tcx.sess.target.binary_format {
+                    let ctors = match this.tcx.sess.target.binary_format {
                         // Read the CRT library section on Windows.
-                        BinaryFormat::Coff => ".CRT$XCU",
+                        BinaryFormat::Coff =>
+                            this.lookup_link_section(|section| section == ".CRT$XCU")?,
 
-                        // Read `__mod_init_func` on macOS.
-                        BinaryFormat::MachO => "__DATA,__mod_init_func",
+                        // Read the `__mod_init_func` section on macOS.
+                        BinaryFormat::MachO =>
+                            this.lookup_link_section(|section| {
+                                let mut parts = section.splitn(3, ',');
+                                let (segment_name, section_name, section_type) =
+                                    (parts.next(), parts.next(), parts.next());
+
+                                segment_name == Some("__DATA")
+                                    && section_name == Some("__mod_init_func")
+                                    // The `mod_init_funcs` directive ensures that the `S_MOD_INIT_FUNC_POINTERS` flag
+                                    // is set on the section, but it is not strictly required.
+                                    && matches!(section_type, None | Some("mod_init_funcs"))
+                            })?,
 
                         // Read the standard `.init_array` section on platforms that use ELF, or WASM,
                         // which supports the same linker directive.
-                        BinaryFormat::Elf | BinaryFormat::Wasm => ".init_array",
+                        BinaryFormat::Elf | BinaryFormat::Wasm =>
+                            this.lookup_link_section(|section| section == ".init_array")?,
 
                         // Other platforms have no global ctor support.
                         _ => break 'new_state Done,
                     };
 
-                    break 'new_state Ctors(this.lookup_link_section(link_section)?);
+                    break 'new_state Ctors(ctors);
                 }
                 Ctors(ctors) => {
                     if let Some(ctor) = ctors.pop() {

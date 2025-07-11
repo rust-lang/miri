@@ -27,7 +27,7 @@ macro_rules! ctor {
         #[cfg_attr(windows, link_section = ".CRT$XCU")]
         #[cfg_attr(
             any(target_os = "macos", target_os = "ios"),
-            link_section = "__DATA,__mod_init_func"
+            link_section = "__DATA,__mod_init_func,mod_init_funcs"
         )]
         #[used]
         static $ident: unsafe extern "C" fn() = $ctor;
