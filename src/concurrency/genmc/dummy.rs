@@ -16,7 +16,7 @@ pub struct GenmcCtx {}
 pub struct GenmcConfig {}
 
 impl GenmcCtx {
-    pub fn new(_miri_config: &MiriConfig, _genmc_config: &GenmcConfig) -> Self {
+    pub fn new(_miri_config: &MiriConfig) -> Self {
         unreachable!()
     }
 

@@ -25,8 +25,8 @@ pub struct GenmcCtx {
 
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    pub fn new(miri_config: &MiriConfig, genmc_config: &GenmcConfig) -> Self {
-        assert!(miri_config.genmc_mode);
+    pub fn new(miri_config: &MiriConfig) -> Self {
+        let genmc_config = miri_config.genmc_config.as_ref().unwrap();
 
         let handle = createGenmcHandle(&genmc_config.params);
         assert!(!handle.is_null());
