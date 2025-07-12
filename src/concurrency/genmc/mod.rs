@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 
+use genmc_sys::{GenmcParams, createGenmcHandle};
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{InterpCx, InterpResult, interp_ok};
 use rustc_middle::mir;
@@ -26,7 +27,17 @@ impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
     pub fn new(miri_config: &MiriConfig, genmc_config: &GenmcConfig) -> Self {
         assert!(miri_config.genmc_mode);
-        todo!()
+
+        let handle = createGenmcHandle(&genmc_config.params);
+        assert!(!handle.is_null());
+
+        eprintln!("Miri: GenMC handle creation successful!");
+
+        drop(handle);
+        eprintln!("Miri: Dropping GenMC handle successful!");
+
+        // FIXME(GenMC): implement
+        std::process::exit(0);
     }
 
     pub fn get_stuck_execution_count(&self) -> usize {

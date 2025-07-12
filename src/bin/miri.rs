@@ -600,7 +600,11 @@ fn main() {
         } else if arg == "-Zmiri-many-seeds-keep-going" {
             many_seeds_keep_going = true;
         } else if let Some(trimmed_arg) = arg.strip_prefix("-Zmiri-genmc") {
-            // FIXME(GenMC): Currently, GenMC mode is incompatible with aliasing model checking.
+            if !miri_config.genmc_mode {
+                miri_config.genmc_mode = true;
+                // FIXME(GenMC): Currently, GenMC mode is incompatible with aliasing model checking.
+                miri_config.borrow_tracker = None;
+            }
             miri_config.borrow_tracker = None;
             GenmcConfig::parse_arg(&mut genmc_config, trimmed_arg);
         } else if let Some(param) = arg.strip_prefix("-Zmiri-env-forward=") {
