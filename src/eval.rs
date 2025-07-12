@@ -11,14 +11,14 @@ use rustc_abi::ExternAbi;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::def::Namespace;
 use rustc_hir::def_id::DefId;
-use rustc_middle::ty::layout::LayoutCx;
+use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutCx};
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_session::config::EntryFnType;
 
 use crate::concurrency::GenmcCtx;
 use crate::concurrency::thread::TlsAllocAction;
 use crate::diagnostics::report_leaks;
-use crate::shims::tls;
+use crate::shims::{ctor, tls};
 use crate::*;
 
 #[derive(Copy, Clone, Debug)]
@@ -215,27 +215,47 @@ impl Default for MiriConfig {
     }
 }
 
+struct MainThread<'tcx> {
+    entry_id: DefId,
+    entry_type: MiriEntryFnType,
+    args: Vec<String>,
+    state: MainThreadState<'tcx>,
+}
+
 /// The state of the main thread. Implementation detail of `on_main_stack_empty`.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 enum MainThreadState<'tcx> {
-    #[default]
+    GlobalCtors(ctor::GlobalCtorState<'tcx>),
     Running,
     TlsDtors(tls::TlsDtorsState<'tcx>),
-    Yield {
-        remaining: u32,
-    },
+    Yield { remaining: u32 },
     Done,
 }
 
-impl<'tcx> MainThreadState<'tcx> {
+impl<'tcx> MainThread<'tcx> {
     fn on_main_stack_empty(
         &mut self,
         this: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, Poll<()>> {
         use MainThreadState::*;
-        match self {
+        match &mut self.state {
+            GlobalCtors(state) => {
+                match state.on_stack_empty(this)? {
+                    Poll::Pending => {} // just keep going
+                    Poll::Ready(()) => {
+                        self.eval_entry(this)?;
+                        self.state = Running;
+                    }
+                }
+            }
             Running => {
-                *self = TlsDtors(Default::default());
+                // Inform GenMC that a thread has finished all user code. GenMC needs to know this for scheduling.
+                if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+                    let thread_id = this.active_thread();
+                    genmc_ctx.handle_thread_stack_empty(thread_id);
+                }
+
+                self.state = TlsDtors(Default::default());
             }
             TlsDtors(state) =>
                 match state.on_stack_empty(this)? {
@@ -244,25 +264,25 @@ impl<'tcx> MainThreadState<'tcx> {
                         if this.machine.data_race.as_genmc_ref().is_some() {
                             // In GenMC mode, we don't yield at the end of the main thread.
                             // Instead, the `GenmcCtx` will ensure that unfinished threads get a chance to run at this point.
-                            *self = Done;
+                            self.state = Done;
                         } else {
                             // Give background threads a chance to finish by yielding the main thread a
                             // couple of times -- but only if we would also preempt threads randomly.
                             if this.machine.preemption_rate > 0.0 {
                                 // There is a non-zero chance they will yield back to us often enough to
                                 // make Miri terminate eventually.
-                                *self = Yield { remaining: MAIN_THREAD_YIELDS_AT_SHUTDOWN };
+                                self.state = Yield { remaining: MAIN_THREAD_YIELDS_AT_SHUTDOWN };
                             } else {
                                 // The other threads did not get preempted, so no need to yield back to
                                 // them.
-                                *self = Done;
+                                self.state = Done;
                             }
                         }
                     }
                 },
             Yield { remaining } =>
                 match remaining.checked_sub(1) {
-                    None => *self = Done,
+                    None => self.state = Done,
                     Some(new_remaining) => {
                         *remaining = new_remaining;
                         this.yield_active_thread();
@@ -289,6 +309,139 @@ impl<'tcx> MainThreadState<'tcx> {
         }
         interp_ok(Poll::Pending)
     }
+
+    fn eval_entry(&mut self, ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, ()> {
+        let tcx = ecx.tcx();
+
+        // Setup first stack frame.
+        let entry_instance = ty::Instance::mono(tcx, self.entry_id);
+
+        // First argument is constructed later, because it's skipped for `miri_start.`
+
+        // Second argument (argc): length of `config.args`.
+        let argc =
+            ImmTy::from_int(i64::try_from(self.args.len()).unwrap(), ecx.machine.layouts.isize);
+        // Third argument (`argv`): created from `config.args`.
+        let argv = {
+            // Put each argument in memory, collect pointers.
+            let mut argvs = Vec::<Immediate<Provenance>>::with_capacity(self.args.len());
+            for arg in self.args.iter() {
+                // Make space for `0` terminator.
+                let size = u64::try_from(arg.len()).unwrap().strict_add(1);
+                let arg_type = Ty::new_array(tcx, tcx.types.u8, size);
+                let arg_place =
+                    ecx.allocate(ecx.layout_of(arg_type)?, MiriMemoryKind::Machine.into())?;
+                ecx.write_os_str_to_c_str(OsStr::new(arg), arg_place.ptr(), size)?;
+                ecx.mark_immutable(&arg_place);
+                argvs.push(arg_place.to_ref(ecx));
+            }
+            // Make an array with all these pointers, in the Miri memory.
+            let u8_ptr_type = Ty::new_imm_ptr(tcx, tcx.types.u8);
+            let u8_ptr_ptr_type = Ty::new_imm_ptr(tcx, u8_ptr_type);
+            let argvs_layout = ecx.layout_of(Ty::new_array(
+                tcx,
+                u8_ptr_type,
+                u64::try_from(argvs.len()).unwrap(),
+            ))?;
+            let argvs_place = ecx.allocate(argvs_layout, MiriMemoryKind::Machine.into())?;
+            for (arg, idx) in argvs.into_iter().zip(0..) {
+                let place = ecx.project_index(&argvs_place, idx)?;
+                ecx.write_immediate(arg, &place)?;
+            }
+            ecx.mark_immutable(&argvs_place);
+            // Store `argc` and `argv` for macOS `_NSGetArg{c,v}`.
+            {
+                let argc_place =
+                    ecx.allocate(ecx.machine.layouts.isize, MiriMemoryKind::Machine.into())?;
+                ecx.write_immediate(*argc, &argc_place)?;
+                ecx.mark_immutable(&argc_place);
+                ecx.machine.argc = Some(argc_place.ptr());
+
+                let argv_place =
+                    ecx.allocate(ecx.layout_of(u8_ptr_ptr_type)?, MiriMemoryKind::Machine.into())?;
+                ecx.write_pointer(argvs_place.ptr(), &argv_place)?;
+                ecx.mark_immutable(&argv_place);
+                ecx.machine.argv = Some(argv_place.ptr());
+            }
+            // Store command line as UTF-16 for Windows `GetCommandLineW`.
+            {
+                // Construct a command string with all the arguments.
+                let cmd_utf16: Vec<u16> = args_to_utf16_command_string(self.args.iter());
+
+                let cmd_type =
+                    Ty::new_array(tcx, tcx.types.u16, u64::try_from(cmd_utf16.len()).unwrap());
+                let cmd_place =
+                    ecx.allocate(ecx.layout_of(cmd_type)?, MiriMemoryKind::Machine.into())?;
+                ecx.machine.cmd_line = Some(cmd_place.ptr());
+                // Store the UTF-16 string. We just allocated so we know the bounds are fine.
+                for (&c, idx) in cmd_utf16.iter().zip(0..) {
+                    let place = ecx.project_index(&cmd_place, idx)?;
+                    ecx.write_scalar(Scalar::from_u16(c), &place)?;
+                }
+                ecx.mark_immutable(&cmd_place);
+            }
+            let imm = argvs_place.to_ref(ecx);
+            let layout = ecx.layout_of(u8_ptr_ptr_type)?;
+            ImmTy::from_immediate(imm, layout)
+        };
+
+        // Return place (in static memory so that it does not count as leak).
+        let ret_place = ecx.allocate(ecx.machine.layouts.isize, MiriMemoryKind::Machine.into())?;
+        ecx.machine.main_fn_ret_place = Some(ret_place.clone());
+        // Call start function.
+
+        match self.entry_type {
+            MiriEntryFnType::Rustc(EntryFnType::Main { .. }) => {
+                let start_id = tcx.lang_items().start_fn().unwrap_or_else(|| {
+                    tcx.dcx().fatal("could not find start lang item");
+                });
+                let main_ret_ty = tcx.fn_sig(self.entry_id).no_bound_vars().unwrap().output();
+                let main_ret_ty = main_ret_ty.no_bound_vars().unwrap();
+                let start_instance = ty::Instance::try_resolve(
+                    tcx,
+                    ecx.typing_env(),
+                    start_id,
+                    tcx.mk_args(&[ty::GenericArg::from(main_ret_ty)]),
+                )
+                .unwrap()
+                .unwrap();
+
+                let main_ptr = ecx.fn_ptr(FnVal::Instance(entry_instance));
+
+                // Always using DEFAULT is okay since we don't support signals in Miri anyway.
+                // (This means we are effectively ignoring `-Zon-broken-pipe`.)
+                let sigpipe = rustc_session::config::sigpipe::DEFAULT;
+
+                ecx.call_function(
+                    start_instance,
+                    ExternAbi::Rust,
+                    &[
+                        ImmTy::from_scalar(
+                            Scalar::from_pointer(main_ptr, ecx),
+                            // FIXME use a proper fn ptr type
+                            ecx.machine.layouts.const_raw_ptr,
+                        ),
+                        argc,
+                        argv,
+                        ImmTy::from_uint(sigpipe, ecx.machine.layouts.u8),
+                    ],
+                    Some(&ret_place),
+                    ReturnContinuation::Stop { cleanup: true },
+                )?;
+            }
+            MiriEntryFnType::MiriStart => {
+                ecx.call_function(
+                    entry_instance,
+                    ExternAbi::Rust,
+                    &[argc, argv],
+                    Some(&ret_place),
+                    ReturnContinuation::Stop { cleanup: true },
+                )?;
+            }
+        }
+
+        interp_ok(())
+    }
 }
 
 /// Returns a freshly created `InterpCx`.
@@ -311,7 +464,13 @@ pub fn create_ecx<'tcx>(
 
     // Some parts of initialization require a full `InterpCx`.
     MiriMachine::late_init(&mut ecx, config, {
-        let mut state = MainThreadState::default();
+        let mut state = MainThread {
+            entry_id,
+            entry_type,
+            args: config.args.clone(),
+            state: MainThreadState::GlobalCtors(ctor::GlobalCtorState::default()),
+        };
+
         // Cannot capture anything GC-relevant here.
         Box::new(move |m| state.on_main_stack_empty(m))
     })?;
@@ -324,130 +483,6 @@ pub fn create_ecx<'tcx>(
             "the current sysroot was built without `-Zalways-encode-mir`, or libcore seems missing. \
             Use `cargo miri setup` to prepare a sysroot that is suitable for Miri."
         );
-    }
-
-    // Setup first stack frame.
-    let entry_instance = ty::Instance::mono(tcx, entry_id);
-
-    // First argument is constructed later, because it's skipped for `miri_start.`
-
-    // Second argument (argc): length of `config.args`.
-    let argc =
-        ImmTy::from_int(i64::try_from(config.args.len()).unwrap(), ecx.machine.layouts.isize);
-    // Third argument (`argv`): created from `config.args`.
-    let argv = {
-        // Put each argument in memory, collect pointers.
-        let mut argvs = Vec::<Immediate<Provenance>>::with_capacity(config.args.len());
-        for arg in config.args.iter() {
-            // Make space for `0` terminator.
-            let size = u64::try_from(arg.len()).unwrap().strict_add(1);
-            let arg_type = Ty::new_array(tcx, tcx.types.u8, size);
-            let arg_place =
-                ecx.allocate(ecx.layout_of(arg_type)?, MiriMemoryKind::Machine.into())?;
-            ecx.write_os_str_to_c_str(OsStr::new(arg), arg_place.ptr(), size)?;
-            ecx.mark_immutable(&arg_place);
-            argvs.push(arg_place.to_ref(&ecx));
-        }
-        // Make an array with all these pointers, in the Miri memory.
-        let u8_ptr_type = Ty::new_imm_ptr(tcx, tcx.types.u8);
-        let u8_ptr_ptr_type = Ty::new_imm_ptr(tcx, u8_ptr_type);
-        let argvs_layout =
-            ecx.layout_of(Ty::new_array(tcx, u8_ptr_type, u64::try_from(argvs.len()).unwrap()))?;
-        let argvs_place = ecx.allocate(argvs_layout, MiriMemoryKind::Machine.into())?;
-        for (arg, idx) in argvs.into_iter().zip(0..) {
-            let place = ecx.project_index(&argvs_place, idx)?;
-            ecx.write_immediate(arg, &place)?;
-        }
-        ecx.mark_immutable(&argvs_place);
-        // Store `argc` and `argv` for macOS `_NSGetArg{c,v}`.
-        {
-            let argc_place =
-                ecx.allocate(ecx.machine.layouts.isize, MiriMemoryKind::Machine.into())?;
-            ecx.write_immediate(*argc, &argc_place)?;
-            ecx.mark_immutable(&argc_place);
-            ecx.machine.argc = Some(argc_place.ptr());
-
-            let argv_place =
-                ecx.allocate(ecx.layout_of(u8_ptr_ptr_type)?, MiriMemoryKind::Machine.into())?;
-            ecx.write_pointer(argvs_place.ptr(), &argv_place)?;
-            ecx.mark_immutable(&argv_place);
-            ecx.machine.argv = Some(argv_place.ptr());
-        }
-        // Store command line as UTF-16 for Windows `GetCommandLineW`.
-        {
-            // Construct a command string with all the arguments.
-            let cmd_utf16: Vec<u16> = args_to_utf16_command_string(config.args.iter());
-
-            let cmd_type =
-                Ty::new_array(tcx, tcx.types.u16, u64::try_from(cmd_utf16.len()).unwrap());
-            let cmd_place =
-                ecx.allocate(ecx.layout_of(cmd_type)?, MiriMemoryKind::Machine.into())?;
-            ecx.machine.cmd_line = Some(cmd_place.ptr());
-            // Store the UTF-16 string. We just allocated so we know the bounds are fine.
-            for (&c, idx) in cmd_utf16.iter().zip(0..) {
-                let place = ecx.project_index(&cmd_place, idx)?;
-                ecx.write_scalar(Scalar::from_u16(c), &place)?;
-            }
-            ecx.mark_immutable(&cmd_place);
-        }
-        let imm = argvs_place.to_ref(&ecx);
-        let layout = ecx.layout_of(u8_ptr_ptr_type)?;
-        ImmTy::from_immediate(imm, layout)
-    };
-
-    // Return place (in static memory so that it does not count as leak).
-    let ret_place = ecx.allocate(ecx.machine.layouts.isize, MiriMemoryKind::Machine.into())?;
-    ecx.machine.main_fn_ret_place = Some(ret_place.clone());
-    // Call start function.
-
-    match entry_type {
-        MiriEntryFnType::Rustc(EntryFnType::Main { .. }) => {
-            let start_id = tcx.lang_items().start_fn().unwrap_or_else(|| {
-                tcx.dcx().fatal("could not find start lang item");
-            });
-            let main_ret_ty = tcx.fn_sig(entry_id).no_bound_vars().unwrap().output();
-            let main_ret_ty = main_ret_ty.no_bound_vars().unwrap();
-            let start_instance = ty::Instance::try_resolve(
-                tcx,
-                typing_env,
-                start_id,
-                tcx.mk_args(&[ty::GenericArg::from(main_ret_ty)]),
-            )
-            .unwrap()
-            .unwrap();
-
-            let main_ptr = ecx.fn_ptr(FnVal::Instance(entry_instance));
-
-            // Always using DEFAULT is okay since we don't support signals in Miri anyway.
-            // (This means we are effectively ignoring `-Zon-broken-pipe`.)
-            let sigpipe = rustc_session::config::sigpipe::DEFAULT;
-
-            ecx.call_function(
-                start_instance,
-                ExternAbi::Rust,
-                &[
-                    ImmTy::from_scalar(
-                        Scalar::from_pointer(main_ptr, &ecx),
-                        // FIXME use a proper fn ptr type
-                        ecx.machine.layouts.const_raw_ptr,
-                    ),
-                    argc,
-                    argv,
-                    ImmTy::from_uint(sigpipe, ecx.machine.layouts.u8),
-                ],
-                Some(&ret_place),
-                ReturnContinuation::Stop { cleanup: true },
-            )?;
-        }
-        MiriEntryFnType::MiriStart => {
-            ecx.call_function(
-                entry_instance,
-                ExternAbi::Rust,
-                &[argc, argv],
-                Some(&ret_place),
-                ReturnContinuation::Stop { cleanup: true },
-            )?;
-        }
     }
 
     interp_ok(ecx)
