@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-const GENMC_LOCAL_PATH_STR: &str = "./genmc/";
+const GENMC_LOCAL_PATH: &str = "./genmc/";
 
 /// Name of the library of the GenMC model checker.
 const GENMC_MODEL_CHECKER: &str = "model_checker";
@@ -18,14 +18,14 @@ mod downloading {
 
     use git2::{Oid, Repository};
 
-    use super::GENMC_LOCAL_PATH_STR;
+    use super::GENMC_LOCAL_PATH;
 
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     pub(crate) const GENMC_COMMIT: &str = "bd4496acaf0994b2515f58f75d21ad8dd15f6603";
-    pub(crate) const GENMC_DOWNLOAD_PATH_STR: &str = "./downloaded/genmc/";
+    pub(crate) const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
 
     pub(crate) fn download_genmc() -> PathBuf {
-        let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH_STR);
+        let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH);
 
         let repo = Repository::open(&genmc_download_path).unwrap_or_else(|open_err| {
             match Repository::clone(GENMC_GITHUB_URL, &genmc_download_path) {
@@ -33,7 +33,7 @@ mod downloading {
                     repo
                 }
                 Err(clone_err) => {
-                    println!("cargo::error=Cannot open GenMC repo at path '{GENMC_LOCAL_PATH_STR}': {open_err:?}");
+                    println!("cargo::error=Cannot open GenMC repo at path '{GENMC_LOCAL_PATH}': {open_err:?}");
                     println!("cargo::error=Cannot clone GenMC repo from '{GENMC_GITHUB_URL}': {clone_err:?}");
                     std::process::exit(1);
                 }
@@ -43,7 +43,7 @@ mod downloading {
         let statuses = repo.statuses(None).expect("should be able to get repository status");
         if !statuses.is_empty() {
             println!(
-                "cargo::error=Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH_STR}' has been modified"
+                "cargo::error=Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH}' has been modified"
             );
             for entry in statuses.iter() {
                 println!(
@@ -56,7 +56,7 @@ mod downloading {
                 "cargo::error=This repository should only be modified by the 'genmc-sys' build script to load a specific commit ('{GENMC_COMMIT}')"
             );
             println!(
-                "cargo::error=HINT: For local development, place a GenMC repository in the path '{GENMC_LOCAL_PATH_STR}'"
+                "cargo::error=HINT: For local development, place a GenMC repository in the path '{GENMC_LOCAL_PATH}'"
             );
             std::process::exit(1);
         }
@@ -74,7 +74,7 @@ mod downloading {
                         Err(e) => panic!("Failed to fetch from remote: {e}"),
                     },
                 Err(e) => {
-                    println!("cargo::error=GenMC repository at path '{GENMC_DOWNLOAD_PATH_STR}' does not contain commit '{GENMC_COMMIT}', and could not load commit from remote repository '{GENMC_GITHUB_URL}'. Error: {e}");
+                    println!("cargo::error=GenMC repository at path '{GENMC_DOWNLOAD_PATH}' does not contain commit '{GENMC_COMMIT}', and could not load commit from remote repository '{GENMC_GITHUB_URL}'. Error: {e}");
                     std::process::exit(1);
                 }
             }
@@ -174,13 +174,13 @@ fn build_genmc_model_checker(genmc_path: &Path) {
 
 fn main() {
     // Select between local GenMC repo, or downloading GenMC from a specific commit.
-    let Ok(genmc_local_path) = PathBuf::from_str(GENMC_LOCAL_PATH_STR);
+    let Ok(genmc_local_path) = PathBuf::from_str(GENMC_LOCAL_PATH);
     let genmc_path = if genmc_local_path.exists() {
         genmc_local_path
     } else {
         #[cfg(not(feature = "download_genmc"))]
         panic!(
-            "GenMC not found in path '{GENMC_LOCAL_PATH_STR}', and downloading GenMC is disabled."
+            "GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled."
         );
 
         #[cfg(feature = "download_genmc")]
@@ -196,5 +196,5 @@ fn main() {
     // Adding that path here would also trigger an unnecessary rebuild after the repo is cloned (since cargo detects that as a file modification).
     println!("cargo::rerun-if-changed={RUST_CXX_BRIDGE_FILE_PATH}");
     println!("cargo::rerun-if-changed=./src_cpp");
-    println!("cargo::rerun-if-changed={GENMC_LOCAL_PATH_STR}");
+    println!("cargo::rerun-if-changed={GENMC_LOCAL_PATH}");
 }
