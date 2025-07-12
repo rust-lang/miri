@@ -70,13 +70,13 @@ mod downloading {
             match repo.find_remote("origin") {
                 Ok(mut remote) =>
                     match remote.fetch(&[GENMC_COMMIT], None, None) {
-                        Ok(_) =>
-                            println!(
-                                "cargo::warning=Successfully fetched commit '{GENMC_COMMIT:?}'"
-                            ),
+                        Ok(_) => println!("Successfully fetched commit '{GENMC_COMMIT}'"),
                         Err(e) => panic!("Failed to fetch from remote: {e}"),
                     },
-                Err(e) => println!("cargo::warning=Could not find remote 'origin': {e}"),
+                Err(e) => {
+                    println!("cargo::error=GenMC repository at path '{GENMC_DOWNLOAD_PATH_STR}' does not contain commit '{GENMC_COMMIT}', and could not load commit from remote repository '{GENMC_GITHUB_URL}'. Error: {e}");
+                    std::process::exit(1);
+                }
             }
             let oid = Oid::from_str(GENMC_COMMIT).unwrap();
             repo.find_commit(oid).unwrap()
@@ -87,7 +87,7 @@ mod downloading {
 
         let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head_commit.id(), commit.id());
-        println!("cargo::warning=Successfully set checked out commit {head_commit:?}");
+        println!("Successfully set checked out commit {head_commit:?}");
 
         genmc_download_path
     }
