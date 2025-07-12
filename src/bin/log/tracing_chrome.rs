@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: Copyright (c) 2020 Thoren Paulson
-//! This file is taken unmodified from the following link, except for file attributes and
-//! `extern crate` at the top.
+//! This file was initially taken from the following link, the changes that were made to the
+//! original file can be found in git history (`git log -- path/to/tracing_chrome.rs`):
 //! https://github.com/thoren-d/tracing-chrome/blob/7e2625ab4aeeef2f0ef9bde9d6258dd181c04472/src/lib.rs
 //! Depending on the tracing-chrome crate from crates.io is unfortunately not possible, since it
 //! depends on `tracing_core` which conflicts with rustc_private's `tracing_core` (meaning it would
@@ -85,6 +85,13 @@ pub enum TraceStyle {
     /// In this style, spans should be entered and exited on the same thread.
     #[default]
     Threaded,
+
+    /// Like [TraceStyle::Threaded], except that spans whose name is in
+    /// [TraceStyle::ThreadedWithExceptions::separate_span_names] will be grouped by name separately
+    /// than all other spans.
+    ThreadedWithExceptions {
+        separate_span_names: Vec<String>
+    },
 
     /// Traces will recorded as a group of asynchronous operations.
     Async,
@@ -497,31 +504,38 @@ where
         }
     }
 
-    fn get_root_id(span: SpanRef<S>) -> u64 {
-        span.scope()
-            .from_root()
-            .take(1)
-            .next()
-            .unwrap_or(span)
-            .id()
-            .into_u64()
+    fn get_root_id(&self, span: SpanRef<S>) -> Option<u64> {
+        match &self.trace_style {
+            TraceStyle::Async => Some(
+                span.scope()
+                    .from_root()
+                    .take(1)
+                    .next()
+                    .unwrap_or(span)
+                    .id()
+                    .into_u64()
+            ),
+            TraceStyle::ThreadedWithExceptions { separate_span_names } => {
+                let span_name = span.metadata().name();
+                // This returns None if a span is not in the list, making all such spans appear on a
+                // separate line. Furthermore, the `pos + 1` is because root_id must be > 0.
+                separate_span_names.iter()
+                    .position(|r| r == span_name)
+                    .map(|pos| (pos + 1) as u64)
+            }
+            TraceStyle::Threaded => None,
+        }
     }
 
     fn enter_span(&self, span: SpanRef<S>, ts: f64) {
         let callsite = self.get_callsite(EventOrSpan::Span(&span));
-        let root_id = match self.trace_style {
-            TraceStyle::Async => Some(ChromeLayer::get_root_id(span)),
-            _ => None,
-        };
+        let root_id = self.get_root_id(span);
         self.send_message(Message::Enter(ts, callsite, root_id));
     }
 
     fn exit_span(&self, span: SpanRef<S>, ts: f64) {
         let callsite = self.get_callsite(EventOrSpan::Span(&span));
-        let root_id = match self.trace_style {
-            TraceStyle::Async => Some(ChromeLayer::get_root_id(span)),
-            _ => None,
-        };
+        let root_id = self.get_root_id(span);
         self.send_message(Message::Exit(ts, callsite, root_id));
     }
 
@@ -591,7 +605,7 @@ where
                 args: Arc::new(args),
             });
         }
-        if let TraceStyle::Threaded = self.trace_style {
+        if !matches!(self.trace_style, TraceStyle::Async) {
             return;
         }
 
@@ -600,7 +614,7 @@ where
     }
 
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-        if let TraceStyle::Threaded = self.trace_style {
+        if !matches!(self.trace_style, TraceStyle::Async) {
             return;
         }
 
