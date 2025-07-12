@@ -386,7 +386,11 @@ fn capstone_find_events(
                         acc_events.push(AccessEvent::Read(push.clone()));
                     }
                     if acc_ty.is_writable() {
-                        acc_events.push(AccessEvent::Write(push));
+                        // FIXME: This could be made certain; either determine all cases where
+                        // only reads happen, or have an intermediate mempr_* function to first
+                        // map the page(s) as readonly and check if a segfault occurred.
+                        // If this did a read as well, it's possible the write didn't happen.
+                        acc_events.push(AccessEvent::Write(push, !acc_ty.is_readable()));
                     }
 
                     return true;
@@ -442,8 +446,7 @@ fn handle_segfault(
     // Get information on what caused the segfault. This contains the address
     // that triggered it.
     let siginfo = ptrace::getsiginfo(pid).unwrap();
-    // All x86, ARM, etc. instructions only have at most one memory operand
-    // (thankfully!)
+    // All x86 instructions only have at most one memory operand (thankfully!)
     // SAFETY: si_addr is safe to call.
     let addr = unsafe { siginfo.si_addr().addr() };
     let page_addr = addr.strict_sub(addr.strict_rem(page_size));

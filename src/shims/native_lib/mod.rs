@@ -34,18 +34,34 @@ pub struct MemEvents {
 /// A single memory access.
 #[allow(dead_code)]
 #[cfg_attr(target_os = "linux", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum AccessEvent {
-    /// A read may have occurred on this memory range.
-    /// Some instructions *may* read memory without *always* doing that,
-    /// so this can be an over-approximation.
-    /// The range info, however, is reliable if the access did happen.
+    /// A read occurred on this memory range.
     Read(AccessRange),
-    /// A read may have occurred on this memory range.
+    /// A write may have occurred on this memory range.
     /// Some instructions *may* write memory without *always* doing that,
     /// so this can be an over-approximation.
     /// The range info, however, is reliable if the access did happen.
-    Write(AccessRange),
+    /// If the second field is true, the access definitely happened.
+    Write(AccessRange, bool),
+}
+
+impl AccessEvent {
+    fn get_range(&self) -> AccessRange {
+        match self {
+            AccessEvent::Read(access_range) => access_range.clone(),
+            AccessEvent::Write(access_range, _) => access_range.clone(),
+        }
+    }
+
+    fn is_read(&self) -> bool {
+        matches!(self, AccessEvent::Read(_))
+    }
+
+    fn definitely_happened(&self) -> bool {
+        // Anything except a maybe-write is definitive.
+        !matches!(self, AccessEvent::Write(_, false))
+    }
 }
 
 /// The memory touched by a given access.
@@ -57,6 +73,12 @@ pub struct AccessRange {
     pub addr: usize,
     /// The number of bytes affected from the base.
     pub size: usize,
+}
+
+impl AccessRange {
+    fn end(&self) -> usize {
+        self.addr.strict_add(self.size)
+    }
 }
 
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -196,6 +218,43 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         None
     }
+
+    /// Applies the `events` to Miri's internal state. The event vector must be
+    /// ordered sequentially by when the accesses happened, and the sizes are
+    /// assumed to be exact.
+    fn tracing_apply_accesses(&mut self, events: MemEvents) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        for evt in events.acc_events {
+            let evt_rg = evt.get_range();
+            // We're assuming an access only touches 1 allocation.
+            let alloc_id = this
+                .alloc_id_from_addr(evt_rg.addr.to_u64(), evt_rg.size.try_into().unwrap(), true)
+                .expect("Foreign code did an out-of-bounds access!");
+
+            let alloc = this.get_alloc_raw(alloc_id)?;
+            let alloc_addr = alloc.get_bytes_unchecked_raw().addr();
+
+            // Shift the overlap range to be an offset from the allocation base addr.
+            let overlap = evt_rg.addr.strict_sub(alloc_addr)..evt_rg.end().strict_sub(alloc_addr);
+
+            // Reads are infallible, writes might not be.
+            if evt.is_read() {
+                let p_map = alloc.provenance();
+                for idx in overlap {
+                    // If a provenance was read by the foreign code, expose it.
+                    if let Some(prov) = p_map.get(Size::from_bytes(idx), this) {
+                        this.expose_provenance(prov)?;
+                    }
+                }
+            } else if evt.definitely_happened() || alloc.mutability.is_mut() {
+                //let (alloc, cx) = this.get_alloc_raw_mut(alloc_id)?;
+                //alloc.process_native_write(AllocRange { start: overlap.start, size: overlap.len() })
+            }
+        }
+
+        interp_ok(())
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -221,6 +280,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         };
 
+        // Do we have ptrace?
+        let tracing = trace::Supervisor::is_enabled();
+
         // Get the function arguments, and convert them to `libffi`-compatible form.
         let mut libffi_args = Vec::<CArg>::with_capacity(args.len());
         for arg in args.iter() {
@@ -240,9 +302,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // The first time this happens, print a warning.
                 if !this.machine.native_call_mem_warned.replace(true) {
                     // Newly set, so first time we get here.
-                    this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem {
-                        tracing: self::trace::Supervisor::is_enabled(),
-                    });
+                    this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem { tracing });
                 }
 
                 this.expose_provenance(prov)?;
@@ -268,15 +328,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // be read by FFI. The `black_box` is defensive programming as LLVM likes
             // to (incorrectly) optimize away ptr2int casts whose result is unused.
             std::hint::black_box(alloc.get_bytes_unchecked_raw().expose_provenance());
-            // Expose all provenances in this allocation, since the native code can do $whatever.
-            for prov in alloc.provenance().provenances() {
-                this.expose_provenance(prov)?;
+
+            if !tracing {
+                // Expose all provenances in this allocation, since the native code can do $whatever.
+                for prov in alloc.provenance().provenances() {
+                    this.expose_provenance(prov)?;
+                }
             }
 
             // Prepare for possible write from native code if mutable.
             if info.mutbl.is_mut() {
-                let alloc = &mut this.get_alloc_raw_mut(alloc_id)?.0;
+                let (alloc, _cx) = this.get_alloc_raw_mut(alloc_id)?;
                 alloc.prepare_for_native_access();
+                if tracing {
+                    //alloc.process_native_write(&cx.tcx, None);
+                }
                 // Also expose *mutable* provenance for the interpreter-level allocation.
                 std::hint::black_box(alloc.get_bytes_unchecked_raw_mut().expose_provenance());
             }
@@ -288,10 +354,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (ret, maybe_memevents) =
             this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
 
-        if cfg!(target_os = "linux")
-            && let Some(events) = maybe_memevents
-        {
-            trace!("Registered FFI events:\n{events:#0x?}");
+        if tracing {
+            this.tracing_apply_accesses(maybe_memevents.unwrap())?;
         }
 
         this.write_immediate(*ret, dest)?;

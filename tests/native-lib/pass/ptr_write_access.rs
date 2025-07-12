@@ -1,3 +1,9 @@
+//revisions: trace notrace
+//@[trace] only-target: linux
+//@[trace] only-target: gnu
+//@[trace] only-target: x86
+//@[trace] only-on-host
+//@[trace] compile-flags: -Zmiri-native-lib-enable-tracing
 //@compile-flags: -Zmiri-permissive-provenance
 
 #![feature(box_as_ptr)]

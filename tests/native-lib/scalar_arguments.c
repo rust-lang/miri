@@ -34,3 +34,7 @@ EXPORT int64_t add_short_to_long(int16_t x, int64_t y) {
 int32_t not_exported(void) {
   return 0;
 }
+
+EXPORT void do_nothing(void) {
+  return;
+}
