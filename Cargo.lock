@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "genmc-sys"
-version = "0.11.0"
+version = "0.1.0"
 dependencies = [
  "cmake",
  "cxx",
