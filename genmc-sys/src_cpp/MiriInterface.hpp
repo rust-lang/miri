@@ -3,6 +3,8 @@
 
 #include "rust/cxx.h"
 
+#include "config.h"
+
 #include "Verification/GenMCDriver.hpp"
 #include "Verification/VerificationConfig.hpp"
 
