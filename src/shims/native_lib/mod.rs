@@ -2,13 +2,14 @@
 
 use std::ops::Deref;
 
-use libffi::high::call as ffi;
 use libffi::low::CodePtr;
-use rustc_abi::{BackendRepr, HasDataLayout, Size};
-use rustc_middle::mir::interpret::Pointer;
-use rustc_middle::ty::{self as ty, IntTy, UintTy};
+use libffi::middle::Type as FfiType;
+use rustc_abi::Size;
+use rustc_middle::ty::{self as ty, IntTy, Ty, UintTy};
 use rustc_span::Symbol;
 use serde::{Deserialize, Serialize};
+
+mod ffi;
 
 #[cfg_attr(
     not(all(
@@ -20,6 +21,7 @@ use serde::{Deserialize, Serialize};
 )]
 pub mod trace;
 
+use self::ffi::{CArg, CPrimitive, FfiArg};
 use crate::*;
 
 /// The final results of an FFI trace, containing every relevant event detected
@@ -75,7 +77,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         link_name: Symbol,
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
-        libffi_args: Vec<libffi::high::Arg<'a>>,
+        libffi_args: Vec<FfiArg<'a>>,
     ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let this = self.eval_context_mut();
         #[cfg(target_os = "linux")]
@@ -93,55 +95,55 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // Unsafe because of the call to native code.
                     // Because this is calling a C function it is not necessarily sound,
                     // but there is no way around this and we've checked as much as we can.
-                    let x = unsafe { ffi::call::<i8>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<i8>(ptr, libffi_args) };
                     Scalar::from_i8(x)
                 }
                 ty::Int(IntTy::I16) => {
-                    let x = unsafe { ffi::call::<i16>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<i16>(ptr, libffi_args) };
                     Scalar::from_i16(x)
                 }
                 ty::Int(IntTy::I32) => {
-                    let x = unsafe { ffi::call::<i32>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<i32>(ptr, libffi_args) };
                     Scalar::from_i32(x)
                 }
                 ty::Int(IntTy::I64) => {
-                    let x = unsafe { ffi::call::<i64>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<i64>(ptr, libffi_args) };
                     Scalar::from_i64(x)
                 }
                 ty::Int(IntTy::Isize) => {
-                    let x = unsafe { ffi::call::<isize>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<isize>(ptr, libffi_args) };
                     Scalar::from_target_isize(x.try_into().unwrap(), this)
                 }
                 // uints
                 ty::Uint(UintTy::U8) => {
-                    let x = unsafe { ffi::call::<u8>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<u8>(ptr, libffi_args) };
                     Scalar::from_u8(x)
                 }
                 ty::Uint(UintTy::U16) => {
-                    let x = unsafe { ffi::call::<u16>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<u16>(ptr, libffi_args) };
                     Scalar::from_u16(x)
                 }
                 ty::Uint(UintTy::U32) => {
-                    let x = unsafe { ffi::call::<u32>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<u32>(ptr, libffi_args) };
                     Scalar::from_u32(x)
                 }
                 ty::Uint(UintTy::U64) => {
-                    let x = unsafe { ffi::call::<u64>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<u64>(ptr, libffi_args) };
                     Scalar::from_u64(x)
                 }
                 ty::Uint(UintTy::Usize) => {
-                    let x = unsafe { ffi::call::<usize>(ptr, libffi_args.as_slice()) };
+                    let x = unsafe { ffi::call::<usize>(ptr, libffi_args) };
                     Scalar::from_target_usize(x.try_into().unwrap(), this)
                 }
                 // Functions with no declared return type (i.e., the default return)
                 // have the output_type `Tuple([])`.
                 ty::Tuple(t_list) if (*t_list).deref().is_empty() => {
-                    unsafe { ffi::call::<()>(ptr, libffi_args.as_slice()) };
+                    unsafe { ffi::call::<()>(ptr, libffi_args) };
                     return interp_ok(ImmTy::uninit(dest.layout));
                 }
                 ty::RawPtr(..) => {
-                    let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args.as_slice()) };
-                    let ptr = Pointer::new(Provenance::Wildcard, Size::from_bytes(x.addr()));
+                    let x = unsafe { ffi::call::<*const ()>(ptr, libffi_args) };
+                    let ptr = StrictPointer::new(Provenance::Wildcard, Size::from_bytes(x.addr()));
                     Scalar::from_pointer(ptr, this)
                 }
                 _ =>
@@ -267,6 +269,147 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         interp_ok(())
     }
+
+    /// Extract the value from the result of reading an operand from the machine
+    /// and convert it to a `CArg`.
+    fn op_to_carg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, CArg> {
+        let this = self.eval_context_ref();
+        let scalar = |v| interp_ok(this.read_immediate(v)?.to_scalar());
+        interp_ok(match v.layout.ty.kind() {
+            // If the primitive provided can be converted to a type matching the type pattern
+            // then create a `CArg` of this primitive value with the corresponding `CArg` constructor.
+            // the ints
+            ty::Int(IntTy::I8) => CPrimitive::Int8(scalar(v)?.to_i8()?).into(),
+            ty::Int(IntTy::I16) => CPrimitive::Int16(scalar(v)?.to_i16()?).into(),
+            ty::Int(IntTy::I32) => CPrimitive::Int32(scalar(v)?.to_i32()?).into(),
+            ty::Int(IntTy::I64) => CPrimitive::Int64(scalar(v)?.to_i64()?).into(),
+            ty::Int(IntTy::Isize) =>
+                CPrimitive::ISize(scalar(v)?.to_target_isize(this)?.try_into().unwrap()).into(),
+            // the uints
+            ty::Uint(UintTy::U8) => CPrimitive::UInt8(scalar(v)?.to_u8()?).into(),
+            ty::Uint(UintTy::U16) => CPrimitive::UInt16(scalar(v)?.to_u16()?).into(),
+            ty::Uint(UintTy::U32) => CPrimitive::UInt32(scalar(v)?.to_u32()?).into(),
+            ty::Uint(UintTy::U64) => CPrimitive::UInt64(scalar(v)?.to_u64()?).into(),
+            ty::Uint(UintTy::Usize) =>
+                CPrimitive::USize(scalar(v)?.to_target_usize(this)?.try_into().unwrap()).into(),
+            ty::RawPtr(..) => {
+                let ptr = scalar(v)?.to_pointer(this)?;
+                // Pointer without provenance may not access any memory anyway, skip.
+                if let Some(prov) = ptr.provenance {
+                    // The first time this happens, print a warning.
+                    if !this.machine.native_call_mem_warned.replace(true) {
+                        // Newly set, so first time we get here.
+                        this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem { tracing });
+                    }
+
+                    this.expose_provenance(prov)?;
+                };
+
+                // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
+                // below to expose the actual interpreter-level allocation.
+                CPrimitive::RawPtr(std::ptr::with_exposed_provenance_mut(ptr.addr().bytes_usize()))
+                    .into()
+            }
+            // For ADTs, create an FfiType from their fields.
+            ty::Adt(adt_def, args) => {
+                let strukt = this.adt_to_ffitype(v.layout.ty, *adt_def, args)?;
+
+                // Copy the raw bytes backing this arg.
+                let bytes = match v.as_mplace_or_imm() {
+                    either::Either::Left(mplace) => {
+                        // We do all of this to grab the bytes without actually
+                        // stripping provenance from them, since it'll later be
+                        // exposed recursively.
+                        let ptr = mplace.ptr();
+                        // Make sure the provenance of this allocation is exposed;
+                        // there must be one for this mplace to be valid at all.
+                        // The interpreter-level allocation itself is exposed in
+                        // visit_reachable_allocs.
+                        this.expose_provenance(ptr.provenance.unwrap())?;
+                        // Then get the actual bytes.
+                        let id = this
+                            .alloc_id_from_addr(
+                                ptr.addr().bytes(),
+                                mplace.layout.size.bytes_usize().try_into().unwrap(),
+                                /* only_exposed_allocations */ true,
+                            )
+                            .unwrap();
+                        let ptr_raw = this.get_alloc_bytes_unchecked_raw(id)?;
+                        // SAFETY: We know for sure that at ptr_raw the next layout.size bytes
+                        // are part of this allocation and initialised. They might be marked as
+                        // uninit in Miri, but all bytes returned by the isolated allocator are
+                        // initialised.
+                        unsafe {
+                            std::slice::from_raw_parts(ptr_raw, mplace.layout.size.bytes_usize())
+                                .to_vec()
+                                .into_boxed_slice()
+                        }
+                    }
+                    either::Either::Right(imm) => {
+                        // For immediates, we know the backing scalar is going to be 128 bits,
+                        // so we can just copy that.
+                        // TODO: is it possible for this to be a scalar pair?
+                        let scalar = imm.to_scalar();
+                        if scalar.size().bytes() > 0 {
+                            let bits = scalar.to_bits(scalar.size())?;
+                            bits.to_ne_bytes().to_vec().into_boxed_slice()
+                        } else {
+                            throw_ub_format!("attempting to pass a ZST over FFI: {}", imm.layout.ty)
+                        }
+                    }
+                };
+
+                ffi::CArg::Struct(strukt, bytes)
+            }
+            _ => throw_unsup_format!("unsupported argument type for native call: {}", v.layout.ty),
+        })
+    }
+
+    /// Parses an ADT to construct the matching libffi type.
+    fn adt_to_ffitype(
+        &self,
+        orig_ty: Ty<'_>,
+        adt_def: ty::AdtDef<'tcx>,
+        args: &'tcx ty::List<ty::GenericArg<'tcx>>,
+    ) -> InterpResult<'tcx, FfiType> {
+        // TODO: is this correct? Maybe `repr(transparent)` when the inner field
+        // is itself `repr(c)` is ok?
+        if !adt_def.repr().c() {
+            throw_ub_format!("passing a non-#[repr(C)] struct over FFI: {orig_ty}")
+        }
+        // TODO: unions, etc.
+        if !adt_def.is_struct() {
+            throw_unsup_format!("unsupported argument type for native call: {orig_ty}");
+        }
+
+        let this = self.eval_context_ref();
+        let mut fields = vec![];
+        for field in adt_def.all_fields() {
+            fields.push(this.ty_to_ffitype(field.ty(*this.tcx, args))?);
+        }
+
+        interp_ok(FfiType::structure(fields))
+    }
+
+    /// Gets the matching libffi type for a given Ty.
+    fn ty_to_ffitype(&self, ty: Ty<'tcx>) -> InterpResult<'tcx, FfiType> {
+        interp_ok(match ty.kind() {
+            ty::Int(IntTy::I8) => FfiType::i8(),
+            ty::Int(IntTy::I16) => FfiType::i16(),
+            ty::Int(IntTy::I32) => FfiType::i32(),
+            ty::Int(IntTy::I64) => FfiType::i64(),
+            ty::Int(IntTy::Isize) => FfiType::isize(),
+            // the uints
+            ty::Uint(UintTy::U8) => FfiType::u8(),
+            ty::Uint(UintTy::U16) => FfiType::u16(),
+            ty::Uint(UintTy::U32) => FfiType::u32(),
+            ty::Uint(UintTy::U64) => FfiType::u64(),
+            ty::Uint(UintTy::Usize) => FfiType::usize(),
+            ty::RawPtr(..) => FfiType::pointer(),
+            ty::Adt(adt_def, args) => self.adt_to_ffitype(ty, *adt_def, args)?,
+            _ => throw_unsup_format!("unsupported argument type for native call: {}", ty),
+        })
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -295,36 +438,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Do we have ptrace?
         let tracing = trace::Supervisor::is_enabled();
 
-        // Get the function arguments, and convert them to `libffi`-compatible form.
+        // Get the function arguments, copy them, and prepare the type descriptions.
         let mut libffi_args = Vec::<CArg>::with_capacity(args.len());
         for arg in args.iter() {
-            if !matches!(arg.layout.backend_repr, BackendRepr::Scalar(_)) {
-                throw_unsup_format!("only scalar argument types are supported for native calls")
-            }
-            let imm = this.read_immediate(arg)?;
-            libffi_args.push(imm_to_carg(&imm, this)?);
-            // If we are passing a pointer, expose its provenance. Below, all exposed memory
-            // (previously exposed and new exposed) will then be properly prepared.
-            if matches!(arg.layout.ty.kind(), ty::RawPtr(..)) {
-                let ptr = imm.to_scalar().to_pointer(this)?;
-                let Some(prov) = ptr.provenance else {
-                    // Pointer without provenance may not access any memory anyway, skip.
-                    continue;
-                };
-                // The first time this happens, print a warning.
-                if !this.machine.native_call_mem_warned.replace(true) {
-                    // Newly set, so first time we get here.
-                    this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem { tracing });
-                }
-
-                this.expose_provenance(prov)?;
-            }
+            libffi_args.push(this.op_to_carg(arg, tracing)?);
         }
-        // Convert arguments to `libffi::high::Arg` type.
-        let libffi_args = libffi_args
-            .iter()
-            .map(|arg| arg.arg_downcast())
-            .collect::<Vec<libffi::high::Arg<'_>>>();
+        // Convert arguments to a libffi-compatible type.
+        let libffi_args = libffi_args.iter().map(|arg| arg.arg_downcast()).collect::<Vec<_>>();
 
         // Prepare all exposed memory (both previously exposed, and just newly exposed since a
         // pointer was passed as argument). Uninitialised memory is left as-is, but any data
@@ -376,84 +496,4 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
     }
-}
-
-#[derive(Debug, Clone)]
-/// Enum of supported arguments to external C functions.
-// We introduce this enum instead of just calling `ffi::arg` and storing a list
-// of `libffi::high::Arg` directly, because the `libffi::high::Arg` just wraps a reference
-// to the value it represents: https://docs.rs/libffi/latest/libffi/high/call/struct.Arg.html
-// and we need to store a copy of the value, and pass a reference to this copy to C instead.
-enum CArg {
-    /// 8-bit signed integer.
-    Int8(i8),
-    /// 16-bit signed integer.
-    Int16(i16),
-    /// 32-bit signed integer.
-    Int32(i32),
-    /// 64-bit signed integer.
-    Int64(i64),
-    /// isize.
-    ISize(isize),
-    /// 8-bit unsigned integer.
-    UInt8(u8),
-    /// 16-bit unsigned integer.
-    UInt16(u16),
-    /// 32-bit unsigned integer.
-    UInt32(u32),
-    /// 64-bit unsigned integer.
-    UInt64(u64),
-    /// usize.
-    USize(usize),
-    /// Raw pointer, stored as C's `void*`.
-    RawPtr(*mut std::ffi::c_void),
-}
-
-impl<'a> CArg {
-    /// Convert a `CArg` to a `libffi` argument type.
-    fn arg_downcast(&'a self) -> libffi::high::Arg<'a> {
-        match self {
-            CArg::Int8(i) => ffi::arg(i),
-            CArg::Int16(i) => ffi::arg(i),
-            CArg::Int32(i) => ffi::arg(i),
-            CArg::Int64(i) => ffi::arg(i),
-            CArg::ISize(i) => ffi::arg(i),
-            CArg::UInt8(i) => ffi::arg(i),
-            CArg::UInt16(i) => ffi::arg(i),
-            CArg::UInt32(i) => ffi::arg(i),
-            CArg::UInt64(i) => ffi::arg(i),
-            CArg::USize(i) => ffi::arg(i),
-            CArg::RawPtr(i) => ffi::arg(i),
-        }
-    }
-}
-
-/// Extract the scalar value from the result of reading a scalar from the machine,
-/// and convert it to a `CArg`.
-fn imm_to_carg<'tcx>(v: &ImmTy<'tcx>, cx: &impl HasDataLayout) -> InterpResult<'tcx, CArg> {
-    interp_ok(match v.layout.ty.kind() {
-        // If the primitive provided can be converted to a type matching the type pattern
-        // then create a `CArg` of this primitive value with the corresponding `CArg` constructor.
-        // the ints
-        ty::Int(IntTy::I8) => CArg::Int8(v.to_scalar().to_i8()?),
-        ty::Int(IntTy::I16) => CArg::Int16(v.to_scalar().to_i16()?),
-        ty::Int(IntTy::I32) => CArg::Int32(v.to_scalar().to_i32()?),
-        ty::Int(IntTy::I64) => CArg::Int64(v.to_scalar().to_i64()?),
-        ty::Int(IntTy::Isize) =>
-            CArg::ISize(v.to_scalar().to_target_isize(cx)?.try_into().unwrap()),
-        // the uints
-        ty::Uint(UintTy::U8) => CArg::UInt8(v.to_scalar().to_u8()?),
-        ty::Uint(UintTy::U16) => CArg::UInt16(v.to_scalar().to_u16()?),
-        ty::Uint(UintTy::U32) => CArg::UInt32(v.to_scalar().to_u32()?),
-        ty::Uint(UintTy::U64) => CArg::UInt64(v.to_scalar().to_u64()?),
-        ty::Uint(UintTy::Usize) =>
-            CArg::USize(v.to_scalar().to_target_usize(cx)?.try_into().unwrap()),
-        ty::RawPtr(..) => {
-            let s = v.to_scalar().to_pointer(cx)?.addr();
-            // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
-            // above.
-            CArg::RawPtr(std::ptr::with_exposed_provenance_mut(s.bytes_usize()))
-        }
-        _ => throw_unsup_format!("unsupported argument type for native call: {}", v.layout.ty),
-    })
 }
