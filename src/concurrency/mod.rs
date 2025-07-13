@@ -8,7 +8,7 @@ mod vector_clock;
 pub mod weak_memory;
 
 // Import either the real genmc adapter or a dummy module.
-// On unsupported platforms, we still include the dummy module, even if the `genmc` feature is enabled.
+// On unsupported platforms, we always include the dummy module, even if the `genmc` feature is enabled.
 // FIXME(genmc,macos): Add `target_os = "macos"` once `https://github.com/dtolnay/cxx/issues/1535` is fixed.
 #[cfg_attr(
     not(all(feature = "genmc", target_os = "linux", target_pointer_width = "64")),

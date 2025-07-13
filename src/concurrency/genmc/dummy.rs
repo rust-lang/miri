@@ -234,7 +234,7 @@ impl GenmcConfig {
             target_pointer_width = "64"
         )) {
             unimplemented!(
-                "GenMC feature im Miri is disabled, cannot handle argument: \"-Zmiri-genmc{trimmed_arg}\""
+                "GenMC is disabled, cannot handle argument: \"-Zmiri-genmc{trimmed_arg}\""
             );
         } else {
             unimplemented!(
