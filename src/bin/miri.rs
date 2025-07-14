@@ -734,6 +734,7 @@ fn main() {
 
     // Validate settings for data race detection and GenMC mode.
     if miri_config.genmc_config.is_some() {
+        // FIXME(genmc): Add checks for currently supported platforms (64bit, target == host)
         if !miri_config.data_race_detector {
             fatal_error!("Cannot disable data race detection in GenMC mode (currently)");
         } else if !miri_config.weak_memory_emulation {

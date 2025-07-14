@@ -18,6 +18,17 @@ impl GenmcConfig {
     ///
     /// `trimmed_arg` should be the argument to be parsed, with the suffix "-Zmiri-genmc" removed.
     pub fn parse_arg(genmc_config: &mut Option<GenmcConfig>, trimmed_arg: &str) {
+        // FIXME(genmc,macos): Add `target_os = "macos"` once `https://github.com/dtolnay/cxx/issues/1535` is fixed.
+        if !cfg!(all(
+            feature = "genmc",
+            any(target_os = "linux", target_os = "macos"),
+            target_pointer_width = "64",
+            target_endian = "little"
+        )) {
+            unimplemented!(
+                "GenMC mode is not supported on this platform, cannot handle argument: \"-Zmiri-genmc{trimmed_arg}\""
+            );
+        }
         if genmc_config.is_none() {
             *genmc_config = Some(Default::default());
         }
