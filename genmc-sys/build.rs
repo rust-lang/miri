@@ -186,9 +186,7 @@ fn main() {
     } else if cfg!(feature = "download_genmc") {
         downloading::download_genmc()
     } else {
-        panic!(
-            "GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled."
-        );
+        panic!("GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled.");
     };
 
     // Build all required components:
