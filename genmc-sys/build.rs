@@ -187,7 +187,7 @@ fn main() {
         downloading::download_genmc()
     } else {
         panic!(
-            "cargo::error=GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled."
+            "GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled."
         );
     };
 
