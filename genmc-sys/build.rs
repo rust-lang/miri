@@ -177,6 +177,11 @@ fn main() {
     // Select between local GenMC repo, or downloading GenMC from a specific commit.
     let Ok(genmc_local_path) = PathBuf::from_str(GENMC_LOCAL_PATH);
     let genmc_path = if genmc_local_path.exists() {
+        // If the local repository exists, cargo should watch it for changes:
+        // FIXME(genmc,cargo): We could always watch this path even if it doesn't (yet) exist, depending on how `https://github.com/rust-lang/cargo/issues/6003` is resolved.
+        //                     Adding it here means we don't rebuild if a user creates `GENMC_LOCAL_PATH`, which isn't ideal.
+        //                     Cargo currently always rebuilds if a watched directory doesn't exist, so we can only add it if it exists.
+        println!("cargo::rerun-if-changed={GENMC_LOCAL_PATH}");
         genmc_local_path
     } else if cfg!(feature = "download_genmc") {
         downloading::download_genmc()
@@ -195,5 +200,4 @@ fn main() {
     // Adding that path here would also trigger an unnecessary rebuild after the repo is cloned (since cargo detects that as a file modification).
     println!("cargo::rerun-if-changed={RUST_CXX_BRIDGE_FILE_PATH}");
     println!("cargo::rerun-if-changed=./src_cpp");
-    println!("cargo::rerun-if-changed={GENMC_LOCAL_PATH}");
 }
