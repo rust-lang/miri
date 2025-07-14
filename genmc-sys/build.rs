@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+// Build script for running Miri with GenMC.
+// Check out doc/GenMC.md for more info.
+
 /// Path used for development of Miri-GenMC.
 /// A GenMC repository in this directory will take precedence over the downloaded GenMC repository.
 /// If the `download` feature is disabled, this path must contain a GenMC repository.
@@ -20,12 +23,6 @@ const ENABLE_GENMC_DEBUG: bool = true;
 /// The profile with which to build GenMC.
 const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
 
-fn fatal_error() -> ! {
-    println!("cargo::error=");
-    println!("cargo::error=HINT: For more information on GenMC, check out 'doc/GenMC.md'");
-    std::process::exit(1)
-}
-
 #[cfg(feature = "download_genmc")]
 mod downloading {
     use std::path::{Path, PathBuf};
@@ -33,7 +30,7 @@ mod downloading {
 
     use git2::{Commit, Oid, Repository, StatusOptions};
 
-    use super::{GENMC_LOCAL_PATH, fatal_error};
+    use super::GENMC_LOCAL_PATH;
 
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     pub(crate) const GENMC_COMMIT: &str = "2f503036ae14dc91746bfc292d142f332f31727e";
@@ -52,10 +49,9 @@ mod downloading {
             Err(_) => {
                 let repo = clone_remote_repo(&genmc_download_path);
                 let Ok(commit) = repo.find_commit(commit_oid) else {
-                    println!(
-                        "cargo::error=Cloned GenMC repository does not contain required commit '{GENMC_COMMIT}'"
+                    panic!(
+                        "Cloned GenMC repository does not contain required commit '{GENMC_COMMIT}'"
                     );
-                    fatal_error();
                 };
                 checkout_commit(&repo, &commit);
             }
@@ -68,15 +64,12 @@ mod downloading {
     fn update_local_repo(repo: &Repository, commit_oid: Oid) -> Commit<'_> {
         repo.find_commit(commit_oid).unwrap_or_else(|_find_error| {
             println!("GenMC repository at path '{GENMC_DOWNLOAD_PATH}' does not contain commit '{GENMC_COMMIT}'.");
+            // The commit is not in the checkout. Try `git fetch` and hope that we find the commit then.
             match repo.find_remote("origin") {
                 Ok(mut remote) =>
-                    remote.fetch(&[GENMC_COMMIT], None, None).unwrap_or_else(|e| {
-                        println!("cargo::error=Failed to fetch from remote: {e}");
-                        fatal_error();
-                    }),
+                    remote.fetch(&[GENMC_COMMIT], None, None).expect("Failed to fetch from remote."),
                 Err(e) => {
-                    println!("cargo::error=could not load commit from remote repository '{GENMC_GITHUB_URL}'. Error: {e}");
-                    fatal_error();
+                    panic!("Could not load commit ({GENMC_COMMIT}) from remote repository '{GENMC_GITHUB_URL}'. Error: {e}");
                 }
             }
             repo.find_commit(commit_oid)
@@ -86,8 +79,7 @@ mod downloading {
 
     fn clone_remote_repo(genmc_download_path: &PathBuf) -> Repository {
         Repository::clone(GENMC_GITHUB_URL, &genmc_download_path).unwrap_or_else(|e| {
-            println!("cargo::error=Cannot clone GenMC repo from '{GENMC_GITHUB_URL}': {e:?}");
-            fatal_error();
+            panic!("Cannot clone GenMC repo from '{GENMC_GITHUB_URL}': {e:?}");
         })
     }
 
@@ -114,40 +106,14 @@ mod downloading {
             return;
         }
 
-        /// Printing too many files makes reading the error message difficult, so we limit the number.
-        const PRINT_LIMIT: usize = 8;
-
-        println!();
-        println!(
-            "cargo::error=Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH}' has been modified:"
-        );
-        for entry in statuses.iter().take(PRINT_LIMIT) {
-            println!(
-                "cargo::error=  {} is {:?}",
-                entry.path().unwrap_or("unknown"),
-                entry.status()
-            );
-        }
-        if statuses.len() > PRINT_LIMIT {
-            println!("cargo::error=  ...");
-            println!("cargo::error=  [ Total {} modified files ]", statuses.len());
-        }
-
-        println!("cargo::error=");
-        println!(
-            "cargo::error=This repository should only be modified by the 'genmc-sys' build script."
-        );
-        println!(
-            "cargo::error=Please undo any changes made, or delete the '{GENMC_DOWNLOAD_PATH}' directory to have it downloaded again."
-        );
-
-        println!("cargo::error=");
         let local_path = Path::new(GENMC_LOCAL_PATH);
         println!(
-            "cargo::error=HINT: For local development, place a GenMC repository in the path {:?}.",
+            "HINT: For local development, place a GenMC repository in the path {:?}.",
             std::path::absolute(local_path).unwrap_or_else(|_| local_path.into())
         );
-        fatal_error();
+        panic!(
+            "Downloaded GenMC repository at path '{GENMC_DOWNLOAD_PATH}' has been modified. Please undo any changes made, or delete the '{GENMC_DOWNLOAD_PATH}' directory to have it downloaded again."
+        );
     }
 }
 
@@ -215,10 +181,9 @@ fn main() {
     } else if cfg!(feature = "download_genmc") {
         downloading::download_genmc()
     } else {
-        println!(
+        panic!(
             "cargo::error=GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled."
         );
-        fatal_error();
     };
 
     // Build all required components:
