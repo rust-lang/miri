@@ -36,7 +36,7 @@ mod downloading {
     use super::{GENMC_LOCAL_PATH, fatal_error};
 
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
-    pub(crate) const GENMC_COMMIT: &str = "31c4d3d280c724c497d4b4563d8ea99849f1c52b";
+    pub(crate) const GENMC_COMMIT: &str = "2f503036ae14dc91746bfc292d142f332f31727e";
     pub(crate) const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
 
     pub(crate) fn download_genmc() -> PathBuf {
@@ -152,7 +152,7 @@ mod downloading {
 }
 
 /// Build the Rust-C++ interop library with cxx.rs
-fn build_cxx_bridge(genmc_path: &Path, cmake_build_path: &Path) {
+fn build_cxx_bridge(genmc_path: &Path, genmc_install_dir: &Path) {
     // Paths for include directories:
     let model_checker_include_path = genmc_path.join(GENMC_MODEL_CHECKER).join("include");
     let genmc_common_include_path = genmc_path.join("common").join("include");
@@ -165,7 +165,7 @@ fn build_cxx_bridge(genmc_path: &Path, cmake_build_path: &Path) {
         .std("c++20")
         .include(genmc_common_include_path) // Required for including GenMC helper files.
         .include(model_checker_include_path) // Required for including GenMC model checker files.
-        .include(cmake_build_path) // Required for including `config.h`.
+        .include(genmc_install_dir) // Required for including `config.h`.
         .include("./src_cpp")
         .file("./src_cpp/MiriInterface.hpp")
         .file("./src_cpp/MiriInterface.cpp")
@@ -176,7 +176,7 @@ fn build_cxx_bridge(genmc_path: &Path, cmake_build_path: &Path) {
 }
 
 /// Build the GenMC model checker library.
-/// Returns the path
+/// Returns the path where cmake installs the model checker library and the config.h file.
 fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
     let cmakelists_path = genmc_path.join("CMakeLists.txt");
 
@@ -198,14 +198,13 @@ fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
     config.define("BUILD_INSTRUMENTATION", "OFF");
     config.define("BUILD_MODEL_CHECKER", "ON");
 
-    config.build_target(GENMC_MODEL_CHECKER);
-    let _dst = config.build();
+    let cmake_install_dir = config.build();
 
-    let genmc_model_checker_build_directory = genmc_build_path.join(GENMC_MODEL_CHECKER);
-    println!("cargo::rustc-link-search=native={}", genmc_model_checker_build_directory.display());
+    // Add the model checker library to be linked and the install directory where it is located:
+    println!("cargo::rustc-link-search=native={}", cmake_install_dir.display());
     println!("cargo::rustc-link-lib=static={GENMC_MODEL_CHECKER}");
 
-    genmc_build_path
+    cmake_install_dir
 }
 
 fn main() {
@@ -223,8 +222,8 @@ fn main() {
     };
 
     // Build all required components:
-    let genmc_build_path = build_genmc_model_checker(&genmc_path);
-    build_cxx_bridge(&genmc_path, &genmc_build_path);
+    let genmc_install_dir = build_genmc_model_checker(&genmc_path);
+    build_cxx_bridge(&genmc_path, &genmc_install_dir);
 
     // Only rebuild if anything changes:
     // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
