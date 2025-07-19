@@ -27,7 +27,7 @@ mod downloading {
 
     use git2::{Commit, Oid, Repository, StatusOptions};
 
-    use super::{GENMC_LOCAL_PATH, GENMC_DOWNLOAD_PATH};
+    use super::{GENMC_DOWNLOAD_PATH, GENMC_LOCAL_PATH};
 
     /// The GenMC repository the we get our commit from.
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
