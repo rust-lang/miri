@@ -5,8 +5,8 @@
 
 #include "config.h"
 
+#include "Config/Config.hpp"
 #include "Verification/GenMCDriver.hpp"
-#include "Verification/VerificationConfig.hpp"
 
 #include <iostream>
 
@@ -19,8 +19,8 @@ struct MiriGenMCShim : private GenMCDriver
 {
 
 public:
-	MiriGenMCShim(std::shared_ptr<const VerificationConfig> vConf, Mode mode /* = VerificationMode{} */)
-		: GenMCDriver(std::move(vConf), nullptr, mode)
+	MiriGenMCShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
+		: GenMCDriver(std::move(conf), nullptr, mode)
 	{
 		std::cerr << "C++: GenMC handle created!" << std::endl;
 	}

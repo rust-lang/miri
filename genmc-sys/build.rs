@@ -10,7 +10,7 @@ use std::str::FromStr;
 const GENMC_LOCAL_PATH: &str = "./genmc/";
 
 /// Name of the library of the GenMC model checker.
-const GENMC_MODEL_CHECKER: &str = "model_checker";
+const GENMC_MODEL_CHECKER: &str = "genmc_lib";
 
 /// Path where the `cxx_bridge!` macro is used to define the Rust-C++ interface.
 const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
@@ -33,7 +33,7 @@ mod downloading {
     use super::GENMC_LOCAL_PATH;
 
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
-    pub(crate) const GENMC_COMMIT: &str = "2f503036ae14dc91746bfc292d142f332f31727e";
+    pub(crate) const GENMC_COMMIT: &str = "a3c6cbb3b0be78fbd1edbfe7e4ec76e5003b2e96";
     pub(crate) const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
 
     pub(crate) fn download_genmc() -> PathBuf {
@@ -117,11 +117,36 @@ mod downloading {
     }
 }
 
+// FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
+/// The linked LLVM version is in the generated `config.h`` file, which we parse and use to link to LLVM.
+fn link_to_llvm(config_file: &Path) {
+    let file_content = std::fs::read_to_string(&config_file).unwrap_or_else(|err| {
+        panic!("GenMC config file ({}) should exist, but got errror {err:?}", config_file.display())
+    });
+    // Look for line '#define LLVM_VERSION "X.Y.Z"'
+    let llvm_version = file_content
+        .lines()
+        .find_map(|line| {
+            if let Some(suffix) = line.strip_prefix("#define LLVM_VERSION")
+                && let Some(version_str) = suffix.split('"').nth(1)
+                && let Some(major) = version_str.split('.').next()
+            {
+                // FIXME(genmc,debugging): remove warning print
+                println!(
+                    "cargo::warning=Found llvm version {version_str}"
+                );
+                return Some(major);
+            }
+            None
+        })
+        .expect("Config file should contain LLVM version");
+
+    println!("cargo::rustc-link-lib=dylib=LLVM-{llvm_version}");
+}
+
 /// Build the Rust-C++ interop library with cxx.rs
-fn build_cxx_bridge(genmc_path: &Path, genmc_install_dir: &Path) {
-    // Paths for include directories:
-    let model_checker_include_path = genmc_path.join(GENMC_MODEL_CHECKER).join("include");
-    let genmc_common_include_path = genmc_path.join("common").join("include");
+fn build_cxx_bridge(genmc_install_dir: &Path) {
+    let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
     // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     cxx_build::bridge("src/lib.rs")
@@ -129,9 +154,7 @@ fn build_cxx_bridge(genmc_path: &Path, genmc_install_dir: &Path) {
         .debug(true) // Same settings that GenMC uses ("-O2 -g")
         .warnings(false) // NOTE: enabling this produces a lot of warnings.
         .std("c++20")
-        .include(genmc_common_include_path) // Required for including GenMC helper files.
-        .include(model_checker_include_path) // Required for including GenMC model checker files.
-        .include(genmc_install_dir) // Required for including `config.h`.
+        .include(genmc_include_dir)
         .include("./src_cpp")
         .file("./src_cpp/MiriInterface.hpp")
         .file("./src_cpp/MiriInterface.cpp")
@@ -159,18 +182,24 @@ fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
     let genmc_build_path: PathBuf = [&out_dir, "build"].into_iter().collect();
     config.configure_arg(format!("-B {}", genmc_build_path.display()));
 
-    // Enable only the components of GenMC that we need:
-    config.define("BUILD_LLI", "OFF");
-    config.define("BUILD_INSTRUMENTATION", "OFF");
+    // Enable and install the components of GenMC that we need:
+    config.define("BUILD_LLI", "OFF"); // No need to build the GenMC executable.
     config.define("BUILD_MODEL_CHECKER", "ON");
+    config.define("INSTALL_MODEL_CHECKER", "ON");
 
-    let cmake_install_dir = config.build();
+    let genmc_install_dir = config.build();
 
-    // Add the model checker library to be linked and the install directory where it is located:
-    println!("cargo::rustc-link-search=native={}", cmake_install_dir.display());
+    // Add the model checker library to be linked and tell GenMC where to find it:
+    let cmake_lib_dir = genmc_install_dir.join("lib").join("genmc");
+    println!("cargo::warning=lib dir: {}", cmake_lib_dir.display());
+    println!("cargo::rustc-link-search=native={}", cmake_lib_dir.display());
     println!("cargo::rustc-link-lib=static={GENMC_MODEL_CHECKER}");
 
-    cmake_install_dir
+    // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
+    let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
+    link_to_llvm(&config_file);
+
+    genmc_install_dir
 }
 
 fn main() {
@@ -191,7 +220,7 @@ fn main() {
 
     // Build all required components:
     let genmc_install_dir = build_genmc_model_checker(&genmc_path);
-    build_cxx_bridge(&genmc_path, &genmc_install_dir);
+    build_cxx_bridge(&genmc_install_dir);
 
     // Only rebuild if anything changes:
     // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
