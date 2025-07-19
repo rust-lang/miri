@@ -5,7 +5,7 @@ use std::str::FromStr;
 // Check out doc/GenMC.md for more info.
 
 /// Path used for development of Miri-GenMC.
-/// A GenMC repository in this directory will take precedence over the downloaded GenMC repository.
+/// A GenMC repository in this directory (relative to the `genmc-sys` directory) will take precedence over the downloaded GenMC repository.
 /// If the `download` feature is disabled, this path must contain a GenMC repository.
 const GENMC_LOCAL_PATH: &str = "./genmc/";
 
@@ -24,8 +24,12 @@ mod downloading {
 
     use super::GENMC_LOCAL_PATH;
 
+    /// The GenMC repository the we get our commit from.
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
+    /// The GenMC commit we depend on. It must be available on the specified GenMC repository.
     pub(crate) const GENMC_COMMIT: &str = "a3c6cbb3b0be78fbd1edbfe7e4ec76e5003b2e96";
+    /// Path where the downloaded GenMC repository will be stored (relative to the `genmc-sys` directory).
+    /// Note that this directory is *not* cleaned up automatically by `cargo clean`.
     pub(crate) const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
 
     pub(crate) fn download_genmc() -> PathBuf {
