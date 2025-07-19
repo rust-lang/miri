@@ -9,6 +9,11 @@ use std::str::FromStr;
 /// If the `download` feature is disabled, this path must contain a GenMC repository.
 const GENMC_LOCAL_PATH: &str = "./genmc/";
 
+/// Path where the downloaded GenMC repository will be stored (relative to the `genmc-sys` directory).
+/// Note that this directory is *not* cleaned up automatically by `cargo clean`.
+#[cfg(feature = "download_genmc")]
+const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
+
 /// Name of the library of the GenMC model checker.
 const GENMC_MODEL_CHECKER: &str = "genmc_lib";
 
@@ -22,15 +27,12 @@ mod downloading {
 
     use git2::{Commit, Oid, Repository, StatusOptions};
 
-    use super::GENMC_LOCAL_PATH;
+    use super::{GENMC_LOCAL_PATH, GENMC_DOWNLOAD_PATH};
 
     /// The GenMC repository the we get our commit from.
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     /// The GenMC commit we depend on. It must be available on the specified GenMC repository.
     pub(crate) const GENMC_COMMIT: &str = "a3c6cbb3b0be78fbd1edbfe7e4ec76e5003b2e96";
-    /// Path where the downloaded GenMC repository will be stored (relative to the `genmc-sys` directory).
-    /// Note that this directory is *not* cleaned up automatically by `cargo clean`.
-    pub(crate) const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
 
     pub(crate) fn download_genmc() -> PathBuf {
         let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH);
@@ -197,9 +199,18 @@ fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
 }
 
 fn main() {
-    // Select between local GenMC repo, or downloading GenMC from a specific commit.
+    // Select which path to use for the GenMC repo:
     let Ok(genmc_local_path) = PathBuf::from_str(GENMC_LOCAL_PATH);
-    let genmc_path = if genmc_local_path.exists() {
+    let genmc_path = if let Ok(genmc_src_path) = std::env::var("GENMC_SRC_PATH") {
+        let genmc_src_path =
+            PathBuf::from_str(&genmc_src_path).expect("GENMC_SRC_PATH should contain a valid path");
+        assert!(
+            genmc_src_path.exists(),
+            "GENMC_SRC_PATH ({}) does not exist!",
+            genmc_src_path.display()
+        );
+        genmc_src_path
+    } else if genmc_local_path.exists() {
         // If the local repository exists, cargo should watch it for changes:
         // FIXME(genmc,cargo): We could always watch this path even if it doesn't (yet) exist, depending on how `https://github.com/rust-lang/cargo/issues/6003` is resolved.
         //                     Adding it here means we don't rebuild if a user creates `GENMC_LOCAL_PATH`, which isn't ideal.
