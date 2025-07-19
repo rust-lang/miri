@@ -8,7 +8,7 @@ use crate::*;
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-     fn emulate_math_intrinsic(
+    fn emulate_math_intrinsic(
         &mut self,
         intrinsic_name: &str,
         _generic_args: ty::GenericArgsRef<'tcx>,
@@ -310,7 +310,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(res, dest)?;
             }
 
-            _ => return interp_ok(EmulateItemResult::NotSupported)
+            _ => return interp_ok(EmulateItemResult::NotSupported),
         }
 
         interp_ok(EmulateItemResult::NeedsReturn)

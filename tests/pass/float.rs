@@ -1142,7 +1142,6 @@ pub fn libm() {
     assert_biteq(0.0f64.asin(), 0.0, "asin(+0) = +0");
     assert_biteq((-0.0f64).asin(), -0.0, "asin(-0) = -0");
 
-
     assert_approx_eq!(1.0f32.sinh(), 1.1752012f32);
     assert_approx_eq!(1.0f64.sinh(), 1.1752011936438014f64);
     assert_approx_eq!(2.0f32.asinh(), 1.443635475178810342493276740273105f32);
