@@ -175,13 +175,6 @@ fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
         config.define("GENMC_DEBUG", "ON");
     }
 
-    // FIXME(GenMC,HACK): Required for unknown reasons on older cmake (version 3.22.1, works without this with version 3.31.6)
-    //              Without this, the files are written into the source directory by the cmake configure step, and then
-    //              the build step cannot find these files, because it correctly tries using the `target` directory.
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    let genmc_build_path: PathBuf = [&out_dir, "build"].into_iter().collect();
-    config.configure_arg(format!("-B {}", genmc_build_path.display()));
-
     // Enable and install the components of GenMC that we need:
     config.define("BUILD_LLI", "OFF"); // No need to build the GenMC executable.
     config.define("BUILD_MODEL_CHECKER", "ON");
