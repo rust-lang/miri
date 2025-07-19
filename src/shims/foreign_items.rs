@@ -9,6 +9,7 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use rustc_middle::mir::interpret::AllocInit;
+use rustc_middle::mir::mono::Linkage;
 use rustc_middle::ty::{Instance, Ty};
 use rustc_middle::{mir, ty};
 use rustc_span::Symbol;
@@ -138,7 +139,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
                 // Find it if it was not cached.
-                let mut instance_and_crate: Option<(ty::Instance<'_>, CrateNum)> = None;
+                let mut instance_and_crate: Option<(ty::Instance<'_>, CrateNum, bool)> = None;
                 helpers::iter_exported_symbols(tcx, |cnum, def_id| {
                     let attrs = tcx.codegen_fn_attrs(def_id);
                     // Skip over imports of items.
@@ -155,38 +156,69 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                     let instance = Instance::mono(tcx, def_id);
                     let symbol_name = tcx.symbol_name(instance).name;
+                    let is_weak = attrs.linkage == Some(Linkage::WeakAny);
                     if symbol_name == link_name.as_str() {
-                        if let Some((original_instance, original_cnum)) = instance_and_crate {
-                            // Make sure we are consistent wrt what is 'first' and 'second'.
-                            let original_span = tcx.def_span(original_instance.def_id()).data();
-                            let span = tcx.def_span(def_id).data();
-                            if original_span < span {
-                                throw_machine_stop!(TerminationInfo::MultipleSymbolDefinitions {
-                                    link_name,
-                                    first: original_span,
-                                    first_crate: tcx.crate_name(original_cnum),
-                                    second: span,
-                                    second_crate: tcx.crate_name(cnum),
-                                });
-                            } else {
-                                throw_machine_stop!(TerminationInfo::MultipleSymbolDefinitions {
-                                    link_name,
-                                    first: span,
-                                    first_crate: tcx.crate_name(cnum),
-                                    second: original_span,
-                                    second_crate: tcx.crate_name(original_cnum),
-                                });
+                        if let Some((original_instance, original_cnum, original_is_weak)) =
+                            instance_and_crate
+                        {
+                            match (is_weak, original_is_weak) {
+                                (false, true) => {
+                                    // Original definition is a weak definition. Override it.
+
+                                    instance_and_crate =
+                                        Some((ty::Instance::mono(tcx, def_id), cnum, is_weak));
+                                }
+                                (true, false) => {
+                                    // Current definition is a weak definition. Keep the original one.
+                                }
+                                (true, true) | (false, false) => {
+                                    // Either both definitions are non-weak or both are weak. In
+                                    // either case return an error. For weak definitions we error
+                                    // because it is undefined which definition would have been
+                                    // picked by the linker.
+
+                                    // Make sure we are consistent wrt what is 'first' and 'second'.
+                                    let original_span =
+                                        tcx.def_span(original_instance.def_id()).data();
+                                    let span = tcx.def_span(def_id).data();
+                                    if original_span < span {
+                                        throw_machine_stop!(
+                                            TerminationInfo::MultipleSymbolDefinitions {
+                                                link_name,
+                                                first: original_span,
+                                                first_crate: tcx.crate_name(original_cnum),
+                                                second: span,
+                                                second_crate: tcx.crate_name(cnum),
+                                            }
+                                        );
+                                    } else {
+                                        throw_machine_stop!(
+                                            TerminationInfo::MultipleSymbolDefinitions {
+                                                link_name,
+                                                first: span,
+                                                first_crate: tcx.crate_name(cnum),
+                                                second: original_span,
+                                                second_crate: tcx.crate_name(original_cnum),
+                                            }
+                                        );
+                                    }
+                                }
                             }
+                        } else {
+                            instance_and_crate =
+                                Some((ty::Instance::mono(tcx, def_id), cnum, is_weak));
                         }
-                        if !matches!(tcx.def_kind(def_id), DefKind::Fn | DefKind::AssocFn) {
-                            throw_ub_format!(
-                                "attempt to call an exported symbol that is not defined as a function"
-                            );
-                        }
-                        instance_and_crate = Some((ty::Instance::mono(tcx, def_id), cnum));
                     }
                     interp_ok(())
                 })?;
+
+                if let Some((instance, _, _)) = instance_and_crate {
+                    if !matches!(tcx.def_kind(instance.def_id()), DefKind::Fn | DefKind::AssocFn) {
+                        throw_ub_format!(
+                            "attempt to call an exported symbol that is not defined as a function"
+                        );
+                    }
+                }
 
                 e.insert(instance_and_crate.map(|ic| ic.0))
             }
