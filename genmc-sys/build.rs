@@ -15,14 +15,6 @@ const GENMC_MODEL_CHECKER: &str = "genmc_lib";
 /// Path where the `cxx_bridge!` macro is used to define the Rust-C++ interface.
 const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 
-// FIXME(GenMC, build): decide whether to keep debug enabled or not (without this: calling BUG() ==> UB).
-// FIXME(GenMC, build): decide on which profile to use.
-
-/// Enable/disable additional debug checks, prints and options for GenMC.
-const ENABLE_GENMC_DEBUG: bool = true;
-/// The profile with which to build GenMC.
-const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
-
 #[cfg(feature = "download_genmc")]
 mod downloading {
     use std::path::{Path, PathBuf};
@@ -132,9 +124,7 @@ fn link_to_llvm(config_file: &Path) {
                 && let Some(major) = version_str.split('.').next()
             {
                 // FIXME(genmc,debugging): remove warning print
-                println!(
-                    "cargo::warning=Found llvm version {version_str}"
-                );
+                println!("cargo::warning=Found llvm version {version_str}");
                 return Some(major);
             }
             None
@@ -167,13 +157,19 @@ fn build_cxx_bridge(genmc_install_dir: &Path) {
 /// Build the GenMC model checker library.
 /// Returns the path where cmake installs the model checker library and the config.h file.
 fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
+    /// The profile with which to build GenMC.
+    const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
+
+    // Enable/disable additional debug checks, prints and options for GenMC, based on the Rust profile (debug/release)
+    let enable_genmc_debug = matches!(std::env::var("PROFILE").as_deref().unwrap(), "debug");
+    // FIXME(genmc,debugging): remove warning print
+    println!("cargo::warning=GENMC_DEBUG = {enable_genmc_debug}");
+
     let cmakelists_path = genmc_path.join("CMakeLists.txt");
 
     let mut config = cmake::Config::new(cmakelists_path);
     config.profile(GENMC_CMAKE_PROFILE);
-    if ENABLE_GENMC_DEBUG {
-        config.define("GENMC_DEBUG", "ON");
-    }
+    config.define("GENMC_DEBUG", if enable_genmc_debug { "ON" } else { "OFF" });
 
     // Enable and install the components of GenMC that we need:
     config.define("BUILD_LLI", "OFF"); // No need to build the GenMC executable.
@@ -184,6 +180,7 @@ fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
 
     // Add the model checker library to be linked and tell GenMC where to find it:
     let cmake_lib_dir = genmc_install_dir.join("lib").join("genmc");
+    // FIXME(genmc,debugging): remove warning print
     println!("cargo::warning=lib dir: {}", cmake_lib_dir.display());
     println!("cargo::rustc-link-search=native={}", cmake_lib_dir.display());
     println!("cargo::rustc-link-lib=static={GENMC_MODEL_CHECKER}");
