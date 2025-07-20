@@ -117,7 +117,8 @@ mod downloading {
 
 // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
 /// The linked LLVM version is in the generated `config.h`` file, which we parse and use to link to LLVM.
-fn link_to_llvm(config_file: &Path) {
+/// Returns c++ flags required for building with/including LLVM.
+fn link_to_llvm(config_file: &Path) -> String {
     let file_content = std::fs::read_to_string(&config_file).unwrap_or_else(|err| {
         panic!("GenMC config file ({}) should exist, but got errror {err:?}", config_file.display())
     });
@@ -138,14 +139,32 @@ fn link_to_llvm(config_file: &Path) {
         .expect("Config file should contain LLVM version");
 
     println!("cargo::rustc-link-lib=dylib=LLVM-{llvm_version}");
+
+    // Get required compile flags for LLVM.
+    let llvm_config = format!("llvm-config-{}", llvm_version);
+    let output = std::process::Command::new(&llvm_config)
+        .arg("--cppflags")
+        .output()
+        .expect("Failed to run llvm-config");
+    if !output.status.success() {
+        panic!("llvm-config command failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    let cpp_flags = String::from_utf8(output.stdout)
+        .expect("llvm-config output should be valid UTF-8")
+        .trim()
+        .to_string();
+
+    println!("cargo::warning=LLVM cpp_flags: '{cpp_flags}'");
+    cpp_flags
 }
 
 /// Build the Rust-C++ interop library with cxx.rs
-fn build_cxx_bridge(genmc_install_dir: &Path) {
+fn build_cxx_bridge(genmc_install_dir: &Path, llvm_cpp_flags: &str) {
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
     // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     cxx_build::bridge("src/lib.rs")
+        .flag(llvm_cpp_flags) // FIXME(genmc,llvm): remove once LLVM dependency is removed.
         .opt_level(2)
         .debug(true) // Same settings that GenMC uses ("-O2 -g")
         .warnings(false) // NOTE: enabling this produces a lot of warnings.
@@ -162,7 +181,8 @@ fn build_cxx_bridge(genmc_install_dir: &Path) {
 
 /// Build the GenMC model checker library.
 /// Returns the path where cmake installs the model checker library and the config.h file.
-fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
+/// FIXME(genmc,llvm): Also returns the cpp_flags required to compile with LLVM (remove once LLVM dependency is removed).
+fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String) {
     /// The profile with which to build GenMC.
     const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
 
@@ -193,9 +213,9 @@ fn build_genmc_model_checker(genmc_path: &Path) -> PathBuf {
 
     // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
     let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
-    link_to_llvm(&config_file);
+    let llvm_cpp_flags = link_to_llvm(&config_file);
 
-    genmc_install_dir
+    (genmc_install_dir, llvm_cpp_flags)
 }
 
 fn main() {
@@ -224,8 +244,8 @@ fn main() {
     };
 
     // Build all required components:
-    let genmc_install_dir = build_genmc_model_checker(&genmc_path);
-    build_cxx_bridge(&genmc_install_dir);
+    let (genmc_install_dir, llvm_cpp_flags) = build_genmc_model_checker(&genmc_path);
+    build_cxx_bridge(&genmc_install_dir, &llvm_cpp_flags);
 
     // Only rebuild if anything changes:
     // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
