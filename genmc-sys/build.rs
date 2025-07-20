@@ -162,9 +162,12 @@ fn link_to_llvm(config_file: &Path) -> String {
 fn build_cxx_bridge(genmc_install_dir: &Path, llvm_cpp_flags: &str) {
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
+    // FIXME(genmc,debugging): remove this:
+    println!("cargo::warning=cpp_flags: {:?}", llvm_cpp_flags.split(" ").collect::<Vec<_>>());
+
     // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     cxx_build::bridge("src/lib.rs")
-        .flag(llvm_cpp_flags) // FIXME(genmc,llvm): remove once LLVM dependency is removed.
+        .flags(llvm_cpp_flags.split(" ")) // FIXME(genmc,llvm): remove once LLVM dependency is removed.
         .opt_level(2)
         .debug(true) // Same settings that GenMC uses ("-O2 -g")
         .warnings(false) // NOTE: enabling this produces a lot of warnings.
