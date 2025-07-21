@@ -32,7 +32,7 @@ mod downloading {
     /// The GenMC repository the we get our commit from.
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     /// The GenMC commit we depend on. It must be available on the specified GenMC repository.
-    pub(crate) const GENMC_COMMIT: &str = "a3c6cbb3b0be78fbd1edbfe7e4ec76e5003b2e96";
+    pub(crate) const GENMC_COMMIT: &str = "128310845621cfe9e1807e344f103da40cd5226e";
 
     pub(crate) fn download_genmc() -> PathBuf {
         let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH);
@@ -117,62 +117,72 @@ mod downloading {
 
 // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
 /// The linked LLVM version is in the generated `config.h`` file, which we parse and use to link to LLVM.
-/// Returns c++ flags required for building with/including LLVM.
-fn link_to_llvm(config_file: &Path) -> String {
-    let file_content = std::fs::read_to_string(&config_file).unwrap_or_else(|err| {
-        panic!("GenMC config file ({}) should exist, but got errror {err:?}", config_file.display())
-    });
-    // Look for line '#define LLVM_VERSION "X.Y.Z"'
-    let llvm_version = file_content
-        .lines()
-        .find_map(|line| {
-            if let Some(suffix) = line.strip_prefix("#define LLVM_VERSION")
-                && let Some(version_str) = suffix.split('"').nth(1)
-                && let Some(major) = version_str.split('.').next()
+/// Returns c++ compiler definitions required for building with/including LLVM, and the include path for LLVM headers.
+fn link_to_llvm(config_file: &Path) -> (String, String) {
+    /// Search a string for a line matching `//@VARIABLE_NAME: VARIABLE CONTENT`
+    fn extract_value<'a>(input: &'a str, name: &str) -> Option<&'a str> {
+        input.lines().find_map(|line| {
+            if let Some(suffix) = line.strip_prefix("//@")
+                && let Some(suffix) = suffix.strip_prefix(name)
+                && let Some(suffix) = suffix.strip_prefix(": ")
             {
                 // FIXME(genmc,debugging): remove warning print
-                println!("cargo::warning=Found llvm version {version_str}");
-                return Some(major);
+                println!("cargo::warning=Found value '{name}': '{suffix}'");
+                return Some(suffix);
             }
             None
         })
-        .expect("Config file should contain LLVM version");
-
-    println!("cargo::rustc-link-lib=dylib=LLVM-{llvm_version}");
-
-    // Get required compile flags for LLVM.
-    let llvm_config = format!("llvm-config-{}", llvm_version);
-    let output = std::process::Command::new(&llvm_config)
-        .arg("--cppflags")
-        .output()
-        .expect("Failed to run llvm-config");
-    if !output.status.success() {
-        panic!("llvm-config command failed: {}", String::from_utf8_lossy(&output.stderr));
     }
-    let cpp_flags = String::from_utf8(output.stdout)
-        .expect("llvm-config output should be valid UTF-8")
-        .trim()
-        .to_string();
 
-    println!("cargo::warning=LLVM cpp_flags: '{cpp_flags}'");
-    cpp_flags
+    let file_content = std::fs::read_to_string(&config_file).unwrap_or_else(|err| {
+        panic!("GenMC config file ({}) should exist, but got errror {err:?}", config_file.display())
+    });
+
+    let llvm_definitions = extract_value(&file_content, "LLVM_DEFINITIONS")
+        .expect("Config file should contain LLVM_DEFINITIONS");
+    let llvm_include_dirs = extract_value(&file_content, "LLVM_INCLUDE_DIRS")
+        .expect("Config file should contain LLVM_INCLUDE_DIRS");
+    let llvm_library_dirs = extract_value(&file_content, "LLVM_LIBRARY_DIRS")
+        .expect("Config file should contain LLVM_LIBRARY_DIRS");
+    let llvm_link_libs = extract_value(&file_content, "LLVM_LINK_LIBS")
+        .expect("Config file should contain LLVM_LINK_LIBS");
+
+    // FIXME(genmc,debugging): remove warning print
+    println!("cargo::warning=Search path for linking: '{llvm_library_dirs}'");
+    let lib_dir = PathBuf::from_str(llvm_library_dirs).unwrap();
+    println!("cargo::rustc-link-search=native={}", lib_dir.display());
+
+    for link_lib in llvm_link_libs.split(" ") {
+        // FIXME(genmc,debugging): remove warning print
+        println!("cargo::warning=Linking with '{link_lib}'");
+        let link_lib = link_lib.strip_prefix("-l").unwrap();
+        println!("cargo::rustc-link-lib=dylib={link_lib}");
+    }
+
+    (llvm_definitions.to_string(), llvm_include_dirs.to_string())
 }
 
 /// Build the Rust-C++ interop library with cxx.rs
-fn build_cxx_bridge(genmc_install_dir: &Path, llvm_cpp_flags: &str) {
+fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_include_dirs: &str) {
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
     // FIXME(genmc,debugging): remove this:
-    println!("cargo::warning=cpp_flags: {:?}", llvm_cpp_flags.split(" ").collect::<Vec<_>>());
+    // println!("cargo::warning=llvm_definitions: {:?}", llvm_definitions.split(" ").collect::<Vec<_>>());
+    println!("cargo::warning=llvm_definitions: '{llvm_definitions}'");
+
+    // FIXME(genmc,llvm): remove once LLVM dependency is removed.
+    // HACK: We filter out _GNU_SOURCE, since it is already set and produces a warning if set again.
+    let definitions = llvm_definitions.split(";").filter(|definition| definition != &"-D_GNU_SOURCE");
 
     // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     cxx_build::bridge("src/lib.rs")
-        .flags(llvm_cpp_flags.split(" ")) // FIXME(genmc,llvm): remove once LLVM dependency is removed.
+        .flags(definitions)
         .opt_level(2)
         .debug(true) // Same settings that GenMC uses ("-O2 -g")
         .warnings(false) // NOTE: enabling this produces a lot of warnings.
         .std("c++20")
         .include(genmc_include_dir)
+        .include(llvm_include_dirs)
         .include("./src_cpp")
         .file("./src_cpp/MiriInterface.hpp")
         .file("./src_cpp/MiriInterface.cpp")
@@ -184,8 +194,8 @@ fn build_cxx_bridge(genmc_install_dir: &Path, llvm_cpp_flags: &str) {
 
 /// Build the GenMC model checker library.
 /// Returns the path where cmake installs the model checker library and the config.h file.
-/// FIXME(genmc,llvm): Also returns the cpp_flags required to compile with LLVM (remove once LLVM dependency is removed).
-fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String) {
+/// FIXME(genmc,llvm): Also returns the c++ compiler definitions required for building with/including LLVM, and the include path for LLVM headers. (remove once LLVM dependency is removed).
+fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String, String) {
     /// The profile with which to build GenMC.
     const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
 
@@ -216,9 +226,9 @@ fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String) {
 
     // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
     let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
-    let llvm_cpp_flags = link_to_llvm(&config_file);
+    let (llvm_definitions, llvm_include_dirs) = link_to_llvm(&config_file);
 
-    (genmc_install_dir, llvm_cpp_flags)
+    (genmc_install_dir, llvm_definitions, llvm_include_dirs)
 }
 
 fn main() {
@@ -247,8 +257,8 @@ fn main() {
     };
 
     // Build all required components:
-    let (genmc_install_dir, llvm_cpp_flags) = build_genmc_model_checker(&genmc_path);
-    build_cxx_bridge(&genmc_install_dir, &llvm_cpp_flags);
+    let (genmc_install_dir, llvm_definitions, llvm_include_dirs) = build_genmc_model_checker(&genmc_path);
+    build_cxx_bridge(&genmc_install_dir, &llvm_definitions, &llvm_include_dirs);
 
     // Only rebuild if anything changes:
     // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
