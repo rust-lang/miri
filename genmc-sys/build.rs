@@ -172,7 +172,8 @@ fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_inclu
 
     // FIXME(genmc,llvm): remove once LLVM dependency is removed.
     // HACK: We filter out _GNU_SOURCE, since it is already set and produces a warning if set again.
-    let definitions = llvm_definitions.split(";").filter(|definition| definition != &"-D_GNU_SOURCE");
+    let definitions =
+        llvm_definitions.split(";").filter(|definition| definition != &"-D_GNU_SOURCE");
 
     // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     cxx_build::bridge("src/lib.rs")
@@ -257,7 +258,8 @@ fn main() {
     };
 
     // Build all required components:
-    let (genmc_install_dir, llvm_definitions, llvm_include_dirs) = build_genmc_model_checker(&genmc_path);
+    let (genmc_install_dir, llvm_definitions, llvm_include_dirs) =
+        build_genmc_model_checker(&genmc_path);
     build_cxx_bridge(&genmc_install_dir, &llvm_definitions, &llvm_include_dirs);
 
     // Only rebuild if anything changes:
