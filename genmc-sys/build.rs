@@ -32,7 +32,7 @@ mod downloading {
     /// The GenMC repository the we get our commit from.
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     /// The GenMC commit we depend on. It must be available on the specified GenMC repository.
-    pub(crate) const GENMC_COMMIT: &str = "128310845621cfe9e1807e344f103da40cd5226e";
+    pub(crate) const GENMC_COMMIT: &str = "f8d41c7d8c7d88e47f71ef6bd7914041a2691aab";
 
     pub(crate) fn download_genmc() -> PathBuf {
         let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH);
@@ -142,20 +142,28 @@ fn link_to_llvm(config_file: &Path) -> (String, String) {
         .expect("Config file should contain LLVM_DEFINITIONS");
     let llvm_include_dirs = extract_value(&file_content, "LLVM_INCLUDE_DIRS")
         .expect("Config file should contain LLVM_INCLUDE_DIRS");
-    let llvm_library_dirs = extract_value(&file_content, "LLVM_LIBRARY_DIRS")
-        .expect("Config file should contain LLVM_LIBRARY_DIRS");
-    let llvm_link_libs = extract_value(&file_content, "LLVM_LINK_LIBS")
-        .expect("Config file should contain LLVM_LINK_LIBS");
+    let llvm_library_dir = extract_value(&file_content, "LLVM_LIBRARY_DIR")
+        .expect("Config file should contain LLVM_LIBRARY_DIR");
+    let llvm_config_path = extract_value(&file_content, "LLVM_CONFIG_PATH")
+        .expect("Config file should contain LLVM_CONFIG_PATH");
 
-    // FIXME(genmc,debugging): remove warning print
-    println!("cargo::warning=Search path for linking: '{llvm_library_dirs}'");
-    let lib_dir = PathBuf::from_str(llvm_library_dirs).unwrap();
+    // Add linker search path.
+    let lib_dir = PathBuf::from_str(llvm_library_dir).unwrap();
     println!("cargo::rustc-link-search=native={}", lib_dir.display());
 
-    for link_lib in llvm_link_libs.split(" ") {
+    // Add libraries to link.
+    let output = std::process::Command::new(llvm_config_path)
+        .arg("--libs") // Print the libraries to link to (space-separated list)
+        .output()
+        .expect("failed to execute llvm-config");
+    let llvm_link_libs =
+        String::try_from(output.stdout).expect("llvm-config output should be a valid string");
+
+    for link_lib in llvm_link_libs.trim().split(" ") {
         // FIXME(genmc,debugging): remove warning print
         println!("cargo::warning=Linking with '{link_lib}'");
-        let link_lib = link_lib.strip_prefix("-l").unwrap();
+        let link_lib =
+            link_lib.strip_prefix("-l").expect("Linker parameter should start with \"-l\"");
         println!("cargo::rustc-link-lib=dylib={link_lib}");
     }
 
