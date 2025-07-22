@@ -172,13 +172,12 @@ fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_inclu
     let definitions =
         llvm_definitions.split(";").filter(|definition| definition != &"-D_GNU_SOURCE");
 
-    // FIXME(GenMC, build): can we use c++23? Does CXX support that? Does rustc CI support that?
     cxx_build::bridge("src/lib.rs")
         .flags(definitions)
         .opt_level(2)
         .debug(true) // Same settings that GenMC uses (default for cmake `RelWithDebInfo`)
         .warnings(false) // NOTE: enabling this produces a lot of warnings.
-        .std("c++20")
+        .std("c++23")
         .include(genmc_include_dir)
         .include(llvm_include_dirs)
         .include("./src_cpp")
