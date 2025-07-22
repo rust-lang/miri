@@ -276,7 +276,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// Extract the value from the result of reading an operand from the machine
     /// and convert it to a `CArg`.
-    fn op_to_carg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, CArg> {
+    fn op_to_ffi_arg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, CArg> {
         let this = self.eval_context_ref();
         let scalar = |v| interp_ok(this.read_immediate(v)?.to_scalar());
         interp_ok(match v.layout.ty.kind() {
@@ -341,7 +341,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         let ptr_raw = this.get_alloc_bytes_unchecked_raw(id)?;
                         // SAFETY: We know for sure that at ptr_raw the next layout.size bytes
                         // are part of this allocation and initialised. They might be marked as
-                        // uninit in Miri, but all bytes returned by the isolated allocator are
+                        // uninit in Miri, but all bytes returned by `MiriAllocBytes` are
                         // initialised.
                         unsafe {
                             std::slice::from_raw_parts(ptr_raw, mplace.layout.size.bytes_usize())
@@ -383,7 +383,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         // TODO: unions, etc.
         if !adt_def.is_struct() {
-            throw_unsup_format!("unsupported argument type for native call: {orig_ty}");
+            throw_unsup_format!("unsupported argument type for native call: {orig_ty} is an enum or union");
         }
 
         let this = self.eval_context_ref();
