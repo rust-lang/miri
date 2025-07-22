@@ -20,6 +20,9 @@ const GENMC_MODEL_CHECKER: &str = "genmc_lib";
 /// Path where the `cxx_bridge!` macro is used to define the Rust-C++ interface.
 const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 
+/// The profile with which to build GenMC.
+const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
+
 #[cfg(feature = "download_genmc")]
 mod downloading {
     use std::path::{Path, PathBuf};
@@ -121,17 +124,9 @@ mod downloading {
 fn link_to_llvm(config_file: &Path) -> (String, String) {
     /// Search a string for a line matching `//@VARIABLE_NAME: VARIABLE CONTENT`
     fn extract_value<'a>(input: &'a str, name: &str) -> Option<&'a str> {
-        input.lines().find_map(|line| {
-            if let Some(suffix) = line.strip_prefix("//@")
-                && let Some(suffix) = suffix.strip_prefix(name)
-                && let Some(suffix) = suffix.strip_prefix(": ")
-            {
-                // FIXME(genmc,debugging): remove warning print
-                println!("cargo::warning=Found value '{name}': '{suffix}'");
-                return Some(suffix);
-            }
-            None
-        })
+        input
+            .lines()
+            .find_map(|line| line.strip_prefix("//@")?.strip_prefix(name)?.strip_prefix(": "))
     }
 
     let file_content = std::fs::read_to_string(&config_file).unwrap_or_else(|err| {
@@ -160,8 +155,6 @@ fn link_to_llvm(config_file: &Path) -> (String, String) {
         String::try_from(output.stdout).expect("llvm-config output should be a valid string");
 
     for link_lib in llvm_link_libs.trim().split(" ") {
-        // FIXME(genmc,debugging): remove warning print
-        println!("cargo::warning=Linking with '{link_lib}'");
         let link_lib =
             link_lib.strip_prefix("-l").expect("Linker parameter should start with \"-l\"");
         println!("cargo::rustc-link-lib=dylib={link_lib}");
@@ -174,10 +167,6 @@ fn link_to_llvm(config_file: &Path) -> (String, String) {
 fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_include_dirs: &str) {
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
-    // FIXME(genmc,debugging): remove this:
-    // println!("cargo::warning=llvm_definitions: {:?}", llvm_definitions.split(" ").collect::<Vec<_>>());
-    println!("cargo::warning=llvm_definitions: '{llvm_definitions}'");
-
     // FIXME(genmc,llvm): remove once LLVM dependency is removed.
     // HACK: We filter out _GNU_SOURCE, since it is already set and produces a warning if set again.
     let definitions =
@@ -187,7 +176,7 @@ fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_inclu
     cxx_build::bridge("src/lib.rs")
         .flags(definitions)
         .opt_level(2)
-        .debug(true) // Same settings that GenMC uses ("-O2 -g")
+        .debug(true) // Same settings that GenMC uses (default for cmake `RelWithDebInfo`)
         .warnings(false) // NOTE: enabling this produces a lot of warnings.
         .std("c++20")
         .include(genmc_include_dir)
@@ -205,13 +194,9 @@ fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_inclu
 /// Returns the path where cmake installs the model checker library and the config.h file.
 /// FIXME(genmc,llvm): Also returns the c++ compiler definitions required for building with/including LLVM, and the include path for LLVM headers. (remove once LLVM dependency is removed).
 fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String, String) {
-    /// The profile with which to build GenMC.
-    const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
-
+    // FIXME(genmc,cargo): Switch to using `CARGO_CFG_DEBUG_ASSERTIONS` once https://github.com/rust-lang/cargo/issues/15760 is completed.
     // Enable/disable additional debug checks, prints and options for GenMC, based on the Rust profile (debug/release)
     let enable_genmc_debug = matches!(std::env::var("PROFILE").as_deref().unwrap(), "debug");
-    // FIXME(genmc,debugging): remove warning print
-    println!("cargo::warning=GENMC_DEBUG = {enable_genmc_debug}");
 
     let cmakelists_path = genmc_path.join("CMakeLists.txt");
 
@@ -228,8 +213,6 @@ fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String, String) {
 
     // Add the model checker library to be linked and tell GenMC where to find it:
     let cmake_lib_dir = genmc_install_dir.join("lib").join("genmc");
-    // FIXME(genmc,debugging): remove warning print
-    println!("cargo::warning=lib dir: {}", cmake_lib_dir.display());
     println!("cargo::rustc-link-search=native={}", cmake_lib_dir.display());
     println!("cargo::rustc-link-lib=static={GENMC_MODEL_CHECKER}");
 
