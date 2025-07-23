@@ -6,12 +6,10 @@ use std::str::FromStr;
 
 /// Path used for development of Miri-GenMC.
 /// A GenMC repository in this directory (relative to the `genmc-sys` directory) will take precedence over the downloaded GenMC repository.
-/// If the `download` feature is disabled, this path must contain a GenMC repository.
 const GENMC_LOCAL_PATH: &str = "./genmc/";
 
 /// Path where the downloaded GenMC repository will be stored (relative to the `genmc-sys` directory).
 /// Note that this directory is *not* cleaned up automatically by `cargo clean`.
-#[cfg(feature = "download_genmc")]
 const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
 
 /// Name of the library of the GenMC model checker.
@@ -23,7 +21,6 @@ const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 /// The profile with which to build GenMC.
 const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
 
-#[cfg(feature = "download_genmc")]
 mod downloading {
     use std::path::{Path, PathBuf};
     use std::str::FromStr;
@@ -241,10 +238,8 @@ fn main() {
         //                     Cargo currently always rebuilds if a watched directory doesn't exist, so we can only add it if it exists.
         println!("cargo::rerun-if-changed={GENMC_LOCAL_PATH}");
         genmc_local_path
-    } else if cfg!(feature = "download_genmc") {
-        downloading::download_genmc()
     } else {
-        panic!("GenMC not found in path '{GENMC_LOCAL_PATH}', and downloading GenMC is disabled.");
+        downloading::download_genmc()
     };
 
     // Build all required components:
