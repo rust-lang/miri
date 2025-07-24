@@ -17,6 +17,15 @@ const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 /// The profile with which to build GenMC.
 const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
 
+/// Info required to be passed to subsequent compilation steps.
+struct CompileInfo {
+    /// Directory where cmake installs the GenMC library into.
+    pub genmc_install_dir: PathBuf,
+    // FIXME(genmc,llvm): remove once LLVM dependency is removed.
+    pub llvm_definitions: String,
+    pub llvm_include_dirs: String,
+}
+
 mod downloading {
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -155,7 +164,9 @@ fn link_to_llvm(config_file: &Path) -> (String, String) {
 }
 
 /// Build the Rust-C++ interop library with cxx.rs
-fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_include_dirs: &str) {
+fn build_cxx_bridge(compile_info: CompileInfo) {
+    let CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs } = compile_info;
+
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
     // FIXME(genmc,llvm): remove once LLVM dependency is removed.
@@ -182,7 +193,7 @@ fn build_cxx_bridge(genmc_install_dir: &Path, llvm_definitions: &str, llvm_inclu
 /// Build the GenMC model checker library.
 /// Returns the path where cmake installs the model checker library and the config.h file.
 /// FIXME(genmc,llvm): Also returns the c++ compiler definitions required for building with/including LLVM, and the include path for LLVM headers. (remove once LLVM dependency is removed).
-fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String, String) {
+fn build_genmc_model_checker(genmc_path: &Path) -> CompileInfo {
     // FIXME(genmc,cargo): Switch to using `CARGO_CFG_DEBUG_ASSERTIONS` once https://github.com/rust-lang/cargo/issues/15760 is completed.
     // Enable/disable additional debug checks, prints and options for GenMC, based on the Rust profile (debug/release)
     let enable_genmc_debug = matches!(std::env::var("PROFILE").as_deref().unwrap(), "debug");
@@ -209,7 +220,7 @@ fn build_genmc_model_checker(genmc_path: &Path) -> (PathBuf, String, String) {
     let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
     let (llvm_definitions, llvm_include_dirs) = link_to_llvm(&config_file);
 
-    (genmc_install_dir, llvm_definitions, llvm_include_dirs)
+    CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs }
 }
 
 fn main() {
@@ -228,9 +239,8 @@ fn main() {
     };
 
     // Build all required components:
-    let (genmc_install_dir, llvm_definitions, llvm_include_dirs) =
-        build_genmc_model_checker(&genmc_path);
-    build_cxx_bridge(&genmc_install_dir, &llvm_definitions, &llvm_include_dirs);
+    let compile_info = build_genmc_model_checker(&genmc_path);
+    build_cxx_bridge(compile_info);
 
     // Only rebuild if anything changes:
     // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
