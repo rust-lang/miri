@@ -49,8 +49,7 @@ Note that this repo is just a mirror repo.
 The build script in the `genmc-sys` crate handles locating, downloading, building and linking the GenMC library.
 
 To determine which GenMC repo path will be used, the following steps are taken:
-- If the env var `GENMC_SRC_PATH` contains a path to a directory with a GenMC repo, use that path.
-- If the path `genmc-sys/genmc` exists, use that path.
+- If the env var `GENMC_SRC_PATH` is set, it's value is used as a path to a directory with a GenMC repo.
 - If the path `genmc-sys/downloaded/genmc` exists, try to set the GenMC repo there to the commit we need.
 - If the downloaded repo doesn't exist or is missing the commit, the build script will fetch the commit over the network.
   - Note that the build script will *not* access the network if any of the steps previous steps succeeds.
