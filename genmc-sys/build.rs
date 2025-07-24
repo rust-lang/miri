@@ -17,17 +17,6 @@ const RUST_CXX_BRIDGE_FILE_PATH: &str = "src/lib.rs";
 /// The profile with which to build GenMC.
 const GENMC_CMAKE_PROFILE: &str = "RelWithDebInfo";
 
-/// Info required to be passed to subsequent compilation steps.
-struct CompileInfo {
-    /// Directory where cmake installs the GenMC library into.
-    pub genmc_install_dir: PathBuf,
-    // FIXME(genmc,llvm): remove once LLVM dependency is removed.
-    pub llvm_definitions: String,
-    pub llvm_include_dirs: String,
-    // FIXME(genmc,cmake): Remove once the GenMC debug setting is available in the config.h file.
-    pub enable_genmc_debug: bool,
-}
-
 mod downloading {
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -165,10 +154,35 @@ fn link_to_llvm(config_file: &Path) -> (String, String) {
     (llvm_definitions.to_string(), llvm_include_dirs.to_string())
 }
 
-/// Build the Rust-C++ interop library with cxx.rs
-fn build_cxx_bridge(compile_info: CompileInfo) {
-    let CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs, enable_genmc_debug } =
-        compile_info;
+/// Build the GenMC model checker library and the Rust-C++ interop library with cxx.rs
+fn compile_cpp_dependencies(genmc_path: &Path) {
+    // Part 1:
+    // Compile the GenMC library using cmake.
+
+    let cmakelists_path = genmc_path.join("CMakeLists.txt");
+
+    // FIXME(genmc,cargo): Switch to using `CARGO_CFG_DEBUG_ASSERTIONS` once https://github.com/rust-lang/cargo/issues/15760 is completed.
+    // Enable/disable additional debug checks, prints and options for GenMC, based on the Rust profile (debug/release)
+    let enable_genmc_debug = matches!(std::env::var("PROFILE").as_deref().unwrap(), "debug");
+
+    let mut config = cmake::Config::new(cmakelists_path);
+    config.profile(GENMC_CMAKE_PROFILE);
+    config.define("GENMC_DEBUG", if enable_genmc_debug { "ON" } else { "OFF" });
+
+    // The actual compilation happens here:
+    let genmc_install_dir = config.build();
+
+    // Add the model checker library to be linked and tell GenMC where to find it:
+    let cmake_lib_dir = genmc_install_dir.join("lib").join("genmc");
+    println!("cargo::rustc-link-search=native={}", cmake_lib_dir.display());
+    println!("cargo::rustc-link-lib=static={GENMC_MODEL_CHECKER}");
+
+    // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
+    let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
+    let (llvm_definitions, llvm_include_dirs) = link_to_llvm(&config_file);
+
+    // Part 2:
+    // Compile the cxx_bridge (the link between the Rust and C++ code).
 
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
@@ -198,39 +212,6 @@ fn build_cxx_bridge(compile_info: CompileInfo) {
     println!("cargo::rustc-link-lib=static=genmc_interop");
 }
 
-/// Build the GenMC model checker library.
-/// Returns the path where cmake installs the model checker library and the config.h file.
-/// FIXME(genmc,llvm): Also returns the c++ compiler definitions required for building with/including LLVM, and the include path for LLVM headers. (remove once LLVM dependency is removed).
-fn build_genmc_model_checker(genmc_path: &Path) -> CompileInfo {
-    // FIXME(genmc,cargo): Switch to using `CARGO_CFG_DEBUG_ASSERTIONS` once https://github.com/rust-lang/cargo/issues/15760 is completed.
-    // Enable/disable additional debug checks, prints and options for GenMC, based on the Rust profile (debug/release)
-    let enable_genmc_debug = matches!(std::env::var("PROFILE").as_deref().unwrap(), "debug");
-
-    let cmakelists_path = genmc_path.join("CMakeLists.txt");
-
-    let mut config = cmake::Config::new(cmakelists_path);
-    config.profile(GENMC_CMAKE_PROFILE);
-    config.define("GENMC_DEBUG", if enable_genmc_debug { "ON" } else { "OFF" });
-
-    // Enable and install the components of GenMC that we need:
-    config.define("BUILD_LLI", "OFF"); // No need to build the GenMC executable.
-    config.define("BUILD_MODEL_CHECKER", "ON");
-    config.define("INSTALL_MODEL_CHECKER", "ON");
-
-    let genmc_install_dir = config.build();
-
-    // Add the model checker library to be linked and tell GenMC where to find it:
-    let cmake_lib_dir = genmc_install_dir.join("lib").join("genmc");
-    println!("cargo::rustc-link-search=native={}", cmake_lib_dir.display());
-    println!("cargo::rustc-link-lib=static={GENMC_MODEL_CHECKER}");
-
-    // FIXME(genmc,llvm): Remove once the LLVM dependency of the GenMC model checker is removed.
-    let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
-    let (llvm_definitions, llvm_include_dirs) = link_to_llvm(&config_file);
-
-    CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs, enable_genmc_debug }
-}
-
 fn main() {
     // Select which path to use for the GenMC repo:
     let genmc_path = if let Ok(genmc_src_path) = std::env::var("GENMC_SRC_PATH") {
@@ -247,8 +228,7 @@ fn main() {
     };
 
     // Build all required components:
-    let compile_info = build_genmc_model_checker(&genmc_path);
-    build_cxx_bridge(compile_info);
+    compile_cpp_dependencies(&genmc_path);
 
     // Only rebuild if anything changes:
     // Note that we don't add the downloaded GenMC repo, since that should never be modified manually.
