@@ -49,8 +49,8 @@ Note that this repo is just a mirror repo.
 The build script in the `genmc-sys` crate handles locating, downloading, building and linking the GenMC library.
 
 To determine which GenMC repo path will be used, the following steps are taken:
-- If the env var `GENMC_SRC_PATH` is set, it's value is used as a path to a directory with a GenMC repo.
-- If the path `genmc-sys/downloaded/genmc` exists, try to set the GenMC repo there to the commit we need.
+- If the env var `GENMC_SRC_PATH` is set, it's value is used as a path to a directory with a GenMC repo (e.g., `GENMC_SRC_PATH="path/to/miri/genmc-sys/genmc-sys-local"`).
+- If the path `genmc-sys/genmc-src/genmc` exists, try to set the GenMC repo there to the commit we need.
 - If the downloaded repo doesn't exist or is missing the commit, the build script will fetch the commit over the network.
   - Note that the build script will *not* access the network if any of the steps previous steps succeeds.
 
@@ -58,3 +58,10 @@ Once we get the path to the repo, the compilation proceeds in two steps:
 - Compile GenMC into a library (using cmake).
 - Compile the cxx.rs bridge to connect the library to the Rust code.
 The first step is where all build settings are made, the relevant ones are then stored in a `config.h` file that can be included in the second compilation step.
+
+#### Code Formatting
+Note that all directories with names starting with `genmc-src` are ignored by `./miri fmt` on purpose.
+GenMC also contains Rust files, but they should not be formatted with Miri's formatting rules.
+For working on Miri-GenMC locally, placing the GenMC repo into such a path (e.g., `miri/genmc-sys/genmc-src-local`) ensures that it is also exempt from formatting.
+
+<!-- FIXME(genmc): Decide on formatting rules for Miri-GenMC interface C++ code. -->

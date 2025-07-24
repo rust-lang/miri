@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 /// Path where the downloaded GenMC repository will be stored (relative to the `genmc-sys` directory).
 /// Note that this directory is *not* cleaned up automatically by `cargo clean`.
-const GENMC_DOWNLOAD_PATH: &str = "./downloaded/genmc/";
+const GENMC_DOWNLOAD_PATH: &str = "./genmc-src/genmc/";
 
 /// Name of the library of the GenMC model checker.
 const GENMC_MODEL_CHECKER: &str = "genmc_lib";
