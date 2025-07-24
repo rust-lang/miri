@@ -24,6 +24,8 @@ struct CompileInfo {
     // FIXME(genmc,llvm): remove once LLVM dependency is removed.
     pub llvm_definitions: String,
     pub llvm_include_dirs: String,
+    // FIXME(genmc,cmake): Remove once the GenMC debug setting is available in the config.h file.
+    pub enable_genmc_debug: bool,
 }
 
 mod downloading {
@@ -37,7 +39,7 @@ mod downloading {
     /// The GenMC repository the we get our commit from.
     pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     /// The GenMC commit we depend on. It must be available on the specified GenMC repository.
-    pub(crate) const GENMC_COMMIT: &str = "f8d41c7d8c7d88e47f71ef6bd7914041a2691aab";
+    pub(crate) const GENMC_COMMIT: &str = "833322934f7608690340a284a496402e2daa0ef3";
 
     pub(crate) fn download_genmc() -> PathBuf {
         let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH);
@@ -165,7 +167,8 @@ fn link_to_llvm(config_file: &Path) -> (String, String) {
 
 /// Build the Rust-C++ interop library with cxx.rs
 fn build_cxx_bridge(compile_info: CompileInfo) {
-    let CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs } = compile_info;
+    let CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs, enable_genmc_debug } =
+        compile_info;
 
     let genmc_include_dir = genmc_install_dir.join("include").join("genmc");
 
@@ -173,7 +176,12 @@ fn build_cxx_bridge(compile_info: CompileInfo) {
     // These definitions are parsed into a cmake list and then printed to the config.h file, so they are ';' separated.
     let definitions = llvm_definitions.split(";");
 
-    cxx_build::bridge("src/lib.rs")
+    let mut bridge = cxx_build::bridge("src/lib.rs");
+    // FIXME(genmc,cmake): Remove once the GenMC debug setting is available in the config.h file.
+    if enable_genmc_debug {
+        bridge.define("ENABLE_GENMC_DEBUG", None);
+    }
+    bridge
         .flags(definitions)
         .opt_level(2)
         .debug(true) // Same settings that GenMC uses (default for cmake `RelWithDebInfo`)
@@ -220,7 +228,7 @@ fn build_genmc_model_checker(genmc_path: &Path) -> CompileInfo {
     let config_file = genmc_install_dir.join("include").join("genmc").join("config.h");
     let (llvm_definitions, llvm_include_dirs) = link_to_llvm(&config_file);
 
-    CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs }
+    CompileInfo { genmc_install_dir, llvm_definitions, llvm_include_dirs, enable_genmc_debug }
 }
 
 fn main() {
