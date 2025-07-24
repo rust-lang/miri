@@ -757,8 +757,8 @@ impl Command {
                 if ty.is_file() {
                     name.ends_with(".rs")
                 } else {
-                    // dir or symlink. skip `target` and `.git`.
-                    &name != "target" && &name != ".git"
+                    // dir or symlink. skip `target`, `.git` and `downloaded` (last is used in `genmc-sys` subcrate of Miri).
+                    &name != "target" && &name != ".git" && &name != "downloaded"
                 }
             })
             .filter_ok(|item| item.file_type().is_file())
