@@ -21,7 +21,7 @@ mod downloading {
     use std::path::PathBuf;
     use std::str::FromStr;
 
-    use git2::{Commit, Oid, Repository, StatusOptions};
+    use git2::{Commit, Oid, Remote, Repository, StatusOptions};
 
     use super::GENMC_DOWNLOAD_PATH;
 
@@ -54,18 +54,40 @@ mod downloading {
         genmc_download_path
     }
 
+    fn get_remote(repo: &Repository) -> Remote<'_> {
+        let remote = repo.find_remote("origin").unwrap_or_else(|e| {
+                panic!(
+                    "Could not load commit ({GENMC_COMMIT}) from remote repository '{GENMC_GITHUB_URL}'. Error: {e}"
+                );
+            });
+
+        // Ensure that the correct remote URL is set.
+        let remote_url = remote.url();
+        if let Some(remote_url) = remote_url
+            && remote_url == GENMC_GITHUB_URL
+        {
+            return remote;
+        }
+
+        // Update remote URL.
+        println!(
+            "cargo::warning=GenMC repository remote URL has changed from '{remote_url:?}' to '{GENMC_GITHUB_URL}'"
+        );
+        repo.remote_set_url("origin", GENMC_GITHUB_URL)
+            .expect("cannot rename url of remote 'origin'");
+
+        // Reacquire the `Remote`, since `remote_set_url` doesn't update Remote objects already in memory.
+        repo.find_remote("origin").unwrap()
+    }
+
     // Check if the required commit exists already, otherwise try fetching it.
     fn update_local_repo(repo: &Repository, commit_oid: Oid) -> Commit<'_> {
         repo.find_commit(commit_oid).unwrap_or_else(|_find_error| {
             println!("GenMC repository at path '{GENMC_DOWNLOAD_PATH}' does not contain commit '{GENMC_COMMIT}'.");
             // The commit is not in the checkout. Try `git fetch` and hope that we find the commit then.
-            match repo.find_remote("origin") {
-                Ok(mut remote) =>
-                    remote.fetch(&[GENMC_COMMIT], None, None).expect("Failed to fetch from remote."),
-                Err(e) => {
-                    panic!("Could not load commit ({GENMC_COMMIT}) from remote repository '{GENMC_GITHUB_URL}'. Error: {e}");
-                }
-            }
+            let mut remote = get_remote(repo);
+            remote.fetch(&[GENMC_COMMIT], None, None).expect("Failed to fetch from remote.");
+
             repo.find_commit(commit_oid)
                 .expect("Remote repository should contain expected commit")
         })
