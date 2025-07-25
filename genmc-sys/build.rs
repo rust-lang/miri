@@ -235,6 +235,11 @@ fn compile_cpp_dependencies(genmc_path: &Path) {
 }
 
 fn main() {
+    // Make sure we don't accidentally distribute a binary with GPL code.
+    if option_env!("RUSTC_STAGE").is_some() {
+        panic!("genmc should not be enabled in the rustc workspace since it includes a GPL dependency");
+    }
+
     // Select which path to use for the GenMC repo:
     let genmc_path = if let Ok(genmc_src_path) = std::env::var("GENMC_SRC_PATH") {
         let genmc_src_path =
