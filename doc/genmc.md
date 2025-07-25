@@ -6,6 +6,16 @@
 <!-- FIXME(genmc): add explanation. -->
 
 ## Usage
+
+**IMPORTANT: The license of GenMC and thus the `genmc-sys` crate in the Miri repo is currently "GPL-3.0-or-later", which is NOT compatible with Miri's "MIT OR Apache" license.**
+
+**IMPORTANT: There should be no distribution of Miri-GenMC until all licensing questions are clarified (the `genmc` feature of Miri is OFF-BY-DEFAULT and should be OFF for all Miri releases).**
+
+For testing/developing Miri-GenMC (while keeping in mind the licensing issues):
+- clone the Miri repo.
+- build Miri-GenMC with `./miri build --features=genmc`.
+- OR: install Miri-GenMC in the current system with `./miri install --features=genmc`
+
 Basic usage:
 ```shell
 MIRIFLAGS="-Zmiri-genmc" cargo miri run
