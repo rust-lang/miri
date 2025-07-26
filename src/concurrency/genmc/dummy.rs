@@ -231,6 +231,17 @@ impl GenmcCtx {
     ) -> InterpResult<'tcx> {
         unreachable!()
     }
+
+    /**** Blocking instructions ****/
+
+    #[allow(unused)]
+    pub(crate) fn handle_verifier_assume<'tcx>(
+        &self,
+        _machine: &MiriMachine<'tcx>,
+        _condition: bool,
+    ) -> InterpResult<'tcx, ()> {
+        unreachable!()
+    }
 }
 
 /// Other functionality not directly related to event handling
@@ -249,12 +260,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /**** Scheduling functionality ****/
 
     fn genmc_schedule_thread(&mut self) -> InterpResult<'tcx, ThreadId> {
-        unreachable!()
-    }
-
-    /**** Blocking instructions ****/
-
-    fn handle_genmc_verifier_assume(&mut self, _condition: &OpTy<'tcx>) -> InterpResult<'tcx> {
         unreachable!()
     }
 }

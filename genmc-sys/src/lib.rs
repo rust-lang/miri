@@ -338,9 +338,6 @@ mod ffi {
         fn handleThreadFinish(self: Pin<&mut MiriGenMCShim>, thread_id: i32, ret_val: u64);
         fn handleThreadKill(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
 
-        /**** Blocking instructions ****/
-        fn handleUserBlock(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
-
         /**** Mutex handling ****/
         fn handleMutexLock(
             self: Pin<&mut MiriGenMCShim>,

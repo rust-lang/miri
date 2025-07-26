@@ -766,6 +766,17 @@ impl GenmcCtx {
         self.exec_state.exit_status.set(Some(exit_status));
         interp_ok(())
     }
+
+    /**** Blocking instructions ****/
+
+    #[allow(unused)]
+    pub(crate) fn handle_verifier_assume<'tcx>(
+        &self,
+        machine: &MiriMachine<'tcx>,
+        condition: bool,
+    ) -> InterpResult<'tcx, ()> {
+        if condition { interp_ok(()) } else { self.handle_user_block(machine) }
+    }
 }
 
 impl GenmcCtx {
@@ -956,16 +967,7 @@ impl GenmcCtx {
     /// This may happen due to an manual `assume` statement added by a user
     /// or added by some automated program transformation, e.g., for spinloops.
     fn handle_user_block<'tcx>(&self, machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
-        let thread_infos = self.exec_state.thread_id_manager.borrow();
-        let curr_thread = machine.threads.active_thread();
-        let genmc_curr_thread = thread_infos.get_genmc_tid(curr_thread);
-        info!("GenMC: handle_user_block, blocking thread {curr_thread:?} ({genmc_curr_thread:?})");
-
-        let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
-        pinned_mc.handleUserBlock(genmc_curr_thread);
-
-        interp_ok(())
+        todo!()
     }
 }
 
@@ -1102,40 +1104,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.return_to_block(ret)?;
 
         interp_ok(true)
-    }
-
-    /**** Blocking instructions ****/
-
-    /// Handle an `assume` statement. This will tell GenMC to block the current thread if the `condition` is false.
-    /// Returns `true` if the current thread should be blocked in Miri too.
-    fn handle_genmc_verifier_assume(&mut self, condition: &OpTy<'tcx>) -> InterpResult<'tcx> {
-        let this = self.eval_context_mut();
-        let condition_bool = this.read_scalar(condition)?.to_bool()?;
-        info!("GenMC: handle_genmc_verifier_assume, condition: {condition:?} = {condition_bool}");
-        if condition_bool {
-            return interp_ok(());
-        }
-        let genmc_ctx = this.machine.data_race.as_genmc_ref().unwrap();
-        genmc_ctx.handle_user_block(&this.machine)?;
-        let condition = condition.clone();
-        this.block_thread(
-            BlockReason::GenmcAssume,
-            None,
-            callback!(
-                @capture<'tcx> {
-                    condition: OpTy<'tcx>,
-                }
-                |this, unblock: UnblockKind| {
-                    assert_eq!(unblock, UnblockKind::Ready);
-
-                    let condition = this.run_for_validation_ref(|this| this.read_scalar(&condition))?.to_bool()?;
-                    assert!(condition);
-
-                    interp_ok(())
-                }
-            ),
-        );
-        interp_ok(())
     }
 }
 
