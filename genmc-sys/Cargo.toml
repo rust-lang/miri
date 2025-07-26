@@ -1,6 +1,8 @@
 [package]
 authors = ["Miri Team"]
-license = "GPL-3.0-or-later"
+# The parts in this repo are MIT OR Apache-2.0, but we are linking in
+# code from https://github.com/MPI-SWS/genmc which is GPL-3.0-or-later.
+license = "(MIT OR Apache-2.0) AND GPL-3.0-or-later"
 name = "genmc-sys"
 version = "0.1.0"
 edition = "2024"
