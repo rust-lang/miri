@@ -71,21 +71,10 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 	// FIXME(genmc): expose this setting to Miri
 	conf->randomScheduleSeed = "42";
 	conf->printRandomScheduleSeed = config.print_random_schedule_seed;
-	if (config.quiet)
-	{
-		// logLevel = VerbosityLevel::Quiet;
-		// TODO GENMC: error might be better (or new level for `BUG`)
-		// logLevel = VerbosityLevel::Quiet;
-		logLevel = VerbosityLevel::Error;
-	}
-	else if (config.log_level_trace)
-	{
-		logLevel = VerbosityLevel::Trace;
-	}
-	else
-	{
-		logLevel = VerbosityLevel::Tip;
-	}
+
+	// FIXME(genmc): Add support for setting this from the Miri side.
+	// FIXME(genmc): Decide on what to do about warnings from GenMC (keep them disabled until then).
+	logLevel = VerbosityLevel::Error;
 
 	// FIXME(genmc): check if we can enable IPR:
 	conf->ipr = false;
@@ -127,20 +116,14 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 		const auto addr = access.getAddr();
 		if (!driverPtr->initVals_.contains(addr))
 		{
-			MIRI_LOG() << "WARNING: TODO GENMC: requested initial value for address "
-					   << addr << ", but there is none.\n";
 			return SVal(0xCC00CC00);
 			// BUG_ON(!driverPtr->initVals_.contains(addr));
 		}
 		auto result = driverPtr->initVals_[addr];
 		if (!result.is_init)
 		{
-			MIRI_LOG() << "WARNING: TODO GENMC: requested initial value for address "
-					   << addr << ", but the memory is uninitialized.\n";
 			return SVal(0xFF00FF00);
 		}
-		MIRI_LOG() << "MiriGenMCShim: requested initial value for address " << addr
-				   << " == " << addr.get() << ", returning: " << result << "\n";
 		return result.toSVal();
 	};
 	driver->getExec().getGraph().setInitValGetter(initValGetter);
@@ -208,8 +191,6 @@ void MiriGenMCShim::handleThreadJoin(ThreadId thread_id, ThreadId child_id)
 
 void MiriGenMCShim::handleThreadFinish(ThreadId thread_id, uint64_t ret_val)
 {
-	MIRI_LOG() << "GenMC:   handleThreadFinish: thread id: " << thread_id << "\n";
-
 	auto pos = incPos(thread_id);
 	auto retVal = SVal(ret_val);
 
@@ -232,9 +213,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 											 MemOrdering ord, GenmcScalar old_val) -> LoadResult
 {
 	auto pos = incPos(thread_id);
-	MIRI_LOG() << "Received Load from Miri at address: " << address << ", size " << size
-			   << " with ordering " << ord << ", event: " << pos << "\n";
-
+	
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
 	// `type` is only used for printing.
@@ -254,10 +233,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 														GenmcScalar rhs_value, GenmcScalar old_val)
 	-> ReadModifyWriteResult
 {
-	MIRI_LOG() << "Received Read-Modify-Write from Miri at address: " << address << ", size "
-			   << size << " with orderings (" << loadOrd << ", " << store_ordering
-			   << "), rmw op: " << static_cast<uint64_t>(rmw_op) << "\n";
-
 	auto pos = incPos(thread_id);
 
 	auto loc = SAddr(address);
@@ -294,14 +269,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	MemOrdering success_store_ordering, MemOrdering fail_load_ordering,
 	bool can_fail_spuriously) -> CompareExchangeResult
 {
-
-	MIRI_LOG() << "Received Compare-Exchange from Miri (value: " << expected_value << " --> "
-			   << new_value << ", old value: " << old_val << ") at address: " << address
-			   << ", size " << size << " with success orderings (" << success_load_ordering
-			   << ", " << success_store_ordering
-			   << "), fail load ordering: " << fail_load_ordering
-			   << ", is weak (can fail spuriously): " << can_fail_spuriously << "\n";
-
 	auto pos = incPos(thread_id);
 
 	auto loc = SAddr(address);
@@ -342,10 +309,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 											  MemOrdering ord, StoreEventType store_event_type)
 	-> StoreResult
 {
-	MIRI_LOG() << "Received Store from Miri at address " << address << ", size " << size
-			   << " with ordering " << ord << ", is part of rmw: ("
-			   << static_cast<uint64_t>(store_event_type) << ")\n";
-
 	auto pos = incPos(thread_id);
 
 	auto loc = SAddr(address);

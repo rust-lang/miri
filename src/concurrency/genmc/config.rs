@@ -9,11 +9,6 @@ pub struct GenmcConfig {
 }
 
 impl GenmcConfig {
-    fn set_log_level_trace(&mut self) {
-        self.params.quiet = false;
-        self.params.log_level_trace = true;
-    }
-
     /// Function for parsing command line options for GenMC mode.
     ///
     /// All GenMC arguments start with the string "-Zmiri-genmc".
@@ -36,10 +31,7 @@ impl GenmcConfig {
         let Some(trimmed_arg) = trimmed_arg.strip_prefix("-") else {
             return Err(format!("Invalid GenMC argument \"-Zmiri-genmc{trimmed_arg}\""));
         };
-        if trimmed_arg == "log-trace" {
-            // TODO GENMC: maybe expand to allow more control over log level?
-            genmc_config.set_log_level_trace();
-        } else if trimmed_arg == "symmetry-reduction" {
+        if trimmed_arg == "symmetry-reduction" {
             // TODO GENMC (PERFORMANCE): maybe make this the default, have an option to turn it off instead
             genmc_config.params.do_symmetry_reduction = true;
         } else {

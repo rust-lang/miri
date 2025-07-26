@@ -28,8 +28,6 @@ impl Default for GenmcParams {
     fn default() -> Self {
         Self {
             print_random_schedule_seed: false,
-            quiet: true,
-            log_level_trace: false,
             do_symmetry_reduction: false,
         }
     }
@@ -43,8 +41,6 @@ mod ffi {
     struct GenmcParams {
         // pub genmc_seed: u64; // OR: Option<u64>
         pub print_random_schedule_seed: bool,
-        pub quiet: bool, // TODO GENMC: maybe make log-level more fine grained
-        pub log_level_trace: bool,
         pub do_symmetry_reduction: bool,
     }
 
