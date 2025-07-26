@@ -61,12 +61,9 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	conf->skipNonAtomicInitializedCheck = true;
 
 	// Set whether GenMC should print execution graphs after every explored/blocked execution.
-	conf->printExecGraphs =
-		(config.print_execution_graphs == ExecutiongraphPrinting::Explored ||
-		 config.print_execution_graphs == ExecutiongraphPrinting::ExploredAndBlocked);
-	conf->printBlockedExecs =
-		(config.print_execution_graphs == ExecutiongraphPrinting::Blocked ||
-		 config.print_execution_graphs == ExecutiongraphPrinting::ExploredAndBlocked);
+	// FIXME(genmc): pass these settings from Miri.
+	conf->printExecGraphs = false;
+	conf->printBlockedExecs = false;
 
 	// `1024` is the default value that GenMC uses.
 	// If any thread has at least this many events, a warning/tip will be printed.

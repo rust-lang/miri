@@ -262,10 +262,6 @@ impl GenmcConfig {
         }
     }
 
-    pub fn print_exec_graphs(&self) -> bool {
-        unreachable!()
-    }
-
     pub fn do_estimation(&self) -> bool {
         unreachable!()
     }

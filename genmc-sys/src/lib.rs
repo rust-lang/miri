@@ -39,7 +39,6 @@ impl Default for GenmcParams {
             log_level: Default::default(),
             do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
             estimation_max: 1000,
-            print_execution_graphs: Default::default(),
         }
     }
 }
@@ -49,12 +48,6 @@ impl Default for LogLevel {
         // FIXME(genmc): set `Warning` by default once changes to GenMC are upstreamed.
         // FIXME(genmc): set `Tip` by default once the GenMC tips are relevant to Miri.
         Self::Error
-    }
-}
-
-impl Default for ExecutiongraphPrinting {
-    fn default() -> Self {
-        Self::None
     }
 }
 
@@ -86,7 +79,6 @@ mod ffi {
         pub log_level: LogLevel,
         pub do_symmetry_reduction: bool,
         pub estimation_max: u32,
-        pub print_execution_graphs: ExecutiongraphPrinting,
     }
 
     /// This is mostly equivalent to GenMC `VerbosityLevel`, but the debug log levels are always present (not conditionally compiled based on `ENABLE_GENMC_DEBUG`).
@@ -113,15 +105,6 @@ mod ffi {
         /// Also includes the previous debug log level.
         /// Downgraded to `Tip` if `GENMC_DEBUG` is not enabled.
         Debug3ReadsFrom,
-    }
-
-    #[derive(Debug)]
-    /// Setting for controlling which executiongraphs GenMC prints after every execution.
-    enum ExecutiongraphPrinting {
-        None,
-        Explored,
-        Blocked,
-        ExploredAndBlocked,
     }
 
     #[derive(Debug)]

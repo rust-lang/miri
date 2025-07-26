@@ -6,15 +6,10 @@ use super::GenmcParams;
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {
     pub(super) params: GenmcParams,
-    print_exec_graphs: bool,
     do_estimation: bool,
 }
 
 impl GenmcConfig {
-    pub fn print_exec_graphs(&self) -> bool {
-        self.print_exec_graphs
-    }
-
     pub fn do_estimation(&self) -> bool {
         self.do_estimation
     }
@@ -43,21 +38,6 @@ impl GenmcConfig {
         };
         if let Some(log_level) = trimmed_arg.strip_prefix("log=") {
             genmc_config.params.log_level = log_level.parse()?;
-        } else if let Some(trimmed_arg) = trimmed_arg.strip_prefix("print-exec-graphs") {
-            use genmc_sys::ExecutiongraphPrinting;
-            genmc_config.params.print_execution_graphs = match trimmed_arg {
-                "=none" => ExecutiongraphPrinting::None,
-                // Make GenMC print explored executions.
-                "" | "=explored" => ExecutiongraphPrinting::Explored,
-                // Make GenMC print blocked executions.
-                "=blocked" => ExecutiongraphPrinting::Blocked,
-                // Make GenMC print all executions.
-                "=all" => ExecutiongraphPrinting::ExploredAndBlocked,
-                _ =>
-                    return Err(format!(
-                        "Invalid suffix to GenMC argument '-Zmiri-genmc-print-exec-graphs', expected '', '=none', '=explored', '=blocked' or '=all'"
-                    )),
-            }
         } else if trimmed_arg == "estimate" {
             // TODO GENMC (DOCUMENTATION): naming, off/on by default?
             genmc_config.do_estimation = true;
