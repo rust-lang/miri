@@ -186,31 +186,18 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     optimizations is usually marginal at best.");
         }
 
-        if let Some(genmc_config) = &config.genmc_config {
+        if let Some(_genmc_config) = &config.genmc_config {
             let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
                 miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
             };
 
-            if genmc_config.do_estimation()
-                && miri_genmc::run_genmc_mode(
-                    &config,
-                    eval_entry_once,
-                    miri_genmc::Mode::Estimation,
-                )
-                .is_some()
-            {
-                tcx.dcx().abort_if_errors();
-            }
+            // FIXME(genmc): add estimation mode here.
 
-            let return_code = miri_genmc::run_genmc_mode(
-                &config,
-                eval_entry_once,
-                miri_genmc::Mode::Verification,
-            )
-            .unwrap_or_else(|| {
-                tcx.dcx().abort_if_errors();
-                rustc_driver::EXIT_FAILURE
-            });
+            let return_code =
+                miri_genmc::run_genmc_mode(&config, eval_entry_once).unwrap_or_else(|| {
+                    tcx.dcx().abort_if_errors();
+                    rustc_driver::EXIT_FAILURE
+                });
 
             exit(return_code);
         };

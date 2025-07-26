@@ -31,7 +31,6 @@ impl Default for GenmcParams {
             quiet: true,
             log_level_trace: false,
             do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
-            estimation_max: 1000,
         }
     }
 }
@@ -47,7 +46,6 @@ mod ffi {
         pub quiet: bool, // TODO GENMC: maybe make log-level more fine grained
         pub log_level_trace: bool,
         pub do_symmetry_reduction: bool,
-        pub estimation_max: u32,
     }
 
     #[derive(Debug)]
@@ -154,11 +152,9 @@ mod ffi {
 
         type GenmcScalar;
 
-        // type OperatingMode; // Estimation(budget) or Verification
-
         type MiriGenMCShim;
 
-        fn createGenmcHandle(config: &GenmcParams, do_estimation: bool)
+        fn createGenmcHandle(config: &GenmcParams)
         -> UniquePtr<MiriGenMCShim>;
         fn getGlobalAllocStaticMask() -> u64;
 
@@ -235,7 +231,5 @@ mod ffi {
         /// Check whether there are more executions to explore.
         /// If there are more executions, this method prepares for the next execution and returns `true`.
         fn isExplorationDone(self: Pin<&mut MiriGenMCShim>) -> bool;
-
-        fn printEstimationResults(self: &MiriGenMCShim, elapsed_time_sec: f64);
     }
 }

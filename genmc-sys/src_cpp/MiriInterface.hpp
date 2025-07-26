@@ -24,7 +24,8 @@ struct GenmcParams;
 
 using ThreadId = int;
 
-enum class StoreEventType : uint8_t {
+enum class StoreEventType : uint8_t
+{
 	Normal,
 	ReadModifyWrite,
 	CompareExchange,
@@ -32,7 +33,8 @@ enum class StoreEventType : uint8_t {
 
 // TODO GENMC: fix naming conventions
 
-struct MiriGenMCShim : private GenMCDriver {
+struct MiriGenMCShim : private GenMCDriver
+{
 
 public:
 	MiriGenMCShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
@@ -53,20 +55,20 @@ public:
 
 	///////////////////
 	[[nodiscard]] LoadResult handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
-					    MemOrdering ord, GenmcScalar old_val);
+										MemOrdering ord, GenmcScalar old_val);
 	[[nodiscard]] ReadModifyWriteResult
 	handleReadModifyWrite(ThreadId thread_id, uint64_t address, uint64_t size,
-			      MemOrdering loadOrd, MemOrdering store_ordering, RMWBinOp rmw_op,
-			      GenmcScalar rhs_value, GenmcScalar old_val);
+						  MemOrdering loadOrd, MemOrdering store_ordering, RMWBinOp rmw_op,
+						  GenmcScalar rhs_value, GenmcScalar old_val);
 	[[nodiscard]] CompareExchangeResult
 	handleCompareExchange(ThreadId thread_id, uint64_t address, uint64_t size,
-			      GenmcScalar expected_value, GenmcScalar new_value,
-			      GenmcScalar old_val, MemOrdering success_load_ordering,
-			      MemOrdering success_store_ordering, MemOrdering fail_load_ordering,
-			      bool can_fail_spuriously);
+						  GenmcScalar expected_value, GenmcScalar new_value,
+						  GenmcScalar old_val, MemOrdering success_load_ordering,
+						  MemOrdering success_store_ordering, MemOrdering fail_load_ordering,
+						  bool can_fail_spuriously);
 	[[nodiscard]] StoreResult handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
-					      GenmcScalar value, GenmcScalar old_val,
-					      MemOrdering ord, StoreEventType store_event_type);
+										  GenmcScalar value, GenmcScalar old_val,
+										  MemOrdering ord, StoreEventType store_event_type);
 
 	void handleFence(ThreadId thread_id, MemOrdering ord);
 
@@ -114,37 +116,7 @@ public:
 		return --globalInstructions[tid].event;
 	}
 
-	void printEstimationResults(const double elapsed_time_sec) const
-	{
-		// TODO GENMC(CLEANUP): should this happen on the Rust side?
-		const auto &res = getResult();
-		const auto *conf = getConf();
-
-		auto mean = std::llround(res.estimationMean);
-		auto sd = std::llround(std::sqrt(res.estimationVariance));
-		auto meanTimeSecs =
-			(long double)elapsed_time_sec / (res.explored + res.exploredBlocked);
-		// FIXME(io): restore the old precision after the print?
-		// PRINT(VerbosityLevel::Error)
-		// 	<< "Finished estimation in " << std::setprecision(2) << elapsed_time_sec
-		// 	<< " seconds.\n\n"
-		// 	<< "Total executions estimate: " << mean << " (+- " << sd << ")\n"
-		// 	<< "Time to completion estimate: " << std::setprecision(2)
-		// 	<< (meanTimeSecs * mean) << "s\n";
-		PRINT(VerbosityLevel::Error)
-			<< "Finished estimation in " << std::format("%.2f", elapsed_time_sec)
-			<< " seconds.\n\n"
-			<< "Total executions estimate: " << mean << " (+- " << sd << ")\n"
-			<< "Time to completion estimate: "
-			<< std::format("%.2f", meanTimeSecs * mean) << "s\n";
-		GENMC_DEBUG(if (conf->printEstimationStats) PRINT(VerbosityLevel::Error)
-				    << "Estimation moot: " << res.exploredMoot << "\n"
-				    << "Estimation blocked: " << res.exploredBlocked << "\n"
-				    << "Estimation complete: " << res.explored << "\n";);
-	}
-
-	static std::unique_ptr<MiriGenMCShim> createHandle(const GenmcParams &config,
-							   bool estimation_mode);
+	static std::unique_ptr<MiriGenMCShim> createHandle(const GenmcParams &config);
 
 private:
 	/**
@@ -155,7 +127,7 @@ private:
 	void handleOldVal(const SAddr addr, GenmcScalar value)
 	{
 		MIRI_LOG() << "handleOldVal: " << addr << ", " << value.value << ", " << value.extra
-			   << ", " << value.is_init << "\n";
+				   << ", " << value.is_init << "\n";
 		// if (!value.is_init) {
 		// 	// // TODO GENMC(uninit value handling)
 		// 	// MIRI_LOG() << "WARNING: got uninitialized old value, ignoring ...\n";
@@ -170,31 +142,39 @@ private:
 		auto &g = getExec().getGraph();
 		auto *coLab = g.co_max(addr);
 		MIRI_LOG() << "handleOldVal: coLab: " << *coLab << "\n";
-		if (auto *wLab = llvm::dyn_cast<WriteLabel>(coLab)) {
+		if (auto *wLab = llvm::dyn_cast<WriteLabel>(coLab))
+		{
 			MIRI_LOG()
 				<< "handleOldVal: got WriteLabel, atomic: " << !wLab->isNotAtomic()
 				<< "\n";
 			if (!value.is_init)
 				MIRI_LOG() << "WARNING: TODO GENMC: handleOldVal tried to "
-					      "overwrite value of NA "
-					      "reads-from label, but old value is `uninit`\n";
+							  "overwrite value of NA "
+							  "reads-from label, but old value is `uninit`\n";
 			else if (wLab->isNotAtomic())
 				wLab->setVal(value.toSVal());
-		} else if (const auto *wLab = llvm::dyn_cast<InitLabel>(coLab)) {
-			if (value.is_init) {
+		}
+		else if (const auto *wLab = llvm::dyn_cast<InitLabel>(coLab))
+		{
+			if (value.is_init)
+			{
 				auto result = initVals_.insert(std::make_pair(addr, value));
 				MIRI_LOG() << "handleOldVal: got InitLabel, insertion result: "
-					   << result.first->second << ", " << result.second << "\n";
+						   << result.first->second << ", " << result.second << "\n";
 				BUG_ON(result.second &&
-				       (*result.first).second !=
-					       value); /* Attempt to replace initial value */
-			} else {
+					   (*result.first).second !=
+						   value); /* Attempt to replace initial value */
+			}
+			else
+			{
 				// LOG(VerbosityLevel::Error) <<
 				MIRI_LOG() << "WARNING: TODO GENMC: handleOldVal tried set initial "
-					      "value, but old "
-					      "value is `uninit`\n";
+							  "value, but old "
+							  "value is `uninit`\n";
 			}
-		} else {
+		}
+		else
+		{
 			BUG(); /* Invalid label */
 		}
 		// either initLabel	==> update initValGetter
@@ -214,7 +194,7 @@ private:
 
 // NOTE: CXX doesn't seem to support exposing static methods to Rust, so we expose this
 // function instead
-std::unique_ptr<MiriGenMCShim> createGenmcHandle(const GenmcParams &config, bool estimation_mode);
+std::unique_ptr<MiriGenMCShim> createGenmcHandle(const GenmcParams &config);
 
 constexpr auto getGlobalAllocStaticMask() -> uint64_t { return SAddr::staticMask; }
 

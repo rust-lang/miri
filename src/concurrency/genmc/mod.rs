@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
-use std::time::Duration;
 
 use genmc_sys::{
     ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, GenmcThreadId, MemOrdering,
@@ -66,11 +65,11 @@ pub struct GenmcCtx {
 /// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    pub fn new(miri_config: &MiriConfig, mode: miri_genmc::Mode) -> Self {
+    pub fn new(miri_config: &MiriConfig) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
         info!("GenMC: Creating new GenMC Context");
 
-        let handle = createGenmcHandle(&genmc_config.params, mode == miri_genmc::Mode::Estimation);
+        let handle = createGenmcHandle(&genmc_config.params);
         let non_null_handle = NonNullUniquePtr::new(handle).expect("GenMC should not return null");
         let non_null_handle = RefCell::new(non_null_handle);
 
@@ -81,12 +80,6 @@ impl GenmcCtx {
             global_allocations: Default::default(),
             exit_status: Cell::new(None),
         }
-    }
-
-    pub fn print_estimation_result(&self, elapsed_time: Duration) {
-        let elapsed_time_sec = elapsed_time.as_secs_f64();
-        let mc = self.handle.borrow();
-        mc.as_ref().printEstimationResults(elapsed_time_sec);
     }
 
     pub fn get_blocked_execution_count(&self) -> u64 {

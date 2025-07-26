@@ -1,31 +1,12 @@
-use std::fmt::Display;
 use std::rc::Rc;
-use std::time::Instant;
 
 use crate::{GenmcCtx, MiriConfig};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Estimation,
-    Verification,
-}
-
-impl Display for Mode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Mode::Estimation => "Estimation",
-            Mode::Verification => "Verification",
-        })
-    }
-}
 
 pub fn run_genmc_mode(
     config: &MiriConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
-    mode: Mode,
 ) -> Option<i32> {
-    let time_start = Instant::now();
-    let genmc_ctx = Rc::new(GenmcCtx::new(config, mode));
+    let genmc_ctx = Rc::new(GenmcCtx::new(config));
 
     for rep in 0u64.. {
         tracing::info!("Miri-GenMC loop {}", rep + 1);
@@ -41,13 +22,7 @@ pub fn run_genmc_mode(
         );
 
         if is_exploration_done {
-            eprintln!("(GenMC) {mode} complete. No errors were detected.",);
-
-            if mode == Mode::Estimation && return_code == 0 {
-                let elapsed_time = Instant::now().duration_since(time_start);
-                genmc_ctx.print_estimation_result(elapsed_time);
-                return Some(0);
-            }
+            eprintln!("(GenMC) Verification complete. No errors were detected.",);
 
             let explored_execution_count = genmc_ctx.get_explored_execution_count();
             let blocked_execution_count = genmc_ctx.get_blocked_execution_count();

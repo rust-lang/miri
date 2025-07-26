@@ -6,17 +6,12 @@ use super::GenmcParams;
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {
     pub(super) params: GenmcParams,
-    do_estimation: bool,
 }
 
 impl GenmcConfig {
     fn set_log_level_trace(&mut self) {
         self.params.quiet = false;
         self.params.log_level_trace = true;
-    }
-
-    pub fn do_estimation(&self) -> bool {
-        self.do_estimation
     }
 
     /// Function for parsing command line options for GenMC mode.
@@ -44,19 +39,6 @@ impl GenmcConfig {
         if trimmed_arg == "log-trace" {
             // TODO GENMC: maybe expand to allow more control over log level?
             genmc_config.set_log_level_trace();
-        } else if trimmed_arg == "estimate" {
-            // TODO GENMC (DOCUMENTATION): naming, off/on by default?
-            genmc_config.do_estimation = true;
-        } else if let Some(estimation_max_str) = trimmed_arg.strip_prefix("estimation-max=") {
-            // TODO GENMC (DOCUMENTATION)
-            let Some(estimation_max) =
-                estimation_max_str.parse().ok().filter(|estimation_max| *estimation_max > 0)
-            else {
-                return Err(format!(
-                    "-Zmiri-genmc-estimation-max expects a positive integer argument, but got '{estimation_max_str}'"
-                ));
-            };
-            genmc_config.params.estimation_max = estimation_max;
         } else if trimmed_arg == "symmetry-reduction" {
             // TODO GENMC (PERFORMANCE): maybe make this the default, have an option to turn it off instead
             genmc_config.params.do_symmetry_reduction = true;

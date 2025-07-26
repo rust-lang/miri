@@ -31,14 +31,15 @@ using AnnotT = SExpr<AnnotID>;
 // NOTE: this is safe because ThreadId is 32 bit, and we return a 64 bit integer
 // FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it (see https://github.com/dtolnay/cxx/issues/87).
 auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
-				 const ActionKind curr_thread_next_instr_kind) -> int64_t
+								 const ActionKind curr_thread_next_instr_kind) -> int64_t
 {
 	// The current thread is the only one where the `kind` could have changed since we last made
 	// a scheduling decision.
 	globalInstructions[curr_thread_id].kind = curr_thread_next_instr_kind;
 
 	auto result = GenMCDriver::scheduleNext(globalInstructions);
-	if (result.has_value()) {
+	if (result.has_value())
+	{
 		return static_cast<int64_t>(result.value());
 	}
 	return -1;
@@ -47,7 +48,7 @@ auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
 /**** Functions available to Miri ****/
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode)
+auto MiriGenMCShim::createHandle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
 	auto conf = std::make_shared<Config>();
@@ -70,14 +71,19 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	// FIXME(genmc): expose this setting to Miri
 	conf->randomScheduleSeed = "42";
 	conf->printRandomScheduleSeed = config.print_random_schedule_seed;
-	if (config.quiet) {
+	if (config.quiet)
+	{
 		// logLevel = VerbosityLevel::Quiet;
 		// TODO GENMC: error might be better (or new level for `BUG`)
 		// logLevel = VerbosityLevel::Quiet;
 		logLevel = VerbosityLevel::Error;
-	} else if (config.log_level_trace) {
+	}
+	else if (config.log_level_trace)
+	{
 		logLevel = VerbosityLevel::Trace;
-	} else {
+	}
+	else
+	{
 		logLevel = VerbosityLevel::Tip;
 	}
 
@@ -96,10 +102,8 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	// FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
 	conf->schedulePolicy = SchedulePolicy::WF;
 
-	conf->estimate = estimation_mode;
-	conf->estimationMax = config.estimation_max;
-	const auto mode = conf->estimate ? GenMCDriver::Mode(GenMCDriver::EstimationMode{})
-					 : GenMCDriver::Mode(GenMCDriver::VerificationMode{});
+	conf->estimate = false;
+	const auto mode = GenMCDriver::Mode(GenMCDriver::VerificationMode{});
 
 	// Running Miri-GenMC without race detection is not supported.
 	// Disabling this option also changes the behavior of the replay scheduler to only schedule
@@ -118,22 +122,25 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	auto driver = std::make_unique<MiriGenMCShim>(std::move(conf), mode);
 
 	auto *driverPtr = driver.get();
-	auto initValGetter = [driverPtr](const AAccess &access) {
+	auto initValGetter = [driverPtr](const AAccess &access)
+	{
 		const auto addr = access.getAddr();
-		if (!driverPtr->initVals_.contains(addr)) {
+		if (!driverPtr->initVals_.contains(addr))
+		{
 			MIRI_LOG() << "WARNING: TODO GENMC: requested initial value for address "
-				   << addr << ", but there is none.\n";
+					   << addr << ", but there is none.\n";
 			return SVal(0xCC00CC00);
 			// BUG_ON(!driverPtr->initVals_.contains(addr));
 		}
 		auto result = driverPtr->initVals_[addr];
-		if (!result.is_init) {
+		if (!result.is_init)
+		{
 			MIRI_LOG() << "WARNING: TODO GENMC: requested initial value for address "
-				   << addr << ", but the memory is uninitialized.\n";
+					   << addr << ", but the memory is uninitialized.\n";
 			return SVal(0xFF00FF00);
 		}
 		MIRI_LOG() << "MiriGenMCShim: requested initial value for address " << addr
-			   << " == " << addr.get() << ", returning: " << result << "\n";
+				   << " == " << addr.get() << ", returning: " << result << "\n";
 		return result.toSVal();
 	};
 	driver->getExec().getGraph().setInitValGetter(initValGetter);
@@ -143,10 +150,10 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 
 // This needs to be available to Miri, but clang-tidy wants it static
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-auto createGenmcHandle(const GenmcParams &config, bool estimation_mode)
+auto createGenmcHandle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
-	return MiriGenMCShim::createHandle(config, estimation_mode);
+	return MiriGenMCShim::createHandle(config);
 }
 
 /**** Execution start/end handling ****/
@@ -222,11 +229,11 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 /**** Memory access handling ****/
 
 [[nodiscard]] auto MiriGenMCShim::handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
-					     MemOrdering ord, GenmcScalar old_val) -> LoadResult
+											 MemOrdering ord, GenmcScalar old_val) -> LoadResult
 {
 	auto pos = incPos(thread_id);
 	MIRI_LOG() << "Received Load from Miri at address: " << address << ", size " << size
-		   << " with ordering " << ord << ", event: " << pos << "\n";
+			   << " with ordering " << ord << ", event: " << pos << "\n";
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
@@ -235,20 +242,21 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 
 	auto newLab = std::make_unique<ReadLabel>(pos, ord, loc, aSize, type);
 
-	auto oldValSetter = [this, old_val](SAddr loc) { this->handleOldVal(loc, old_val); };
+	auto oldValSetter = [this, old_val](SAddr loc)
+	{ this->handleOldVal(loc, old_val); };
 	auto result = GenMCDriver::handleLoad(std::move(newLab), oldValSetter);
 	return result;
 }
 
 [[nodiscard]] auto MiriGenMCShim::handleReadModifyWrite(ThreadId thread_id, uint64_t address,
-							uint64_t size, MemOrdering loadOrd,
-							MemOrdering store_ordering, RMWBinOp rmw_op,
-							GenmcScalar rhs_value, GenmcScalar old_val)
+														uint64_t size, MemOrdering loadOrd,
+														MemOrdering store_ordering, RMWBinOp rmw_op,
+														GenmcScalar rhs_value, GenmcScalar old_val)
 	-> ReadModifyWriteResult
 {
 	MIRI_LOG() << "Received Read-Modify-Write from Miri at address: " << address << ", size "
-		   << size << " with orderings (" << loadOrd << ", " << store_ordering
-		   << "), rmw op: " << static_cast<uint64_t>(rmw_op) << "\n";
+			   << size << " with orderings (" << loadOrd << ", " << store_ordering
+			   << "), rmw op: " << static_cast<uint64_t>(rmw_op) << "\n";
 
 	auto pos = incPos(thread_id);
 
@@ -261,9 +269,11 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	auto newLab =
 		std::make_unique<FaiReadLabel>(pos, loadOrd, loc, aSize, type, rmw_op, rhsVal);
 
-	auto oldValSetter = [this, old_val](SAddr loc) { this->handleOldVal(loc, old_val); };
+	auto oldValSetter = [this, old_val](SAddr loc)
+	{ this->handleOldVal(loc, old_val); };
 	auto result = GenMCDriver::handleLoad(std::move(newLab), oldValSetter);
-	if (const auto *error = result.error.get()) {
+	if (const auto *error = result.error.get())
+	{
 		return ReadModifyWriteResult::fromError(*error);
 	}
 
@@ -271,7 +281,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	auto newVal = executeRMWBinOp(oldVal, rhsVal, size, rmw_op);
 
 	auto store_result = handleStore(thread_id, address, size, GenmcScalar(newVal), old_val,
-					store_ordering, StoreEventType::ReadModifyWrite);
+									store_ordering, StoreEventType::ReadModifyWrite);
 
 	if (store_result.is_error())
 		return ReadModifyWriteResult::fromError(*store_result.error.get());
@@ -286,11 +296,11 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 {
 
 	MIRI_LOG() << "Received Compare-Exchange from Miri (value: " << expected_value << " --> "
-		   << new_value << ", old value: " << old_val << ") at address: " << address
-		   << ", size " << size << " with success orderings (" << success_load_ordering
-		   << ", " << success_store_ordering
-		   << "), fail load ordering: " << fail_load_ordering
-		   << ", is weak (can fail spuriously): " << can_fail_spuriously << "\n";
+			   << new_value << ", old value: " << old_val << ") at address: " << address
+			   << ", size " << size << " with success orderings (" << success_load_ordering
+			   << ", " << success_store_ordering
+			   << "), fail load ordering: " << fail_load_ordering
+			   << ", is weak (can fail spuriously): " << can_fail_spuriously << "\n";
 
 	auto pos = incPos(thread_id);
 
@@ -305,11 +315,13 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	// FIXME(GenMC): properly handle failure memory ordering.
 
 	auto newLab = std::make_unique<CasReadLabel>(pos, success_load_ordering, loc, aSize, type,
-						     expectedVal, newVal);
+												 expectedVal, newVal);
 
-	auto oldValSetter = [this, old_val](SAddr loc) { this->handleOldVal(loc, old_val); };
+	auto oldValSetter = [this, old_val](SAddr loc)
+	{ this->handleOldVal(loc, old_val); };
 	auto result = GenMCDriver::handleLoad(std::move(newLab), oldValSetter);
-	if (const auto *error = result.error.get()) {
+	if (const auto *error = result.error.get())
+	{
 		return CompareExchangeResult::fromError(*error);
 	}
 
@@ -318,7 +330,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 		return CompareExchangeResult::failure(oldVal);
 
 	auto store_result = handleStore(thread_id, address, size, GenmcScalar(newVal), old_val,
-					success_store_ordering, StoreEventType::CompareExchange);
+									success_store_ordering, StoreEventType::CompareExchange);
 
 	if (store_result.is_error())
 		return CompareExchangeResult::fromError(*store_result.error);
@@ -326,13 +338,13 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 }
 
 [[nodiscard]] auto MiriGenMCShim::handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
-					      GenmcScalar value, GenmcScalar old_val,
-					      MemOrdering ord, StoreEventType store_event_type)
+											  GenmcScalar value, GenmcScalar old_val,
+											  MemOrdering ord, StoreEventType store_event_type)
 	-> StoreResult
 {
 	MIRI_LOG() << "Received Store from Miri at address " << address << ", size " << size
-		   << " with ordering " << ord << ", is part of rmw: ("
-		   << static_cast<uint64_t>(store_event_type) << ")\n";
+			   << " with ordering " << ord << ", is part of rmw: ("
+			   << static_cast<uint64_t>(store_event_type) << ")\n";
 
 	auto pos = incPos(thread_id);
 
@@ -344,7 +356,8 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	auto val = value.toSVal();
 
 	std::unique_ptr<WriteLabel> wLab;
-	switch (store_event_type) {
+	switch (store_event_type)
+	{
 	case StoreEventType::Normal:
 		wLab = std::make_unique<WriteLabel>(pos, ord, loc, aSize, type, val);
 		break;
@@ -358,9 +371,10 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 		ERROR("Unsupported Store Event Type");
 	}
 
-	auto oldValSetter = [this, old_val](SAddr loc) {
+	auto oldValSetter = [this, old_val](SAddr loc)
+	{
 		this->handleOldVal(loc,
-				   old_val); // TODO GENMC(HACK): is this the correct way to do it?
+						   old_val); // TODO GENMC(HACK): is this the correct way to do it?
 	};
 
 	return GenMCDriver::handleStore(std::move(wLab), oldValSetter);
