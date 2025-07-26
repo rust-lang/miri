@@ -6,7 +6,6 @@ use super::GenmcParams;
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {
     pub(super) params: GenmcParams,
-    print_exec_graphs: bool,
     do_estimation: bool,
 }
 
@@ -14,10 +13,6 @@ impl GenmcConfig {
     fn set_log_level_trace(&mut self) {
         self.params.quiet = false;
         self.params.log_level_trace = true;
-    }
-
-    pub fn print_exec_graphs(&self) -> bool {
-        self.print_exec_graphs
     }
 
     pub fn do_estimation(&self) -> bool {
@@ -49,9 +44,6 @@ impl GenmcConfig {
         if trimmed_arg == "log-trace" {
             // TODO GENMC: maybe expand to allow more control over log level?
             genmc_config.set_log_level_trace();
-        } else if trimmed_arg == "print-graphs" {
-            // TODO GENMC (DOCUMENTATION)
-            genmc_config.print_exec_graphs = true;
         } else if trimmed_arg == "estimate" {
             // TODO GENMC (DOCUMENTATION): naming, off/on by default?
             genmc_config.do_estimation = true;

@@ -51,10 +51,6 @@ impl GenmcCtx {
         unreachable!()
     }
 
-    pub fn print_genmc_graph(&self) {
-        unreachable!()
-    }
-
     pub fn is_exploration_done(&self) -> bool {
         unreachable!()
     }
@@ -270,10 +266,6 @@ impl GenmcConfig {
         } else {
             Err(format!("GenMC is not supported on this target"))
         }
-    }
-
-    pub fn print_exec_graphs(&self) -> bool {
-        unreachable!()
     }
 
     pub fn do_estimation(&self) -> bool {

@@ -99,13 +99,6 @@ impl GenmcCtx {
         mc.as_ref().getExploredExecutionCount()
     }
 
-    pub fn print_genmc_graph(&self) {
-        info!("GenMC: print the Execution graph");
-        let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
-        pinned_mc.printGraph();
-    }
-
     /// This function determines if we should continue exploring executions or if we are done.
     ///
     /// In GenMC mode, the input program should be repeatedly executed until this function returns `true` or an error is found.

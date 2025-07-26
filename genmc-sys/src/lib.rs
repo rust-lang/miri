@@ -236,7 +236,6 @@ mod ffi {
         /// If there are more executions, this method prepares for the next execution and returns `true`.
         fn isExplorationDone(self: Pin<&mut MiriGenMCShim>) -> bool;
 
-        fn printGraph(self: Pin<&mut MiriGenMCShim>);
         fn printEstimationResults(self: &MiriGenMCShim, elapsed_time_sec: f64);
     }
 }

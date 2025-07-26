@@ -114,8 +114,6 @@ public:
 		return --globalInstructions[tid].event;
 	}
 
-	void printGraph() { GenMCDriver::debugPrintGraph(); }
-
 	void printEstimationResults(const double elapsed_time_sec) const
 	{
 		// TODO GENMC(CLEANUP): should this happen on the Rust side?

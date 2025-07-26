@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::{GenmcConfig, GenmcCtx, MiriConfig};
+use crate::{GenmcCtx, MiriConfig};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -21,7 +21,6 @@ impl Display for Mode {
 
 pub fn run_genmc_mode(
     config: &MiriConfig,
-    genmc_config: &GenmcConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
     mode: Mode,
 ) -> Option<i32> {
@@ -31,10 +30,6 @@ pub fn run_genmc_mode(
     for rep in 0u64.. {
         tracing::info!("Miri-GenMC loop {}", rep + 1);
         let result = eval_entry(genmc_ctx.clone());
-
-        if genmc_config.print_exec_graphs() {
-            genmc_ctx.print_genmc_graph();
-        }
 
         // TODO GENMC (ERROR REPORTING): we currently do this here, so we can still print the GenMC graph above
         let return_code = result?;
