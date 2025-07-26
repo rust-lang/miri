@@ -186,32 +186,18 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     optimizations is usually marginal at best.");
         }
 
-        if let Some(genmc_config) = &config.genmc_config {
+        if let Some(_genmc_config) = &config.genmc_config {
             let target_usize_max = tcx.target_usize_max();
             let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
                 miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
             };
 
-            // Estimate the execution space and runtime, if enabled.
-            if genmc_config.do_estimation()
-                && miri_genmc::run_genmc_mode(
-                    &config,
-                    eval_entry_once,
-                    target_usize_max,
-                    miri_genmc::Mode::Estimation,
-                )
-                .is_none()
-            {
-                // We might already find an error during estimation, then we should stop here.
-                tcx.dcx().abort_if_errors();
-                exit(rustc_driver::EXIT_FAILURE);
-            }
+            // FIXME(genmc): add estimation mode here.
 
             let return_code = miri_genmc::run_genmc_mode(
                 &config,
                 eval_entry_once,
                 target_usize_max,
-                miri_genmc::Mode::Verification,
             )
             .unwrap_or_else(|| {
                 tcx.dcx().abort_if_errors();

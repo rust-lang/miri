@@ -4,7 +4,7 @@ use rustc_middle::mir;
 
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
-    MiriMachine, OpTy, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
+    MiriMachine, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
 };
 
 #[derive(Debug)]
@@ -16,19 +16,12 @@ pub struct GenmcConfig {}
 pub mod miri_genmc {
     use std::rc::Rc;
 
-    use crate::{GenmcConfig, GenmcCtx, MiriConfig};
-
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    pub enum Mode {
-        Estimation,
-        Verification,
-    }
+    use crate::{GenmcCtx, MiriConfig};
 
     pub fn run_genmc_mode(
         _config: &MiriConfig,
         _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
         _target_usize_max: u64,
-        _mode: Mode,
     ) -> Option<i32> {
         unreachable!();
     }
@@ -36,10 +29,6 @@ pub mod miri_genmc {
 
 impl GenmcCtx {
     pub fn new(_miri_config: &MiriConfig) -> Self {
-        unreachable!()
-    }
-
-    pub fn print_estimation_result(&self) {
         unreachable!()
     }
 
@@ -260,9 +249,5 @@ impl GenmcConfig {
         } else {
             Err(format!("GenMC is not supported on this target"))
         }
-    }
-
-    pub fn do_estimation(&self) -> bool {
-        unreachable!()
     }
 }

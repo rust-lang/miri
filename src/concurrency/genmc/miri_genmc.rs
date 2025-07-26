@@ -1,39 +1,19 @@
-use std::fmt::Display;
 use std::rc::Rc;
-use std::time::Instant;
 
 use crate::{GenmcCtx, MiriConfig};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Estimation,
-    Verification,
-}
-
-impl Display for Mode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Mode::Estimation => "Estimation",
-            Mode::Verification => "Verification",
-        })
-    }
-}
 
 /// Do a complete run of the program in GenMC mode.
 /// This will call `eval_entry` multiple times, until either:
 /// - An error is detected
-/// - All possible executions are explored (in `Mode::Verification`)
-/// - Enough executions are explored to estimated the total number of executions (in `Mode::Estimation`)
+/// - All possible executions are explored.
 ///
-/// Returns `None` is an error is detected, or `Some(return_value)` with the return value of the last run of the program.
+/// FIXME(genmc): add estimation mode setting.
 pub fn run_genmc_mode(
     config: &MiriConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
     target_usize_max: u64,
-    mode: Mode,
 ) -> Option<i32> {
-    let time_start = Instant::now();
-    let genmc_ctx = Rc::new(GenmcCtx::new(config, target_usize_max, mode));
+    let genmc_ctx = Rc::new(GenmcCtx::new(config, target_usize_max));
 
     for rep in 0u64.. {
         tracing::info!("Miri-GenMC loop {}", rep + 1);
@@ -55,13 +35,7 @@ pub fn run_genmc_mode(
             continue;
         }
 
-        eprintln!("(GenMC) {mode} complete. No errors were detected.",);
-
-        if mode == Mode::Estimation && return_code == 0 {
-            let elapsed_time = Instant::now().duration_since(time_start);
-            genmc_ctx.print_estimation_result(elapsed_time);
-            return Some(0);
-        }
+        eprintln!("(GenMC) Verification complete. No errors were detected.");
 
         let explored_execution_count = genmc_ctx.get_explored_execution_count();
         let blocked_execution_count = genmc_ctx.get_blocked_execution_count();

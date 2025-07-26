@@ -38,7 +38,6 @@ impl Default for GenmcParams {
             print_random_schedule_seed: false,
             log_level: Default::default(),
             do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
-            estimation_max: 1000,
         }
     }
 }
@@ -78,7 +77,6 @@ mod ffi {
         pub print_random_schedule_seed: bool,
         pub log_level: LogLevel,
         pub do_symmetry_reduction: bool,
-        pub estimation_max: u32,
     }
 
     /// This is mostly equivalent to GenMC `VerbosityLevel`, but the debug log levels are always present (not conditionally compiled based on `ENABLE_GENMC_DEBUG`).
@@ -237,8 +235,7 @@ mod ffi {
         type SchedulingResult;
 
         /// Set up everything required for one run of GenMC, either in verification or estimation mode.
-        fn createGenmcHandle(config: &GenmcParams, do_estimation: bool)
-        -> UniquePtr<MiriGenMCShim>;
+        fn createGenmcHandle(config: &GenmcParams) -> UniquePtr<MiriGenMCShim>;
         /// Get the bit mask that GenMC expects for global memory allocations.
         fn getGlobalAllocStaticMask() -> u64;
 
@@ -339,10 +336,5 @@ mod ffi {
         fn getResultMessage(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
         /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
         fn getErrorString(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
-
-        /**** Printing functionality. ****/
-
-        /// Print the results of a run in estimation mode.
-        fn printEstimationResults(self: &MiriGenMCShim, elapsed_time_sec: f64);
     }
 }

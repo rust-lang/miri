@@ -53,7 +53,7 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode)
+auto MiriGenMCShim::createHandle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
 	auto conf = std::make_shared<Config>();
@@ -118,11 +118,9 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	// FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
 	conf->schedulePolicy = SchedulePolicy::WF;
 
-	// Set the maximal number of executions tested in estimation mode.
-	conf->estimationMax = config.estimation_max;
 	// Set the mode used for this driver, either estimation or verification.
-	const auto mode = conf->estimate ? GenMCDriver::Mode(GenMCDriver::EstimationMode{})
-					 : GenMCDriver::Mode(GenMCDriver::VerificationMode{});
+	// FIXME(genmc): implement estimation mode.
+	const auto mode = GenMCDriver::Mode(GenMCDriver::VerificationMode{});
 
 	// Running Miri-GenMC without race detection is not supported.
 	// Disabling this option also changes the behavior of the replay scheduler to only schedule
@@ -171,8 +169,8 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 
 // This needs to be available to Miri, but clang-tidy wants it static
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-auto createGenmcHandle(const GenmcParams &config, bool estimation_mode)
+auto createGenmcHandle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
-	return MiriGenMCShim::createHandle(config, estimation_mode);
+	return MiriGenMCShim::createHandle(config);
 }

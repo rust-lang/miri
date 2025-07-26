@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
-use std::time::Duration;
 
 use genmc_sys::{
     GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim, RMWBinOp,
@@ -108,11 +107,11 @@ pub struct GenmcCtx {
 /// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    pub fn new(miri_config: &MiriConfig, target_usize_max: u64, mode: miri_genmc::Mode) -> Self {
+    pub fn new(miri_config: &MiriConfig, target_usize_max: u64) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
         info!("GenMC: Creating new GenMC Context");
 
-        let handle = createGenmcHandle(&genmc_config.params, mode == miri_genmc::Mode::Estimation);
+        let handle = createGenmcHandle(&genmc_config.params);
         let non_null_handle = NonNullUniquePtr::new(handle).expect("GenMC should not return null");
         let non_null_handle = RefCell::new(non_null_handle);
         let global_allocations = Arc::new(GlobalAllocationHandler::new(target_usize_max));
@@ -121,14 +120,6 @@ impl GenmcCtx {
             global_allocations,
             exec_state: Default::default(),
         }
-    }
-
-    /// Given the time taken for the estimation mode run,
-    /// print an estimation for how many executions the entire verification will require and give a total time estimate.
-    pub fn print_estimation_result(&self, elapsed_time: Duration) {
-        let elapsed_time_sec = elapsed_time.as_secs_f64();
-        let mc = self.handle.borrow();
-        mc.as_ref().printEstimationResults(elapsed_time_sec);
     }
 
     /// Get the number of blocked executions encountered by GenMC.
