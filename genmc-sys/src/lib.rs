@@ -288,7 +288,6 @@ mod ffi {
             old_value: GenmcScalar,
             memory_ordering: MemOrdering,
         ) -> StoreResult;
-        fn handleFence(self: Pin<&mut MiriGenMCShim>, thread_id: i32, memory_ordering: MemOrdering);
 
         /**** Memory (de)allocation ****/
         fn handleMalloc(

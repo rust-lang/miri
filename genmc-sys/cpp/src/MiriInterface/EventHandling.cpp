@@ -178,12 +178,6 @@
 	return StoreResult::ok(isCoMaxWrite);
 }
 
-void MiriGenMCShim::handleFence(ThreadId thread_id, MemOrdering ord)
-{
-	const auto pos = incPos(thread_id);
-	GenMCDriver::handleFence(pos, ord, EventDeps());
-}
-
 /**** Memory (de)allocation ****/
 
 auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment) -> uint64_t

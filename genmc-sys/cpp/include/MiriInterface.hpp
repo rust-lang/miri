@@ -74,8 +74,6 @@ public:
 					      GenmcScalar value, GenmcScalar old_val,
 					      MemOrdering ord);
 
-	void handleFence(ThreadId thread_id, MemOrdering ord);
-
 	/**** Memory (de)allocation ****/
 	uintptr_t handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment);
 	void handleFree(ThreadId thread_id, uint64_t address);
