@@ -1,6 +1,7 @@
 pub use self::ffi::*;
 
-pub mod cxx_extra;
+pub use cxx::UniquePtr;
+
 
 /// Defined in "genmc/src/Support/SAddr.hpp"
 /// FIXME: currently we use `getGlobalAllocStaticMask()` to ensure the constant is consistent between Miri and GenMC,
