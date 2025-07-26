@@ -1,7 +1,6 @@
-pub use self::ffi::*;
-
 pub use cxx::UniquePtr;
 
+pub use self::ffi::*;
 
 /// Defined in "genmc/src/Support/SAddr.hpp"
 /// FIXME: currently we use `getGlobalAllocStaticMask()` to ensure the constant is consistent between Miri and GenMC,
@@ -27,10 +26,7 @@ impl GenmcScalar {
 
 impl Default for GenmcParams {
     fn default() -> Self {
-        Self {
-            print_random_schedule_seed: false,
-            do_symmetry_reduction: false,
-        }
+        Self { print_random_schedule_seed: false, do_symmetry_reduction: false }
     }
 }
 
@@ -64,21 +60,6 @@ mod ffi {
         SequentiallyConsistent = 6,
     }
 
-    #[derive(Debug)]
-    enum RMWBinOp {
-        Xchg = 0,
-        Add = 1,
-        Sub = 2,
-        And = 3,
-        Nand = 4,
-        Or = 5,
-        Xor = 6,
-        Max = 7,
-        Min = 8,
-        UMax = 9,
-        UMin = 10,
-    }
-
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
@@ -108,7 +89,6 @@ mod ffi {
         include!("MiriInterface.hpp");
 
         type MemOrdering;
-        type RMWBinOp;
 
         // Types for Scheduling queries:
         type ActionKind;
@@ -121,8 +101,7 @@ mod ffi {
 
         type MiriGenMCShim;
 
-        fn createGenmcHandle(config: &GenmcParams)
-        -> UniquePtr<MiriGenMCShim>;
+        fn createGenmcHandle(config: &GenmcParams) -> UniquePtr<MiriGenMCShim>;
         fn getGlobalAllocStaticMask() -> u64;
 
         fn handleExecutionStart(self: Pin<&mut MiriGenMCShim>);
