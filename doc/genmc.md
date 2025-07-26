@@ -60,6 +60,7 @@ The build script in the `genmc-sys` crate handles locating, downloading, buildin
 
 To determine which GenMC repo path will be used, the following steps are taken:
 - If the env var `GENMC_SRC_PATH` is set, it's value is used as a path to a directory with a GenMC repo (e.g., `GENMC_SRC_PATH="path/to/miri/genmc-sys/genmc-sys-local"`).
+  - Note that this variable must be set wherever Miri is built, e.g., in the terminal, or in the Rust Analyzer settings.
 - If the path `genmc-sys/genmc-src/genmc` exists, try to set the GenMC repo there to the commit we need.
 - If the downloaded repo doesn't exist or is missing the commit, the build script will fetch the commit over the network.
   - Note that the build script will *not* access the network if any of the steps previous steps succeeds.
