@@ -18,20 +18,19 @@ using ModelCheckerError = std::string;
  */
 struct GenmcScalar {
 	uint64_t value;
-	uint64_t extra;
 	bool is_init;
 
-	explicit GenmcScalar() : value(0), extra(0), is_init(false) {}
+	explicit GenmcScalar() : value(0), is_init(false) {}
 	explicit GenmcScalar(uint64_t value, uint64_t extra)
-		: value(value), extra(extra), is_init(true)
+		: value(value), is_init(true)
 	{}
-	explicit GenmcScalar(SVal val) : value(val.get()), extra(val.getExtra()), is_init(true) {}
+	explicit GenmcScalar(SVal val) : value(val.get()), is_init(true) {}
 
 	/** Convert to a GenMC SVal. Panics if the value is uninitialized. */
 	auto toSVal() const -> SVal
 	{
 		ERROR_ON(!is_init, "attempt to convert uninitialized GenmcScalar to an SVal\n");
-		return SVal(value, extra);
+		return SVal(value);
 	}
 
 	bool operator==(const GenmcScalar &other) const
@@ -44,8 +43,8 @@ struct GenmcScalar {
 		if (is_init != other.is_init)
 			return false;
 
-		// Compare the actual values.
-		return value == other.value && extra == other.extra;
+		// Compare the actual values
+		return value == other.value;
 	}
 
 	friend auto operator<<(llvm::raw_ostream &rhs, const GenmcScalar &v) -> llvm::raw_ostream &;
@@ -101,7 +100,9 @@ public:
 		read_value = rhs.read_value;
 		if (rhs.error.get() != nullptr) {
 			error = std::make_unique<ModelCheckerError>(*rhs.error);
-		} else {
+		}
+		else
+		{
 			error = nullptr;
 		}
 		return *this;
@@ -145,7 +146,8 @@ public:
 	ReadModifyWriteResult(SVal old_value, SVal new_value, bool isCoMaxWrite)
 		: old_value(GenmcScalar(old_value)), new_value(GenmcScalar(new_value)),
 		  isCoMaxWrite(isCoMaxWrite), error(nullptr)
-	{}
+	{
+	}
 
 	static ReadModifyWriteResult fromError(std::string msg)
 	{

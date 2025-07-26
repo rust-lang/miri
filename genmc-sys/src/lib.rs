@@ -18,17 +18,13 @@ pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 pub const GENMC_MAIN_THREAD_ID: i32 = 0;
 
 impl GenmcScalar {
-    pub const UNINIT: Self = Self { value: 0, extra: 0, is_init: false };
+    pub const UNINIT: Self = Self { value: 0, is_init: false };
     /// GenMC expects a value for all stores, but we cannot always provide one (e.g., non-atomic writes).
     /// FIXME(genmc): remove this if a permanent fix is ever found.
     pub const DUMMY: Self = Self::from_u64(0xDEADBEEF);
 
     pub const fn from_u64(value: u64) -> Self {
-        Self { value, extra: 0, is_init: true }
-    }
-
-    pub const fn has_provenance(&self) -> bool {
-        self.extra != 0
+        Self { value, is_init: true }
     }
 }
 
@@ -142,7 +138,6 @@ mod ffi {
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
-        extra: u64,
         is_init: bool,
     }
 
