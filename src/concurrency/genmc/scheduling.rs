@@ -44,7 +44,7 @@ impl GenmcCtx {
         let curr_thread_info = thread_infos.get_genmc_tid(active_thread_id);
 
         let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
+        let pinned_mc = mc.as_mut().unwrap();
         let result = pinned_mc.scheduleNext(curr_thread_info, curr_thread_next_instr_kind);
         // Depending on the exec_state, we either schedule the given thread, or we are finished with this execution.
         match result.exec_state {

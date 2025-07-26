@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-pub use self::ffi::*;
+pub use cxx::UniquePtr;
 
-pub mod cxx_extra;
+pub use self::ffi::*;
 
 /// Defined in "genmc/src/Support/SAddr.hpp".
 /// The first bit of all global addresses must be set to `1`, the rest are the actual address.
