@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use genmc_sys::{
     ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, GenmcThreadId, MemOrdering,
-    MiriGenMCShim, StoreEventType, UniquePtr, createGenmcHandle,
+    MiriGenMCShim, UniquePtr, createGenmcHandle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -11,10 +11,7 @@ use rustc_middle::{mir, throw_machine_stop, throw_ub_format, throw_unsup_format}
 use tracing::info;
 
 use self::global_allocations::{EvalContextExtPriv as _, GlobalAllocationHandler};
-use self::helper::{
-    genmc_scalar_to_scalar, option_scalar_to_genmc_scalar,
-    scalar_to_genmc_scalar,
-};
+use self::helper::{genmc_scalar_to_scalar, option_scalar_to_genmc_scalar, scalar_to_genmc_scalar};
 use self::thread_info_manager::ThreadInfoManager;
 use crate::concurrency::genmc::helper::split_access;
 use crate::{
@@ -214,7 +211,7 @@ impl GenmcCtx {
         _old_value: Scalar,
     ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         assert!(!self.allow_data_races.get());
-        throw_unsup_format!("FIXME(genmc): Add support for atomic min/max.")
+        throw_unsup_format!("FIXME(genmc): Add support for atomic RMW.")
     }
 
     /// Inform GenMC about an atomic `min` or `max` operation.
@@ -253,69 +250,19 @@ impl GenmcCtx {
 
     pub(crate) fn atomic_compare_exchange<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        expected_old_value: Scalar,
-        new_value: Scalar,
-        success: AtomicRwOrd,
-        fail: AtomicReadOrd,
-        can_fail_spuriously: bool,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _expected_old_value: Scalar,
+        _new_value: Scalar,
+        _success: AtomicRwOrd,
+        _fail: AtomicReadOrd,
+        _can_fail_spuriously: bool,
         // The value that we would get, if we were to do a non-atomic load here.
-        old_value: Scalar,
+        _old_value: Scalar,
     ) -> InterpResult<'tcx, (Scalar, bool, bool)> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-
-        let machine = &ecx.machine;
-        let (success_load_ordering, success_store_ordering) = success.to_genmc_memory_orderings();
-        let fail_load_ordering = fail.convert();
-
-        info!(
-            "GenMC: atomic_compare_exchange, address: {address:?}, size: {size:?} (expect: {expected_old_value:?}, new: {new_value:?}, old_value: {old_value:?}, {success:?}, {fail:?}), can fail spuriously: {can_fail_spuriously}"
-        );
-        info!(
-            "GenMC: atomic_compare_exchange orderings: success: ({success_load_ordering:?}, {success_store_ordering:?}), failure load ordering: {fail_load_ordering:?}"
-        );
-
-        let thread_infos = self.thread_infos.borrow();
-        let curr_thread = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
-
-        let genmc_address = address.bytes();
-        let genmc_size = size.bytes();
-
-        let genmc_expected_value = scalar_to_genmc_scalar(ecx, expected_old_value)?;
-        let genmc_new_value = scalar_to_genmc_scalar(ecx, new_value)?;
-        let genmc_old_value = scalar_to_genmc_scalar(ecx, old_value)?;
-
-        let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut().unwrap();
-        let cas_result = pinned_mc.handleCompareExchange(
-            genmc_tid.0,
-            genmc_address,
-            genmc_size,
-            genmc_expected_value,
-            genmc_new_value,
-            genmc_old_value,
-            success_load_ordering,
-            success_store_ordering,
-            fail_load_ordering,
-            can_fail_spuriously,
-        );
-
-        if let Some(error) = cas_result.error.as_ref() {
-            let msg = error.to_string_lossy().to_string();
-            info!("GenMC: RMW operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
-        }
-
-        let return_scalar = genmc_scalar_to_scalar(ecx, cas_result.old_value, size)?;
-        info!(
-            "GenMC: atomic_compare_exchange: result: {cas_result:?}, returning scalar: {return_scalar:?}"
-        );
-        // The write can only be a co-maximal write if the CAS succeeded.
-        assert!(cas_result.is_success || !cas_result.isCoMaxWrite);
-        interp_ok((return_scalar, cas_result.isCoMaxWrite, cas_result.is_success))
+        assert!(!self.allow_data_races.get());
+        throw_unsup_format!("FIXME(genmc): Add support for atomic compare_exchange.")
     }
 
     /// Inform GenMC about a non-atomic memory load
@@ -681,7 +628,6 @@ impl GenmcCtx {
             genmc_value,
             genmc_old_value,
             memory_ordering,
-            StoreEventType::Normal,
         );
 
         if let Some(error) = store_result.error.as_ref() {

@@ -79,13 +79,6 @@ mod ffi {
         UMin = 10,
     }
 
-    // TODO GENMC: do these have to be shared with the Rust side?
-    #[derive(Debug)]
-    enum StoreEventType {
-        Normal,
-        CompareExchange,
-    }
-
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
@@ -93,15 +86,6 @@ mod ffi {
     }
 
     /**** \/ Result & Error types \/ ****/
-
-    #[must_use]
-    #[derive(Debug)]
-    struct CompareExchangeResult {
-        old_value: GenmcScalar, // TODO GENMC: handle bigger values
-        is_success: bool,
-        isCoMaxWrite: bool,
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
-    }
 
     #[must_use]
     #[derive(Debug)]
@@ -125,7 +109,6 @@ mod ffi {
 
         type MemOrdering;
         type RMWBinOp;
-        type StoreEventType;
 
         // Types for Scheduling queries:
         type ActionKind;
@@ -133,7 +116,6 @@ mod ffi {
         // Result / Error types:
         type LoadResult;
         type StoreResult;
-        type CompareExchangeResult;
 
         type GenmcScalar;
 
@@ -154,19 +136,6 @@ mod ffi {
             memory_ordering: MemOrdering,
             old_value: GenmcScalar,
         ) -> LoadResult;
-        fn handleCompareExchange(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-            expected_value: GenmcScalar,
-            new_value: GenmcScalar,
-            old_value: GenmcScalar,
-            success_load_ordering: MemOrdering,
-            success_store_ordering: MemOrdering,
-            fail_load_ordering: MemOrdering,
-            can_fail_spuriously: bool,
-        ) -> CompareExchangeResult;
         fn handleStore(
             self: Pin<&mut MiriGenMCShim>,
             thread_id: i32,
@@ -175,7 +144,6 @@ mod ffi {
             value: GenmcScalar,
             old_value: GenmcScalar,
             memory_ordering: MemOrdering,
-            store_event_type: StoreEventType,
         ) -> StoreResult;
 
         fn handleMalloc(

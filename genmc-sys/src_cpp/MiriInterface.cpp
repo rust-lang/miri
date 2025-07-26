@@ -213,7 +213,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 											 MemOrdering ord, GenmcScalar old_val) -> LoadResult
 {
 	auto pos = incPos(thread_id);
-	
+
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
 	// `type` is only used for printing.
@@ -227,50 +227,9 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	return result;
 }
 
-[[nodiscard]] auto MiriGenMCShim::handleCompareExchange(
-	ThreadId thread_id, uint64_t address, uint64_t size, GenmcScalar expected_value,
-	GenmcScalar new_value, GenmcScalar old_val, MemOrdering success_load_ordering,
-	MemOrdering success_store_ordering, MemOrdering fail_load_ordering,
-	bool can_fail_spuriously) -> CompareExchangeResult
-{
-	auto pos = incPos(thread_id);
-
-	auto loc = SAddr(address);
-	auto aSize = ASize(size);
-	// `type` is only used for printing.
-	auto type = AType::Unsigned;
-
-	auto expectedVal = expected_value.toSVal();
-	auto newVal = new_value.toSVal();
-
-	// FIXME(GenMC): properly handle failure memory ordering.
-
-	auto newLab = std::make_unique<CasReadLabel>(pos, success_load_ordering, loc, aSize, type,
-												 expectedVal, newVal);
-
-	auto oldValSetter = [this, old_val](SAddr loc)
-	{ this->handleOldVal(loc, old_val); };
-	auto result = GenMCDriver::handleLoad(std::move(newLab), oldValSetter);
-	if (const auto *error = result.error.get())
-	{
-		return CompareExchangeResult::fromError(*error);
-	}
-
-	auto oldVal = result.scalar.toSVal();
-	if (oldVal != expectedVal)
-		return CompareExchangeResult::failure(oldVal);
-
-	auto store_result = handleStore(thread_id, address, size, GenmcScalar(newVal), old_val,
-									success_store_ordering, StoreEventType::CompareExchange);
-
-	if (store_result.is_error())
-		return CompareExchangeResult::fromError(*store_result.error);
-	return CompareExchangeResult::success(oldVal, store_result.isCoMaxWrite);
-}
-
 [[nodiscard]] auto MiriGenMCShim::handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
 											  GenmcScalar value, GenmcScalar old_val,
-											  MemOrdering ord, StoreEventType store_event_type)
+											  MemOrdering ord)
 	-> StoreResult
 {
 	auto pos = incPos(thread_id);
@@ -282,18 +241,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 
 	auto val = value.toSVal();
 
-	std::unique_ptr<WriteLabel> wLab;
-	switch (store_event_type)
-	{
-	case StoreEventType::Normal:
-		wLab = std::make_unique<WriteLabel>(pos, ord, loc, aSize, type, val);
-		break;
-	case StoreEventType::CompareExchange:
-		wLab = std::make_unique<CasWriteLabel>(pos, ord, loc, aSize, type, val);
-		break;
-	default:
-		ERROR("Unsupported Store Event Type");
-	}
+	std::unique_ptr<WriteLabel> wLab = std::make_unique<WriteLabel>(pos, ord, loc, aSize, type, val);
 
 	auto oldValSetter = [this, old_val](SAddr loc)
 	{

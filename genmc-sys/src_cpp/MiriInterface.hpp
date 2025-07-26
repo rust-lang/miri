@@ -55,15 +55,9 @@ public:
 	///////////////////
 	[[nodiscard]] LoadResult handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
 										MemOrdering ord, GenmcScalar old_val);
-	[[nodiscard]] CompareExchangeResult
-	handleCompareExchange(ThreadId thread_id, uint64_t address, uint64_t size,
-						  GenmcScalar expected_value, GenmcScalar new_value,
-						  GenmcScalar old_val, MemOrdering success_load_ordering,
-						  MemOrdering success_store_ordering, MemOrdering fail_load_ordering,
-						  bool can_fail_spuriously);
 	[[nodiscard]] StoreResult handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
 										  GenmcScalar value, GenmcScalar old_val,
-										  MemOrdering ord, StoreEventType store_event_type);
+										  MemOrdering ord);
 
 	/**** Memory (de)allocation ****/
 
