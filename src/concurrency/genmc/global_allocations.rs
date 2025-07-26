@@ -1,4 +1,3 @@
-use std::cmp::max;
 use std::collections::hash_map::Entry;
 use std::sync::RwLock;
 
@@ -22,11 +21,12 @@ pub struct GlobalAllocationHandler {
 /// This contains more or less a subset of the functionality of `struct GlobalStateInner` in `alloc_addresses`.
 #[derive(Clone, Debug)]
 struct GlobalStateInner {
+    // FIXME(genmc): Decide on an API for GenMC to access this (to check if access to global memory is valid), or decide we don't need that.
+    #[allow(unused)]
     /// This is used as a map between the address of each allocation and its `AllocId`. It is always
     /// sorted by address. We cannot use a `HashMap` since we can be given an address that is offset
     /// from the base address, and we need to find the `AllocId` it belongs to. This is not the
     /// *full* inverse of `base_addr`; dead allocations have been removed.
-    #[allow(unused)] // FIXME(GenMC): do we need this?
     int_to_ptr_map: Vec<(u64, AllocId)>,
     /// The base address for each allocation.
     /// This is the inverse of `int_to_ptr_map`.
@@ -35,7 +35,7 @@ struct GlobalStateInner {
     /// is always larger than any address that was previously made part of a block.
     next_base_addr: u64,
     /// To add some randomness to the allocations
-    /// FIXME(GenMC): maybe seed this from the rng in MiriMachine?
+    /// FIXME(genmc): maybe seed this from the rng in MiriMachine?
     rng: StdRng,
 }
 
@@ -97,11 +97,12 @@ impl GlobalStateInner {
         // `alloc_id_from_addr` assumes unique addresses, and different function/vtable pointers
         // need to be distinguishable!)
         self.next_base_addr = base_addr
-            .checked_add(max(info.size.bytes(), 1))
+            .checked_add(info.size.bytes().max(1))
             .ok_or_else(|| err_exhaust!(AddressSpaceFull))?;
 
         assert_ne!(0, base_addr & GENMC_GLOBAL_ADDRESSES_MASK);
         assert_ne!(0, self.next_base_addr & GENMC_GLOBAL_ADDRESSES_MASK);
+
         // Cache the address for future use.
         entry.insert(base_addr);
 
@@ -109,7 +110,6 @@ impl GlobalStateInner {
     }
 }
 
-// FIXME(GenMC): "ExtPriv" or "PrivExt"?
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn get_global_allocation_address(
