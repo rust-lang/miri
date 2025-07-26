@@ -187,7 +187,6 @@ impl GenmcCtx {
         _alloc_id: AllocId,
         _address: Size,
         _size: Size,
-        _align: Align,
         _kind: MemoryKind,
     ) -> InterpResult<'tcx> {
         unreachable!()

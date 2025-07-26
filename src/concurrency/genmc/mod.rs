@@ -484,16 +484,8 @@ impl GenmcCtx {
     ) -> InterpResult<'tcx, u64> {
         let machine = &ecx.machine;
         let chosen_address = if memory_kind == MiriMemoryKind::Global.into() {
-            info!("GenMC: global memory allocation: {alloc_id:?}");
             ecx.get_global_allocation_address(&self.global_allocations, alloc_id)?
         } else {
-            // TODO GENMC: Does GenMC need to know about the kind of Memory?
-
-            // eprintln!(
-            //     "handle_alloc ({memory_kind:?}): Custom backtrace: {}",
-            //     std::backtrace::Backtrace::force_capture()
-            // );
-            // TODO GENMC: should we put this before the special handling for globals?
             if self.allow_data_races.get() {
                 unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
             }
@@ -502,31 +494,24 @@ impl GenmcCtx {
             let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
             // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
             let genmc_size = size.bytes().max(1);
-            info!(
-                "GenMC: handle_alloc (thread: {curr_thread:?} ({genmc_tid:?}), size: {}, alignment: {alignment:?}, memory_kind: {memory_kind:?})",
-                size.bytes()
-            );
 
             let alignment = alignment.bytes();
 
             let mut mc = self.handle.borrow_mut();
             let pinned_mc = mc.as_mut();
             let chosen_address = pinned_mc.handleMalloc(genmc_tid.0, genmc_size, alignment);
-            info!("GenMC: handle_alloc: got address '{chosen_address}' ({chosen_address:#x})");
 
-            // TODO GENMC:
-            if chosen_address == 0 {
-                throw_unsup_format!("TODO GENMC: we got address '0' from malloc");
-            }
+            assert_ne!(chosen_address, 0, "GenMC malloc returned nullptr.");
+            // Non-global addresses should not be in the global address space.
             assert_eq!(0, chosen_address & GENMC_GLOBAL_ADDRESSES_MASK);
             chosen_address
         };
+
         // Sanity check the address alignment:
-        assert_eq!(
+        debug_assert_eq!(
             0,
             chosen_address % alignment.bytes(),
-            "GenMC returned address {chosen_address} == {chosen_address:#x} with lower alignment than requested ({:})!",
-            alignment.bytes()
+            "Allocated address {chosen_address:#x} does not have requested alignment ({alignment:?})!"
         );
 
         interp_ok(chosen_address)
@@ -538,7 +523,6 @@ impl GenmcCtx {
         alloc_id: AllocId,
         address: Size,
         size: Size,
-        align: Align,
         kind: MemoryKind,
     ) -> InterpResult<'tcx> {
         assert_ne!(
@@ -552,10 +536,6 @@ impl GenmcCtx {
         let thread_infos = self.thread_infos.borrow();
         let curr_thread = machine.threads.active_thread();
         let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
-        info!(
-            "GenMC: memory deallocation, thread: {curr_thread:?} ({genmc_tid:?}), address: {addr} == {addr:#x}, size: {size:?}, align: {align:?}, memory_kind: {kind:?}",
-            addr = address.bytes()
-        );
 
         let genmc_address = address.bytes();
         // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
@@ -585,14 +565,9 @@ impl GenmcCtx {
         let genmc_parent_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
         let genmc_new_tid = thread_infos.add_thread(new_thread_id);
 
-        info!(
-            "GenMC: handling thread creation (thread {curr_thread_id:?} ({genmc_parent_tid:?}) spawned thread {new_thread_id:?} ({genmc_new_tid:?}))"
-        );
-
         let mut mc = self.handle.borrow_mut();
         mc.as_mut().handleThreadCreate(genmc_new_tid.0, genmc_parent_tid.0);
 
-        // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
     }
 
@@ -606,10 +581,6 @@ impl GenmcCtx {
 
         let genmc_curr_tid = thread_infos.get_info(active_thread_id).genmc_tid;
         let genmc_child_tid = thread_infos.get_info(child_thread_id).genmc_tid;
-
-        info!(
-            "GenMC: handling thread joining (thread {active_thread_id:?} ({genmc_curr_tid:?}) joining thread {child_thread_id:?} ({genmc_child_tid:?}))"
-        );
 
         let mut mc = self.handle.borrow_mut();
         mc.as_mut().handleThreadJoin(genmc_curr_tid.0, genmc_child_tid.0);

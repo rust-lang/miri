@@ -1462,7 +1462,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         match &machine.data_race {
             GlobalDataRaceHandler::None => {}
             GlobalDataRaceHandler::Genmc(genmc_ctx) =>
-                genmc_ctx.handle_dealloc(machine, alloc_id, ptr.addr(), size, align, kind)?,
+                genmc_ctx.handle_dealloc(machine, alloc_id, ptr.addr(), size, kind)?,
             GlobalDataRaceHandler::Vclocks(_global_state) => {
                 let data_race = alloc_extra.data_race.as_vclocks_mut().unwrap();
                 data_race.write(
@@ -1673,7 +1673,6 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         frame: &Frame<'tcx, Provenance, FrameExtra<'tcx>>,
         local: mir::Local,
     ) -> InterpResult<'tcx> {
-        // TODO GENMC: does GenMC care about local reads/writes?
         if let Some(data_race) = &frame.extra.data_race {
             data_race.local_read(local, &ecx.machine);
         }
@@ -1685,7 +1684,6 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         local: mir::Local,
         storage_live: bool,
     ) -> InterpResult<'tcx> {
-        // TODO GENMC: does GenMC care about local reads/writes?
         if let Some(data_race) = &ecx.frame().extra.data_race {
             data_race.local_write(local, storage_live, &ecx.machine);
         }
@@ -1715,7 +1713,6 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
                 machine,
             );
         }
-        // TODO GENMC: how to handle this (if at all)?
         interp_ok(())
     }
 
