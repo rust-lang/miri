@@ -46,17 +46,6 @@ pub fn split_access(address: Size, size: Size) -> impl Iterator<Item = (u64, u64
     start_chunks.chain(aligned_chunks).chain(end_chunks)
 }
 
-/// Like `scalar_to_genmc_scalar`, but returns an error if the scalar is not an integer
-pub fn rhs_scalar_to_genmc_scalar<'tcx>(
-    ecx: &MiriInterpCx<'tcx>,
-    scalar: Scalar,
-) -> InterpResult<'tcx, GenmcScalar> {
-    if matches!(scalar, Scalar::Ptr(..)) {
-        throw_unsup_format!("Right hand side of atomic operation cannot be a pointer");
-    }
-    scalar_to_genmc_scalar(ecx, scalar)
-}
-
 pub fn option_scalar_to_genmc_scalar<'tcx>(
     ecx: &MiriInterpCx<'tcx>,
     maybe_scalar: Option<Scalar>,

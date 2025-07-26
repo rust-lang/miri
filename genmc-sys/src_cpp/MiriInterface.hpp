@@ -27,7 +27,6 @@ using ThreadId = int;
 enum class StoreEventType : uint8_t
 {
 	Normal,
-	ReadModifyWrite,
 	CompareExchange,
 };
 
@@ -56,10 +55,6 @@ public:
 	///////////////////
 	[[nodiscard]] LoadResult handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
 										MemOrdering ord, GenmcScalar old_val);
-	[[nodiscard]] ReadModifyWriteResult
-	handleReadModifyWrite(ThreadId thread_id, uint64_t address, uint64_t size,
-						  MemOrdering loadOrd, MemOrdering store_ordering, RMWBinOp rmw_op,
-						  GenmcScalar rhs_value, GenmcScalar old_val);
 	[[nodiscard]] CompareExchangeResult
 	handleCompareExchange(ThreadId thread_id, uint64_t address, uint64_t size,
 						  GenmcScalar expected_value, GenmcScalar new_value,

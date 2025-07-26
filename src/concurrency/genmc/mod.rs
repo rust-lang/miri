@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use genmc_sys::{
     ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, GenmcThreadId, MemOrdering,
-    MiriGenMCShim, RMWBinOp, StoreEventType, UniquePtr, createGenmcHandle,
+    MiriGenMCShim, StoreEventType, UniquePtr, createGenmcHandle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -12,10 +12,9 @@ use tracing::info;
 
 use self::global_allocations::{EvalContextExtPriv as _, GlobalAllocationHandler};
 use self::helper::{
-    genmc_scalar_to_scalar, option_scalar_to_genmc_scalar, rhs_scalar_to_genmc_scalar,
+    genmc_scalar_to_scalar, option_scalar_to_genmc_scalar,
     scalar_to_genmc_scalar,
 };
-use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
 use self::thread_info_manager::ThreadInfoManager;
 use crate::concurrency::genmc::helper::split_access;
 use crate::{
@@ -205,33 +204,17 @@ impl GenmcCtx {
     /// Returns `(old_val, Option<new_val>)`. `new_val` might not be the latest write in coherence order, which is indicated by `None`.
     pub(crate) fn atomic_rmw_op<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        ordering: AtomicRwOrd,
-        (rmw_op, not): (mir::BinOp, bool),
-        rhs_scalar: Scalar,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _ordering: AtomicRwOrd,
+        (_rmw_op, _not): (mir::BinOp, bool),
+        _rhs_scalar: Scalar,
         // The value that we would get, if we were to do a non-atomic load here.
-        old_value: Scalar,
+        _old_value: Scalar,
     ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        let (load_ordering, store_ordering) = ordering.to_genmc_memory_orderings();
-        let genmc_rmw_op = to_genmc_rmw_op(rmw_op, not);
-        tracing::info!(
-            "GenMC: atomic_rmw_op (op: {rmw_op:?}, not: {not}, genmc_rmw_op: {genmc_rmw_op:?}): rhs value: {rhs_scalar:?}, orderings ({load_ordering:?}, {store_ordering:?})"
-        );
-        let genmc_rhs_scalar = rhs_scalar_to_genmc_scalar(ecx, rhs_scalar)?;
-        let genmc_old_value = scalar_to_genmc_scalar(ecx, old_value)?;
-        self.atomic_rmw_op_impl(
-            ecx,
-            address,
-            size,
-            load_ordering,
-            store_ordering,
-            genmc_rmw_op,
-            genmc_rhs_scalar,
-            genmc_old_value,
-        )
+        assert!(!self.allow_data_races.get());
+        throw_unsup_format!("FIXME(genmc): Add support for atomic min/max.")
     }
 
     /// Inform GenMC about an atomic `min` or `max` operation.
@@ -239,67 +222,33 @@ impl GenmcCtx {
     /// Returns `(old_val, Option<new_val>)`. `new_val` might not be the latest write in coherence order, which is indicated by `None`.
     pub(crate) fn atomic_min_max_op<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        ordering: AtomicRwOrd,
-        min: bool,
-        is_signed: bool,
-        rhs_scalar: Scalar,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _ordering: AtomicRwOrd,
+        _min: bool,
+        _is_signed: bool,
+        _rhs_scalar: Scalar,
         // The value that we would get, if we were to do a non-atomic load here.
-        old_value: Scalar,
+        _old_value: Scalar,
     ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        let (load_ordering, store_ordering) = ordering.to_genmc_memory_orderings();
-        let genmc_rmw_op = min_max_to_genmc_rmw_op(min, is_signed);
-        tracing::info!(
-            "GenMC: atomic_min_max_op (min: {min}, signed: {is_signed}, genmc_rmw_op: {genmc_rmw_op:?}): rhs value: {rhs_scalar:?}, orderings ({load_ordering:?}, {store_ordering:?})"
-        );
-        let genmc_rhs_scalar = rhs_scalar_to_genmc_scalar(ecx, rhs_scalar)?;
-        let genmc_old_value = scalar_to_genmc_scalar(ecx, old_value)?;
-        self.atomic_rmw_op_impl(
-            ecx,
-            address,
-            size,
-            load_ordering,
-            store_ordering,
-            genmc_rmw_op,
-            genmc_rhs_scalar,
-            genmc_old_value,
-        )
+        assert!(!self.allow_data_races.get());
+        throw_unsup_format!("FIXME(genmc): Add support for atomic min/max.")
     }
 
     /// Returns `(old_val, Option<new_val>)`. `new_val` might not be the latest write in coherence order, which is indicated by `None`.
     pub(crate) fn atomic_exchange<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        rhs_scalar: Scalar,
-        ordering: AtomicRwOrd,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _rhs_scalar: Scalar,
+        _ordering: AtomicRwOrd,
         // The value that we would get, if we were to do a non-atomic load here.
-        old_value: Scalar,
+        _old_value: Scalar,
     ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        // TODO GENMC: could maybe merge this with atomic_rmw?
-
-        let (load_ordering, store_ordering) = ordering.to_genmc_memory_orderings();
-        let genmc_rmw_op = RMWBinOp::Xchg;
-        tracing::info!(
-            "GenMC: atomic_exchange (op: {genmc_rmw_op:?}): new value: {rhs_scalar:?}, orderings ({load_ordering:?}, {store_ordering:?})"
-        );
-        let genmc_rhs_scalar = scalar_to_genmc_scalar(ecx, rhs_scalar)?;
-        let genmc_old_value = scalar_to_genmc_scalar(ecx, old_value)?;
-        self.atomic_rmw_op_impl(
-            ecx,
-            address,
-            size,
-            load_ordering,
-            store_ordering,
-            genmc_rmw_op,
-            genmc_rhs_scalar,
-            genmc_old_value,
-        )
+        assert!(!self.allow_data_races.get());
+        throw_unsup_format!("FIXME(genmc): Add support for atomic swap.")
     }
 
     pub(crate) fn atomic_compare_exchange<'tcx>(
@@ -742,64 +691,6 @@ impl GenmcCtx {
         }
 
         interp_ok(store_result.isCoMaxWrite)
-    }
-
-    fn atomic_rmw_op_impl<'tcx>(
-        &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        load_ordering: MemOrdering,
-        store_ordering: MemOrdering,
-        genmc_rmw_op: RMWBinOp,
-        genmc_rhs_scalar: GenmcScalar,
-        genmc_old_value: GenmcScalar,
-    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
-        assert!(
-            size.bytes() <= 8,
-            "TODO GENMC: no support for accesses larger than 8 bytes (got {} bytes)",
-            size.bytes()
-        );
-        let machine = &ecx.machine;
-        assert_ne!(0, size.bytes());
-        let thread_infos = self.thread_infos.borrow();
-        let curr_thread_id = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
-
-        let genmc_address = address.bytes();
-        let genmc_size = size.bytes();
-
-        info!(
-            "GenMC: atomic_rmw_op, thread: {curr_thread_id:?} ({genmc_tid:?}) (op: {genmc_rmw_op:?}, rhs value: {genmc_rhs_scalar:?}), address: {address:?}, size: {size:?}, orderings: ({load_ordering:?}, {store_ordering:?})",
-        );
-
-        let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
-        let rmw_result = pinned_mc.handleReadModifyWrite(
-            genmc_tid.0,
-            genmc_address,
-            genmc_size,
-            load_ordering,
-            store_ordering,
-            genmc_rmw_op,
-            genmc_rhs_scalar,
-            genmc_old_value,
-        );
-
-        if let Some(error) = rmw_result.error.as_ref() {
-            let msg = error.to_string_lossy().to_string();
-            info!("GenMC: RMW operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
-        }
-
-        let old_value_scalar = genmc_scalar_to_scalar(ecx, rmw_result.old_value, size)?;
-
-        let new_value_scalar = if rmw_result.isCoMaxWrite {
-            Some(genmc_scalar_to_scalar(ecx, rmw_result.new_value, size)?)
-        } else {
-            None
-        };
-        interp_ok((old_value_scalar, new_value_scalar))
     }
 
     /**** Scheduling functionality ****/

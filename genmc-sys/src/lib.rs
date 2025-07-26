@@ -83,7 +83,6 @@ mod ffi {
     #[derive(Debug)]
     enum StoreEventType {
         Normal,
-        ReadModifyWrite,
         CompareExchange,
     }
 
@@ -94,15 +93,6 @@ mod ffi {
     }
 
     /**** \/ Result & Error types \/ ****/
-
-    #[must_use]
-    #[derive(Debug)]
-    struct ReadModifyWriteResult {
-        old_value: GenmcScalar,
-        new_value: GenmcScalar,
-        isCoMaxWrite: bool,
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
-    }
 
     #[must_use]
     #[derive(Debug)]
@@ -143,7 +133,6 @@ mod ffi {
         // Result / Error types:
         type LoadResult;
         type StoreResult;
-        type ReadModifyWriteResult;
         type CompareExchangeResult;
 
         type GenmcScalar;
@@ -165,17 +154,6 @@ mod ffi {
             memory_ordering: MemOrdering,
             old_value: GenmcScalar,
         ) -> LoadResult;
-        fn handleReadModifyWrite(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-            load_ordering: MemOrdering,
-            store_ordering: MemOrdering,
-            rmw_op: RMWBinOp,
-            rhs_value: GenmcScalar,
-            old_value: GenmcScalar,
-        ) -> ReadModifyWriteResult;
         fn handleCompareExchange(
             self: Pin<&mut MiriGenMCShim>,
             thread_id: i32,

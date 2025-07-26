@@ -227,42 +227,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	return result;
 }
 
-[[nodiscard]] auto MiriGenMCShim::handleReadModifyWrite(ThreadId thread_id, uint64_t address,
-														uint64_t size, MemOrdering loadOrd,
-														MemOrdering store_ordering, RMWBinOp rmw_op,
-														GenmcScalar rhs_value, GenmcScalar old_val)
-	-> ReadModifyWriteResult
-{
-	auto pos = incPos(thread_id);
-
-	auto loc = SAddr(address);
-	auto aSize = ASize(size);
-	// `type` is only used for printing.
-	auto type = AType::Unsigned;
-
-	auto rhsVal = rhs_value.toSVal();
-	auto newLab =
-		std::make_unique<FaiReadLabel>(pos, loadOrd, loc, aSize, type, rmw_op, rhsVal);
-
-	auto oldValSetter = [this, old_val](SAddr loc)
-	{ this->handleOldVal(loc, old_val); };
-	auto result = GenMCDriver::handleLoad(std::move(newLab), oldValSetter);
-	if (const auto *error = result.error.get())
-	{
-		return ReadModifyWriteResult::fromError(*error);
-	}
-
-	auto oldVal = result.scalar.toSVal(); // TODO GENMC: u128 handling
-	auto newVal = executeRMWBinOp(oldVal, rhsVal, size, rmw_op);
-
-	auto store_result = handleStore(thread_id, address, size, GenmcScalar(newVal), old_val,
-									store_ordering, StoreEventType::ReadModifyWrite);
-
-	if (store_result.is_error())
-		return ReadModifyWriteResult::fromError(*store_result.error.get());
-	return ReadModifyWriteResult(oldVal, newVal, store_result.isCoMaxWrite);
-}
-
 [[nodiscard]] auto MiriGenMCShim::handleCompareExchange(
 	ThreadId thread_id, uint64_t address, uint64_t size, GenmcScalar expected_value,
 	GenmcScalar new_value, GenmcScalar old_val, MemOrdering success_load_ordering,
@@ -323,9 +287,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	{
 	case StoreEventType::Normal:
 		wLab = std::make_unique<WriteLabel>(pos, ord, loc, aSize, type, val);
-		break;
-	case StoreEventType::ReadModifyWrite:
-		wLab = std::make_unique<FaiWriteLabel>(pos, ord, loc, aSize, type, val);
 		break;
 	case StoreEventType::CompareExchange:
 		wLab = std::make_unique<CasWriteLabel>(pos, ord, loc, aSize, type, val);

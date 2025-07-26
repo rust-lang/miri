@@ -1,4 +1,4 @@
-use genmc_sys::{MemOrdering, RMWBinOp};
+use genmc_sys::MemOrdering;
 
 use crate::{AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd};
 
@@ -33,29 +33,6 @@ impl AtomicRwOrd {
             AtomicRwOrd::AcqRel => (MemOrdering::AcquireRelease, MemOrdering::AcquireRelease),
             AtomicRwOrd::SeqCst =>
                 (MemOrdering::SequentiallyConsistent, MemOrdering::SequentiallyConsistent),
-        }
-    }
-}
-
-pub(super) fn min_max_to_genmc_rmw_op(min: bool, is_signed: bool) -> RMWBinOp {
-    match (min, is_signed) {
-        (true, true) => RMWBinOp::Min, // TODO GENMC: is there a use for FMin? (Min, UMin, FMin)
-        (false, true) => RMWBinOp::Max,
-        (true, false) => RMWBinOp::UMin,
-        (false, false) => RMWBinOp::UMax,
-    }
-}
-
-pub(super) fn to_genmc_rmw_op(bin_op: rustc_middle::mir::BinOp, negate: bool) -> RMWBinOp {
-    match bin_op {
-        rustc_middle::mir::BinOp::Add => RMWBinOp::Add,
-        rustc_middle::mir::BinOp::Sub => RMWBinOp::Sub,
-        rustc_middle::mir::BinOp::BitOr if !negate => RMWBinOp::Or,
-        rustc_middle::mir::BinOp::BitXor if !negate => RMWBinOp::Xor,
-        rustc_middle::mir::BinOp::BitAnd if negate => RMWBinOp::Nand,
-        rustc_middle::mir::BinOp::BitAnd => RMWBinOp::And,
-        _ => {
-            panic!("unsupported atomic operation: bin_op: {bin_op:?}, negate: {negate}");
         }
     }
 }
