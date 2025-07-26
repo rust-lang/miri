@@ -30,7 +30,7 @@ impl Default for GenmcParams {
             print_random_schedule_seed: false,
             quiet: true,
             log_level_trace: false,
-            do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
+            do_symmetry_reduction: false,
         }
     }
 }

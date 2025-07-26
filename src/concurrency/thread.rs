@@ -586,8 +586,6 @@ impl<'tcx> ThreadManager<'tcx> {
     fn detach_thread(&mut self, id: ThreadId, allow_terminated_joined: bool) -> InterpResult<'tcx> {
         trace!("detaching {:?}", id);
 
-        tracing::info!("GenMC: TODO GENMC: does GenMC need special handling for detached threads?");
-
         let is_ub = if allow_terminated_joined && self.threads[id].state.is_terminated() {
             // "Detached" in particular means "not yet joined". Redundant detaching is still UB.
             self.threads[id].join_status == ThreadJoinStatus::Detached
