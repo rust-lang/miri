@@ -85,13 +85,6 @@ public:
 	void handleThreadFinish(ThreadId thread_id, uint64_t ret_val);
 	void handleThreadKill(ThreadId thread_id);
 
-	/**** Mutex handling ****/
-	auto handleMutexLock(ThreadId thread_id, uint64_t address, uint64_t size)
-		-> MutexLockResult;
-	auto handleMutexTryLock(ThreadId thread_id, uint64_t address, uint64_t size)
-		-> MutexLockResult;
-	auto handleMutexUnlock(ThreadId thread_id, uint64_t address, uint64_t size) -> StoreResult;
-
 	/***** Exploration related functionality *****/
 
 	/** Ask the GenMC scheduler for a new thread to schedule and return whether the execution is

@@ -181,21 +181,4 @@ struct CompareExchangeResult {
 	}
 };
 
-struct MutexLockResult {
-	/// if not `nullptr`, it contains an error encountered during the handling of the mutex op.
-	std::unique_ptr<ModelCheckerError> error;
-	/// Indicate whether the lock was acquired by this thread.
-	bool is_lock_acquired;
-
-	MutexLockResult(bool is_lock_acquired) : is_lock_acquired(is_lock_acquired), error(nullptr)
-	{}
-
-	static auto fromError(std::string msg) -> MutexLockResult
-	{
-		auto res = MutexLockResult(false);
-		res.error = std::make_unique<ModelCheckerError>(msg);
-		return res;
-	}
-};
-
 #endif /* GENMC_RESULT_HANDLING_HPP */

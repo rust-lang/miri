@@ -23,9 +23,6 @@ impl GenmcScalar {
     /// FIXME(genmc): remove this if a permanent fix is ever found.
     pub const DUMMY: Self = Self::from_u64(0xDEADBEEF);
 
-    pub const MUTEX_LOCKED_STATE: Self = Self::from_u64(1);
-    pub const MUTEX_UNLOCKED_STATE: Self = Self::from_u64(0);
-
     pub const fn from_u64(value: u64) -> Self {
         Self { value, extra: 0, is_init: true }
     }
@@ -231,15 +228,6 @@ mod ffi {
         isCoMaxWrite: bool,
     }
 
-    #[must_use]
-    #[derive(Debug)]
-    struct MutexLockResult {
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
-        error: UniquePtr<CxxString>,
-        /// Indicate whether the lock was acquired by this thread.
-        is_lock_acquired: bool,
-    }
-
     /**** /\ Result & Error types /\ ****/
 
     unsafe extern "C++" {
@@ -258,7 +246,6 @@ mod ffi {
         type StoreResult;
         type ReadModifyWriteResult;
         type CompareExchangeResult;
-        type MutexLockResult;
 
         /// Communication layer between Miri/Rust and GenMC/C++:
         type MiriGenMCShim;
@@ -337,26 +324,6 @@ mod ffi {
         fn handleThreadJoin(self: Pin<&mut MiriGenMCShim>, thread_id: i32, child_id: i32);
         fn handleThreadFinish(self: Pin<&mut MiriGenMCShim>, thread_id: i32, ret_val: u64);
         fn handleThreadKill(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
-
-        /**** Mutex handling ****/
-        fn handleMutexLock(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-        ) -> MutexLockResult;
-        fn handleMutexTryLock(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-        ) -> MutexLockResult;
-        fn handleMutexUnlock(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-        ) -> StoreResult;
 
         /***** Exploration related functionality *****/
 
