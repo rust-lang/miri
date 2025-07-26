@@ -17,7 +17,7 @@ use self::helper::{
 };
 use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
 use self::thread_info_manager::ThreadInfoManager;
-use crate::concurrency::genmc::helper::{is_terminator_atomic, split_access};
+use crate::concurrency::genmc::helper::split_access;
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
     MiriMachine, MiriMemoryKind, Scalar, TerminationInfo, ThreadId, ThreadManager, VisitProvenance,
@@ -864,11 +864,8 @@ impl GenmcCtx {
                     return interp_ok(active_thread_id);
                 }
 
-                if is_terminator_atomic(ecx, basic_block.terminator(), active_thread_id)? {
-                    ActionKind::Load
-                } else {
-                    ActionKind::NonLoad
-                }
+                // FIXME(genmc): determine terminator kind.
+                ActionKind::Load
             };
 
         info!(
