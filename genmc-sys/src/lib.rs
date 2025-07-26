@@ -203,7 +203,6 @@ mod ffi {
             memory_ordering: MemOrdering,
             store_event_type: StoreEventType,
         ) -> StoreResult;
-        fn handleFence(self: Pin<&mut MiriGenMCShim>, thread_id: i32, memory_ordering: MemOrdering);
 
         fn handleMalloc(
             self: Pin<&mut MiriGenMCShim>,

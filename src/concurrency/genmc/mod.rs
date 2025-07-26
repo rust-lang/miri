@@ -199,24 +199,10 @@ impl GenmcCtx {
 
     pub(crate) fn atomic_fence<'tcx>(
         &self,
-        machine: &MiriMachine<'tcx>,
-        ordering: AtomicFenceOrd,
+        _machine: &MiriMachine<'tcx>,
+        _ordering: AtomicFenceOrd,
     ) -> InterpResult<'tcx> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        info!("GenMC: atomic_fence with ordering: {ordering:?}");
-
-        let ordering = ordering.convert();
-
-        let thread_infos = self.thread_infos.borrow();
-        let curr_thread = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
-
-        let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
-        pinned_mc.handleFence(genmc_tid.0, ordering);
-
-        // TODO GENMC: can this operation ever fail?
-        interp_ok(())
+        throw_unsup_format!("FIXME(genmc): Add support for atomic fences.")
     }
 
     /// Inform GenMC about an atomic read-modify-write operation.

@@ -70,8 +70,6 @@ public:
 										  GenmcScalar value, GenmcScalar old_val,
 										  MemOrdering ord, StoreEventType store_event_type);
 
-	void handleFence(ThreadId thread_id, MemOrdering ord);
-
 	/**** Memory (de)allocation ****/
 
 	uintptr_t handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment);

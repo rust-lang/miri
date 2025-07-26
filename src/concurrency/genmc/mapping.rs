@@ -1,6 +1,6 @@
 use genmc_sys::{MemOrdering, RMWBinOp};
 
-use crate::{AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd};
+use crate::{AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd};
 
 impl AtomicReadOrd {
     pub(super) fn convert(self) -> MemOrdering {
@@ -18,17 +18,6 @@ impl AtomicWriteOrd {
             AtomicWriteOrd::Relaxed => MemOrdering::Relaxed,
             AtomicWriteOrd::Release => MemOrdering::Release,
             AtomicWriteOrd::SeqCst => MemOrdering::SequentiallyConsistent,
-        }
-    }
-}
-
-impl AtomicFenceOrd {
-    pub(super) fn convert(self) -> MemOrdering {
-        match self {
-            AtomicFenceOrd::Acquire => MemOrdering::Acquire,
-            AtomicFenceOrd::Release => MemOrdering::Release,
-            AtomicFenceOrd::AcqRel => MemOrdering::AcquireRelease,
-            AtomicFenceOrd::SeqCst => MemOrdering::SequentiallyConsistent,
         }
     }
 }

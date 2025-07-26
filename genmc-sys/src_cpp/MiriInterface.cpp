@@ -380,16 +380,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	return GenMCDriver::handleStore(std::move(wLab), oldValSetter);
 }
 
-void MiriGenMCShim::handleFence(ThreadId thread_id, MemOrdering ord)
-{
-	MIRI_LOG() << "Received fence operation from Miri with ordering " << ord << "\n";
-
-	auto pos = incPos(thread_id);
-
-	auto fLab = std::make_unique<FenceLabel>(pos, ord);
-	GenMCDriver::handleFence(std::move(fLab));
-}
-
 /**** Memory (de)allocation ****/
 
 auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment) -> uintptr_t
