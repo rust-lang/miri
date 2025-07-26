@@ -18,11 +18,10 @@ use self::helper::{
 use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
 use self::thread_info_manager::ThreadInfoManager;
 use crate::concurrency::genmc::helper::{is_terminator_atomic, split_access};
-use crate::concurrency::thread::{EvalContextExt as _, ThreadState};
 use crate::{
-    AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, BlockReason, MemoryKind,
-    MiriConfig, MiriMachine, MiriMemoryKind, Scalar, TerminationInfo, ThreadId, ThreadManager,
-    VisitProvenance, VisitWith,
+    AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
+    MiriMachine, MiriMemoryKind, Scalar, TerminationInfo, ThreadId, ThreadManager, VisitProvenance,
+    VisitWith,
 };
 
 mod config;
@@ -853,7 +852,7 @@ impl GenmcCtx {
 
     /**** Scheduling functionality ****/
 
-    fn schedule_thread<'tcx>(
+    pub fn schedule_thread<'tcx>(
         &self,
         ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> InterpResult<'tcx, ThreadId> {
@@ -917,49 +916,6 @@ impl GenmcCtx {
 
     fn handle_user_block<'tcx>(&self, _machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
         todo!()
-    }
-}
-
-/// Other functionality not directly related to event handling
-impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
-pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    /**** Scheduling functionality ****/
-
-    /// Ask for a scheduling decision. This should be called before every MIR instruction.
-    ///
-    /// GenMC may realize that the execution is blocked, then this function will return a `InterpErrorKind::MachineStop` with error kind `TerminationInfo::GenmcBlockedExecution`).
-    ///
-    /// This is **not** an error by iself! Treat this as if the program ended normally: `handle_execution_end` should be called next, which will determine if were are any actual errors.
-    fn genmc_schedule_thread(&mut self) -> InterpResult<'tcx, ThreadId> {
-        let this = self.eval_context_mut();
-        loop {
-            let genmc_ctx = this.machine.data_race.as_genmc_ref().unwrap();
-            let next_thread_id = genmc_ctx.schedule_thread(this)?;
-
-            match this.machine.threads.threads_ref()[next_thread_id].get_state() {
-                ThreadState::Blocked {
-                    reason: block_reason @ (BlockReason::Mutex | BlockReason::GenmcAssume),
-                    ..
-                } => {
-                    info!(
-                        "GenMC: schedule returned thread {next_thread_id:?}, which is blocked, so we unblock it now."
-                    );
-                    this.unblock_thread(next_thread_id, *block_reason)?;
-
-                    // In some cases, like waiting on a Mutex::lock, the thread might still be blocked here:
-                    if this.machine.threads.threads_ref()[next_thread_id]
-                        .get_state()
-                        .is_blocked_on(crate::BlockReason::Mutex)
-                    {
-                        info!("GenMC: Unblocked thread is blocked on a Mutex again!");
-                        continue;
-                    }
-                }
-                _ => {}
-            }
-
-            return interp_ok(next_thread_id);
-        }
     }
 }
 
