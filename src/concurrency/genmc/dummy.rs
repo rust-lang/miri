@@ -254,26 +254,6 @@ impl GenmcCtx {
     }
 }
 
-/// Other functionality not directly related to event handling
-impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
-pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    fn check_genmc_intercept_function(
-        &mut self,
-        _instance: rustc_middle::ty::Instance<'tcx>,
-        _args: &[rustc_const_eval::interpret::FnArg<'tcx, crate::Provenance>],
-        _dest: &crate::PlaceTy<'tcx>,
-        _ret: Option<mir::BasicBlock>,
-    ) -> InterpResult<'tcx, bool> {
-        unreachable!()
-    }
-
-    /**** Scheduling functionality ****/
-
-    fn genmc_schedule_thread(&mut self) -> InterpResult<'tcx, ThreadId> {
-        unreachable!()
-    }
-}
-
 impl VisitProvenance for GenmcCtx {
     fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
         unreachable!()

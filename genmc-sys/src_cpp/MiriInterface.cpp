@@ -219,15 +219,6 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 	GenMCDriver::handleThreadKill(std::move(kLab));
 }
 
-/**** Blocking instructions ****/
-
-void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
-{
-	auto pos = incPos(thread_id);
-	auto bLab = UserBlockLabel::create(pos);
-	GenMCDriver::handleBlock(std::move(bLab));
-}
-
 /**** Memory access handling ****/
 
 [[nodiscard]] auto MiriGenMCShim::handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
@@ -363,9 +354,6 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 	case StoreEventType::CompareExchange:
 		wLab = std::make_unique<CasWriteLabel>(pos, ord, loc, aSize, type, val);
 		break;
-	case StoreEventType::MutexUnlockWrite:
-		wLab = UnlockWriteLabel::create(pos, ord, loc, aSize, AType::Signed, val);
-		break;
 	default:
 		ERROR("Unsupported Store Event Type");
 	}
@@ -418,95 +406,4 @@ void MiriGenMCShim::handleFree(ThreadId thread_id, uint64_t address, uint64_t si
 
 	auto dLab = std::make_unique<FreeLabel>(pos, addr, size);
 	GenMCDriver::handleFree(std::move(dLab));
-}
-
-/**** Mutex handling ****/
-
-auto MiriGenMCShim::handleMutexLock(ThreadId thread_id, uint64_t address, uint64_t size)
-	-> MutexLockResult
-{
-	// TODO GENMC: this needs to be identical even in multithreading
-	ModuleID::ID annot_id;
-	if (annotation_id.contains(address)) {
-		annot_id = annotation_id.at(address);
-	} else {
-		annot_id = annotation_id_counter++;
-		annotation_id.insert(std::make_pair(address, annot_id));
-	}
-	const auto aSize = ASize(size);
-	auto annot = std::move(Annotation(
-		AssumeType::Spinloop,
-		Annotation::ExprVP(NeExpr<AnnotID>::create(
-					   RegisterExpr<AnnotID>::create(aSize.getBits(), annot_id),
-					   ConcreteExpr<AnnotID>::create(aSize.getBits(), SVal(1)))
-					   .release())));
-
-	auto &currPos = globalInstructions[thread_id].event;
-	// auto rLab = LockCasReadLabel::create(++currPos, address, size);
-	auto rLab = LockCasReadLabel::create(++currPos, address, size, annot);
-
-	// Mutex starts out unlocked, so we always say the previous value is "unlocked".
-	auto oldValSetter = [this](SAddr loc) { this->handleOldVal(loc, SVal(0)); };
-	LoadResult loadResult = GenMCDriver::handleLoad(std::move(rLab), oldValSetter);
-	if (loadResult.is_error()) {
-		--currPos;
-		return MutexLockResult::fromError(*loadResult.error);
-	} else if (loadResult.is_read_opt) {
-		--currPos;
-		// TODO GENMC: is_read_opt == Mutex is acquired
-		// None	--> Someone else has lock, this thread will be rescheduled later (currently
-		// block) 0	--> Got the lock 1 	--> Someone else has lock, this thread will
-		// not be rescheduled later (block on Miri side)
-		return MutexLockResult(false);
-	}
-	// TODO GENMC(QUESTION): is the `isBlocked` even needed?
-	// if (!loadResult.has_value() || getCurThr().isBlocked())
-	//     return;
-
-	const bool is_lock_acquired = loadResult.value() == SVal(0);
-	if (is_lock_acquired) {
-		auto wLab = LockCasWriteLabel::create(++currPos, address, size);
-		StoreResult storeResult = GenMCDriver::handleStore(std::move(wLab), oldValSetter);
-		if (storeResult.is_error())
-			return MutexLockResult::fromError(*storeResult.error);
-
-	} else {
-		auto bLab = LockNotAcqBlockLabel::create(++currPos);
-		GenMCDriver::handleBlock(std::move(bLab));
-	}
-
-	return MutexLockResult(is_lock_acquired);
-}
-
-auto MiriGenMCShim::handleMutexTryLock(ThreadId thread_id, uint64_t address, uint64_t size)
-	-> MutexLockResult
-{
-	auto &currPos = globalInstructions[thread_id].event;
-	auto rLab = TrylockCasReadLabel::create(++currPos, address, size);
-	// Mutex starts out unlocked, so we always say the previous value is "unlocked".
-	auto oldValSetter = [this](SAddr loc) { this->handleOldVal(loc, SVal(0)); };
-	LoadResult loadResult = GenMCDriver::handleLoad(std::move(rLab), oldValSetter);
-	if (!loadResult.has_value()) {
-		--currPos;
-		// TODO GENMC: maybe use std move and make it take a unique_ptr<string> ?
-		return MutexLockResult::fromError(*loadResult.error);
-	}
-
-	const bool is_lock_acquired = loadResult.value() == SVal(0);
-	if (!is_lock_acquired)
-		return MutexLockResult(false); /* Lock already held. */
-
-	auto wLab = TrylockCasWriteLabel::create(++currPos, address, size);
-	StoreResult storeResult = GenMCDriver::handleStore(std::move(wLab), oldValSetter);
-	if (storeResult.is_error())
-		return MutexLockResult::fromError(*storeResult.error);
-
-	return MutexLockResult(true);
-}
-
-auto MiriGenMCShim::handleMutexUnlock(ThreadId thread_id, uint64_t address, uint64_t size)
-	-> StoreResult
-{
-	return handleStore(thread_id, address, size, SVal(0), SVal(0xDEADBEEF),
-			   MemOrdering::Release, StoreEventType::MutexUnlockWrite);
 }

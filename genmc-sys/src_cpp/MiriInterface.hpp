@@ -28,22 +28,6 @@ enum class StoreEventType : uint8_t {
 	Normal,
 	ReadModifyWrite,
 	CompareExchange,
-	MutexUnlockWrite,
-};
-
-struct MutexLockResult {
-	bool is_lock_acquired;
-	std::unique_ptr<ModelCheckerError> error; // TODO GENMC: pass more error info here
-
-	MutexLockResult(bool is_lock_acquired) : is_lock_acquired(is_lock_acquired), error(nullptr)
-	{}
-
-	static auto fromError(std::string msg) -> MutexLockResult
-	{
-		auto res = MutexLockResult(false);
-		res.error = std::make_unique<ModelCheckerError>(msg);
-		return res;
-	}
 };
 
 // TODO GENMC: fix naming conventions
@@ -98,20 +82,7 @@ public:
 	void handleThreadFinish(ThreadId thread_id, uint64_t ret_val);
 	void handleThreadKill(ThreadId thread_id);
 
-	/**** Blocking instructions ****/
-
-	void handleUserBlock(ThreadId thread_id);
-
-	/**** Mutex handling ****/
-	auto handleMutexLock(ThreadId thread_id, uint64_t address, uint64_t size)
-		-> MutexLockResult;
-	auto handleMutexTryLock(ThreadId thread_id, uint64_t address, uint64_t size)
-		-> MutexLockResult;
-	auto handleMutexUnlock(ThreadId thread_id, uint64_t address, uint64_t size) -> StoreResult;
-
 	/**** Scheduling queries ****/
-
-	// TODO GENMC: implement
 
 	auto scheduleNext(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
 		-> int64_t;

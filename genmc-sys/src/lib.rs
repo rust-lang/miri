@@ -19,9 +19,6 @@ impl GenmcScalar {
     /// FIXME(genmc): remove this if a permanent fix is ever found.
     pub const DUMMY: Self = Self::from_u64(0xDEADBEEF);
 
-    pub const MUTEX_LOCKED_STATE: Self = Self::from_u64(1);
-    pub const MUTEX_UNLOCKED_STATE: Self = Self::from_u64(0);
-
     pub const fn from_u64(value: u64) -> Self {
         Self { value, extra: 0, is_init: true }
     }
@@ -93,7 +90,6 @@ mod ffi {
         Normal,
         ReadModifyWrite,
         CompareExchange,
-        MutexUnlockWrite,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -111,13 +107,6 @@ mod ffi {
         old_value: GenmcScalar,
         new_value: GenmcScalar,
         isCoMaxWrite: bool,
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
-    }
-
-    #[must_use]
-    #[derive(Debug)]
-    struct MutexLockResult {
-        is_lock_acquired: bool,
         error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
     }
 
@@ -162,7 +151,6 @@ mod ffi {
         type StoreResult;
         type ReadModifyWriteResult;
         type CompareExchangeResult;
-        type MutexLockResult;
 
         type GenmcScalar;
 
@@ -233,29 +221,6 @@ mod ffi {
         fn handleThreadJoin(self: Pin<&mut MiriGenMCShim>, thread_id: i32, child_id: i32);
         fn handleThreadFinish(self: Pin<&mut MiriGenMCShim>, thread_id: i32, ret_val: u64);
         fn handleThreadKill(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
-
-        /**** Blocking instructions ****/
-        fn handleUserBlock(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
-
-        /**** Mutex handling ****/
-        fn handleMutexLock(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-        ) -> MutexLockResult;
-        fn handleMutexTryLock(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-        ) -> MutexLockResult;
-        fn handleMutexUnlock(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-        ) -> StoreResult;
 
         /**** Scheduling ****/
         fn scheduleNext(
