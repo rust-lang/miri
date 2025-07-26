@@ -37,7 +37,7 @@ impl Default for GenmcParams {
         Self {
             print_random_schedule_seed: false,
             log_level: Default::default(),
-            do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
+            do_symmetry_reduction: false,
         }
     }
 }

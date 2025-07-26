@@ -17,7 +17,6 @@ use rustc_middle::ty::layout::TyAndLayout;
 use rustc_span::Span;
 
 use crate::concurrency::GlobalDataRaceHandler;
-use crate::concurrency::genmc::scheduling::EvalContextExt as _;
 use crate::shims::tls;
 use crate::*;
 
@@ -111,8 +110,6 @@ pub enum BlockReason {
     Eventfd,
     /// Blocked on unnamed_socket.
     UnnamedSocket,
-    /// Blocked on a GenMC `assume` statement (GenMC mode only).
-    GenmcAssume,
 }
 
 /// The state of a thread.
@@ -529,11 +526,6 @@ impl<'tcx> ThreadManager<'tcx> {
         self.active_thread
     }
 
-    pub fn threads_ref(&self) -> &IndexVec<ThreadId, Thread<'tcx>> {
-        // TODO GENMC: should this implementation detail be exposed?
-        &self.threads
-    }
-
     /// Get the total number of threads that were ever spawn by this program.
     pub fn get_total_thread_count(&self) -> usize {
         self.threads.len()
@@ -586,8 +578,6 @@ impl<'tcx> ThreadManager<'tcx> {
     /// > The handle is valid until closed, even after the thread it represents has been terminated.
     fn detach_thread(&mut self, id: ThreadId, allow_terminated_joined: bool) -> InterpResult<'tcx> {
         trace!("detaching {:?}", id);
-
-        tracing::info!("GenMC: TODO GENMC: does GenMC need special handling for detached threads?");
 
         let is_ub = if allow_terminated_joined && self.threads[id].state.is_terminated() {
             // "Detached" in particular means "not yet joined". Redundant detaching is still UB.
@@ -719,8 +709,8 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         // In GenMC mode, we let GenMC do the scheduling.
-        if this.machine.data_race.as_genmc_ref().is_some() {
-            let next_thread_id = this.genmc_schedule_thread()?;
+        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
+            let next_thread_id = genmc_ctx.schedule_thread(this)?;
 
             let thread_manager = &mut this.machine.threads;
             thread_manager.active_thread = next_thread_id;

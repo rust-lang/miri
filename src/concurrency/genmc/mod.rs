@@ -15,11 +15,10 @@ use self::helper::{genmc_scalar_to_scalar, scalar_to_genmc_scalar};
 use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
 use self::thread_id_map::ThreadIdMap;
 use crate::concurrency::genmc::helper::split_access;
-use crate::concurrency::thread::EvalContextExt as _;
 use crate::{
-    AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, BlockReason, MemoryKind,
-    MiriConfig, MiriMachine, MiriMemoryKind, Scalar, TerminationInfo, ThreadId, ThreadManager,
-    VisitProvenance, VisitWith,
+    AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
+    MiriMachine, MiriMemoryKind, Scalar, TerminationInfo, ThreadId, ThreadManager, VisitProvenance,
+    VisitWith,
 };
 
 mod config;

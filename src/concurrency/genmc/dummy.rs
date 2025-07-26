@@ -221,6 +221,15 @@ impl GenmcCtx {
         unreachable!()
     }
 
+    /**** Scheduling functionality ****/
+
+    pub fn schedule_thread<'tcx>(
+        &self,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+    ) -> InterpResult<'tcx, ThreadId> {
+        unreachable!()
+    }
+
     /**** Blocking instructions ****/
 
     #[allow(unused)]

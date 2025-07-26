@@ -71,7 +71,7 @@ pub enum AtomicRwOrd {
 }
 
 /// Valid atomic read orderings, subset of atomic::Ordering.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum AtomicReadOrd {
     Relaxed,
     Acquire,
@@ -1016,7 +1016,6 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         if let Some(data_race) = this.machine.data_race.as_vclocks_ref() {
             data_race.acquire_clock(clock, &this.machine.threads);
         }
-        // TODO GENMC: does GenMC need to be informed about this?
     }
 }
 
