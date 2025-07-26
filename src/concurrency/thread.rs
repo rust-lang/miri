@@ -347,10 +347,10 @@ impl VisitProvenance for Frame<'_, Provenance, FrameExtra<'_>> {
     }
 }
 
+// FIXME(genmc,question): is this ok to be public?
 /// The moment in time when a blocked thread should be woken up.
-// TODO GENMC: is this ok to be pub?
 #[derive(Debug)]
-pub enum Timeout {
+pub(crate) enum Timeout {
     Monotonic(Instant),
     RealTime(SystemTime),
 }
@@ -529,11 +529,6 @@ impl<'tcx> ThreadManager<'tcx> {
     /// Get the total number of threads that were ever spawn by this program.
     pub fn get_total_thread_count(&self) -> usize {
         self.threads.len()
-    }
-
-    /// Get the total of threads that are currently enabled, i.e., could continue executing.
-    pub fn get_enabled_thread_count(&self) -> usize {
-        self.threads.iter().filter(|t| t.state.is_enabled()).count()
     }
 
     /// Get the total of threads that are currently live, i.e., not yet terminated.
@@ -927,10 +922,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         assert!(thread.stack.is_empty(), "only threads with an empty stack can be terminated");
         thread.state = ThreadState::Terminated;
 
-        // TODO GENMC (QUESTION): Can we move this down to where the GenmcCtx is?
-        if let Some(data_race) = this.machine.data_race.as_vclocks_mut() {
-            data_race.thread_terminated(&this.machine.threads);
-        }
         // Deallocate TLS.
         let gone_thread = this.active_thread();
         {
@@ -962,10 +953,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
 
-        // Inform GenMC that the thread finished.
-        // This needs to happen once all accesses to the thread are done, including freeing any TLS statics.
-        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            genmc_ctx.handle_thread_finish(&this.machine.threads);
+        // FIXME(genmc,question): Is it correct to move this code here?
+        match &mut this.machine.data_race {
+            GlobalDataRaceHandler::None => {}
+            GlobalDataRaceHandler::Vclocks(data_race) =>
+                data_race.thread_terminated(&this.machine.threads),
+            GlobalDataRaceHandler::Genmc(genmc_ctx) => {
+                // Inform GenMC that the thread finished.
+                // This needs to happen once all accesses to the thread are done, including freeing any TLS statics.
+                genmc_ctx.handle_thread_finish(&this.machine.threads)
+            }
         }
 
         // Unblock joining threads.

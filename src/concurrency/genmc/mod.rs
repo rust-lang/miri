@@ -567,7 +567,6 @@ impl GenmcCtx {
         );
         let machine = &ecx.machine;
         if memory_kind == MiriMemoryKind::Global.into() {
-            info!("GenMC: global memory allocation: {alloc_id:?}");
             return ecx.get_global_allocation_address(&self.global_allocations, alloc_id);
         }
         let thread_infos = self.exec_state.thread_id_manager.borrow();
@@ -575,10 +574,6 @@ impl GenmcCtx {
         let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
         // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
         let genmc_size = size.bytes().max(1);
-        info!(
-            "GenMC: handle_alloc (thread: {curr_thread:?} ({genmc_tid:?}), size: {}, alignment: {alignment:?}, memory_kind: {memory_kind:?})",
-            size.bytes()
-        );
 
         let alignment = alignment.bytes();
 
@@ -645,14 +640,9 @@ impl GenmcCtx {
         let genmc_parent_tid = thread_infos.get_genmc_tid(curr_thread_id);
         let genmc_new_tid = thread_infos.add_thread(new_thread_id);
 
-        info!(
-            "GenMC: handling thread creation (thread {curr_thread_id:?} ({genmc_parent_tid:?}) spawned thread {new_thread_id:?} ({genmc_new_tid:?}))"
-        );
-
         let mut mc = self.handle.borrow_mut();
         mc.as_mut().handleThreadCreate(genmc_new_tid, genmc_parent_tid);
 
-        // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
     }
 
