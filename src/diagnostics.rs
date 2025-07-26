@@ -258,14 +258,9 @@ pub fn report_error<'tcx>(
                 let genmc_ctx = ecx.machine.data_race.as_genmc_ref().unwrap();
                 // Check whether the execution got blocked or the program exited.
                 if let Some((exit_code, leak_check)) = genmc_ctx.get_exit_status() {
-                    let is_blocked_execution =
-                        ecx.machine.threads.threads_ref().iter().any(|thread| {
-                            thread.get_state().is_blocked_on(BlockReason::GenmcAssume)
-                        });
-
                     // We have an exit status (from `exit(x)` or main thread return).
                     // Skip leak checks if the execution was blocked.
-                    return Some((exit_code, leak_check && !is_blocked_execution));
+                    return Some((exit_code, leak_check));
                 }
                 // The program got blocked by GenMC without ever exiting, so we don't do any leak checks.
                 return Some((0, false));
