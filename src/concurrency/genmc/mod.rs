@@ -16,7 +16,6 @@ use self::helper::{genmc_scalar_to_scalar, scalar_to_genmc_scalar};
 use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
 use self::thread_id_map::ThreadIdMap;
 use crate::concurrency::genmc::helper::split_access;
-use crate::concurrency::genmc::warnings::WarningsCache;
 use crate::concurrency::thread::EvalContextExt as _;
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, BlockReason, MemoryKind,
@@ -31,7 +30,6 @@ mod mapping;
 pub mod miri_genmc;
 pub(crate) mod scheduling;
 mod thread_id_map;
-mod warnings;
 
 pub use genmc_sys::GenmcParams;
 
@@ -103,10 +101,6 @@ pub struct GenmcCtx {
     /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
     global_allocations: Arc<GlobalAllocationHandler>,
 
-    /// Cache for which warnings have already been shown to the user.
-    /// FIXME(genmc): like `GlobalAllocationHandler`, there should only be one of these per entire execution, maybe even across estimation and verification.
-    warnings_cache: RefCell<WarningsCache>,
-
     /// State that is reset at the start of every execution.
     exec_state: PerExecutionState,
 }
@@ -125,7 +119,6 @@ impl GenmcCtx {
         Self {
             handle: non_null_handle,
             global_allocations,
-            warnings_cache: Default::default(),
             exec_state: Default::default(),
         }
     }
@@ -426,13 +419,6 @@ impl GenmcCtx {
             !self.get_alloc_data_races(),
             "atomic compare-exchange with data race checking disabled."
         );
-
-        // FIXME(genmc): remove once GenMC supports failure memory ordering in `compare_exchange`.
-        self.warnings_cache.borrow_mut().warn_once_rmw_failure_ordering(&ecx.tcx, success, fail);
-        // FIXME(genmc): remove once GenMC implements spurious failures for `compare_exchange_weak`.
-        if can_fail_spuriously {
-            self.warnings_cache.borrow_mut().warn_once_compare_exchange_weak(&ecx.tcx);
-        }
 
         let machine = &ecx.machine;
         let (success_load_ordering, success_store_ordering) = success.to_genmc_memory_orderings();
