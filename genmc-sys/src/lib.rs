@@ -120,21 +120,6 @@ mod ffi {
         SequentiallyConsistent = 6,
     }
 
-    #[derive(Debug)]
-    enum RMWBinOp {
-        Xchg = 0,
-        Add = 1,
-        Sub = 2,
-        And = 3,
-        Nand = 4,
-        Or = 5,
-        Xor = 6,
-        Max = 7,
-        Min = 8,
-        UMax = 9,
-        UMin = 10,
-    }
-
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
@@ -178,32 +163,6 @@ mod ffi {
         isCoMaxWrite: bool,
     }
 
-    #[must_use]
-    #[derive(Debug)]
-    struct ReadModifyWriteResult {
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
-        error: UniquePtr<CxxString>,
-        /// The value that was read by the RMW operation as the left operand.
-        old_value: GenmcScalar,
-        /// The value that was produced by the RMW operation.
-        new_value: GenmcScalar,
-        /// `true` if the write should also be reflected in Miri's memory representation.
-        isCoMaxWrite: bool,
-    }
-
-    #[must_use]
-    #[derive(Debug)]
-    struct CompareExchangeResult {
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
-        error: UniquePtr<CxxString>,
-        /// The value that was read by the compare-exchange.
-        old_value: GenmcScalar,
-        /// `true` if compare_exchange op was successful.
-        is_success: bool,
-        /// `true` if the write should also be reflected in Miri's memory representation.
-        isCoMaxWrite: bool,
-    }
-
     /**** /\ Result & Error types /\ ****/
 
     unsafe extern "C++" {
@@ -212,7 +171,6 @@ mod ffi {
         // Types for event handling:
         type GenmcScalar;
         type MemOrdering;
-        type RMWBinOp;
 
         // Types for Scheduling queries:
         type ActionKind;
@@ -220,8 +178,6 @@ mod ffi {
         // Result / Error types:
         type LoadResult;
         type StoreResult;
-        type ReadModifyWriteResult;
-        type CompareExchangeResult;
 
         /// Communication layer between Miri/Rust and GenMC/C++:
         type MiriGenMCShim;
@@ -250,30 +206,6 @@ mod ffi {
             memory_ordering: MemOrdering,
             old_value: GenmcScalar,
         ) -> LoadResult;
-        fn handleReadModifyWrite(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-            load_ordering: MemOrdering,
-            store_ordering: MemOrdering,
-            rmw_op: RMWBinOp,
-            rhs_value: GenmcScalar,
-            old_value: GenmcScalar,
-        ) -> ReadModifyWriteResult;
-        fn handleCompareExchange(
-            self: Pin<&mut MiriGenMCShim>,
-            thread_id: i32,
-            address: u64,
-            size: u64,
-            expected_value: GenmcScalar,
-            new_value: GenmcScalar,
-            old_value: GenmcScalar,
-            success_load_ordering: MemOrdering,
-            success_store_ordering: MemOrdering,
-            fail_load_ordering: MemOrdering,
-            can_fail_spuriously: bool,
-        ) -> CompareExchangeResult;
         fn handleStore(
             self: Pin<&mut MiriGenMCShim>,
             thread_id: i32,
