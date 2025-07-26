@@ -34,17 +34,6 @@ impl AtomicFenceOrd {
 }
 
 impl AtomicRwOrd {
-    /// Split up an atomic read-write memory ordering into a separate read and write ordering.
-    pub(super) fn split_memory_orderings(self) -> (AtomicReadOrd, AtomicWriteOrd) {
-        match self {
-            AtomicRwOrd::Relaxed => (AtomicReadOrd::Relaxed, AtomicWriteOrd::Relaxed),
-            AtomicRwOrd::Acquire => (AtomicReadOrd::Acquire, AtomicWriteOrd::Relaxed),
-            AtomicRwOrd::Release => (AtomicReadOrd::Relaxed, AtomicWriteOrd::Release),
-            AtomicRwOrd::AcqRel => (AtomicReadOrd::Acquire, AtomicWriteOrd::Release),
-            AtomicRwOrd::SeqCst => (AtomicReadOrd::SeqCst, AtomicWriteOrd::SeqCst),
-        }
-    }
-
     /// Split up the atomic success ordering of a read-modify-write operation into GenMC's representation.
     /// Note that both returned orderings are currently identical, because this is what GenMC expects.
     pub(super) fn to_genmc_memory_orderings(self) -> (MemOrdering, MemOrdering) {

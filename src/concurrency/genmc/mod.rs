@@ -19,7 +19,6 @@ use self::helper::{
 use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
 use self::thread_info_manager::ThreadInfoManager;
 use crate::concurrency::genmc::helper::{is_terminator_atomic, split_access};
-use crate::concurrency::genmc::warnings::WarningsCache;
 use crate::concurrency::thread::{EvalContextExt as _, ThreadState};
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, BlockReason, MemoryKind,
@@ -33,7 +32,6 @@ mod helper;
 mod mapping;
 pub mod miri_genmc;
 mod thread_info_manager;
-mod warnings;
 
 pub use genmc_sys::GenmcParams;
 
@@ -61,11 +59,7 @@ pub struct GenmcCtx {
     /// Keep track of global allocations, to ensure they keep the same address across different executions, even if the order of allocations changes.
     /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
     global_allocations: Arc<GlobalAllocationHandler>,
-    // TODO GENMC: maybe make this a (base, size), maybe BTreeMap/sorted vector for reverse lookups
-    //          GenMC needs to have access to that
-    // TODO: look at code of "pub struct GlobalStateInner"
-    warnings_cache: RefCell<WarningsCache>,
-    // terminator_cache: RefCell<FxHashMap<rustc_middle::ty::Ty<'tcx>, bool>>,
+
     exit_status: Cell<Option<ExitStatus>>,
 }
 
@@ -85,7 +79,6 @@ impl GenmcCtx {
             thread_infos: Default::default(),
             allow_data_races: Cell::new(false),
             global_allocations: Default::default(),
-            warnings_cache: Default::default(),
             exit_status: Cell::new(None),
         }
     }
@@ -357,13 +350,6 @@ impl GenmcCtx {
         old_value: Scalar,
     ) -> InterpResult<'tcx, (Scalar, bool, bool)> {
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-
-        // FIXME(genmc): remove once GenMC supports failure memory ordering in `compare_exchange`.
-        self.warnings_cache.borrow_mut().warn_once_rmw_failure_ordering(&ecx.tcx, success, fail);
-        // FIXME(genmc): remove once GenMC implements spurious failures for `compare_exchange_weak`.
-        if can_fail_spuriously {
-            self.warnings_cache.borrow_mut().warn_once_compare_exchange_weak(&ecx.tcx);
-        }
 
         let machine = &ecx.machine;
         let (success_load_ordering, success_store_ordering) = success.to_genmc_memory_orderings();
