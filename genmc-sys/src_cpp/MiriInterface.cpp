@@ -24,9 +24,6 @@
 #include <memory>
 #include <utility>
 
-using AnnotID = ModuleID::ID;
-using AnnotT = SExpr<AnnotID>;
-
 // Return -1 when no thread can/should be scheduled, or the thread id of the next thread
 // NOTE: this is safe because ThreadId is 32 bit, and we return a 64 bit integer
 // FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it (see https://github.com/dtolnay/cxx/issues/87).
@@ -37,11 +34,8 @@ auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
 	// a scheduling decision.
 	globalInstructions[curr_thread_id].kind = curr_thread_next_instr_kind;
 
-	auto result = GenMCDriver::scheduleNext(globalInstructions);
-	if (result.has_value())
-	{
+	if (const auto result = GenMCDriver::scheduleNext(globalInstructions))
 		return static_cast<int64_t>(result.value());
-	}
 	return -1;
 }
 
@@ -52,8 +46,6 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
 	auto conf = std::make_shared<Config>();
-	// TODO GENMC: Can we get some default values somehow?
-	// Config::saveConfigOptions(*conf);
 
 	// NOTE: Miri already initialization checks, so we can disable them in GenMC
 	conf->skipNonAtomicInitializedCheck = true;
@@ -145,6 +137,7 @@ void MiriGenMCShim::handleExecutionStart()
 {
 	globalInstructions.clear();
 	globalInstructions.push_back(Action(ActionKind::Load, Event::getInit()));
+
 	GenMCDriver::handleExecutionStart();
 }
 
