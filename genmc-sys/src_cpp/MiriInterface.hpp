@@ -143,9 +143,6 @@ private:
 	std::unordered_map<SAddr, GenmcScalar> initVals_{};
 
 	std::vector<Action> globalInstructions;
-
-	std::unordered_map<uint64_t, ModuleID::ID> annotation_id{};
-	ModuleID::ID annotation_id_counter = 0;
 };
 
 /**** Functions available to Miri ****/
