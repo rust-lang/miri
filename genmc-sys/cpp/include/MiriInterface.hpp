@@ -206,14 +206,6 @@ private:
 	 * in a given thread.
 	 */
 	std::vector<Action> threadsAction;
-
-	/**
-	 * Map of already used annotation ids (e.g., for mutexes).
-	 * FIXME(GenMC): For multithreading support, this map and the counter below need to be
-	 * synchronized across threads.
-	 */
-	std::unordered_map<uint64_t, ModuleID::ID> annotation_id{};
-	ModuleID::ID annotation_id_counter = 0;
 };
 
 /**** Functions available to Miri ****/
