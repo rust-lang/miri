@@ -105,18 +105,8 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 	auto *driverPtr = driver.get();
 	auto initValGetter = [driverPtr](const AAccess &access)
 	{
-		const auto addr = access.getAddr();
-		if (!driverPtr->initVals_.contains(addr))
-		{
-			return SVal(0xCC00CC00);
-			// BUG_ON(!driverPtr->initVals_.contains(addr));
-		}
-		auto result = driverPtr->initVals_[addr];
-		if (!result.is_init)
-		{
-			return SVal(0xFF00FF00);
-		}
-		return result.toSVal();
+		// FIXME(genmc): Add proper support for initial values.
+		return SVal(0xff);
 	};
 	driver->getExec().getGraph().setInitValGetter(initValGetter);
 
@@ -214,9 +204,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 
 	auto newLab = std::make_unique<ReadLabel>(pos, ord, loc, aSize, type);
 
-	auto oldValSetter = [this, old_val](SAddr loc)
-	{ this->handleOldVal(loc, old_val); };
-	auto result = GenMCDriver::handleLoad(std::move(newLab), oldValSetter);
+	auto result = GenMCDriver::handleLoad(std::move(newLab));
 	return result;
 }
 
@@ -236,13 +224,7 @@ void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
 
 	std::unique_ptr<WriteLabel> wLab = std::make_unique<WriteLabel>(pos, ord, loc, aSize, type, val);
 
-	auto oldValSetter = [this, old_val](SAddr loc)
-	{
-		this->handleOldVal(loc,
-						   old_val); // TODO GENMC(HACK): is this the correct way to do it?
-	};
-
-	return GenMCDriver::handleStore(std::move(wLab), oldValSetter);
+	return GenMCDriver::handleStore(std::move(wLab));
 }
 
 /**** Memory (de)allocation ****/

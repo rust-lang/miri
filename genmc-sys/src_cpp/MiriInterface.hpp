@@ -106,42 +106,6 @@ public:
 	static std::unique_ptr<MiriGenMCShim> createHandle(const GenmcParams &config);
 
 private:
-	/**
-	 * @brief Try to insert the initial value of a memory location.
-	 * @param addr
-	 * @param value
-	 * */
-	void handleOldVal(const SAddr addr, GenmcScalar value)
-	{
-		// TODO GENMC(CLEANUP): Pass this as a parameter:
-		auto &g = getExec().getGraph();
-		auto *coLab = g.co_max(addr);
-		if (auto *wLab = llvm::dyn_cast<WriteLabel>(coLab))
-		{
-			if (value.is_init && wLab->isNotAtomic())
-				wLab->setVal(value.toSVal());
-		}
-		else if (const auto *wLab = llvm::dyn_cast<InitLabel>(coLab))
-		{
-			if (value.is_init)
-			{
-				auto result = initVals_.insert(std::make_pair(addr, value));
-				BUG_ON(result.second &&
-					   (*result.first).second !=
-						   value); /* Attempt to replace initial value */
-			}
-		}
-		else
-		{
-			BUG(); /* Invalid label */
-		}
-		// either initLabel	==> update initValGetter
-		// or WriteLabel    ==> Update its value in place (only if non-atomic)
-	}
-
-	// TODO GENMC(mixed-size accesses):
-	std::unordered_map<SAddr, GenmcScalar> initVals_{};
-
 	std::vector<Action> globalInstructions;
 };
 
