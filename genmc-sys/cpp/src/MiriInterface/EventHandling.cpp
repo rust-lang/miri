@@ -36,18 +36,15 @@
 /**** Memory access handling ****/
 
 [[nodiscard]] auto MiriGenMCShim::handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
-					     MemOrdering ord, GenmcScalar old_val) -> LoadResult
+											 MemOrdering ord, GenmcScalar old_val) -> LoadResult
 {
 	const auto addr = SAddr(address);
 	const auto aSize = ASize(size);
 	// `type` is only used for printing.
 	const auto type = AType::Unsigned;
 
-	const auto oldValSetter = [this, old_val](SAddr addr) {
-		this->handleOldVal(addr, old_val);
-	};
 	const auto ret = handleLoadResetIfNone<EventLabel::EventLabelKind::Read>(
-		oldValSetter, thread_id, ord, addr, aSize, type);
+		thread_id, ord, addr, aSize, type);
 	RETURN_IF_ERROR(ret, LoadResult);
 
 	const auto *retVal = std::get_if<SVal>(&ret);
@@ -58,8 +55,8 @@
 }
 
 [[nodiscard]] auto MiriGenMCShim::handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
-					      GenmcScalar value, GenmcScalar old_val,
-					      MemOrdering ord) -> StoreResult
+											  GenmcScalar value, GenmcScalar old_val,
+											  MemOrdering ord) -> StoreResult
 {
 	auto pos = incPos(thread_id);
 
@@ -70,17 +67,13 @@
 
 	auto val = value.toSVal();
 
-	auto oldValSetter = [this, old_val](SAddr addr) {
-		this->handleOldVal(addr,
-				   old_val); // TODO GENMC(HACK): is this the correct way to do it?
-	};
-
 	const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
-		oldValSetter, pos, ord, addr, aSize, type, val, EventDeps());
+		pos, ord, addr, aSize, type, val, EventDeps());
 
 	RETURN_IF_ERROR(ret, StoreResult);
 
-	if (!std::holds_alternative<std::monostate>(ret)) {
+	if (!std::holds_alternative<std::monostate>(ret))
+	{
 		ERROR("store returned unexpected result");
 	}
 

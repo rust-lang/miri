@@ -41,7 +41,8 @@ struct MiriGenMCShim : private GenMCDriver
 public:
 	MiriGenMCShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
 		: GenMCDriver(std::move(conf), nullptr, mode)
-	{}
+	{
+	}
 
 	virtual ~MiriGenMCShim() {}
 
@@ -61,8 +62,8 @@ public:
 	[[nodiscard]] LoadResult handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
 										MemOrdering ord, GenmcScalar old_val);
 	[[nodiscard]] StoreResult handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
-					      GenmcScalar value, GenmcScalar old_val,
-					      MemOrdering ord);
+										  GenmcScalar value, GenmcScalar old_val,
+										  MemOrdering ord);
 
 	/**** Memory (de)allocation ****/
 	uintptr_t handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment);
@@ -142,59 +143,23 @@ private:
 	}
 
 	/**
-	 * @brief Try to insert the initial value of a memory location.
-	 * @param addr
-	 * @param value
-	 * */
-	void handleOldVal(const SAddr addr, GenmcScalar value)
-	{
-		// TODO GENMC(CLEANUP): Pass this as a parameter:
-		auto &g = getExec().getGraph();
-		auto *coLab = g.co_max(addr);
-		if (auto *wLab = llvm::dyn_cast<WriteLabel>(coLab))
-		{
-			if (value.is_init && wLab->isNotAtomic())
-				wLab->setVal(value.toSVal());
-		}
-		else if (const auto *wLab = llvm::dyn_cast<InitLabel>(coLab))
-		{
-			if (value.is_init)
-			{
-				auto result = initVals_.insert(std::make_pair(addr, value));
-				BUG_ON(result.second &&
-					   (*result.first).second !=
-						   value); /* Attempt to replace initial value */
-			}
-		}
-		else
-		{
-			BUG(); /* Invalid label */
-		}
-		// either initLabel	==> update initValGetter
-		// or WriteLabel    ==> Update its value in place (only if non-atomic)
-	}
-
-	/**
 	 * Helper function for loads that need to reset the event counter when no value is returned.
 	 * Same syntax as `GenMCDriver::handleLoad`, but this takes a thread id instead of an Event.
 	 * Automatically calls `incPos` and `decPos` where needed for the given thread.
 	 */
 	template <EventLabel::EventLabelKind k, typename... Ts>
-	HandleResult<SVal> handleLoadResetIfNone(std::function<void(SAddr)> oldValSetter,
-						 ThreadId tid, Ts &&...params)
+	HandleResult<SVal> handleLoadResetIfNone(ThreadId tid, Ts &&...params)
 	{
 		const auto pos = incPos(tid);
 		const auto ret =
-			GenMCDriver::handleLoad<k>(oldValSetter, pos, std::forward<Ts>(params)...);
+			GenMCDriver::handleLoad<k>(pos, std::forward<Ts>(params)...);
 		// If we didn't get a value, we reset the index of the current thread.
-		if (!std::holds_alternative<SVal>(ret)) {
+		if (!std::holds_alternative<SVal>(ret))
+		{
 			decPos(tid);
 		}
 		return ret;
 	}
-
-	// TODO GENMC(mixed-size accesses):
-	std::unordered_map<SAddr, GenmcScalar> initVals_{};
 
 	/**
 	 * Currently, the interpreter is responsible for maintaining `ExecutionGraph` event indices.

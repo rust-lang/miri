@@ -142,25 +142,8 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 
 	auto *driverPtr = driver.get();
 	auto initValGetter = [driverPtr](const AAccess &access) {
-		const auto addr = access.getAddr();
-		if (!driverPtr->initVals_.contains(addr)) {
-			LOG(VerbosityLevel::Warning)
-				<< "WARNING: TODO GENMC: requested initial value for address "
-				<< addr << ", but there is none.\n";
-			return SVal(0xCC00CC00);
-			// BUG_ON(!driverPtr->initVals_.contains(addr));
-		}
-		auto result = driverPtr->initVals_[addr];
-		if (!result.is_init) {
-			LOG(VerbosityLevel::Warning)
-				<< "WARNING: TODO GENMC: requested initial value for address "
-				<< addr << ", but the memory is uninitialized.\n";
-			return SVal(0xFF00FF00);
-		}
-		LOG(VerbosityLevel::Warning)
-			<< "MiriGenMCShim: requested initial value for address " << addr
-			<< " == " << addr.get() << ", returning: " << result << "\n";
-		return result.toSVal();
+		// FIXME(genmc): Add proper support for initial values.
+		return SVal(0xff);
 	};
 	driver->getExec().getGraph().setInitValGetter(initValGetter);
 
