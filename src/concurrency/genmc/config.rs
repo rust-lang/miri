@@ -33,11 +33,7 @@ impl GenmcConfig {
         };
         if let Some(log_level) = trimmed_arg.strip_prefix("log=") {
             genmc_config.params.log_level = log_level.parse()?;
-        } else if trimmed_arg == "symmetry-reduction" {
-            // TODO GENMC (PERFORMANCE): maybe make this the default, have an option to turn it off instead
-            genmc_config.params.do_symmetry_reduction = true;
         } else {
-            // TODO GENMC: how to properly handle this?
             return Err(format!("Invalid GenMC argument: \"-Zmiri-genmc-{trimmed_arg}\""));
         }
         Ok(())

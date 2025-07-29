@@ -194,15 +194,12 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
 
             // FIXME(genmc): add estimation mode here.
 
-            let return_code = miri_genmc::run_genmc_mode(
-                &config,
-                eval_entry_once,
-                target_usize_max,
-            )
-            .unwrap_or_else(|| {
-                tcx.dcx().abort_if_errors();
-                rustc_driver::EXIT_FAILURE
-            });
+            let return_code =
+                miri_genmc::run_genmc_mode(&config, eval_entry_once, target_usize_max)
+                    .unwrap_or_else(|| {
+                        tcx.dcx().abort_if_errors();
+                        rustc_driver::EXIT_FAILURE
+                    });
 
             exit(return_code);
         };

@@ -210,6 +210,7 @@ impl<'tcx> Thread<'tcx> {
     }
 
     /// Get the current state of this thread.
+    #[allow(unused)] // Note: only used if `genmc` feature is enabled.
     pub(crate) fn get_state(&self) -> &ThreadState<'tcx> {
         &self.state
     }

@@ -1,11 +1,8 @@
 use genmc_sys::{ActionKind, ExecutionState};
-use rustc_middle::ty::{self, Ty};
 
 use super::GenmcCtx;
-use crate::concurrency::thread::EvalContextExt as _;
 use crate::{
-    InterpCx, InterpResult, MiriMachine, TerminationInfo, ThreadId, interp_ok,
-    throw_machine_stop,
+    InterpCx, InterpResult, MiriMachine, TerminationInfo, ThreadId, interp_ok, throw_machine_stop,
 };
 
 impl GenmcCtx {
@@ -49,7 +46,7 @@ impl GenmcCtx {
         // Depending on the exec_state, we either schedule the given thread, or we are finished with this execution.
         match result.exec_state {
             ExecutionState::Ok =>
-                return interp_ok(
+                interp_ok(
                     thread_infos
                         .try_get_miri_tid(result.next_thread)
                         .expect("A thread id returned from GenMC should exist."),

@@ -26,9 +26,9 @@ mod downloading {
     use super::GENMC_DOWNLOAD_PATH;
 
     /// The GenMC repository the we get our commit from.
-    pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/MPI-SWS/genmc.git";
+    pub(crate) const GENMC_GITHUB_URL: &str = "https://github.com/Patrick-6/genmc.git";
     /// The GenMC commit we depend on. It must be available on the specified GenMC repository.
-    pub(crate) const GENMC_COMMIT: &str = "3438dd2c1202cd4a47ed7881d099abf23e4167ab";
+    pub(crate) const GENMC_COMMIT: &str = "56997d85fc9c07f75431570d49ce4892b22b8e6e";
 
     pub(crate) fn download_genmc() -> PathBuf {
         let Ok(genmc_download_path) = PathBuf::from_str(GENMC_DOWNLOAD_PATH);

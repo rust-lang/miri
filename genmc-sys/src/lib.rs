@@ -69,10 +69,10 @@ mod ffi {
     /// (The fields of this struct are visible to both Rust and C++)
     #[derive(Clone, Debug)]
     struct GenmcParams {
-        // pub genmc_seed: u64; // OR: Option<u64>
         pub print_random_schedule_seed: bool,
         pub log_level: LogLevel,
         pub do_symmetry_reduction: bool,
+        // FIXME(GenMC): Add remaining parameters.
     }
 
     /// This is mostly equivalent to GenMC `VerbosityLevel`, but the debug log levels are always present (not conditionally compiled based on `ENABLE_GENMC_DEBUG`).
@@ -127,6 +127,8 @@ mod ffi {
     }
 
     /**** \/ Result & Error types \/ ****/
+
+    // FIXME(genmc): Rework error handling (likely requires changes on the GenMC side).
 
     #[must_use]
     #[derive(Debug, Clone, Copy)]

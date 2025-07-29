@@ -17,9 +17,6 @@ name = "miri"
 test = false    # we have no unit tests
 doctest = false # and no doc tests
 
-[profile.bench]
-debug = true
-
 [dependencies]
 getrandom = { version = "0.3", features = ["std"] }
 rand = "0.9"

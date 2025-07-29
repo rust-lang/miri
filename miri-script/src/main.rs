@@ -96,9 +96,6 @@ pub enum Command {
         /// The flags set in `MIRIFLAGS` are added in front of these flags.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         flags: Vec<String>,
-        /// Run with flamegraph (requires cargo-flamegraph to be installed)
-        #[arg(long)]
-        flamegraph: bool,
     },
     /// Build documentation.
     Doc {

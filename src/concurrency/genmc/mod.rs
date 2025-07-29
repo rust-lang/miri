@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use genmc_sys::{
-    GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim,
-    UniquePtr, createGenmcHandle,
+    GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim, UniquePtr,
+    createGenmcHandle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -109,11 +109,7 @@ impl GenmcCtx {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
         let handle = RefCell::new(createGenmcHandle(&genmc_config.params));
         let global_allocations = Arc::new(GlobalAllocationHandler::new(target_usize_max));
-        Self {
-            handle,
-            global_allocations,
-            exec_state: Default::default(),
-        }
+        Self { handle, global_allocations, exec_state: Default::default() }
     }
 
     /// Get the number of blocked executions encountered by GenMC.
@@ -415,7 +411,6 @@ impl GenmcCtx {
         }
 
         if size.bytes() <= 8 {
-            // TODO GENMC(mixed atomic-non-atomics): anything to do here?
             let _is_co_max_write = self.handle_store(
                 machine,
                 address,
@@ -514,7 +509,6 @@ impl GenmcCtx {
         let pinned_mc = mc.as_mut().unwrap();
         pinned_mc.handleFree(genmc_tid, genmc_address);
 
-        // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
     }
 
@@ -667,7 +661,8 @@ impl GenmcCtx {
         );
 
         if let Some(error) = load_result.error.as_ref() {
-            throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
+            // FIXME(genmc): error handling
+            throw_ub_format!("{}", error.to_string_lossy());
         }
 
         if !load_result.has_value {
@@ -722,7 +717,8 @@ impl GenmcCtx {
         );
 
         if let Some(error) = store_result.error.as_ref() {
-            throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
+            // FIXME(genmc): error handling
+            throw_ub_format!("{}", error.to_string_lossy());
         }
 
         interp_ok(store_result.isCoMaxWrite)
@@ -733,7 +729,7 @@ impl GenmcCtx {
     /// Handle a user thread getting blocked.
     /// This may happen due to an manual `assume` statement added by a user
     /// or added by some automated program transformation, e.g., for spinloops.
-    fn handle_user_block<'tcx>(&self, machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
+    fn handle_user_block<'tcx>(&self, _machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
         todo!()
     }
 }

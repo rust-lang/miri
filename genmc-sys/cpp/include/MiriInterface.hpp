@@ -175,8 +175,7 @@ private:
 
 /**** Functions available to Miri ****/
 
-// NOTE: CXX doesn't seem to support exposing static methods to Rust, so we expose this
-// function instead
+// NOTE: CXX doesn't support exposing static methods to Rust currently, so we expose this function instead.
 std::unique_ptr<MiriGenMCShim> createGenmcHandle(const GenmcParams &config);
 
 constexpr auto getGlobalAllocStaticMask() -> uint64_t { return SAddr::staticMask; }

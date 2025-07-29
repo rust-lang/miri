@@ -45,7 +45,7 @@ pub fn run_genmc_mode(
             eprintln!("Number of blocked executions seen: {blocked_execution_count}");
         }
 
-        // TODO GENMC: what is an appropriate return code? (since there are possibly many)
+        // Return the return code of the last execution.
         return Some(return_code);
     }
     tracing::error!("GenMC mode did not finish in 2^64 iterations!");
