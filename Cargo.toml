@@ -72,8 +72,7 @@ name = "ui"
 harness = false
 
 [features]
-# TODO GENMC (DEBUGGING): `genmc` feature should be turned off in upstream repo for now
-default = ["stack-cache", "native-lib", "genmc"]
+default = ["stack-cache", "native-lib"]
 genmc = ["dep:genmc-sys"] # this enables a GPL dependency!
 stack-cache = []
 stack-cache-consistency-check = ["stack-cache"]
