@@ -57,7 +57,7 @@ impl ThreadInfoManager {
         let index = self.thread_infos.len();
         let genmc_tid = GenmcThreadId(index.try_into().unwrap());
         let thread_info = ThreadInfo::new(thread_id, genmc_tid);
-        // TODO GENMC: Document this in place where ThreadIds are created
+        // FIXME(genmc): Document this in place where ThreadIds are created
         assert!(
             self.tid_map.insert(thread_id, genmc_tid).is_none(),
             "Cannot reuse thread ids: thread id {thread_id:?} already inserted"
@@ -76,6 +76,14 @@ impl ThreadInfoManager {
     #[must_use]
     pub fn get_info_genmc(&self, genmc_tid: GenmcThreadId) -> &ThreadInfo {
         let index: usize = genmc_tid.0.try_into().unwrap();
-        &self.thread_infos[index]
+        let Some(infos) = self.thread_infos.get(index) else {
+            panic!(
+                "GenMC returned invalid thread id: {}, existing thread ids: {}..{}",
+                genmc_tid.0,
+                GENMC_MAIN_THREAD_ID.0,
+                self.thread_infos.len()
+            );
+        };
+        infos
     }
 }

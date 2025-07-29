@@ -77,12 +77,13 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 
 	// FIXME(genmc): implement symmetry reduction.
 	ERROR_ON(config.do_symmetry_reduction,
-		 "Symmetry reduction is currently unsupported in GenMC mode.");
+			 "Symmetry reduction is currently unsupported in GenMC mode.");
 	conf->symmetryReduction = config.do_symmetry_reduction;
 
 	// FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
 	conf->schedulePolicy = SchedulePolicy::WF;
 
+	// FIXME(genmc): implement estimation mode.
 	conf->estimate = false;
 	const auto mode = GenMCDriver::Mode(GenMCDriver::VerificationMode{});
 

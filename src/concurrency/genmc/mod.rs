@@ -43,7 +43,7 @@ struct ExitStatus {
 pub struct GenmcCtx {
     handle: RefCell<UniquePtr<MiriGenMCShim>>,
 
-    // TODO GENMC (PERFORMANCE): could use one RefCell for all internals instead of multiple
+    // FIXME(genmc,performance): we could use one RefCell for all internals instead of multiple
     thread_infos: RefCell<ThreadInfoManager>,
 
     /// Some actions Miri does are allowed to cause data races.
@@ -54,6 +54,8 @@ pub struct GenmcCtx {
     /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
     global_allocations: Arc<GlobalAllocationHandler>,
 
+    /// The exit status of the program.
+    /// `None` if no thread has called `exit` and the main thread isn't finished yet.
     exit_status: Cell<Option<ExitStatus>>,
 }
 
@@ -126,9 +128,10 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let result = mc.as_mut().unwrap().handleExecutionEnd();
         if let Some(msg) = result.as_ref() {
+            // FIXME(genmc): error handling (may need changes on GenMC side first).
             let msg = msg.to_string_lossy().to_string();
             info!("GenMC: execution ended with error \"{msg}\"");
-            Err(msg) // TODO GENMC: add more error info here, and possibly handle this without requiring to clone the CxxString
+            Err(msg)
         } else {
             Ok(())
         }
@@ -162,7 +165,7 @@ impl GenmcCtx {
         old_val: Option<Scalar>,
     ) -> InterpResult<'tcx, Scalar> {
         info!("GenMC: atomic_load: old_val: {old_val:?}");
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get()); // FIXME(genmc): ensure correct behavior whereever `allow_data_races` is used.
         let ordering = ordering.convert();
         let genmc_old_value = option_scalar_to_genmc_scalar(ecx, old_val)?;
         let read_value =
@@ -181,7 +184,7 @@ impl GenmcCtx {
         old_value: Option<Scalar>,
         ordering: AtomicWriteOrd,
     ) -> InterpResult<'tcx, bool> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get());
         let ordering = ordering.convert();
         let genmc_value = scalar_to_genmc_scalar(ecx, value)?;
         let genmc_old_value = option_scalar_to_genmc_scalar(ecx, old_value)?;
@@ -319,7 +322,6 @@ impl GenmcCtx {
         machine: &MiriMachine<'tcx>,
         address: Size,
         size: Size,
-        // old_value: Option<Scalar>, // TODO GENMC(mixed atomic-non-atomic): is this needed?
     ) -> InterpResult<'tcx> {
         info!(
             "GenMC: received memory_store (non-atomic): address: {:#x}, size: {}",
@@ -336,7 +338,6 @@ impl GenmcCtx {
         }
 
         if size.bytes() <= 8 {
-            // TODO GENMC(mixed atomic-non-atomics): anything to do here?
             let _is_co_max_write = self.atomic_store_impl(
                 machine,
                 address,
@@ -436,7 +437,6 @@ impl GenmcCtx {
         let pinned_mc = mc.as_mut().unwrap();
         pinned_mc.handleFree(genmc_tid.0, genmc_address, genmc_size);
 
-        // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
     }
 
@@ -445,11 +445,11 @@ impl GenmcCtx {
     pub(crate) fn handle_thread_create<'tcx>(
         &self,
         threads: &ThreadManager<'tcx>,
-        _start_routine: crate::Pointer, // TODO GENMC: pass info to GenMC
+        _start_routine: crate::Pointer, // FIXME(genmc): symmetry reduction will need this info
         _func_arg: &crate::ImmTy<'tcx>,
         new_thread_id: ThreadId,
     ) -> InterpResult<'tcx> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get());
         let mut thread_infos = self.thread_infos.borrow_mut();
 
         let curr_thread_id = threads.active_thread();
@@ -467,7 +467,7 @@ impl GenmcCtx {
         active_thread_id: ThreadId,
         child_thread_id: ThreadId,
     ) -> InterpResult<'tcx> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get());
         let thread_infos = self.thread_infos.borrow();
 
         let genmc_curr_tid = thread_infos.get_info(active_thread_id).genmc_tid;
@@ -480,7 +480,7 @@ impl GenmcCtx {
     }
 
     pub(crate) fn handle_thread_finish<'tcx>(&self, threads: &ThreadManager<'tcx>) {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get());
         let curr_thread_id = threads.active_thread();
 
         let thread_infos = self.thread_infos.borrow();
@@ -554,7 +554,7 @@ impl GenmcCtx {
         if size.bytes() > 8 {
             throw_unsup_format!("{UNSUPPORTED_ATOMICS_SIZE_MSG}");
         }
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get());
         let thread_infos = self.thread_infos.borrow();
         let curr_thread_id = machine.threads.active_thread();
         let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
@@ -581,9 +581,10 @@ impl GenmcCtx {
         }
 
         if let Some(error) = load_result.error.as_ref() {
+            // FIXME(genmc): error handling
             let msg = error.to_string_lossy().to_string();
             info!("GenMC: load operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
+            throw_ub_format!("{}", msg);
         }
 
         info!("GenMC: load returned value: {:?}", load_result.read_value);
@@ -631,9 +632,10 @@ impl GenmcCtx {
         );
 
         if let Some(error) = store_result.error.as_ref() {
+            // FIXME(genmc): error handling
             let msg = error.to_string_lossy().to_string();
             info!("GenMC: store operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
+            throw_ub_format!("{}", msg);
         }
 
         interp_ok(store_result.isCoMaxWrite)
@@ -645,7 +647,7 @@ impl GenmcCtx {
         &self,
         ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> InterpResult<'tcx, ThreadId> {
-        assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
+        assert!(!self.allow_data_races.get());
         let thread_manager = &ecx.machine.threads;
         let active_thread_id = thread_manager.active_thread();
 
@@ -684,7 +686,6 @@ impl GenmcCtx {
         let result =
             pinned_mc.scheduleNext(curr_thread_info.genmc_tid.0, curr_thread_next_instr_kind);
         if result >= 0 {
-            // TODO GENMC: can we ensure this thread_id is valid?
             let genmc_next_thread_id = result.try_into().unwrap();
             let genmc_next_thread_id = GenmcThreadId(genmc_next_thread_id);
             let thread_infos = self.thread_infos.borrow();

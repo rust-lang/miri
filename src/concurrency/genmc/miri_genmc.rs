@@ -12,7 +12,8 @@ pub fn run_genmc_mode(
         tracing::info!("Miri-GenMC loop {}", rep + 1);
         let result = eval_entry(genmc_ctx.clone());
 
-        // TODO GENMC (ERROR REPORTING): we currently do this here, so we can still print the GenMC graph above
+        // FIXME(genmc): tell GenMC to print the execution graph here (if requested by the user).
+
         let return_code = result?;
 
         let is_exploration_done = genmc_ctx.is_exploration_done();
@@ -32,7 +33,7 @@ pub fn run_genmc_mode(
                 eprintln!("Number of blocked executions seen: {blocked_execution_count}");
             }
 
-            // TODO GENMC: what is an appropriate return code? (since there are possibly many)
+            // Return the return code of the last execution.
             return Some(return_code);
         }
     }

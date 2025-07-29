@@ -24,14 +24,6 @@ struct GenmcParams;
 
 using ThreadId = int;
 
-enum class StoreEventType : uint8_t
-{
-	Normal,
-	CompareExchange,
-};
-
-// TODO GENMC: fix naming conventions
-
 struct MiriGenMCShim : private GenMCDriver
 {
 
@@ -52,7 +44,6 @@ public:
 
 	/**** Memory access handling ****/
 
-	///////////////////
 	[[nodiscard]] LoadResult handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
 										MemOrdering ord, GenmcScalar old_val);
 	[[nodiscard]] StoreResult handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
@@ -111,8 +102,7 @@ private:
 
 /**** Functions available to Miri ****/
 
-// NOTE: CXX doesn't seem to support exposing static methods to Rust, so we expose this
-// function instead
+// NOTE: CXX doesn't support exposing static methods to Rust currently, so we expose this function instead.
 std::unique_ptr<MiriGenMCShim> createGenmcHandle(const GenmcParams &config);
 
 constexpr auto getGlobalAllocStaticMask() -> uint64_t { return SAddr::staticMask; }

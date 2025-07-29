@@ -3,7 +3,7 @@ pub use cxx::UniquePtr;
 pub use self::ffi::*;
 
 /// Defined in "genmc/src/Support/SAddr.hpp"
-/// FIXME: currently we use `getGlobalAllocStaticMask()` to ensure the constant is consistent between Miri and GenMC,
+/// FIXME(genmc): `getGlobalAllocStaticMask()` is used to ensure the constant is consistent between Miri and GenMC,
 ///   but if https://github.com/dtolnay/cxx/issues/1051 is fixed we could share the constant directly.
 pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 
@@ -36,9 +36,9 @@ mod ffi {
     /// (The fields of this struct are visible to both Rust and C++)
     #[derive(Clone, Debug)]
     struct GenmcParams {
-        // pub genmc_seed: u64; // OR: Option<u64>
         pub print_random_schedule_seed: bool,
         pub do_symmetry_reduction: bool,
+        // FIXME(GenMC): Add remaining parameters.
     }
 
     #[derive(Debug)]
@@ -68,18 +68,20 @@ mod ffi {
 
     /**** \/ Result & Error types \/ ****/
 
+    // FIXME(genmc): Rework error handling (likely requires changes on the GenMC side).
+
     #[must_use]
     #[derive(Debug)]
     struct LoadResult {
         is_read_opt: bool,
-        read_value: GenmcScalar,     // TODO GENMC: handle bigger values
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
+        read_value: GenmcScalar,
+        error: UniquePtr<CxxString>,
     }
 
     #[must_use]
     #[derive(Debug)]
     struct StoreResult {
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
+        error: UniquePtr<CxxString>,
         isCoMaxWrite: bool,
     }
 

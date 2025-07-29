@@ -33,7 +33,7 @@ pub struct GlobalStateInner {
     /// sorted by address. We cannot use a `HashMap` since we can be given an address that is offset
     /// from the base address, and we need to find the `AllocId` it belongs to. This is not the
     /// *full* inverse of `base_addr`; dead allocations have been removed.
-    /// TODO GENMC: keep dead allocations in GenMC mode?
+    /// FIXME(genmc,dead allocs): keep dead allocations in GenMC mode?
     int_to_ptr_map: Vec<(u64, AllocId)>,
     /// The base address for each allocation.  We cannot put that into
     /// `AllocExtra` because function pointers also have a base address, and
@@ -510,7 +510,7 @@ impl<'tcx> MiriMachine<'tcx> {
         let pos =
             global_state.int_to_ptr_map.binary_search_by_key(&addr, |(addr, _)| *addr).unwrap();
 
-        // TODO GENMC(DOCUMENTATION):
+        // FIXME(genmc,dead allocs): keep dead allocations in GenMC mode?
         if self.data_race.as_genmc_ref().is_none() {
             let removed = global_state.int_to_ptr_map.remove(pos);
             assert_eq!(removed, (addr, dead_id)); // double-check that we removed the right thing

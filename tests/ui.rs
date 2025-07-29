@@ -322,12 +322,10 @@ fn main() -> Result<()> {
     let mut args = std::env::args_os();
 
     // Skip the program name and check whether this is a `./miri run-dep` invocation
-    if let Some(first) = args.nth(1) {
-        if first == "--miri-run-dep-mode" {
-            return run_dep_mode(target, args, /* flamegraph */ false);
-        } else if first == "--miri-run-dep-mode-flamegraph" {
-            return run_dep_mode(target, args, /* flamegraph */ true);
-        }
+    if let Some(first) = args.nth(1)
+        && first == "--miri-run-dep-mode"
+    {
+        return run_dep_mode(target, args);
     }
 
     ui(Mode::Pass, "tests/pass", &target, WithoutDependencies, tmpdir.path())?;
@@ -357,11 +355,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_dep_mode(
-    target: String,
-    args: impl Iterator<Item = OsString>,
-    flamegraph: bool,
-) -> Result<()> {
+fn run_dep_mode(target: String, args: impl Iterator<Item = OsString>) -> Result<()> {
     let mut config =
         miri_config(&target, "", Mode::RunDep, Some(WithDependencies { bless: false }));
     config.comment_defaults.base().custom.remove("edition"); // `./miri` adds an `--edition` in `args`, so don't set it twice
@@ -375,12 +369,6 @@ fn run_dep_mode(
     cmd.arg("--target").arg(test_config.config.target.as_ref().unwrap());
     // Build dependencies
     test_config.apply_custom(&mut cmd, &build_manager).unwrap();
-
-    if flamegraph {
-        let mut flamegraph_cmd = Command::new("flamegraph");
-        flamegraph_cmd.arg("--").arg(cmd.get_program()).args(cmd.get_args());
-        cmd = flamegraph_cmd;
-    }
 
     if cmd.spawn()?.wait()?.success() { Ok(()) } else { std::process::exit(1) }
 }

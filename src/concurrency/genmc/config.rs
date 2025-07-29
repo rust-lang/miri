@@ -27,17 +27,11 @@ impl GenmcConfig {
         if trimmed_arg.is_empty() {
             return Ok(()); // this corresponds to "-Zmiri-genmc"
         }
-        let genmc_config = genmc_config.as_mut().unwrap();
+        let _genmc_config = genmc_config.as_mut().unwrap();
         let Some(trimmed_arg) = trimmed_arg.strip_prefix("-") else {
             return Err(format!("Invalid GenMC argument \"-Zmiri-genmc{trimmed_arg}\""));
         };
-        if trimmed_arg == "symmetry-reduction" {
-            // TODO GENMC (PERFORMANCE): maybe make this the default, have an option to turn it off instead
-            genmc_config.params.do_symmetry_reduction = true;
-        } else {
-            // TODO GENMC: how to properly handle this?
-            return Err(format!("Invalid GenMC argument: \"-Zmiri-genmc-{trimmed_arg}\""));
-        }
-        Ok(())
+        // FIXME(genmc): Add parsing for remaining parameters.
+        Err(format!("Invalid GenMC argument: \"-Zmiri-genmc-{trimmed_arg}\""))
     }
 }

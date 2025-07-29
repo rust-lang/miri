@@ -63,8 +63,8 @@ pub fn scalar_to_genmc_scalar<'tcx>(
 ) -> InterpResult<'tcx, GenmcScalar> {
     interp_ok(match scalar {
         rustc_const_eval::interpret::Scalar::Int(scalar_int) => {
-            // TODO GENMC: u128 support
-            let value: u64 = scalar_int.to_uint(scalar_int.size()).try_into().unwrap(); // TODO GENMC: doesn't work for size != 8
+            // FIXME(genmc): 128bit atomics support
+            let value: u64 = scalar_int.to_uint(scalar_int.size()).try_into().unwrap();
             GenmcScalar { value, is_init: true }
         }
         rustc_const_eval::interpret::Scalar::Ptr(_pointer, _size) =>
