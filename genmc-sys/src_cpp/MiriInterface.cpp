@@ -60,16 +60,15 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	// Miri needs all threads to be replayed, even fully completed ones.
 	conf->replayCompletedThreads = true;
 
-	// TODO GENMC: make sure this doesn't affect any tests, and maybe make it changeable from
-	// Miri:
+	// FIXME(genmc): make sure this doesn't affect any tests, and maybe make it changeable from Miri:
 	constexpr unsigned int DEFAULT_WARN_ON_GRAPH_SIZE = 16 * 1024;
 	conf->warnOnGraphSize = DEFAULT_WARN_ON_GRAPH_SIZE;
 
 	// We only support the RC11 memory model for Rust.
 	conf->model = ModelType::RC11;
 
-	conf->randomScheduleSeed =
-		"42"; // TODO GENMC: only for random exploration/scheduling mode in GenMC
+	// FIXME(genmc): expose this setting to Miri
+	conf->randomScheduleSeed = "42";
 	conf->printRandomScheduleSeed = config.print_random_schedule_seed;
 	if (config.quiet) {
 		// logLevel = VerbosityLevel::Quiet;
@@ -82,19 +81,19 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 		logLevel = VerbosityLevel::Tip;
 	}
 
-	// TODO GENMC (EXTRA): check if we can enable IPR:
+	// FIXME(genmc): check if we can enable IPR:
 	conf->ipr = false;
-	// TODO GENMC (EXTRA): check if we can enable BAM:
+	// FIXME(genmc): check if we can enable BAM:
 	conf->disableBAM = true;
-	// TODO GENMC (EXTRA): check if we can do instruction caching (probably not)
+	// FIXME(genmc): check if we can do instruction caching (probably not)
 	conf->instructionCaching = false;
 
-	// TODO GENMC (EXTRA): check if we can enable Symmetry Reduction:
+	// FIXME(genmc): implement symmetry reduction.
 	ERROR_ON(config.do_symmetry_reduction,
 		 "Symmetry reduction is currently unsupported in GenMC mode.");
 	conf->symmetryReduction = config.do_symmetry_reduction;
 
-	// TODO GENMC: Should there be a way to change this option from Miri?
+	// FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
 	conf->schedulePolicy = SchedulePolicy::WF;
 
 	conf->estimate = estimation_mode;
@@ -236,7 +235,7 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
-	auto type = AType::Unsigned; // TODO GENMC: get correct type from Miri
+	auto type = AType::Unsigned; // FIXME(genmc): get correct type from Miri(?)
 
 	auto newLab = std::make_unique<ReadLabel>(pos, ord, loc, aSize, type);
 
@@ -339,9 +338,9 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 	auto pos = incPos(thread_id);
 
-	auto loc = SAddr(address); // TODO GENMC: called addr for write, loc for read?
+	auto loc = SAddr(address);
 	auto aSize = ASize(size);
-	auto type = AType::Unsigned; // TODO GENMC: get from Miri
+	auto type = AType::Unsigned; // FIXME(genmc): get correct type from Miri(?)
 
 	// TODO GENMC: u128 support
 	auto val = value.toSVal();
@@ -388,14 +387,12 @@ auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t ali
 {
 	auto pos = incPos(thread_id);
 
-	auto sd = StorageDuration::SD_Heap;   // TODO GENMC: get from Miri
-	auto stype = StorageType::ST_Durable; // TODO GENMC
-	auto spc = AddressSpace::AS_User;     // TODO GENMC
+	// FIXME(genmc): get correct values from Miri
+	auto sd = StorageDuration::SD_Heap;
+	auto stype = StorageType::ST_Durable;
+	auto spc = AddressSpace::AS_User;
 
-	auto deps = EventDeps(); // TODO GENMC: without this, constructor is ambiguous
-
-	// TODO GENMC (types): size_t vs unsigned int
-	auto aLab = std::make_unique<MallocLabel>(pos, size, alignment, sd, stype, spc, deps);
+	auto aLab = std::make_unique<MallocLabel>(pos, size, alignment, sd, stype, spc, EventDeps());
 
 	SAddr retVal = GenMCDriver::handleMalloc(std::move(aLab));
 
