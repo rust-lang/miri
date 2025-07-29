@@ -212,6 +212,7 @@ impl<'tcx> Thread<'tcx> {
     }
 
     // FIXME(genmc,question): is this ok to be public? (it exposes implementation details)
+    #[allow(unused)] // Note: only used if `genmc` feature is enabled.
     pub(crate) fn get_state(&self) -> &ThreadState<'tcx> {
         &self.state
     }
@@ -500,6 +501,7 @@ impl<'tcx> ThreadManager<'tcx> {
     }
 
     // FIXME(genmc,question): is this ok to exist?
+    #[allow(unused)] // Note: only used if `genmc` feature is enabled.
     pub(crate) fn get_thread_stack(
         &self,
         id: ThreadId,
