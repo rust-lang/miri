@@ -143,41 +143,6 @@ mod ffi {
         isCoMaxWrite: bool,
     }
 
-    #[must_use]
-    #[derive(Debug)]
-    enum VerificationError {
-        VE_NonErrorBegin,
-        VE_OK,
-        VE_WWRace,
-        VE_UnfreedMemory,
-        VE_NonErrorLast,
-
-        VE_Safety,
-        VE_Recovery,
-        VE_Liveness,
-        VE_RaceNotAtomic,
-        VE_RaceFreeMalloc,
-        VE_FreeNonMalloc,
-        VE_DoubleFree,
-        VE_Allocation,
-
-        VE_InvalidAccessBegin,
-        VE_UninitializedMem,
-        VE_AccessNonMalloc,
-        VE_AccessFreed,
-        VE_InvalidAccessEnd,
-
-        VE_InvalidCreate,
-        VE_InvalidJoin,
-        VE_InvalidUnlock,
-        VE_InvalidBInit,
-        VE_BarrierWellFormedness,
-        VE_Annotation,
-        VE_MixedSize,
-        VE_LinearizabilityError,
-        VE_SystemError,
-    }
-
     /**** /\ Result & Error types /\ ****/
 
     unsafe extern "C++" {
@@ -196,7 +161,6 @@ mod ffi {
         type ReadModifyWriteResult;
         type CompareExchangeResult;
         type MutexLockResult;
-        type VerificationError;
 
         type GenmcScalar;
 
