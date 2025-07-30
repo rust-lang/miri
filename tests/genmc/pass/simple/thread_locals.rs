@@ -5,6 +5,7 @@
 #[path = "../../../utils-dep/mod.rs"]
 mod utils_dep;
 
+use std::alloc::{Layout, alloc};
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -25,7 +26,7 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
 }
 
 pub unsafe fn malloc() -> *mut u64 {
-    Box::into_raw(Box::<u64>::new_uninit()) as *mut u64
+    alloc(Layout::new::<u64>()) as *mut u64
 }
 
 extern "C" fn thread_1(_value: *mut c_void) -> *mut c_void {

@@ -1,4 +1,4 @@
-//@compile-flags: -Zmiri-ignore-leaks -Zmiri-genmc -Zmiri-disable-stacked-borrows
+//@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
 //  -Zmiri-disable-data-race-detector
 
 #![no_main]

@@ -1,8 +1,5 @@
 //@compile-flags: -Zmiri-ignore-leaks -Zmiri-genmc -Zmiri-disable-stacked-borrows
 
-// TODO GENMC: maybe use `-Zmiri-genmc-symmetry-reduction`?
-// TODO GENMC: investigate why `-Zmiri-ignore-leaks ` is required
-
 #![no_main]
 #![allow(static_mut_refs)]
 #![allow(unused)]

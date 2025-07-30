@@ -1,4 +1,4 @@
-//@compile-flags: -Zmiri-ignore-leaks -Zmiri-genmc -Zmiri-disable-stacked-borrows
+//@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
 //@revisions: order123 order321 order312 order231
 
 #![no_main]
