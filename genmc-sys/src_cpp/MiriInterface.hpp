@@ -96,6 +96,7 @@ public:
 	void handleThreadCreate(ThreadId thread_id, ThreadId parent_id);
 	void handleThreadJoin(ThreadId thread_id, ThreadId child_id);
 	void handleThreadFinish(ThreadId thread_id, uint64_t ret_val);
+	void handleThreadKill(ThreadId thread_id);
 
 	/**** Blocking instructions ****/
 

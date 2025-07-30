@@ -306,7 +306,7 @@ impl<'tcx> MainThreadState<'tcx> {
                 // In GenMC mode, we let GenMC decide what happens on main thread exit.
                 if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
                     // If there's no error, execution will continue (on another thread).
-                    genmc_ctx.handle_exit(ThreadId::MAIN_THREAD, exit_code, false)?;
+                    genmc_ctx.handle_exit(ThreadId::MAIN_THREAD, exit_code, /* is_exit_call */ false)?;
                 } else {
                     // Stop interpreter loop.
                     throw_machine_stop!(TerminationInfo::Exit {

@@ -215,6 +215,13 @@ void MiriGenMCShim::handleThreadFinish(ThreadId thread_id, uint64_t ret_val)
 	GenMCDriver::handleThreadFinish(std::move(eLab));
 }
 
+void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
+	auto pos = incPos(thread_id);
+	auto kLab = std::make_unique<ThreadKillLabel>(pos);
+
+	GenMCDriver::handleThreadKill(std::move(kLab));
+}
+
 /**** Blocking instructions ****/
 
 void MiriGenMCShim::handleUserBlock(ThreadId thread_id)

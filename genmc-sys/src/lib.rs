@@ -266,6 +266,7 @@ mod ffi {
         fn handleThreadCreate(self: Pin<&mut MiriGenMCShim>, thread_id: i32, parent_id: i32);
         fn handleThreadJoin(self: Pin<&mut MiriGenMCShim>, thread_id: i32, child_id: i32);
         fn handleThreadFinish(self: Pin<&mut MiriGenMCShim>, thread_id: i32, ret_val: u64);
+        fn handleThreadKill(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
 
         /**** Blocking instructions ****/
         fn handleUserBlock(self: Pin<&mut MiriGenMCShim>, thread_id: i32);

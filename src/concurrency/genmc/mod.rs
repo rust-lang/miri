@@ -676,11 +676,11 @@ impl GenmcCtx {
         );
 
         let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
-        pinned_mc.handleThreadFinish(genmc_tid.0, ret_val);
+        mc.as_mut().handleThreadFinish(genmc_tid.0, ret_val);
     }
 
-    /// Handle a call to `libc::exit`. Returns `true` if the program should continue executing (in a different thread).
+    /// Handle a call to `libc::exit` or the exit of the main thread.
+    /// Unless an error is returned, the program should continue executing (in a different thread, chosen by the next scheduling call).
     pub(crate) fn handle_exit<'tcx>(
         &self,
         thread: ThreadId,
@@ -690,9 +690,19 @@ impl GenmcCtx {
         // Calling `libc::exit` doesn't do cleanup, so we skip the leak check in that case.
         let leak_check = !is_exit_call;
         self.set_exit_status(exit_code, leak_check);
+
+        // FIXME(genmc): Add a flag to continue exploration even when the program exits with a non-zero exit code.
+        if exit_code != 0 {
+            info!("GenMC: 'exit' called with non-zero argument, aborting execution.");
+            throw_machine_stop!(TerminationInfo::GenmcFinishedExecution);
+        }
+
         if is_exit_call {
-            // FIXME(genmc): handle exit call (run other threads to completion)
-            todo!("Inform GenMC about killed thread {thread:?}.");
+            let thread_infos = self.thread_infos.borrow();
+            let genmc_tid = thread_infos.get_info(thread).genmc_tid;
+
+            let mut mc = self.handle.borrow_mut();
+            mc.as_mut().handleThreadKill(genmc_tid.0);
         }
         interp_ok(())
     }
