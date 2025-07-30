@@ -135,16 +135,8 @@ pub fn genmc_scalar_to_scalar<'tcx>(
     }
 
     // NOTE: GenMC always returns 64 bit values, and the upper bits are not yet truncated.
-    // FIXME(genmc): Rework if 128bit support is added to GenMC.
-    let trunc_value = if size.bits() >= 64 {
-        scalar.value
-    } else {
-        // Zero out the upper bits.
-        let mask = (1u64 << size.bits()) - 1;
-        scalar.value & mask
-    };
-
-    let value_scalar_int = ScalarInt::try_from_uint(trunc_value, size).unwrap();
+    // FIXME(genmc): GenMC should be doing the truncation, not Miri.
+    let (value_scalar_int, _got_truncated) = ScalarInt::truncate_from_uint(scalar.value, size);
     interp_ok(Scalar::Int(value_scalar_int))
 }
 
