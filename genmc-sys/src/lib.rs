@@ -15,6 +15,8 @@ pub const GENMC_MAIN_THREAD_ID: GenmcThreadId = GenmcThreadId(0);
 
 impl GenmcScalar {
     pub const UNINIT: Self = Self { value: 0, extra: 0, is_init: false };
+    /// GenMC expects a value for all stores, but we cannot always provide one (e.g., non-atomic writes).
+    /// FIXME(genmc): remove this if a permanent fix is ever found.
     pub const DUMMY: Self = Self::from_u64(0xDEADBEEF);
 
     pub const MUTEX_LOCKED_STATE: Self = Self::from_u64(1);
@@ -63,7 +65,7 @@ mod ffi {
     enum MemOrdering {
         NotAtomic = 0,
         Relaxed = 1,
-        // In case we support consume
+        // We skip 2 in case we support consume.
         Acquire = 3,
         Release = 4,
         AcquireRelease = 5,
