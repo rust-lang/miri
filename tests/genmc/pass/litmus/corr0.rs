@@ -1,5 +1,4 @@
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
-//@revisions: order123 order321 order312 order231
 
 #![no_main]
 
@@ -15,19 +14,7 @@ use crate::genmc::*;
 
 #[unsafe(no_mangle)]
 fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
-    let thread_order = if cfg!(order123) {
-        [thread_1, thread_2, thread_3]
-    } else if cfg!(order321) {
-        [thread_3, thread_2, thread_1]
-    } else if cfg!(order312) {
-        [thread_3, thread_1, thread_2]
-    } else if cfg!(order231) {
-        [thread_2, thread_3, thread_1]
-    } else {
-        unimplemented!();
-    };
-
-    let _ids = unsafe { create_pthreads_no_params(thread_order) };
+    let _ids = unsafe { create_pthreads_no_params([thread_1, thread_2, thread_3]) };
 
     0
 }

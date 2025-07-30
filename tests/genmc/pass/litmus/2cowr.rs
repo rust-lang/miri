@@ -1,5 +1,4 @@
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
-//@revisions: order1234 order2341 order3412 order4123 order4321
 
 #![no_main]
 
@@ -17,21 +16,7 @@ static Y: AtomicU64 = AtomicU64::new(0);
 
 #[unsafe(no_mangle)]
 fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
-    let thread_order = if cfg!(order1234) {
-        [thread_1, thread_2, thread_3, thread_4]
-    } else if cfg!(order2341) {
-        [thread_2, thread_3, thread_4, thread_1]
-    } else if cfg!(order3412) {
-        [thread_3, thread_4, thread_1, thread_2]
-    } else if cfg!(order4123) {
-        [thread_4, thread_1, thread_2, thread_3]
-    } else if cfg!(order4321) {
-        [thread_4, thread_3, thread_2, thread_1]
-    } else {
-        unimplemented!();
-    };
-
-    let _ids = unsafe { create_pthreads_no_params(thread_order) };
+    let _ids = unsafe { create_pthreads_no_params([thread_1, thread_2, thread_3, thread_4]) };
 
     0
 }

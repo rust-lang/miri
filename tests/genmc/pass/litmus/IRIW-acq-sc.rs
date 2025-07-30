@@ -6,7 +6,6 @@
 mod genmc;
 
 use std::ffi::c_void;
-use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::genmc::*;
@@ -24,22 +23,22 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
 
 pub extern "C" fn thread_1(_value: *mut c_void) -> *mut c_void {
     X.store(1, Ordering::SeqCst);
-    null_mut()
+    std::ptr::null_mut()
 }
 
 pub extern "C" fn thread_2(_value: *mut c_void) -> *mut c_void {
     X.load(Ordering::Acquire);
     Y.load(Ordering::SeqCst);
-    null_mut()
+    std::ptr::null_mut()
 }
 
 pub extern "C" fn thread_3(_value: *mut c_void) -> *mut c_void {
     Y.load(Ordering::Acquire);
     X.load(Ordering::SeqCst);
-    null_mut()
+    std::ptr::null_mut()
 }
 
 pub extern "C" fn thread_4(_value: *mut c_void) -> *mut c_void {
     Y.store(1, Ordering::SeqCst);
-    null_mut()
+    std::ptr::null_mut()
 }

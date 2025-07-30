@@ -1,5 +1,5 @@
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
-//@revisions: order12reps1 order21reps1 order12reps2 order21reps2
+//@revisions: reps1 reps2
 
 #![no_main]
 #![feature(abort_unwind)]
@@ -12,9 +12,9 @@ use std::sync::Mutex;
 
 use crate::genmc::*;
 
-#[cfg(not(any(order12reps2, order21reps2)))]
+#[cfg(reps1)]
 const REPS: u64 = 1;
-#[cfg(any(order12reps2, order21reps2))]
+#[cfg(reps2)]
 const REPS: u64 = 2;
 
 static LOCK: Mutex<[u64; 32]> = Mutex::new([1234; 32]);
