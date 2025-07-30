@@ -29,7 +29,7 @@ using AnnotT = SExpr<AnnotID>;
 
 // Return -1 when no thread can/should be scheduled, or the thread id of the next thread
 // NOTE: this is safe because ThreadId is 32 bit, and we return a 64 bit integer
-// TODO GENMC: could directly return std::optional if CXX ever supports this
+// FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it (see https://github.com/dtolnay/cxx/issues/87).
 auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
 				 const ActionKind curr_thread_next_instr_kind) -> int64_t
 {
@@ -186,18 +186,15 @@ void MiriGenMCShim::handleThreadCreate(ThreadId thread_id, ThreadId parent_id)
 
 void MiriGenMCShim::handleThreadJoin(ThreadId thread_id, ThreadId child_id)
 {
-	auto parentTid = thread_id;
-	auto childTid = child_id;
-
 	// The thread join event happens in the parent.
-	auto pos = incPos(parentTid);
+	auto pos = incPos(thread_id);
 
 	// NOTE: Default memory ordering (`Acquire`) used here.
-	auto lab = std::make_unique<ThreadJoinLabel>(pos, childTid);
+	auto lab = std::make_unique<ThreadJoinLabel>(pos, child_id);
 	auto res = GenMCDriver::handleThreadJoin(std::move(lab));
 	// If the join failed, decrease the event index again:
 	if (!res.has_value())
-		decPos(parentTid);
+		decPos(thread_id);
 
 	// NOTE: Thread return value is ignored, since Miri doesn't need it.
 }
@@ -242,7 +239,8 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
-	auto type = AType::Unsigned; // FIXME(genmc): get correct type from Miri(?)
+	// `type` is only used for printing.
+	auto type = AType::Unsigned;
 
 	auto newLab = std::make_unique<ReadLabel>(pos, ord, loc, aSize, type);
 
@@ -265,6 +263,7 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
+	// `type` is only used for printing.
 	auto type = AType::Unsigned;
 
 	auto rhsVal = rhs_value.toSVal();
@@ -306,6 +305,7 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
+	// `type` is only used for printing.
 	auto type = AType::Unsigned;
 
 	auto expectedVal = expected_value.toSVal();
@@ -347,9 +347,9 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
-	auto type = AType::Unsigned; // FIXME(genmc): get correct type from Miri(?)
+	// `type` is only used for printing.
+	auto type = AType::Unsigned;
 
-	// TODO GENMC: u128 support
 	auto val = value.toSVal();
 
 	std::unique_ptr<WriteLabel> wLab;
@@ -394,9 +394,9 @@ auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t ali
 {
 	auto pos = incPos(thread_id);
 
-	// FIXME(genmc): get correct values from Miri
+	// These are only used for printing and features Miri-GenMC doesn't support (yet).
 	auto sd = StorageDuration::SD_Heap;
-	auto stype = StorageType::ST_Durable;
+	auto stype = StorageType::ST_Volatile;
 	auto spc = AddressSpace::AS_User;
 
 	auto aLab = std::make_unique<MallocLabel>(pos, size, alignment, sd, stype, spc, EventDeps());
