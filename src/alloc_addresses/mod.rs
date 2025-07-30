@@ -118,12 +118,6 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_ref();
         let info = this.get_alloc_info(alloc_id);
 
-        // Miri's address assignment leaks state across thread boundaries, which is incompatible
-        // with GenMC execution. So we instead let GenMC assign addresses to allocations.
-        if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            return genmc_ctx.handle_alloc(this, alloc_id, info.size, info.align, memory_kind);
-        }
-
         // This is either called immediately after allocation (and then cached), or when
         // adjusting `tcx` pointers (which never get freed). So assert that we are looking
         // at a live allocation. This also ensures that we never re-assign an address to an
