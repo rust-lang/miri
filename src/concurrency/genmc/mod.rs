@@ -108,10 +108,8 @@ impl GenmcCtx {
     }
 
     pub fn print_genmc_graph(&self) {
-        info!("GenMC: print the Execution graph");
         let mut mc = self.handle.borrow_mut();
-        let pinned_mc = mc.as_mut();
-        pinned_mc.printGraph();
+        mc.as_mut().printGraph();
     }
 
     /// This function determines if we should continue exploring executions or if we are done.
@@ -158,9 +156,7 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let result = mc.as_mut().handleExecutionEnd();
         if let Some(msg) = result.as_ref() {
-            let msg = msg.to_string_lossy().to_string();
-            info!("GenMC: execution ended with error \"{msg}\"");
-            Err(msg) // TODO GENMC: add more error info here, and possibly handle this without requiring to clone the CxxString
+            Err(msg.to_string_lossy().to_string())
         } else {
             Ok(())
         }
@@ -193,13 +189,11 @@ impl GenmcCtx {
         // The value that we would get, if we were to do a non-atomic load here.
         old_val: Option<Scalar>,
     ) -> InterpResult<'tcx, Scalar> {
-        info!("GenMC: atomic_load: old_val: {old_val:?}");
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
         let ordering = ordering.convert();
         let genmc_old_value = option_scalar_to_genmc_scalar(ecx, old_val)?;
         let read_value =
             self.atomic_load_impl(&ecx.machine, address, size, ordering, genmc_old_value)?;
-        info!("GenMC: atomic_load: received value from GenMC: {read_value:?}");
         genmc_scalar_to_scalar(ecx, read_value, size)
     }
 
@@ -226,7 +220,6 @@ impl GenmcCtx {
         ordering: AtomicFenceOrd,
     ) -> InterpResult<'tcx> {
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        info!("GenMC: atomic_fence with ordering: {ordering:?}");
 
         let ordering = ordering.convert();
 
@@ -404,9 +397,7 @@ impl GenmcCtx {
         );
 
         if let Some(error) = cas_result.error.as_ref() {
-            let msg = error.to_string_lossy().to_string();
-            info!("GenMC: RMW operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
+            throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
         }
 
         let return_scalar = genmc_scalar_to_scalar(ecx, cas_result.old_value, size)?;
@@ -752,9 +743,7 @@ impl GenmcCtx {
         }
 
         if let Some(error) = load_result.error.as_ref() {
-            let msg = error.to_string_lossy().to_string();
-            info!("GenMC: load operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
+            throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
         }
 
         info!("GenMC: load returned value: {:?}", load_result.read_value);
@@ -803,9 +792,7 @@ impl GenmcCtx {
         );
 
         if let Some(error) = store_result.error.as_ref() {
-            let msg = error.to_string_lossy().to_string();
-            info!("GenMC: store operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
+            throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
         }
 
         interp_ok(store_result.isCoMaxWrite)
@@ -854,9 +841,7 @@ impl GenmcCtx {
         );
 
         if let Some(error) = rmw_result.error.as_ref() {
-            let msg = error.to_string_lossy().to_string();
-            info!("GenMC: RMW operation returned an error: \"{msg}\"");
-            throw_ub_format!("{}", msg); // TODO GENMC: proper error handling: find correct error here
+            throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
         }
 
         let old_value_scalar = genmc_scalar_to_scalar(ecx, rmw_result.old_value, size)?;
@@ -908,7 +893,6 @@ impl GenmcCtx {
             "GenMC: schedule_thread, active thread: {active_thread_id:?}, next instr.: '{curr_thread_next_instr_kind:?}'"
         );
 
-        // let curr_thread_user_block = self.curr_thread_user_block.replace(false);
         let thread_infos = self.thread_infos.borrow();
         let curr_thread_info = thread_infos.get_info(active_thread_id);
 
@@ -990,9 +974,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 pinned_mc.handleMutexLock(genmc_curr_thread.0, addr, size)
             };
             if let Some(error) = result.error.as_ref() {
-                let msg = error.to_string_lossy().to_string();
-                info!("GenMC: handling Mutex::lock: error: {msg:?}");
-                throw_ub_format!("{msg}");
+                throw_ub_format!("{}", error.to_string_lossy());
             }
             // TODO GENMC(HACK): for determining if the Mutex lock blocks this thread.
             if !result.is_lock_acquired {
@@ -1020,17 +1002,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 pinned_mc.handleMutexLock(genmc_curr_thread, addr, size)
                             };
                             if let Some(error) = result.error.as_ref() {
-                                let msg = error.to_string_lossy().to_string();
-                                info!("GenMC: handling Mutex::lock: error: {msg:?}");
-                                throw_ub_format!("{msg}");
+                                throw_ub_format!("{}", error.to_string_lossy());
                             }
                             // TODO GENMC(HACK): for determining if the Mutex lock blocks this thread.
                             if !result.is_lock_acquired {
                                 // If this thread gets woken up without the mutex being made available, block the thread again.
                                 this.block_thread( crate::BlockReason::Mutex, None, create_callback(genmc_curr_thread, addr, size));
-                                // panic!(
-                                //     "Somehow, Mutex is still locked after waiting thread was unblocked?!"
-                                // );
                             }
                             interp_ok(())
                         }
@@ -1060,9 +1037,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 pinned_mc.handleMutexTryLock(genmc_curr_thread.0, addr, size)
             };
             if let Some(error) = result.error.as_ref() {
-                let msg = error.to_string_lossy().to_string();
-                info!("GenMC: handling Mutex::try_lock: error: {msg:?}");
-                throw_ub_format!("{msg}");
+                throw_ub_format!("{}", error.to_string_lossy());
             }
             info!(
                 "GenMC: Mutex::try_lock(): writing resulting bool is_lock_acquired ({}) to place: {dest:?}",
@@ -1079,8 +1054,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let pinned_mc = mc.as_mut();
             let result = pinned_mc.handleMutexUnlock(genmc_curr_thread.0, addr, size);
             if let Some(error) = result.error.as_ref() {
-                let msg = error.to_string_lossy().to_string();
-                throw_ub_format!("{msg}");
+                throw_ub_format!("{}", error.to_string_lossy());
             }
             // NOTE: We don't write anything back to Miri's memory, the Mutex state is handled only by GenMC.
 
