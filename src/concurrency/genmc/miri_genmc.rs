@@ -46,7 +46,6 @@ pub fn run_genmc_mode(
         );
 
         if is_exploration_done {
-            eprintln!();
             eprintln!("(GenMC) {mode} complete. No errors were detected.",);
 
             if mode == Mode::Estimation && return_code == 0 {

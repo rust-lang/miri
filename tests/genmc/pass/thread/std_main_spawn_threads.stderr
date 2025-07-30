@@ -4,6 +4,5 @@ warning: GenMC currently does not model the atomic failure ordering for `compare
 
 warning: GenMC currently does not model the atomic failure ordering for `compare_exchange`. Failure ordering 'Acquire' is treated like 'Relaxed', which means that Miri might incorrectly detect errors related to this memory access (possible false positives).
 
-
 (GenMC) Verification complete. No errors were detected.
 Number of complete executions explored: 1
