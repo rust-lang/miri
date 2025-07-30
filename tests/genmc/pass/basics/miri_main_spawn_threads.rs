@@ -2,7 +2,7 @@
 
 #![no_main]
 
-const N: usize = 1;
+const N: usize = 2;
 
 #[unsafe(no_mangle)]
 fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
