@@ -2,15 +2,15 @@
 
 #![no_main]
 
-#[path = "../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../utils/genmc.rs"]
+mod genmc;
 
 use std::alloc::{Layout, alloc};
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
-use crate::utils_dep::*;
+use crate::genmc::*;
 
 static X: AtomicPtr<u64> = AtomicPtr::new(std::ptr::null_mut());
 

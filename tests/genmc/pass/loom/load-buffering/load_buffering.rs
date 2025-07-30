@@ -13,8 +13,8 @@
 #![no_main]
 
 #[cfg(not(any(non_genmc_std, genmc_std)))]
-#[path = "../../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../../utils/genmc.rs"]
+mod genmc;
 
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
@@ -52,7 +52,7 @@ fn test() -> usize {
 fn test() -> usize {
     use std::ffi::c_void;
 
-    use crate::utils_dep::genmc::{join_pthread, spawn_pthread};
+    use crate::genmc::{join_pthread, spawn_pthread};
 
     extern "C" fn thread_func(_value: *mut c_void) -> *mut c_void {
         thread_0();

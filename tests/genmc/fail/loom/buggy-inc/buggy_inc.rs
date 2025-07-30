@@ -9,14 +9,14 @@
 #![no_main]
 
 #[cfg(not(any(non_genmc_std, genmc_std)))]
-#[path = "../../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../../utils/genmc.rs"]
+mod genmc;
 
 use std::ffi::c_void;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use crate::utils_dep::genmc::{create_pthreads_no_params, join_pthreads};
+use crate::genmc::{create_pthreads_no_params, join_pthreads};
 
 struct BuggyInc {
     num: AtomicUsize,

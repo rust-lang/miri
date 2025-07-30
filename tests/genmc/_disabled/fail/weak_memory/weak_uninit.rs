@@ -11,14 +11,14 @@
 
 #![no_main]
 
-#[path = "../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../utils/genmc.rs"]
+mod genmc;
 
 use std::ffi::c_void;
 use std::mem::MaybeUninit;
 use std::sync::atomic::*;
 
-use crate::utils_dep::*;
+use crate::genmc::*;
 
 #[allow(dead_code)]
 #[derive(Copy, Clone)]

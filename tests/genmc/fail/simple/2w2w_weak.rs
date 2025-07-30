@@ -7,13 +7,13 @@
 
 #![no_main]
 
-#[path = "../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../utils/genmc.rs"]
+mod genmc;
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::utils_dep::genmc::{join_pthread, spawn_pthread};
+use crate::genmc::{join_pthread, spawn_pthread};
 
 static X: AtomicU64 = AtomicU64::new(0);
 static Y: AtomicU64 = AtomicU64::new(0);

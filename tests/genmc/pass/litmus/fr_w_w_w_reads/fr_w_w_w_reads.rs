@@ -2,14 +2,14 @@
 
 #![no_main]
 
-#[path = "../../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../../utils/genmc.rs"]
+mod genmc;
 
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::utils_dep::*;
+use crate::genmc::*;
 
 static X: AtomicU64 = AtomicU64::new(0);
 

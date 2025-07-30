@@ -4,13 +4,13 @@
 #![no_main]
 #![feature(abort_unwind)]
 
-#[path = "../../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../../utils/genmc.rs"]
+mod genmc;
 
 use std::ffi::c_void;
 use std::sync::Mutex;
 
-use crate::utils_dep::*;
+use crate::genmc::*;
 
 #[cfg(not(any(order12reps2, order21reps2)))]
 const REPS: u64 = 1;

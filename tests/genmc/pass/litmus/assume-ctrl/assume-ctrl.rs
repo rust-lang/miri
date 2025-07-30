@@ -2,8 +2,11 @@
 
 #![no_main]
 
-#[path = "../../../../utils-dep/mod.rs"]
-mod utils_dep;
+#[path = "../../../../utils/genmc.rs"]
+mod genmc;
+
+#[path = "../../../../utils/mod.rs"]
+mod utils;
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static X: AtomicU64 = AtomicU64::new(0);
 static Y: AtomicU64 = AtomicU64::new(0);
 
-use crate::utils_dep::*;
+use crate::genmc::*;
+use crate::utils::miri_genmc_verifier_assume;
 
 #[unsafe(no_mangle)]
 fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {

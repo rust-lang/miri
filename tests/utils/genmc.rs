@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::ffi::c_void;
 
 use libc::{self, pthread_attr_t, pthread_t};
