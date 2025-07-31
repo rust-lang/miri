@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use genmc_sys::cxx_extra::NonNullUniquePtr;
 use genmc_sys::{
-    ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, GenmcThreadId, MemOrdering,
-    MiriGenMCShim, RMWBinOp, StoreEventType, createGenmcHandle,
+    ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim, RMWBinOp,
+    StoreEventType, createGenmcHandle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -18,7 +18,7 @@ use self::helper::{
     scalar_to_genmc_scalar,
 };
 use self::mapping::{min_max_to_genmc_rmw_op, to_genmc_rmw_op};
-use self::thread_info_manager::ThreadInfoManager;
+use self::thread_id_map::ThreadIdMap;
 use crate::concurrency::genmc::helper::{is_terminator_atomic, split_access};
 use crate::concurrency::genmc::warnings::WarningsCache;
 use crate::concurrency::thread::{EvalContextExt as _, ThreadState};
@@ -33,7 +33,7 @@ mod global_allocations;
 mod helper;
 mod mapping;
 pub mod miri_genmc;
-mod thread_info_manager;
+mod thread_id_map;
 mod warnings;
 
 pub use genmc_sys::GenmcParams;
@@ -53,7 +53,7 @@ pub struct GenmcCtx {
     handle: RefCell<NonNullUniquePtr<MiriGenMCShim>>,
 
     // TODO GENMC (PERFORMANCE): could use one RefCell for all internals instead of multiple
-    thread_infos: RefCell<ThreadInfoManager>,
+    thread_id_manager: RefCell<ThreadIdMap>,
 
     /// Some actions Miri does are allowed to cause data races.
     /// GenMC will not be informed about certain actions (e.g. non-atomic loads) when this flag is set.
@@ -66,7 +66,7 @@ pub struct GenmcCtx {
     //          GenMC needs to have access to that
     // TODO: look at code of "pub struct GlobalStateInner"
     warnings_cache: RefCell<WarningsCache>,
-    // terminator_cache: RefCell<FxHashMap<rustc_middle::ty::Ty<'tcx>, bool>>,
+
     exit_status: Cell<Option<ExitStatus>>,
 }
 
@@ -83,7 +83,7 @@ impl GenmcCtx {
 
         Self {
             handle: non_null_handle,
-            thread_infos: Default::default(),
+            thread_id_manager: Default::default(),
             allow_data_races: Cell::new(false),
             global_allocations: Default::default(),
             warnings_cache: Default::default(),
@@ -138,7 +138,7 @@ impl GenmcCtx {
     /// This function should be called at the start of every execution.
     pub(crate) fn handle_execution_start(&self) {
         self.allow_data_races.replace(false);
-        self.thread_infos.borrow_mut().reset();
+        self.thread_id_manager.borrow_mut().reset();
         self.exit_status.set(None);
 
         let mut mc = self.handle.borrow_mut();
@@ -223,13 +223,13 @@ impl GenmcCtx {
 
         let ordering = ordering.convert();
 
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
-        pinned_mc.handleFence(genmc_tid.0, ordering);
+        pinned_mc.handleFence(genmc_tid, ordering);
 
         // TODO GENMC: can this operation ever fail?
         interp_ok(())
@@ -370,9 +370,9 @@ impl GenmcCtx {
             "GenMC: atomic_compare_exchange orderings: success: ({success_load_ordering:?}, {success_store_ordering:?}), failure load ordering: {fail_load_ordering:?}"
         );
 
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
 
         let genmc_address = address.bytes();
         let genmc_size = size.bytes();
@@ -384,7 +384,7 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
         let cas_result = pinned_mc.handleCompareExchange(
-            genmc_tid.0,
+            genmc_tid,
             genmc_address,
             genmc_size,
             genmc_expected_value,
@@ -532,9 +532,9 @@ impl GenmcCtx {
             if self.allow_data_races.get() {
                 unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
             }
-            let thread_infos = self.thread_infos.borrow();
+            let thread_infos = self.thread_id_manager.borrow();
             let curr_thread = machine.threads.active_thread();
-            let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
+            let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
             // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
             let genmc_size = size.bytes().max(1);
             info!(
@@ -546,7 +546,7 @@ impl GenmcCtx {
 
             let mut mc = self.handle.borrow_mut();
             let pinned_mc = mc.as_mut();
-            let chosen_address = pinned_mc.handleMalloc(genmc_tid.0, genmc_size, alignment);
+            let chosen_address = pinned_mc.handleMalloc(genmc_tid, genmc_size, alignment);
             info!("GenMC: handle_alloc: got address '{chosen_address}' ({chosen_address:#x})");
 
             // TODO GENMC:
@@ -584,9 +584,9 @@ impl GenmcCtx {
         if self.allow_data_races.get() {
             unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
         }
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
         info!(
             "GenMC: memory deallocation, thread: {curr_thread:?} ({genmc_tid:?}), address: {addr} == {addr:#x}, size: {size:?}, align: {align:?}, memory_kind: {kind:?}",
             addr = address.bytes()
@@ -598,7 +598,7 @@ impl GenmcCtx {
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
-        pinned_mc.handleFree(genmc_tid.0, genmc_address, genmc_size);
+        pinned_mc.handleFree(genmc_tid, genmc_address, genmc_size);
 
         // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
@@ -614,10 +614,10 @@ impl GenmcCtx {
         new_thread_id: ThreadId,
     ) -> InterpResult<'tcx> {
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        let mut thread_infos = self.thread_infos.borrow_mut();
+        let mut thread_infos = self.thread_id_manager.borrow_mut();
 
         let curr_thread_id = threads.active_thread();
-        let genmc_parent_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+        let genmc_parent_tid = thread_infos.get_genmc_tid(curr_thread_id);
         let genmc_new_tid = thread_infos.add_thread(new_thread_id);
 
         info!(
@@ -625,7 +625,7 @@ impl GenmcCtx {
         );
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().handleThreadCreate(genmc_new_tid.0, genmc_parent_tid.0);
+        mc.as_mut().handleThreadCreate(genmc_new_tid, genmc_parent_tid);
 
         // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
@@ -637,17 +637,17 @@ impl GenmcCtx {
         child_thread_id: ThreadId,
     ) -> InterpResult<'tcx> {
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
 
-        let genmc_curr_tid = thread_infos.get_info(active_thread_id).genmc_tid;
-        let genmc_child_tid = thread_infos.get_info(child_thread_id).genmc_tid;
+        let genmc_curr_tid = thread_infos.get_genmc_tid(active_thread_id);
+        let genmc_child_tid = thread_infos.get_genmc_tid(child_thread_id);
 
         info!(
             "GenMC: handling thread joining (thread {active_thread_id:?} ({genmc_curr_tid:?}) joining thread {child_thread_id:?} ({genmc_child_tid:?}))"
         );
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().handleThreadJoin(genmc_curr_tid.0, genmc_child_tid.0);
+        mc.as_mut().handleThreadJoin(genmc_curr_tid, genmc_child_tid);
 
         interp_ok(())
     }
@@ -656,8 +656,8 @@ impl GenmcCtx {
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
         let curr_thread_id = threads.active_thread();
 
-        let thread_infos = self.thread_infos.borrow();
-        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+        let thread_infos = self.thread_id_manager.borrow();
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread_id);
 
         // NOTE: Miri doesn't support return values for threads, but GenMC expects one, so we return 0
         let ret_val = 0;
@@ -667,7 +667,7 @@ impl GenmcCtx {
         );
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().handleThreadFinish(genmc_tid.0, ret_val);
+        mc.as_mut().handleThreadFinish(genmc_tid, ret_val);
     }
 
     /// Handle a call to `libc::exit` or the exit of the main thread.
@@ -689,11 +689,11 @@ impl GenmcCtx {
         }
 
         if is_exit_call {
-            let thread_infos = self.thread_infos.borrow();
-            let genmc_tid = thread_infos.get_info(thread).genmc_tid;
+            let thread_infos = self.thread_id_manager.borrow();
+            let genmc_tid = thread_infos.get_genmc_tid(thread);
 
             let mut mc = self.handle.borrow_mut();
-            mc.as_mut().handleThreadKill(genmc_tid.0);
+            mc.as_mut().handleThreadKill(genmc_tid);
         }
         interp_ok(())
     }
@@ -717,9 +717,9 @@ impl GenmcCtx {
             throw_unsup_format!("{UNSUPPORTED_ATOMICS_SIZE_MSG}");
         }
         assert!(!self.allow_data_races.get()); // TODO GENMC: handle this properly
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread_id = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread_id);
 
         info!(
             "GenMC: load, thread: {curr_thread_id:?} ({genmc_tid:?}), address: {addr} == {addr:#x}, size: {size:?}, ordering: {memory_ordering:?}, old_value: {genmc_old_value:x?}",
@@ -731,7 +731,7 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
         let load_result = pinned_mc.handleLoad(
-            genmc_tid.0,
+            genmc_tid,
             genmc_address,
             genmc_size,
             memory_ordering,
@@ -767,9 +767,9 @@ impl GenmcCtx {
         if size.bytes() > 8 {
             throw_unsup_format!("{UNSUPPORTED_ATOMICS_SIZE_MSG}");
         }
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread_id = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread_id);
 
         let genmc_address = address.bytes();
         let genmc_size = size.bytes();
@@ -782,7 +782,7 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
         let store_result = pinned_mc.handleStore(
-            genmc_tid.0,
+            genmc_tid,
             genmc_address,
             genmc_size,
             genmc_value,
@@ -816,9 +816,9 @@ impl GenmcCtx {
         );
         let machine = &ecx.machine;
         assert_ne!(0, size.bytes());
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread_id = machine.threads.active_thread();
-        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread_id);
 
         let genmc_address = address.bytes();
         let genmc_size = size.bytes();
@@ -830,7 +830,7 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
         let rmw_result = pinned_mc.handleReadModifyWrite(
-            genmc_tid.0,
+            genmc_tid,
             genmc_address,
             genmc_size,
             load_ordering,
@@ -893,19 +893,16 @@ impl GenmcCtx {
             "GenMC: schedule_thread, active thread: {active_thread_id:?}, next instr.: '{curr_thread_next_instr_kind:?}'"
         );
 
-        let thread_infos = self.thread_infos.borrow();
-        let curr_thread_info = thread_infos.get_info(active_thread_id);
+        let thread_infos = self.thread_id_manager.borrow();
+        let curr_thread_info = thread_infos.get_genmc_tid(active_thread_id);
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
-        let result =
-            pinned_mc.scheduleNext(curr_thread_info.genmc_tid.0, curr_thread_next_instr_kind);
+        let result = pinned_mc.scheduleNext(curr_thread_info, curr_thread_next_instr_kind);
         if result >= 0 {
-            // TODO GENMC: can we ensure this thread_id is valid?
-            let genmc_next_thread_id = result.try_into().unwrap();
-            let genmc_next_thread_id = GenmcThreadId(genmc_next_thread_id);
-            let thread_infos = self.thread_infos.borrow();
-            let next_thread_id = thread_infos.get_info_genmc(genmc_next_thread_id).miri_tid;
+            let next_thread_id = thread_infos
+                .try_get_miri_tid(result)
+                .expect("A thread id returned from GenMC should exist.");
 
             return interp_ok(next_thread_id);
         }
@@ -918,14 +915,14 @@ impl GenmcCtx {
     /**** Blocking functionality ****/
 
     fn handle_user_block<'tcx>(&self, machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
-        let thread_infos = self.thread_infos.borrow();
+        let thread_infos = self.thread_id_manager.borrow();
         let curr_thread = machine.threads.active_thread();
-        let genmc_curr_thread = thread_infos.get_info(curr_thread).genmc_tid;
+        let genmc_curr_thread = thread_infos.get_genmc_tid(curr_thread);
         info!("GenMC: handle_user_block, blocking thread {curr_thread:?} ({genmc_curr_thread:?})");
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
-        pinned_mc.handleUserBlock(genmc_curr_thread.0);
+        pinned_mc.handleUserBlock(genmc_curr_thread);
 
         interp_ok(())
     }
@@ -957,9 +954,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // FIXME(genmc): assert that we have at least 1 byte.
             // FIXME(genmc): maybe use actual size of mutex here?.
 
-            let thread_infos = genmc_ctx.thread_infos.borrow();
+            let thread_infos = genmc_ctx.thread_id_manager.borrow();
             let curr_thread = this.machine.threads.active_thread();
-            let genmc_curr_thread = thread_infos.get_info(curr_thread).genmc_tid;
+            let genmc_curr_thread = thread_infos.get_genmc_tid(curr_thread);
             interp_ok((genmc_curr_thread, addr, 1))
         };
 
@@ -971,7 +968,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let result = {
                 let mut mc = genmc_ctx.handle.borrow_mut();
                 let pinned_mc = mc.as_mut();
-                pinned_mc.handleMutexLock(genmc_curr_thread.0, addr, size)
+                pinned_mc.handleMutexLock(genmc_curr_thread, addr, size)
             };
             if let Some(error) = result.error.as_ref() {
                 throw_ub_format!("{}", error.to_string_lossy());
@@ -1017,8 +1014,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 info!("GenMC: handling Mutex::lock failed, blocking thread");
                 // NOTE: We don't write anything back to Miri's memory, the Mutex state is handled only by GenMC.
 
-                info!("GenMC: blocking thread due to intercepted call.");
-                let genmc_curr_thread = genmc_curr_thread.0;
                 this.block_thread(
                     crate::BlockReason::Mutex,
                     None,
@@ -1034,7 +1029,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let result = {
                 let mut mc = genmc_ctx.handle.borrow_mut();
                 let pinned_mc = mc.as_mut();
-                pinned_mc.handleMutexTryLock(genmc_curr_thread.0, addr, size)
+                pinned_mc.handleMutexTryLock(genmc_curr_thread, addr, size)
             };
             if let Some(error) = result.error.as_ref() {
                 throw_ub_format!("{}", error.to_string_lossy());
@@ -1052,7 +1047,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             let mut mc = genmc_ctx.handle.borrow_mut();
             let pinned_mc = mc.as_mut();
-            let result = pinned_mc.handleMutexUnlock(genmc_curr_thread.0, addr, size);
+            let result = pinned_mc.handleMutexUnlock(genmc_curr_thread, addr, size);
             if let Some(error) = result.error.as_ref() {
                 throw_ub_format!("{}", error.to_string_lossy());
             }
@@ -1152,7 +1147,7 @@ impl std::fmt::Debug for GenmcCtx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenmcCtx")
             // .field("mc", &self.mc)
-            .field("thread_infos", &self.thread_infos)
+            .field("thread_infos", &self.thread_id_manager)
             .finish_non_exhaustive()
     }
 }

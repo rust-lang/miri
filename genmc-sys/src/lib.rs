@@ -7,11 +7,9 @@ pub mod cxx_extra;
 ///   but if https://github.com/dtolnay/cxx/issues/1051 is fixed we could share the constant directly.
 pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GenmcThreadId(pub i32);
-
-pub const GENMC_MAIN_THREAD_ID: GenmcThreadId = GenmcThreadId(0);
+/// GenMC thread ids are C++ type `int`, which is equivalent to Rust's `i32` on most platforms.
+/// The main thread always has thread id 0.
+pub const GENMC_MAIN_THREAD_ID: i32 = 0;
 
 impl GenmcScalar {
     pub const UNINIT: Self = Self { value: 0, extra: 0, is_init: false };
