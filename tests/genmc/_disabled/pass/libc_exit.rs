@@ -3,6 +3,8 @@
 
 #![no_main]
 
+// NOTE: Disabled due to incomplete support for `libc::exit`.
+
 // Copied from `tests/genmc/pass/litmus/inc2w.rs`
 
 #[path = "../../../../utils/genmc.rs"]

@@ -1,7 +1,11 @@
+// `genmc-sys/src_cpp` headers:
 #include "MiriInterface.hpp"
+#include "LogLevel.hpp"
 
+// CXX.rs generated headers:
 #include "genmc-sys/src/lib.rs.h"
 
+// GenMC headers:
 #include "ADT/value_ptr.hpp"
 #include "Config/MemoryModel.hpp"
 #include "Config/Verbosity.hpp"
@@ -19,6 +23,7 @@
 #include "Support/ThreadInfo.hpp"
 #include "Verification/GenMCDriver.hpp"
 
+// C++ headers:
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -29,7 +34,8 @@ using AnnotT = SExpr<AnnotID>;
 
 // Return -1 when no thread can/should be scheduled, or the thread id of the next thread
 // NOTE: this is safe because ThreadId is 32 bit, and we return a 64 bit integer
-// FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it (see https://github.com/dtolnay/cxx/issues/87).
+// FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it (see
+// https://github.com/dtolnay/cxx/issues/87).
 auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
 				 const ActionKind curr_thread_next_instr_kind) -> int64_t
 {
@@ -37,10 +43,8 @@ auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
 	// a scheduling decision.
 	threadsAction[curr_thread_id].kind = curr_thread_next_instr_kind;
 
-	auto result = GenMCDriver::scheduleNext(threadsAction);
-	if (result.has_value()) {
+	if (const auto result = GenMCDriver::scheduleNext(threadsAction))
 		return static_cast<int64_t>(result.value());
-	}
 	return -1;
 }
 
@@ -54,32 +58,34 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	// TODO GENMC: Can we get some default values somehow?
 	// Config::saveConfigOptions(*conf);
 
-	// NOTE: Miri already initialization checks, so we can disable them in GenMC
-	conf->skipNonAtomicInitializedCheck = true;
+	// NOTE: Miri already does validity checks, so we can disable them in GenMC.
+	conf->skipAccessValidityChecks = true;
+	// Miri handles non-atomic accesses, so we skip the check for those in GenMC.
+	// Mixed atomic-non-atomic mixed-size checks are still enabled.
+	conf->allowNonAtomicMixedSizeAccesses = true;
 
 	// Miri needs all threads to be replayed, even fully completed ones.
 	conf->replayCompletedThreads = true;
 
-	// FIXME(genmc): make sure this doesn't affect any tests, and maybe make it changeable from Miri:
-	constexpr unsigned int DEFAULT_WARN_ON_GRAPH_SIZE = 16 * 1024;
-	conf->warnOnGraphSize = DEFAULT_WARN_ON_GRAPH_SIZE;
+	// `1024` is the default value that GenMC uses.
+	// If any thread has at least this many events, a warning/tip will be printed.
+	//
+	// Miri produces a lot more events than GenMC, so the graph size warning triggers on almost
+	// all programs. The current value is large enough so the warning is not be triggered by any
+	// reasonable programs.
+	// FIXME(genmc): The emitted warning mentions features not supported by Miri ('--unroll'
+	// parameter).
+	// FIXME(genmc): A more appropriate limit should be chosen once the warning is useful for
+	// Miri.
+	conf->warnOnGraphSize = 1024 * 1024;
+
+	// The `logLevel` is not part of the config struct, but the static variable `logLevel`.
+	logLevel = to_genmc_verbosity_level(config.log_level);
 
 	// We only support the RC11 memory model for Rust.
 	conf->model = ModelType::RC11;
 
-	// FIXME(genmc): expose this setting to Miri
-	conf->randomScheduleSeed = "42";
 	conf->printRandomScheduleSeed = config.print_random_schedule_seed;
-	if (config.quiet) {
-		// logLevel = VerbosityLevel::Quiet;
-		// TODO GENMC: error might be better (or new level for `BUG`)
-		// logLevel = VerbosityLevel::Quiet;
-		logLevel = VerbosityLevel::Error;
-	} else if (config.log_level_trace) {
-		logLevel = VerbosityLevel::Trace;
-	} else {
-		logLevel = VerbosityLevel::Tip;
-	}
 
 	// FIXME(genmc): check if we can enable IPR:
 	conf->ipr = false;
@@ -121,18 +127,18 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode
 	auto initValGetter = [driverPtr](const AAccess &access) {
 		const auto addr = access.getAddr();
 		if (!driverPtr->initVals_.contains(addr)) {
-			MIRI_LOG() << "WARNING: TODO GENMC: requested initial value for address "
+			LOG(VerbosityLevel::Warning) << "WARNING: TODO GENMC: requested initial value for address "
 				   << addr << ", but there is none.\n";
 			return SVal(0xCC00CC00);
 			// BUG_ON(!driverPtr->initVals_.contains(addr));
 		}
 		auto result = driverPtr->initVals_[addr];
 		if (!result.is_init) {
-			MIRI_LOG() << "WARNING: TODO GENMC: requested initial value for address "
+			LOG(VerbosityLevel::Warning) << "WARNING: TODO GENMC: requested initial value for address "
 				   << addr << ", but the memory is uninitialized.\n";
 			return SVal(0xFF00FF00);
 		}
-		MIRI_LOG() << "MiriGenMCShim: requested initial value for address " << addr
+		LOG(VerbosityLevel::Warning) << "MiriGenMCShim: requested initial value for address " << addr
 			   << " == " << addr.get() << ", returning: " << result << "\n";
 		return result.toSVal();
 	};
@@ -201,8 +207,6 @@ void MiriGenMCShim::handleThreadJoin(ThreadId thread_id, ThreadId child_id)
 
 void MiriGenMCShim::handleThreadFinish(ThreadId thread_id, uint64_t ret_val)
 {
-	MIRI_LOG() << "GenMC:   handleThreadFinish: thread id: " << thread_id << "\n";
-
 	auto pos = incPos(thread_id);
 	auto retVal = SVal(ret_val);
 
@@ -212,7 +216,8 @@ void MiriGenMCShim::handleThreadFinish(ThreadId thread_id, uint64_t ret_val)
 	GenMCDriver::handleThreadFinish(std::move(eLab));
 }
 
-void MiriGenMCShim::handleThreadKill(ThreadId thread_id) {
+void MiriGenMCShim::handleThreadKill(ThreadId thread_id)
+{
 	auto pos = incPos(thread_id);
 	auto kLab = std::make_unique<ThreadKillLabel>(pos);
 
@@ -234,8 +239,6 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 					     MemOrdering ord, GenmcScalar old_val) -> LoadResult
 {
 	auto pos = incPos(thread_id);
-	MIRI_LOG() << "Received Load from Miri at address: " << address << ", size " << size
-		   << " with ordering " << ord << ", event: " << pos << "\n";
 
 	auto loc = SAddr(address);
 	auto aSize = ASize(size);
@@ -255,10 +258,6 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 							GenmcScalar rhs_value, GenmcScalar old_val)
 	-> ReadModifyWriteResult
 {
-	MIRI_LOG() << "Received Read-Modify-Write from Miri at address: " << address << ", size "
-		   << size << " with orderings (" << loadOrd << ", " << store_ordering
-		   << "), rmw op: " << static_cast<uint64_t>(rmw_op) << "\n";
-
 	auto pos = incPos(thread_id);
 
 	auto loc = SAddr(address);
@@ -293,14 +292,6 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 	MemOrdering success_store_ordering, MemOrdering fail_load_ordering,
 	bool can_fail_spuriously) -> CompareExchangeResult
 {
-
-	MIRI_LOG() << "Received Compare-Exchange from Miri (value: " << expected_value << " --> "
-		   << new_value << ", old value: " << old_val << ") at address: " << address
-		   << ", size " << size << " with success orderings (" << success_load_ordering
-		   << ", " << success_store_ordering
-		   << "), fail load ordering: " << fail_load_ordering
-		   << ", is weak (can fail spuriously): " << can_fail_spuriously << "\n";
-
 	auto pos = incPos(thread_id);
 
 	auto loc = SAddr(address);
@@ -339,10 +330,6 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 					      MemOrdering ord, StoreEventType store_event_type)
 	-> StoreResult
 {
-	MIRI_LOG() << "Received Store from Miri at address " << address << ", size " << size
-		   << " with ordering " << ord << ", is part of rmw: ("
-		   << static_cast<uint64_t>(store_event_type) << ")\n";
-
 	auto pos = incPos(thread_id);
 
 	auto loc = SAddr(address);
@@ -380,8 +367,6 @@ void MiriGenMCShim::handleUserBlock(ThreadId thread_id)
 
 void MiriGenMCShim::handleFence(ThreadId thread_id, MemOrdering ord)
 {
-	MIRI_LOG() << "Received fence operation from Miri with ordering " << ord << "\n";
-
 	auto pos = incPos(thread_id);
 
 	auto fLab = std::make_unique<FenceLabel>(pos, ord);
@@ -399,7 +384,8 @@ auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t ali
 	auto stype = StorageType::ST_Volatile;
 	auto spc = AddressSpace::AS_User;
 
-	auto aLab = std::make_unique<MallocLabel>(pos, size, alignment, sd, stype, spc, EventDeps());
+	auto aLab =
+		std::make_unique<MallocLabel>(pos, size, alignment, sd, stype, spc, EventDeps());
 
 	SAddr retVal = GenMCDriver::handleMalloc(std::move(aLab));
 

@@ -1,10 +1,13 @@
 #ifndef GENMC_MIRI_INTERFACE_HPP
 #define GENMC_MIRI_INTERFACE_HPP
 
+// CXX.rs generated headers:
 #include "rust/cxx.h"
 
+// GenMC generated headers:
 #include "config.h"
 
+// GenMC headers:
 #include "Config/Config.hpp"
 #include "ExecutionGraph/EventLabel.hpp"
 #include "Static/ModuleID.hpp"
@@ -13,6 +16,7 @@
 #include "Support/ResultHandling.hpp"
 #include "Verification/GenMCDriver.hpp"
 
+// C++ headers:
 #include <cstdint>
 #include <format>
 #include <iomanip>
@@ -182,45 +186,38 @@ private:
 	 * */
 	void handleOldVal(const SAddr addr, GenmcScalar value)
 	{
-		MIRI_LOG() << "handleOldVal: " << addr << ", " << value.value << ", " << value.extra
-			   << ", " << value.is_init << "\n";
-		// if (!value.is_init) {
-		// 	// // TODO GENMC(uninit value handling)
-		// 	// MIRI_LOG() << "WARNING: got uninitialized old value, ignoring ...\n";
-		// 	// return;
-		// 	MIRI_LOG() << "WARNING: got uninitialized old value, converting to dummy "
-		// 		      "value ...\n";
-		// 	value.is_init = true;
-		// 	value.value = 0xAAFFAAFF;
-		// }
+		LOG(VerbosityLevel::Warning)
+			<< "handleOldVal: " << addr << ", " << value.value << ", " << value.extra
+			<< ", " << value.is_init << "\n";
 
 		// TODO GENMC(CLEANUP): Pass this as a parameter:
 		auto &g = getExec().getGraph();
 		auto *coLab = g.co_max(addr);
-		MIRI_LOG() << "handleOldVal: coLab: " << *coLab << "\n";
 		if (auto *wLab = llvm::dyn_cast<WriteLabel>(coLab)) {
-			MIRI_LOG()
+			LOG(VerbosityLevel::Warning)
 				<< "handleOldVal: got WriteLabel, atomic: " << !wLab->isNotAtomic()
 				<< "\n";
 			if (!value.is_init)
-				MIRI_LOG() << "WARNING: TODO GENMC: handleOldVal tried to "
-					      "overwrite value of NA "
-					      "reads-from label, but old value is `uninit`\n";
+				LOG(VerbosityLevel::Warning)
+					<< "WARNING: TODO GENMC: handleOldVal tried to "
+					   "overwrite value of NA "
+					   "reads-from label, but old value is `uninit`\n";
 			else if (wLab->isNotAtomic())
 				wLab->setVal(value.toSVal());
 		} else if (const auto *wLab = llvm::dyn_cast<InitLabel>(coLab)) {
 			if (value.is_init) {
 				auto result = initVals_.insert(std::make_pair(addr, value));
-				MIRI_LOG() << "handleOldVal: got InitLabel, insertion result: "
-					   << result.first->second << ", " << result.second << "\n";
+				LOG(VerbosityLevel::Warning)
+					<< "handleOldVal: got InitLabel, insertion result: "
+					<< result.first->second << ", " << result.second << "\n";
 				BUG_ON(result.second &&
 				       (*result.first).second !=
 					       value); /* Attempt to replace initial value */
 			} else {
-				// LOG(VerbosityLevel::Error) <<
-				MIRI_LOG() << "WARNING: TODO GENMC: handleOldVal tried set initial "
-					      "value, but old "
-					      "value is `uninit`\n";
+				LOG(VerbosityLevel::Warning)
+					<< "WARNING: TODO GENMC: handleOldVal tried set initial "
+					   "value, but old "
+					   "value is `uninit`\n";
 			}
 		} else {
 			BUG(); /* Invalid label */
@@ -234,10 +231,12 @@ private:
 
 	/**
 	 * Currently, the interpreter is responsible for maintaining `ExecutionGraph` event indices.
-	 * The interpreter is also responsible for informing GenMC about the `ActionKind` of the next instruction in each thread.
-	 * 
-	 * This vector contains this data in the expected format `Action`, which consists of the `ActionKind` of the next instruction
-	 * and the last event index added to the ExecutionGraph in a given thread.
+	 * The interpreter is also responsible for informing GenMC about the `ActionKind` of the
+	 * next instruction in each thread.
+	 *
+	 * This vector contains this data in the expected format `Action`, which consists of the
+	 * `ActionKind` of the next instruction and the last event index added to the ExecutionGraph
+	 * in a given thread.
 	 */
 	std::vector<Action> threadsAction;
 

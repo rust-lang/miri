@@ -1,25 +1,24 @@
 //@compile-flags: -Zmiri-ignore-leaks -Zmiri-genmc -Zmiri-disable-stacked-borrows
 
+// This test is a translations of the GenMC test `ms-queue-dynamic`, but with all code related to GenMC's hazard pointer API removed.
+// The test leaks memory, so leak checks are disabled.
+
 #![no_main]
 #![allow(static_mut_refs)]
-#![allow(unused)]
 
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::c_void;
 use std::sync::atomic::Ordering::*;
-use std::sync::atomic::{AtomicPtr, AtomicU64};
+use std::sync::atomic::{AtomicPtr};
 
 use libc::{self, pthread_attr_t, pthread_t};
 
 const MAX_THREADS: usize = 32;
 
-const POISON_IDX: u64 = 0xAAAABBBBBBBBAAAA;
-
 static mut QUEUE: MyStack = MyStack::new();
-static mut PARAMS: [u64; MAX_THREADS] = [POISON_IDX; MAX_THREADS];
-static mut INPUT: [u64; MAX_THREADS] = [POISON_IDX; MAX_THREADS];
+static mut PARAMS: [u64; MAX_THREADS] = [0; MAX_THREADS];
+static mut INPUT: [u64; MAX_THREADS] = [0; MAX_THREADS];
 static mut OUTPUT: [Option<u64>; MAX_THREADS] = [None; MAX_THREADS];
-static mut THREADS: [pthread_t; MAX_THREADS] = [0; MAX_THREADS];
 
 #[repr(C)]
 struct Node {
@@ -40,10 +39,6 @@ impl Node {
     pub unsafe fn free(node: *mut Self) {
         dealloc(node as *mut u8, Layout::new::<Self>())
     }
-
-    pub unsafe fn reclaim(_node: *mut Self) {
-        // __VERIFIER_hp_retire(node);
-    }
 }
 
 impl MyStack {
@@ -54,8 +49,7 @@ impl MyStack {
     }
 
     pub unsafe fn init_queue(&mut self, _num_threads: usize) {
-        /* initialize queue */
-        let mut dummy = Node::new_alloc();
+        let dummy = Node::new_alloc();
 
         (*dummy).next = AtomicPtr::new(std::ptr::null_mut());
         self.head = AtomicPtr::new(dummy);
@@ -86,17 +80,14 @@ impl MyStack {
             }
 
             if next.is_null() {
-                // TODO GENMC: what if anything has to be done for `__VERIFIER_final_CAS`?
                 if (*tail).next.compare_exchange(next, node, Release, Relaxed).is_ok() {
                     break;
                 }
             } else {
-                // TODO GENMC: what if anything has to be done for `__VERIFIER_helping_CAS`?
                 let _ = self.tail.compare_exchange(tail, next, Release, Relaxed);
             }
         }
 
-        // TODO GENMC: what if anything has to be done for `__VERIFIER_helped_CAS`?
         let _ = self.tail.compare_exchange(tail, node, Release, Relaxed);
     }
 
@@ -118,9 +109,7 @@ impl MyStack {
             } else {
                 let ret_val = (*next).value;
                 if self.head.compare_exchange(head, next, Release, Relaxed).is_ok() {
-                    // reclaim(head);
-                    // __VERIFIER_hp_free(hp_head);
-                    // __VERIFIER_hp_free(hp_next);
+                    // NOTE: The popped `Node` is leaked.
                     return Some(ret_val);
                 }
             }
@@ -164,6 +153,8 @@ extern "C" fn thread_rw(value: *mut c_void) -> *mut c_void {
 
 #[unsafe(no_mangle)]
 fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
+    let mut thread_ids: [pthread_t; MAX_THREADS] = [0; MAX_THREADS];
+
     let attr: *const pthread_attr_t = std::ptr::null();
 
     // TODO GENMC (TESTS): make different tests:
@@ -188,28 +179,28 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
         /* Spawn threads */
         for _ in 0..writers {
             let value: *mut c_void = (&raw mut PARAMS[i]) as *mut c_void;
-            if 0 != libc::pthread_create(&raw mut THREADS[i], attr, thread_w, value) {
+            if libc::pthread_create(&raw mut thread_ids[i], attr, thread_w, value) != 0 {
                 std::process::abort();
             }
             i += 1;
         }
         for _ in 0..readers {
             let value: *mut c_void = (&raw mut PARAMS[i]) as *mut c_void;
-            if 0 != libc::pthread_create(&raw mut THREADS[i], attr, thread_r, value) {
+            if libc::pthread_create(&raw mut thread_ids[i], attr, thread_r, value) != 0 {
                 std::process::abort();
             }
             i += 1;
         }
         for _ in 0..rdwr {
             let value: *mut c_void = (&raw mut PARAMS[i]) as *mut c_void;
-            if 0 != libc::pthread_create(&raw mut THREADS[i], attr, thread_rw, value) {
+            if libc::pthread_create(&raw mut thread_ids[i], attr, thread_rw, value) != 0 {
                 std::process::abort();
             }
             i += 1;
         }
 
         for i in 0..num_threads {
-            if 0 != libc::pthread_join(THREADS[i], std::ptr::null_mut()) {
+            if libc::pthread_join(thread_ids[i], std::ptr::null_mut()) != 0 {
                 std::process::abort();
             }
         }

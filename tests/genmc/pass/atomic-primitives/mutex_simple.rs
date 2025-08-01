@@ -41,10 +41,7 @@ fn main_() {
         assert!(LOCK.try_lock().is_ok()); // Trying to lock now should *not* fail since the lock is not held.
     }
 
-    // Thread spawning order should not matter for the result
-    let thread_order = if cfg!(order21) { [thread_2, thread_1] } else { [thread_1, thread_2] };
-    // let thread_order = [thread_1  as extern "C" fn(*mut libc::c_void) -> *mut libc::c_void];
-    let ids = unsafe { create_pthreads_no_params(thread_order) };
+    let ids = unsafe { create_pthreads_no_params([thread_1, thread_2]) };
     unsafe { join_pthreads(ids) };
 
     let guard = LOCK.lock().unwrap();

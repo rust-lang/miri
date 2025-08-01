@@ -13,7 +13,7 @@ pub unsafe fn spawn_pthread(
 
     let attr: *const pthread_attr_t = std::ptr::null();
 
-    if 0 != unsafe { libc::pthread_create(&raw mut thread_id, attr, f, value) } {
+    if unsafe { libc::pthread_create(&raw mut thread_id, attr, f, value) } != 0 {
         std::process::abort();
     }
     thread_id
@@ -21,7 +21,7 @@ pub unsafe fn spawn_pthread(
 
 // Join the given pthread, abort the process on any errors.
 pub unsafe fn join_pthread(thread_id: pthread_t) {
-    if 0 != unsafe { libc::pthread_join(thread_id, std::ptr::null_mut()) } {
+    if unsafe { libc::pthread_join(thread_id, std::ptr::null_mut()) } != 0 {
         std::process::abort();
     }
 }

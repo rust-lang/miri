@@ -240,7 +240,7 @@ fn main() {
     }
 
     // Select which path to use for the GenMC repo:
-    let genmc_path = if let Ok(genmc_src_path) = std::env::var("GENMC_SRC_PATH") {
+    let genmc_path = if let Some(genmc_src_path) = option_env!("GENMC_SRC_PATH") {
         let genmc_src_path =
             PathBuf::from_str(&genmc_src_path).expect("GENMC_SRC_PATH should contain a valid path");
         assert!(
@@ -248,6 +248,9 @@ fn main() {
             "GENMC_SRC_PATH={} does not exist!",
             genmc_src_path.display()
         );
+        // Rebuild files in the given path change.
+        // FIXME(genmc): using the full directory instead of `./src` causes spurious rebuilds for some reason.
+        println!("cargo::rerun-if-changed={}", genmc_src_path.join("src").display());
         genmc_src_path
     } else {
         downloading::download_genmc()

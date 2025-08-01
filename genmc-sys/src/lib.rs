@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 pub use self::ffi::*;
 
 pub mod cxx_extra;
@@ -33,11 +35,35 @@ impl Default for GenmcParams {
     fn default() -> Self {
         Self {
             print_random_schedule_seed: false,
-            quiet: true,
-            log_level_trace: false,
+            log_level: Default::default(),
             do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
             estimation_max: 1000,
         }
+    }
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        // FIXME(genmc): set `Warning` by default once changes to GenMC are upstreamed.
+        // FIXME(genmc): set `Tip` by default once the GenMC tips are relevant to Miri.
+        Self::Error
+    }
+}
+
+impl FromStr for LogLevel {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "quiet" => LogLevel::Quiet,
+            "error" => LogLevel::Error,
+            "warning" => LogLevel::Warning,
+            "tip" => LogLevel::Tip,
+            "debug1" => LogLevel::Debug1Revisits,
+            "debug2" => LogLevel::Debug2MemoryAccesses,
+            "debug3" => LogLevel::Debug3ReadsFrom,
+            _ => return Err("invalid log level"),
+        })
     }
 }
 
@@ -49,10 +75,35 @@ mod ffi {
     struct GenmcParams {
         // pub genmc_seed: u64; // OR: Option<u64>
         pub print_random_schedule_seed: bool,
-        pub quiet: bool, // TODO GENMC: maybe make log-level more fine grained
-        pub log_level_trace: bool,
+        pub log_level: LogLevel,
         pub do_symmetry_reduction: bool,
         pub estimation_max: u32,
+    }
+
+    /// This is mostly equivalent to GenMC `VerbosityLevel`, but the debug log levels are always present (not conditionally compiled based on `ENABLE_GENMC_DEBUG`).
+    /// We add this intermediate type to prevent changes to the GenMC log-level from breaking the Miri
+    /// build, and to have a stable type for the C++-Rust interface, independent of `ENABLE_GENMC_DEBUG`.
+    #[derive(Debug)]
+    enum LogLevel {
+        /// Disable *all* logging (including error messages on a crash).
+        Quiet,
+        /// Log errors.
+        Error,
+        /// Log errors and warnings.
+        Warning,
+        /// Log errors, warnings and tips.
+        Tip,
+        /// Debug print considered revisits.
+        /// Downgraded to `Tip` if `GENMC_DEBUG` is not enabled.
+        Debug1Revisits,
+        /// Print the execution graph after every memory access.
+        /// Also includes the previous debug log level.
+        /// Downgraded to `Tip` if `GENMC_DEBUG` is not enabled.
+        Debug2MemoryAccesses,
+        /// Print reads-from values considered by GenMC.
+        /// Also includes the previous debug log level.
+        /// Downgraded to `Tip` if `GENMC_DEBUG` is not enabled.
+        Debug3ReadsFrom,
     }
 
     #[derive(Debug)]

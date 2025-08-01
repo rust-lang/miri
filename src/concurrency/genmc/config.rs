@@ -11,11 +11,6 @@ pub struct GenmcConfig {
 }
 
 impl GenmcConfig {
-    fn set_log_level_trace(&mut self) {
-        self.params.quiet = false;
-        self.params.log_level_trace = true;
-    }
-
     pub fn print_exec_graphs(&self) -> bool {
         self.print_exec_graphs
     }
@@ -46,9 +41,8 @@ impl GenmcConfig {
         let Some(trimmed_arg) = trimmed_arg.strip_prefix("-") else {
             return Err(format!("Invalid GenMC argument \"-Zmiri-genmc{trimmed_arg}\""));
         };
-        if trimmed_arg == "log-trace" {
-            // TODO GENMC: maybe expand to allow more control over log level?
-            genmc_config.set_log_level_trace();
+        if let Some(log_level) = trimmed_arg.strip_prefix("log=") {
+            genmc_config.params.log_level = log_level.parse()?;
         } else if trimmed_arg == "print-graphs" {
             // TODO GENMC (DOCUMENTATION)
             genmc_config.print_exec_graphs = true;

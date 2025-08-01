@@ -547,12 +547,9 @@ impl GenmcCtx {
             let mut mc = self.handle.borrow_mut();
             let pinned_mc = mc.as_mut();
             let chosen_address = pinned_mc.handleMalloc(genmc_tid, genmc_size, alignment);
-            info!("GenMC: handle_alloc: got address '{chosen_address}' ({chosen_address:#x})");
 
-            // TODO GENMC:
-            if chosen_address == 0 {
-                throw_unsup_format!("TODO GENMC: we got address '0' from malloc");
-            }
+            // Non-global addresses should not be in the global address space or null.
+            assert_ne!(0, chosen_address, "GenMC malloc returned nullptr.");
             assert_eq!(0, chosen_address & GENMC_GLOBAL_ADDRESSES_MASK);
             chosen_address
         };
@@ -573,7 +570,6 @@ impl GenmcCtx {
         alloc_id: AllocId,
         address: Size,
         size: Size,
-        align: Align,
         kind: MemoryKind,
     ) -> InterpResult<'tcx> {
         assert_ne!(
@@ -587,10 +583,6 @@ impl GenmcCtx {
         let thread_infos = self.thread_id_manager.borrow();
         let curr_thread = machine.threads.active_thread();
         let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
-        info!(
-            "GenMC: memory deallocation, thread: {curr_thread:?} ({genmc_tid:?}), address: {addr} == {addr:#x}, size: {size:?}, align: {align:?}, memory_kind: {kind:?}",
-            addr = address.bytes()
-        );
 
         let genmc_address = address.bytes();
         // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
@@ -641,10 +633,6 @@ impl GenmcCtx {
 
         let genmc_curr_tid = thread_infos.get_genmc_tid(active_thread_id);
         let genmc_child_tid = thread_infos.get_genmc_tid(child_thread_id);
-
-        info!(
-            "GenMC: handling thread joining (thread {active_thread_id:?} ({genmc_curr_tid:?}) joining thread {child_thread_id:?} ({genmc_child_tid:?}))"
-        );
 
         let mut mc = self.handle.borrow_mut();
         mc.as_mut().handleThreadJoin(genmc_curr_tid, genmc_child_tid);
@@ -738,12 +726,12 @@ impl GenmcCtx {
             genmc_old_value,
         );
 
-        if load_result.is_read_opt {
-            todo!();
-        }
-
         if let Some(error) = load_result.error.as_ref() {
             throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
+        }
+
+        if load_result.is_read_opt {
+            todo!();
         }
 
         info!("GenMC: load returned value: {:?}", load_result.read_value);

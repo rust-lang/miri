@@ -16,13 +16,13 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
     let value: *mut c_void = std::ptr::null_mut();
 
     handles.iter_mut().for_each(|thread_id| {
-        if 0 != unsafe { libc::pthread_create(thread_id, attr, thread_func, value) } {
+        if unsafe { libc::pthread_create(thread_id, attr, thread_func, value) } != 0 {
             std::process::abort();
         }
     });
 
     handles.into_iter().for_each(|thread_id| {
-        if 0 != unsafe { libc::pthread_join(thread_id, std::ptr::null_mut()) } {
+        if unsafe { libc::pthread_join(thread_id, std::ptr::null_mut()) } != 0 {
             std::process::abort();
         }
     });

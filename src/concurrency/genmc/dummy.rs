@@ -28,6 +28,7 @@ pub mod miri_genmc {
         _config: &MiriConfig,
         _genmc_config: &GenmcConfig,
         _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
+        _target_usize_max: u64,
         _mode: Mode,
     ) -> Option<i32> {
         unreachable!();
@@ -203,7 +204,6 @@ impl GenmcCtx {
         _alloc_id: AllocId,
         _address: Size,
         _size: Size,
-        _align: Align,
         _kind: MemoryKind,
     ) -> InterpResult<'tcx> {
         unreachable!()

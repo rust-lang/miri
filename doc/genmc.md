@@ -21,6 +21,24 @@ Basic usage:
 MIRIFLAGS="-Zmiri-genmc" cargo miri run
 ```
 
+### Supported Parameters
+- `-Zmiri-genmc`: Enable GenMC mode (not required if any other GenMC options are used).
+- `-Zmiri-genmc-log=LOG_LEVEL`: Change the log level for GenMC. Default: `warning`.
+
+#### Available log levels
+Every log level includes all previous log levels.
+- `quiet`:    Disable logging.
+- `error`:    Print errors.
+- `warning`:  Print errors and warnings.
+- `tip`:      Print errors, warnings and tips.
+#### Extra log levels for debugging
+These are downgraded to `tip` if GenMC is compiled without debug assertions (e.g., with Miri in release mode).
+These options are *very* verbose.
+- `debug1`:   Print revisits considered by GenMC.
+- `debug2`:   Print the execution graph after every memory access.
+- `debug3`:   Print reads-from values considered by GenMC.
+
+
 <!-- FIXME(genmc): explain options. -->
 
 <!-- FIXME(genmc): explain Miri-GenMC specific functions. -->

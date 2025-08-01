@@ -192,6 +192,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                 miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
             };
 
+            // Estimate the execution space and runtime, if enabled.
             if genmc_config.do_estimation()
                 && miri_genmc::run_genmc_mode(
                     &config,
@@ -200,9 +201,11 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     target_usize_max,
                     miri_genmc::Mode::Estimation,
                 )
-                .is_some()
+                .is_none()
             {
+                // We might already find an error during estimation, then we should stop here.
                 tcx.dcx().abort_if_errors();
+                exit(rustc_driver::EXIT_FAILURE);
             }
 
             let return_code = miri_genmc::run_genmc_mode(
