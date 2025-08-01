@@ -53,10 +53,7 @@ struct MiriGenMCShim : private GenMCDriver {
 public:
 	MiriGenMCShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
 		: GenMCDriver(std::move(conf), nullptr, mode)
-	{
-		globalInstructions.reserve(8);
-		globalInstructions.push_back(Action(ActionKind::Load, Event::getInit()));
-	}
+	{}
 
 	virtual ~MiriGenMCShim() {}
 
@@ -134,13 +131,13 @@ public:
 
 	auto incPos(ThreadId tid) -> Event
 	{
-		ERROR_ON(tid >= globalInstructions.size(), "ThreadId out of bounds");
-		return ++globalInstructions[tid].event;
+		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
+		return ++threadsAction[tid].event;
 	}
 	auto decPos(ThreadId tid) -> Event
 	{
-		ERROR_ON(tid >= globalInstructions.size(), "ThreadId out of bounds");
-		return --globalInstructions[tid].event;
+		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
+		return --threadsAction[tid].event;
 	}
 
 	void printGraph() { GenMCDriver::debugPrintGraph(); }
@@ -235,7 +232,14 @@ private:
 	// TODO GENMC(mixed-size accesses):
 	std::unordered_map<SAddr, GenmcScalar> initVals_{};
 
-	std::vector<Action> globalInstructions;
+	/**
+	 * Currently, the interpreter is responsible for maintaining `ExecutionGraph` event indices.
+	 * The interpreter is also responsible for informing GenMC about the `ActionKind` of the next instruction in each thread.
+	 * 
+	 * This vector contains this data in the expected format `Action`, which consists of the `ActionKind` of the next instruction
+	 * and the last event index added to the ExecutionGraph in a given thread.
+	 */
+	std::vector<Action> threadsAction;
 
 	std::unordered_map<uint64_t, ModuleID::ID> annotation_id{};
 	ModuleID::ID annotation_id_counter = 0;

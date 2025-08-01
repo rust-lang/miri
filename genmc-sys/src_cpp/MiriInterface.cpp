@@ -35,9 +35,9 @@ auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
 {
 	// The current thread is the only one where the `kind` could have changed since we last made
 	// a scheduling decision.
-	globalInstructions[curr_thread_id].kind = curr_thread_next_instr_kind;
+	threadsAction[curr_thread_id].kind = curr_thread_next_instr_kind;
 
-	auto result = GenMCDriver::scheduleNext(globalInstructions);
+	auto result = GenMCDriver::scheduleNext(threadsAction);
 	if (result.has_value()) {
 		return static_cast<int64_t>(result.value());
 	}
@@ -153,14 +153,14 @@ auto createGenmcHandle(const GenmcParams &config, bool estimation_mode)
 
 void MiriGenMCShim::handleExecutionStart()
 {
-	globalInstructions.clear();
-	globalInstructions.push_back(Action(ActionKind::Load, Event::getInit()));
+	threadsAction.clear();
+	threadsAction.push_back(Action(ActionKind::Load, Event::getInit()));
 	GenMCDriver::handleExecutionStart();
 }
 
 auto MiriGenMCShim::handleExecutionEnd() -> std::unique_ptr<ModelCheckerError>
 {
-	return GenMCDriver::handleExecutionEnd(globalInstructions);
+	return GenMCDriver::handleExecutionEnd(threadsAction);
 }
 
 /**** Thread management ****/
@@ -180,8 +180,8 @@ void MiriGenMCShim::handleThreadCreate(ThreadId thread_id, ThreadId parent_id)
 	auto createLab = GenMCDriver::handleThreadCreate(std::move(tcLab));
 	auto genmcTid = createLab->getChildId();
 
-	BUG_ON(genmcTid != thread_id || genmcTid == -1 || genmcTid != globalInstructions.size());
-	globalInstructions.push_back(Action(ActionKind::Load, Event(genmcTid, 0)));
+	BUG_ON(genmcTid != thread_id || genmcTid == -1 || genmcTid != threadsAction.size());
+	threadsAction.push_back(Action(ActionKind::Load, Event(genmcTid, 0)));
 }
 
 void MiriGenMCShim::handleThreadJoin(ThreadId thread_id, ThreadId child_id)
@@ -441,7 +441,7 @@ auto MiriGenMCShim::handleMutexLock(ThreadId thread_id, uint64_t address, uint64
 					   ConcreteExpr<AnnotID>::create(aSize.getBits(), SVal(1)))
 					   .release())));
 
-	auto &currPos = globalInstructions[thread_id].event;
+	auto &currPos = threadsAction[thread_id].event;
 	// auto rLab = LockCasReadLabel::create(++currPos, address, size);
 	auto rLab = LockCasReadLabel::create(++currPos, address, size, annot);
 
@@ -481,7 +481,7 @@ auto MiriGenMCShim::handleMutexLock(ThreadId thread_id, uint64_t address, uint64
 auto MiriGenMCShim::handleMutexTryLock(ThreadId thread_id, uint64_t address, uint64_t size)
 	-> MutexLockResult
 {
-	auto &currPos = globalInstructions[thread_id].event;
+	auto &currPos = threadsAction[thread_id].event;
 	auto rLab = TrylockCasReadLabel::create(++currPos, address, size);
 	// Mutex starts out unlocked, so we always say the previous value is "unlocked".
 	auto oldValSetter = [this](SAddr loc) { this->handleOldVal(loc, SVal(0)); };
