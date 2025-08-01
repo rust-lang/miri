@@ -12,7 +12,7 @@ use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
 use rustc_middle::{mir, throw_machine_stop, throw_ub_format, throw_unsup_format};
 use tracing::info;
 
-use self::global_allocations::{EvalContextExtPriv as _, GlobalAllocationHandler};
+use self::global_allocations::{EvalContextExt as _, GlobalAllocationHandler};
 use self::helper::{
     genmc_scalar_to_scalar, option_scalar_to_genmc_scalar, rhs_scalar_to_genmc_scalar,
     scalar_to_genmc_scalar,
@@ -73,19 +73,19 @@ pub struct GenmcCtx {
 /// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    pub fn new(miri_config: &MiriConfig, mode: miri_genmc::Mode) -> Self {
+    pub fn new(miri_config: &MiriConfig, target_usize_max: u64, mode: miri_genmc::Mode) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
         info!("GenMC: Creating new GenMC Context");
 
         let handle = createGenmcHandle(&genmc_config.params, mode == miri_genmc::Mode::Estimation);
         let non_null_handle = NonNullUniquePtr::new(handle).expect("GenMC should not return null");
         let non_null_handle = RefCell::new(non_null_handle);
-
+        let global_allocations = Arc::new(GlobalAllocationHandler::new(target_usize_max));
         Self {
             handle: non_null_handle,
             thread_id_manager: Default::default(),
             allow_data_races: Cell::new(false),
-            global_allocations: Default::default(),
+            global_allocations,
             warnings_cache: Default::default(),
             exit_status: Cell::new(None),
         }

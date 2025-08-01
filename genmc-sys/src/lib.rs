@@ -2,8 +2,12 @@ pub use self::ffi::*;
 
 pub mod cxx_extra;
 
-/// Defined in "genmc/src/Support/SAddr.hpp"
-/// FIXME: currently we use `getGlobalAllocStaticMask()` to ensure the constant is consistent between Miri and GenMC,
+/// Defined in "genmc/src/Support/SAddr.hpp".
+/// The first bit of all global addresses must be set to `1`, the rest are the actual address.
+/// This means the mask, interpreted as an address, is the lower bound of where the global address space starts.
+///
+/// FIXME(genmc): rework this if non-64bit support is added to GenMC (the current allocation scheme only allows for 64bit addresses).
+/// FIXME(genmc): currently we use `getGlobalAllocStaticMask()` to ensure the constant is consistent between Miri and GenMC,
 ///   but if https://github.com/dtolnay/cxx/issues/1051 is fixed we could share the constant directly.
 pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 

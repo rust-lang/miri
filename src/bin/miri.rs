@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
+    PointerArithmetic, ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -187,6 +187,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         }
 
         if let Some(genmc_config) = &config.genmc_config {
+            let target_usize_max = tcx.target_usize_max();
             let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
                 miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
             };
@@ -196,6 +197,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     &config,
                     genmc_config,
                     eval_entry_once,
+                    target_usize_max,
                     miri_genmc::Mode::Estimation,
                 )
                 .is_some()
@@ -207,6 +209,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                 &config,
                 genmc_config,
                 eval_entry_once,
+                target_usize_max,
                 miri_genmc::Mode::Verification,
             )
             .unwrap_or_else(|| {

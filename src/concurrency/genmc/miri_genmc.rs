@@ -23,10 +23,11 @@ pub fn run_genmc_mode(
     config: &MiriConfig,
     genmc_config: &GenmcConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
+    target_usize_max: u64,
     mode: Mode,
 ) -> Option<i32> {
     let time_start = Instant::now();
-    let genmc_ctx = Rc::new(GenmcCtx::new(config, mode));
+    let genmc_ctx = Rc::new(GenmcCtx::new(config, target_usize_max, mode));
 
     for rep in 0u64.. {
         tracing::info!("Miri-GenMC loop {}", rep + 1);

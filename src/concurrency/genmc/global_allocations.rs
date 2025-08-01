@@ -1,58 +1,59 @@
-use std::cmp::max;
 use std::collections::hash_map::Entry;
 use std::sync::RwLock;
 
 use genmc_sys::{GENMC_GLOBAL_ADDRESSES_MASK, getGlobalAllocStaticMask};
+use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use rustc_const_eval::interpret::{
-    AllocId, AllocInfo, AllocKind, InterpResult, PointerArithmetic, interp_ok,
-};
+use rustc_const_eval::interpret::{AllocId, AllocInfo, InterpResult, interp_ok};
 use rustc_data_structures::fx::FxHashMap;
-use rustc_middle::{err_exhaust, throw_exhaust};
 use tracing::info;
 
-use crate::alloc_addresses::align_addr;
+use crate::alloc_addresses::AddressGenerator;
 
-#[derive(Debug, Default)]
-pub struct GlobalAllocationHandler {
-    inner: RwLock<GlobalStateInner>,
-}
+/// Allocator for global memory in GenMC mode.
+/// Miri doesn't discover all global allocations statically like LLI does for GenMC.
+/// The existing global memory allocator in GenMC doesn't support this, so we take over these allocations.
+/// Global allocations need to be in a specific address range, with the lower limit given by the `GENMC_GLOBAL_ADDRESSES_MASK` constant.
+///
+/// Every global allocation must have the same addresses across all executions of a single program.
+/// Therefore there is only 1 global allocator, and it syncs new globals across executions, even if they are explored in parallel.
+#[derive(Debug)]
+pub struct GlobalAllocationHandler(RwLock<GlobalStateInner>);
 
-/// This contains more or less a subset of the functionality of `struct GlobalStateInner` in `alloc_addresses`.
-#[derive(Clone, Debug)]
-struct GlobalStateInner {
-    /// This is used as a map between the address of each allocation and its `AllocId`. It is always
-    /// sorted by address. We cannot use a `HashMap` since we can be given an address that is offset
-    /// from the base address, and we need to find the `AllocId` it belongs to. This is not the
-    /// *full* inverse of `base_addr`; dead allocations have been removed.
-    #[allow(unused)] // FIXME(GenMC): do we need this?
-    int_to_ptr_map: Vec<(u64, AllocId)>,
-    /// The base address for each allocation.
-    /// This is the inverse of `int_to_ptr_map`.
-    base_addr: FxHashMap<AllocId, u64>,
-    /// This is used as a memory address when a new pointer is casted to an integer. It
-    /// is always larger than any address that was previously made part of a block.
-    next_base_addr: u64,
-    /// To add some randomness to the allocations
-    /// FIXME(GenMC): maybe seed this from the rng in MiriMachine?
-    rng: StdRng,
-}
-
-impl Default for GlobalStateInner {
-    fn default() -> Self {
-        Self::new()
+impl GlobalAllocationHandler {
+    pub fn new(last_addr: u64) -> GlobalAllocationHandler {
+        Self(RwLock::new(GlobalStateInner::new(last_addr)))
     }
 }
 
+#[derive(Debug)]
+struct GlobalStateInner {
+    /// The base address for each allocation.
+    /// This is the inverse of `int_to_ptr_map`.
+    base_addr: FxHashMap<AllocId, u64>,
+    /// We use the same address generator that Miri uses in normal operation.
+    address_generator: AddressGenerator,
+    /// The address generator needs an Rng to randomize the offsets between allocations.
+    /// We don't use the `MiriMachine` Rng, since we don't want it to be reset after every execution.
+    rng: StdRng,
+}
+
 impl GlobalStateInner {
-    pub fn new() -> Self {
+    /// Create a new global address generator with a given max address (corresponding to the highest address available on the target platform, unless another limit exists).
+    /// No addresses higher than this will be allocated.
+    /// Will return an error if the given address limit is too small to allocate any addresses.
+    fn new(last_addr: u64) -> Self {
         assert_eq!(GENMC_GLOBAL_ADDRESSES_MASK, getGlobalAllocStaticMask());
         assert_ne!(GENMC_GLOBAL_ADDRESSES_MASK, 0);
+        // FIXME(genmc): Remove if non-64bit targets are supported.
+        assert!(
+            GENMC_GLOBAL_ADDRESSES_MASK < last_addr,
+            "only 64bit platforms are currently supported (highest address {last_addr:#x} <= minimum global address {GENMC_GLOBAL_ADDRESSES_MASK:#x})."
+        );
         Self {
-            int_to_ptr_map: Vec::default(),
             base_addr: FxHashMap::default(),
-            next_base_addr: GENMC_GLOBAL_ADDRESSES_MASK,
+            address_generator: AddressGenerator::new(GENMC_GLOBAL_ADDRESSES_MASK..last_addr),
+            // FIXME(genmc): We could provide a way to changes this seed, to allow for different global addresses.
             rng: StdRng::seed_from_u64(0),
         }
     }
@@ -72,46 +73,19 @@ impl GlobalStateInner {
             Entry::Vacant(vacant_entry) => vacant_entry,
         };
 
-        // This is either called immediately after allocation (and then cached), or when
-        // adjusting `tcx` pointers (which never get freed). So assert that we are looking
-        // at a live allocation. This also ensures that we never re-assign an address to an
-        // allocation that previously had an address, but then was freed and the address
-        // information was removed.
-        assert!(!matches!(info.kind, AllocKind::Dead));
-
         // This allocation does not have a base address yet, pick or reuse one.
+        // We are not in native lib mode (incompatible with GenMC mode), so we control the addresses ourselves.
+        let new_addr = self.address_generator.generate(info.size, info.align, &mut self.rng)?;
 
-        // We are not in native lib mode, so we control the addresses ourselves.
-
-        // We have to pick a fresh address.
-        // Leave some space to the previous allocation, to give it some chance to be less aligned.
-        // We ensure that `(global_state.next_base_addr + slack) % 16` is uniformly distributed.
-        let slack = self.rng.random_range(0..16);
-        // From next_base_addr + slack, round up to adjust for alignment.
-        let base_addr =
-            self.next_base_addr.checked_add(slack).ok_or_else(|| err_exhaust!(AddressSpaceFull))?;
-        let base_addr = align_addr(base_addr, info.align.bytes());
-
-        // Remember next base address.  If this allocation is zero-sized, leave a gap of at
-        // least 1 to avoid two allocations having the same base address. (The logic in
-        // `alloc_id_from_addr` assumes unique addresses, and different function/vtable pointers
-        // need to be distinguishable!)
-        self.next_base_addr = base_addr
-            .checked_add(max(info.size.bytes(), 1))
-            .ok_or_else(|| err_exhaust!(AddressSpaceFull))?;
-
-        assert_ne!(0, base_addr & GENMC_GLOBAL_ADDRESSES_MASK);
-        assert_ne!(0, self.next_base_addr & GENMC_GLOBAL_ADDRESSES_MASK);
         // Cache the address for future use.
-        entry.insert(base_addr);
+        entry.insert(new_addr);
 
-        interp_ok(base_addr)
+        interp_ok(new_addr)
     }
 }
 
-// FIXME(GenMC): "ExtPriv" or "PrivExt"?
-impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
-pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn get_global_allocation_address(
         &self,
         global_allocation_handler: &GlobalAllocationHandler,
@@ -120,7 +94,7 @@ pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_ref();
         let info = this.get_alloc_info(alloc_id);
 
-        let global_state = global_allocation_handler.inner.read().unwrap();
+        let global_state = global_allocation_handler.0.read().unwrap();
         if let Some(base_addr) = global_state.base_addr.get(&alloc_id) {
             info!(
                 "GenMC: address for global with alloc id {alloc_id:?} was cached: {base_addr} == {base_addr:#x}"
@@ -128,18 +102,19 @@ pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return interp_ok(*base_addr);
         }
 
+        // We need to upgrade to a write lock. `std::sync::RwLock` doesn't support this, so we drop the guard and lock again
+        // Note that another thread might allocate the address while the `RwLock` is unlocked, but we handle this case in the allocation function.
         drop(global_state);
-        // We need to upgrade to a write lock. std::sync::RwLock doesn't support this, so we drop the guard and lock again
-        // Note that another thread might run in between and allocate the address, but we handle this case in the allocation function.
-        let mut global_state = global_allocation_handler.inner.write().unwrap();
-        let base_addr = global_state.global_allocate_addr(alloc_id, info)?;
-        // Even if `Size` didn't overflow, we might still have filled up the address space.
-        if global_state.next_base_addr > this.target_usize_max() {
-            throw_exhaust!(AddressSpaceFull);
-        }
-        info!(
-            "GenMC: global with alloc id {alloc_id:?} got address: {base_addr} == {base_addr:#x}"
+        let mut global_state = global_allocation_handler.0.write().unwrap();
+        // With the write lock, we can safely allocate an address only once per `alloc_id`.
+        let new_addr = global_state.global_allocate_addr(alloc_id, info)?;
+        info!("GenMC: global with alloc id {alloc_id:?} got address: {new_addr} == {new_addr:#x}");
+        assert_eq!(
+            GENMC_GLOBAL_ADDRESSES_MASK,
+            new_addr & GENMC_GLOBAL_ADDRESSES_MASK,
+            "Global address allocated outside global address space."
         );
-        interp_ok(base_addr)
+
+        interp_ok(new_addr)
     }
 }
