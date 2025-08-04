@@ -31,8 +31,10 @@ pub enum TerminationInfo {
     },
     Int2PtrWithStrictProvenance,
     Deadlock,
-    /// In GenMC mode, an execution can get stuck in certain cases. This is not an error.
-    GenmcStuckExecution,
+    /// Program exit is handled differently in GenMC mode.
+    /// Executions can get blocked or continue running after the main thread is finished or `exit` is called.
+    /// The `Exit` variant of this enum should not be used in GenMC mode.
+    GenmcFinishedExecution,
     MultipleSymbolDefinitions {
         link_name: Symbol,
         first: SpanData,
@@ -77,7 +79,11 @@ impl fmt::Display for TerminationInfo {
             StackedBorrowsUb { msg, .. } => write!(f, "{msg}"),
             TreeBorrowsUb { title, .. } => write!(f, "{title}"),
             Deadlock => write!(f, "the evaluated program deadlocked"),
-            GenmcStuckExecution => write!(f, "GenMC determined that the execution got stuck"),
+            GenmcFinishedExecution =>
+                write!(
+                    f,
+                    "GenMC determined that the execution is finished (either the program exited or got blocked)"
+                ),
             MultipleSymbolDefinitions { link_name, .. } =>
                 write!(f, "multiple definitions of symbol `{link_name}`"),
             SymbolShimClashing { link_name, .. } =>
@@ -231,6 +237,10 @@ pub fn report_error<'tcx>(
     let (title, helps) = if let MachineStop(info) = e.kind() {
         let info = info.downcast_ref::<TerminationInfo>().expect("invalid MachineStop payload");
         use TerminationInfo::*;
+        assert!(
+            ecx.machine.data_race.as_genmc_ref().is_none() || !matches!(info, Exit { .. }),
+            "Program exit in GenMC mode should use `GenmcFinishedExecution`."
+        );
         let title = match info {
             &Exit { code, leak_check } => return Some((code, leak_check)),
             Abort(_) => Some("abnormal termination"),
@@ -243,11 +253,17 @@ pub fn report_error<'tcx>(
                 labels.push(format!("this thread got stuck here"));
                 None
             }
-            GenmcStuckExecution => {
-                // This case should only happen in GenMC mode. We treat it like a normal program exit.
-                assert!(ecx.machine.data_race.as_genmc_ref().is_some());
-                tracing::info!("GenMC: found stuck execution");
-                return Some((0, true));
+            GenmcFinishedExecution => {
+                // This case should only happen in GenMC mode.
+                let genmc_ctx = ecx.machine.data_race.as_genmc_ref().unwrap();
+                // Check whether the execution got blocked or the program exited.
+                if let Some((exit_code, leak_check)) = genmc_ctx.get_exit_status() {
+                    // We have an exit status (from `exit(x)` or main thread return).
+                    // Skip leak checks if the execution was blocked.
+                    return Some((exit_code, leak_check));
+                }
+                // The program got blocked by GenMC without ever exiting, so we don't do any leak checks.
+                return Some((0, false));
             }
             MultipleSymbolDefinitions { .. } | SymbolShimClashing { .. } => None,
         };

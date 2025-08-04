@@ -1,74 +1,140 @@
-#![allow(unused)] // FIXME(GenMC): remove this
+use std::cell::{Cell, RefCell};
+use std::sync::Arc;
 
-use std::cell::Cell;
-
-use genmc_sys::{GenmcParams, createGenmcHandle};
+use genmc_sys::{
+    ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, GenmcThreadId, MemOrdering,
+    MiriGenMCShim, UniquePtr, createGenmcHandle,
+};
 use rustc_abi::{Align, Size};
-use rustc_const_eval::interpret::{InterpCx, InterpResult, interp_ok};
-use rustc_middle::mir;
+use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
+use rustc_middle::{mir, throw_machine_stop, throw_ub_format, throw_unsup_format};
+use tracing::info;
 
+use self::global_allocations::{EvalContextExtPriv as _, GlobalAllocationHandler};
+use self::helper::{genmc_scalar_to_scalar, option_scalar_to_genmc_scalar, scalar_to_genmc_scalar};
+use self::thread_info_manager::ThreadInfoManager;
+use crate::concurrency::genmc::helper::split_access;
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
-    MiriMachine, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
+    MiriMachine, MiriMemoryKind, Scalar, TerminationInfo, ThreadId, ThreadManager, VisitProvenance,
+    VisitWith,
 };
 
 mod config;
+mod global_allocations;
+mod helper;
+mod mapping;
+pub mod miri_genmc;
+mod thread_info_manager;
+
+pub use genmc_sys::GenmcParams;
 
 pub use self::config::GenmcConfig;
 
-// FIXME(GenMC): add fields
+const UNSUPPORTED_ATOMICS_SIZE_MSG: &str =
+    "GenMC mode currently does not support atomics larger than 8 bytes.";
+
+#[derive(Clone, Copy)]
+struct ExitStatus {
+    exit_code: i32,
+    leak_check: bool,
+}
+
 pub struct GenmcCtx {
+    handle: RefCell<UniquePtr<MiriGenMCShim>>,
+
+    // FIXME(genmc,performance): we could use one RefCell for all internals instead of multiple
+    thread_infos: RefCell<ThreadInfoManager>,
+
     /// Some actions Miri does are allowed to cause data races.
     /// GenMC will not be informed about certain actions (e.g. non-atomic loads) when this flag is set.
     allow_data_races: Cell<bool>,
+
+    /// Keep track of global allocations, to ensure they keep the same address across different executions, even if the order of allocations changes.
+    /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
+    global_allocations: Arc<GlobalAllocationHandler>,
+
+    /// The exit status of the program.
+    /// `None` if no thread has called `exit` and the main thread isn't finished yet.
+    exit_status: Cell<Option<ExitStatus>>,
 }
 
+/// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
     pub fn new(miri_config: &MiriConfig) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
-
-        let handle = createGenmcHandle(&genmc_config.params);
-        assert!(!handle.is_null());
-
-        eprintln!("Miri: GenMC handle creation successful!");
-
-        drop(handle);
-        eprintln!("Miri: Dropping GenMC handle successful!");
-
-        // FIXME(GenMC): implement
-        std::process::exit(0);
+        let handle = RefCell::new(createGenmcHandle(&genmc_config.params));
+        Self {
+            handle,
+            thread_infos: Default::default(),
+            allow_data_races: Cell::new(false),
+            global_allocations: Default::default(),
+            exit_status: Cell::new(None),
+        }
     }
 
-    pub fn get_stuck_execution_count(&self) -> usize {
-        todo!()
+    pub fn get_blocked_execution_count(&self) -> u64 {
+        let mc = self.handle.borrow();
+        mc.as_ref().unwrap().getBlockedExecutionCount()
     }
 
-    pub fn print_genmc_graph(&self) {
-        todo!()
+    pub fn get_explored_execution_count(&self) -> u64 {
+        let mc = self.handle.borrow();
+        mc.as_ref().unwrap().getExploredExecutionCount()
     }
 
     /// This function determines if we should continue exploring executions or if we are done.
     ///
     /// In GenMC mode, the input program should be repeatedly executed until this function returns `true` or an error is found.
     pub fn is_exploration_done(&self) -> bool {
-        todo!()
+        let mut mc = self.handle.borrow_mut();
+        mc.as_mut().unwrap().isExplorationDone()
     }
+
+    pub fn get_exit_status(&self) -> Option<(i32, bool)> {
+        let ExitStatus { exit_code, leak_check } = self.exit_status.get()?;
+        Some((exit_code, leak_check))
+    }
+
+    fn set_exit_status(&self, exit_code: i32, leak_check: bool) {
+        self.exit_status.set(Some(ExitStatus { exit_code, leak_check }));
+    }
+}
+
+/// GenMC event handling. These methods are used to inform GenMC about events happening in the program, and to handle scheduling decisions.
+impl GenmcCtx {
+    /**** Memory access handling ****/
 
     /// Inform GenMC that a new program execution has started.
     /// This function should be called at the start of every execution.
     pub(crate) fn handle_execution_start(&self) {
-        todo!()
+        self.allow_data_races.replace(false);
+        self.thread_infos.borrow_mut().reset();
+        self.exit_status.set(None);
+
+        let mut mc = self.handle.borrow_mut();
+        mc.as_mut().unwrap().handleExecutionStart();
     }
 
     /// Inform GenMC that the program's execution has ended.
     ///
-    /// This function must be called even when the execution got stuck (i.e., it returned a `InterpErrorKind::MachineStop` with error kind `TerminationInfo::GenmcStuckExecution`).
+    /// This function must be called even when the execution is blocked
+    /// (i.e., it returned a `InterpErrorKind::MachineStop` with error kind `TerminationInfo::GenmcBlockedExecution`).
     pub(crate) fn handle_execution_end<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> Result<(), String> {
-        todo!()
+        let mut mc = self.handle.borrow_mut();
+        let result = mc.as_mut().unwrap().handleExecutionEnd();
+        if let Some(msg) = result.as_ref() {
+            // FIXME(genmc): error handling (may need changes on GenMC side first).
+            let msg = msg.to_string_lossy().to_string();
+            info!("GenMC: execution ended with error \"{msg}\"");
+            Err(msg)
+        } else {
+            Ok(())
+        }
     }
 
     /**** Memory access handling ****/
@@ -83,20 +149,29 @@ impl GenmcCtx {
     /// # Panics
     /// If data race free is attempted to be set more than once (i.e., no nesting allowed).
     pub(super) fn set_ongoing_action_data_race_free(&self, enable: bool) {
+        info!("GenMC: set_ongoing_action_data_race_free ({enable})");
         let old = self.allow_data_races.replace(enable);
         assert_ne!(old, enable, "cannot nest allow_data_races");
     }
 
+    //* might fails if there's a race, load might also not read anything (returns None) */
     pub(crate) fn atomic_load<'tcx>(
         &self,
         ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
         address: Size,
         size: Size,
         ordering: AtomicReadOrd,
+        // The value that we would get, if we were to do a non-atomic load here.
         old_val: Option<Scalar>,
     ) -> InterpResult<'tcx, Scalar> {
-        assert!(!self.allow_data_races.get());
-        todo!()
+        info!("GenMC: atomic_load: old_val: {old_val:?}");
+        assert!(!self.allow_data_races.get()); // FIXME(genmc): ensure correct behavior whereever `allow_data_races` is used.
+        let ordering = ordering.convert();
+        let genmc_old_value = option_scalar_to_genmc_scalar(ecx, old_val)?;
+        let read_value =
+            self.atomic_load_impl(&ecx.machine, address, size, ordering, genmc_old_value)?;
+        info!("GenMC: atomic_load: received value from GenMC: {read_value:?}");
+        genmc_scalar_to_scalar(ecx, read_value, size)
     }
 
     pub(crate) fn atomic_store<'tcx>(
@@ -105,79 +180,92 @@ impl GenmcCtx {
         address: Size,
         size: Size,
         value: Scalar,
+        // The value that we would get, if we were to do a non-atomic load here.
+        old_value: Option<Scalar>,
         ordering: AtomicWriteOrd,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx, bool> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        let ordering = ordering.convert();
+        let genmc_value = scalar_to_genmc_scalar(ecx, value)?;
+        let genmc_old_value = option_scalar_to_genmc_scalar(ecx, old_value)?;
+        self.atomic_store_impl(&ecx.machine, address, size, genmc_value, genmc_old_value, ordering)
     }
 
     pub(crate) fn atomic_fence<'tcx>(
         &self,
-        machine: &MiriMachine<'tcx>,
-        ordering: AtomicFenceOrd,
-    ) -> InterpResult<'tcx, ()> {
-        assert!(!self.allow_data_races.get());
-        todo!()
+        _machine: &MiriMachine<'tcx>,
+        _ordering: AtomicFenceOrd,
+    ) -> InterpResult<'tcx> {
+        throw_unsup_format!("FIXME(genmc): Add support for atomic fences.")
     }
 
     /// Inform GenMC about an atomic read-modify-write operation.
     ///
-    /// Returns `(old_val, new_val)`.
+    /// Returns `(old_val, Option<new_val>)`. `new_val` might not be the latest write in coherence order, which is indicated by `None`.
     pub(crate) fn atomic_rmw_op<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        ordering: AtomicRwOrd,
-        (rmw_op, not): (mir::BinOp, bool),
-        rhs_scalar: Scalar,
-    ) -> InterpResult<'tcx, (Scalar, Scalar)> {
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _ordering: AtomicRwOrd,
+        (_rmw_op, _not): (mir::BinOp, bool),
+        _rhs_scalar: Scalar,
+        // The value that we would get, if we were to do a non-atomic load here.
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        throw_unsup_format!("FIXME(genmc): Add support for atomic RMW.")
     }
 
     /// Inform GenMC about an atomic `min` or `max` operation.
     ///
-    /// Returns `(old_val, new_val)`.
+    /// Returns `(old_val, Option<new_val>)`. `new_val` might not be the latest write in coherence order, which is indicated by `None`.
     pub(crate) fn atomic_min_max_op<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        ordering: AtomicRwOrd,
-        min: bool,
-        is_signed: bool,
-        rhs_scalar: Scalar,
-    ) -> InterpResult<'tcx, (Scalar, Scalar)> {
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _ordering: AtomicRwOrd,
+        _min: bool,
+        _is_signed: bool,
+        _rhs_scalar: Scalar,
+        // The value that we would get, if we were to do a non-atomic load here.
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        throw_unsup_format!("FIXME(genmc): Add support for atomic min/max.")
     }
 
+    /// Returns `(old_val, Option<new_val>)`. `new_val` might not be the latest write in coherence order, which is indicated by `None`.
     pub(crate) fn atomic_exchange<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        rhs_scalar: Scalar,
-        ordering: AtomicRwOrd,
-    ) -> InterpResult<'tcx, (Scalar, bool)> {
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _rhs_scalar: Scalar,
+        _ordering: AtomicRwOrd,
+        // The value that we would get, if we were to do a non-atomic load here.
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>)> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        throw_unsup_format!("FIXME(genmc): Add support for atomic swap.")
     }
 
     pub(crate) fn atomic_compare_exchange<'tcx>(
         &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-        address: Size,
-        size: Size,
-        expected_old_value: Scalar,
-        new_value: Scalar,
-        success: AtomicRwOrd,
-        fail: AtomicReadOrd,
-        can_fail_spuriously: bool,
-    ) -> InterpResult<'tcx, (Scalar, bool)> {
+        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        _address: Size,
+        _size: Size,
+        _expected_old_value: Scalar,
+        _new_value: Scalar,
+        _success: AtomicRwOrd,
+        _fail: AtomicReadOrd,
+        _can_fail_spuriously: bool,
+        // The value that we would get, if we were to do a non-atomic load here.
+        _old_value: Scalar,
+    ) -> InterpResult<'tcx, (Scalar, bool, bool)> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        throw_unsup_format!("FIXME(genmc): Add support for atomic compare_exchange.")
     }
 
     /// Inform GenMC about a non-atomic memory load
@@ -188,8 +276,45 @@ impl GenmcCtx {
         machine: &MiriMachine<'tcx>,
         address: Size,
         size: Size,
-    ) -> InterpResult<'tcx, ()> {
-        todo!()
+    ) -> InterpResult<'tcx> {
+        info!(
+            "GenMC: received memory_load (non-atomic): address: {:#x}, size: {}",
+            address.bytes(),
+            size.bytes()
+        );
+        if self.allow_data_races.get() {
+            info!("GenMC: skipping `memory_load` on address");
+            return interp_ok(());
+        }
+        // GenMC doesn't like ZSTs, and they can't have any data races, so we skip them
+        if size.bytes() == 0 {
+            return interp_ok(());
+        }
+
+        if size.bytes() <= 8 {
+            // NOTE: Values loaded non-atomically are still handled by Miri, so we discard whatever we get from GenMC
+            let _read_value = self.atomic_load_impl(
+                machine,
+                address,
+                size,
+                MemOrdering::NotAtomic,
+                GenmcScalar::UNINIT, // Don't use DUMMY here, since that might have it stored as the initial value
+            )?;
+            return interp_ok(());
+        }
+
+        for (address, size) in split_access(address, size) {
+            let chunk_addr = Size::from_bytes(address);
+            let chunk_size = Size::from_bytes(size);
+            let _read_value = self.atomic_load_impl(
+                machine,
+                chunk_addr,
+                chunk_size,
+                MemOrdering::NotAtomic,
+                GenmcScalar::UNINIT, // Don't use DUMMY here, since that might have it stored as the initial value
+            )?;
+        }
+        interp_ok(())
     }
 
     pub(crate) fn memory_store<'tcx>(
@@ -197,31 +322,122 @@ impl GenmcCtx {
         machine: &MiriMachine<'tcx>,
         address: Size,
         size: Size,
-    ) -> InterpResult<'tcx, ()> {
-        todo!()
+    ) -> InterpResult<'tcx> {
+        info!(
+            "GenMC: received memory_store (non-atomic): address: {:#x}, size: {}",
+            address.bytes(),
+            size.bytes()
+        );
+        if self.allow_data_races.get() {
+            info!("GenMC: skipping `memory_store`");
+            return interp_ok(());
+        }
+        // GenMC doesn't like ZSTs, and they can't have any data races, so we skip them
+        if size.bytes() == 0 {
+            return interp_ok(());
+        }
+
+        if size.bytes() <= 8 {
+            let _is_co_max_write = self.atomic_store_impl(
+                machine,
+                address,
+                size,
+                GenmcScalar::DUMMY,
+                GenmcScalar::UNINIT, // Don't use DUMMY here, since that might have it stored as the initial value
+                MemOrdering::NotAtomic,
+            )?;
+            return interp_ok(());
+        }
+
+        for (address, size) in split_access(address, size) {
+            let chunk_addr = Size::from_bytes(address);
+            let chunk_size = Size::from_bytes(size);
+            let _is_co_max_write = self.atomic_store_impl(
+                machine,
+                chunk_addr,
+                chunk_size,
+                GenmcScalar::DUMMY,
+                GenmcScalar::UNINIT, // Don't use DUMMY here, since that might have it stored as the initial value
+                MemOrdering::NotAtomic,
+            )?;
+        }
+        interp_ok(())
     }
 
     /**** Memory (de)allocation ****/
 
     pub(crate) fn handle_alloc<'tcx>(
         &self,
-        machine: &MiriMachine<'tcx>,
+        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+        alloc_id: AllocId,
         size: Size,
         alignment: Align,
         memory_kind: MemoryKind,
     ) -> InterpResult<'tcx, u64> {
-        todo!()
+        let machine = &ecx.machine;
+        let chosen_address = if memory_kind == MiriMemoryKind::Global.into() {
+            ecx.get_global_allocation_address(&self.global_allocations, alloc_id)?
+        } else {
+            if self.allow_data_races.get() {
+                unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
+            }
+            let thread_infos = self.thread_infos.borrow();
+            let curr_thread = machine.threads.active_thread();
+            let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
+            // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
+            let genmc_size = size.bytes().max(1);
+
+            let alignment = alignment.bytes();
+
+            let mut mc = self.handle.borrow_mut();
+            let pinned_mc = mc.as_mut().unwrap();
+            let chosen_address = pinned_mc.handleMalloc(genmc_tid.0, genmc_size, alignment);
+
+            assert_ne!(chosen_address, 0, "GenMC malloc returned nullptr.");
+            // Non-global addresses should not be in the global address space.
+            assert_eq!(0, chosen_address & GENMC_GLOBAL_ADDRESSES_MASK);
+            chosen_address
+        };
+
+        // Sanity check the address alignment:
+        debug_assert_eq!(
+            0,
+            chosen_address % alignment.bytes(),
+            "Allocated address {chosen_address:#x} does not have requested alignment ({alignment:?})!"
+        );
+
+        interp_ok(chosen_address)
     }
 
     pub(crate) fn handle_dealloc<'tcx>(
         &self,
         machine: &MiriMachine<'tcx>,
+        alloc_id: AllocId,
         address: Size,
         size: Size,
-        align: Align,
         kind: MemoryKind,
-    ) -> InterpResult<'tcx, ()> {
-        todo!()
+    ) -> InterpResult<'tcx> {
+        assert_ne!(
+            kind,
+            MiriMemoryKind::Global.into(),
+            "we probably shouldn't try to deallocate global allocations (alloc_id: {alloc_id:?})"
+        );
+        if self.allow_data_races.get() {
+            unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
+        }
+        let thread_infos = self.thread_infos.borrow();
+        let curr_thread = machine.threads.active_thread();
+        let genmc_tid = thread_infos.get_info(curr_thread).genmc_tid;
+
+        let genmc_address = address.bytes();
+        // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
+        let genmc_size = size.bytes().max(1);
+
+        let mut mc = self.handle.borrow_mut();
+        let pinned_mc = mc.as_mut().unwrap();
+        pinned_mc.handleFree(genmc_tid.0, genmc_address, genmc_size);
+
+        interp_ok(())
     }
 
     /**** Thread management ****/
@@ -229,50 +445,89 @@ impl GenmcCtx {
     pub(crate) fn handle_thread_create<'tcx>(
         &self,
         threads: &ThreadManager<'tcx>,
+        _start_routine: crate::Pointer, // FIXME(genmc): symmetry reduction will need this info
+        _func_arg: &crate::ImmTy<'tcx>,
         new_thread_id: ThreadId,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        let mut thread_infos = self.thread_infos.borrow_mut();
+
+        let curr_thread_id = threads.active_thread();
+        let genmc_parent_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+        let genmc_new_tid = thread_infos.add_thread(new_thread_id);
+
+        let mut mc = self.handle.borrow_mut();
+        mc.as_mut().unwrap().handleThreadCreate(genmc_new_tid.0, genmc_parent_tid.0);
+
+        interp_ok(())
     }
 
     pub(crate) fn handle_thread_join<'tcx>(
         &self,
         active_thread_id: ThreadId,
         child_thread_id: ThreadId,
-    ) -> InterpResult<'tcx, ()> {
+    ) -> InterpResult<'tcx> {
         assert!(!self.allow_data_races.get());
-        todo!()
+        let thread_infos = self.thread_infos.borrow();
+
+        let genmc_curr_tid = thread_infos.get_info(active_thread_id).genmc_tid;
+        let genmc_child_tid = thread_infos.get_info(child_thread_id).genmc_tid;
+
+        let mut mc = self.handle.borrow_mut();
+        mc.as_mut().unwrap().handleThreadJoin(genmc_curr_tid.0, genmc_child_tid.0);
+
+        interp_ok(())
     }
 
-    pub(crate) fn handle_thread_stack_empty(&self, thread_id: ThreadId) {
-        todo!()
+    pub(crate) fn handle_thread_finish<'tcx>(&self, threads: &ThreadManager<'tcx>) {
+        assert!(!self.allow_data_races.get());
+        let curr_thread_id = threads.active_thread();
+
+        let thread_infos = self.thread_infos.borrow();
+        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+
+        // NOTE: Miri doesn't support return values for threads, but GenMC expects one, so we return 0
+        let ret_val = 0;
+
+        info!(
+            "GenMC: handling thread finish (thread {curr_thread_id:?} ({genmc_tid:?}) returns with dummy value 0)"
+        );
+
+        let mut mc = self.handle.borrow_mut();
+        mc.as_mut().unwrap().handleThreadFinish(genmc_tid.0, ret_val);
     }
 
-    pub(crate) fn handle_thread_finish<'tcx>(
+    /// Handle a call to `libc::exit` or the exit of the main thread.
+    /// Unless an error is returned, the program should continue executing (in a different thread, chosen by the next scheduling call).
+    pub(crate) fn handle_exit<'tcx>(
         &self,
-        threads: &ThreadManager<'tcx>,
-    ) -> InterpResult<'tcx, ()> {
-        assert!(!self.allow_data_races.get());
-        todo!()
-    }
+        thread: ThreadId,
+        exit_code: i32,
+        is_exit_call: bool,
+    ) -> InterpResult<'tcx> {
+        // Calling `libc::exit` doesn't do cleanup, so we skip the leak check in that case.
+        let leak_check = !is_exit_call;
+        self.set_exit_status(exit_code, leak_check);
 
-    /**** Scheduling functionality ****/
+        // FIXME(genmc): Add a flag to continue exploration even when the program exits with a non-zero exit code.
+        if exit_code != 0 {
+            info!("GenMC: 'exit' called with non-zero argument, aborting execution.");
+            throw_machine_stop!(TerminationInfo::GenmcFinishedExecution);
+        }
 
-    /// Ask for a scheduling decision. This should be called before every MIR instruction.
-    ///
-    /// GenMC may realize that the execution got stuck, then this function will return a `InterpErrorKind::MachineStop` with error kind `TerminationInfo::GenmcStuckExecution`).
-    ///
-    /// This is **not** an error by iself! Treat this as if the program ended normally: `handle_execution_end` should be called next, which will determine if were are any actual errors.
-    pub(crate) fn schedule_thread<'tcx>(
-        &self,
-        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    ) -> InterpResult<'tcx, ThreadId> {
-        assert!(!self.allow_data_races.get());
-        todo!()
+        if is_exit_call {
+            let thread_infos = self.thread_infos.borrow();
+            let genmc_tid = thread_infos.get_info(thread).genmc_tid;
+
+            let mut mc = self.handle.borrow_mut();
+            mc.as_mut().unwrap().handleThreadKill(genmc_tid.0);
+        }
+        interp_ok(())
     }
 
     /**** Blocking instructions ****/
 
+    #[allow(unused)]
     pub(crate) fn handle_verifier_assume<'tcx>(
         &self,
         machine: &MiriMachine<'tcx>,
@@ -282,14 +537,186 @@ impl GenmcCtx {
     }
 }
 
+impl GenmcCtx {
+    //* might fails if there's a race, load might also not read anything (returns None) */
+    fn atomic_load_impl<'tcx>(
+        &self,
+        machine: &MiriMachine<'tcx>,
+        address: Size,
+        size: Size,
+        memory_ordering: MemOrdering,
+        genmc_old_value: GenmcScalar,
+    ) -> InterpResult<'tcx, GenmcScalar> {
+        assert!(
+            size.bytes() != 0
+                && (memory_ordering == MemOrdering::NotAtomic || size.bytes().is_power_of_two())
+        );
+        if size.bytes() > 8 {
+            throw_unsup_format!("{UNSUPPORTED_ATOMICS_SIZE_MSG}");
+        }
+        assert!(!self.allow_data_races.get());
+        let thread_infos = self.thread_infos.borrow();
+        let curr_thread_id = machine.threads.active_thread();
+        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+
+        info!(
+            "GenMC: load, thread: {curr_thread_id:?} ({genmc_tid:?}), address: {addr} == {addr:#x}, size: {size:?}, ordering: {memory_ordering:?}, old_value: {genmc_old_value:x?}",
+            addr = address.bytes()
+        );
+        let genmc_address = address.bytes();
+        let genmc_size = size.bytes();
+
+        let mut mc = self.handle.borrow_mut();
+        let pinned_mc = mc.as_mut().unwrap();
+        let load_result = pinned_mc.handleLoad(
+            genmc_tid.0,
+            genmc_address,
+            genmc_size,
+            memory_ordering,
+            genmc_old_value,
+        );
+
+        if load_result.is_read_opt {
+            todo!();
+        }
+
+        if let Some(error) = load_result.error.as_ref() {
+            // FIXME(genmc): error handling
+            let msg = error.to_string_lossy().to_string();
+            info!("GenMC: load operation returned an error: \"{msg}\"");
+            throw_ub_format!("{}", msg);
+        }
+
+        info!("GenMC: load returned value: {:?}", load_result.read_value);
+
+        interp_ok(load_result.read_value)
+    }
+
+    fn atomic_store_impl<'tcx>(
+        &self,
+        machine: &MiriMachine<'tcx>,
+        address: Size,
+        size: Size,
+        genmc_value: GenmcScalar,
+        genmc_old_value: GenmcScalar,
+        memory_ordering: MemOrdering,
+    ) -> InterpResult<'tcx, bool> {
+        assert!(
+            size.bytes() != 0
+                && (memory_ordering == MemOrdering::NotAtomic || size.bytes().is_power_of_two())
+        );
+        if size.bytes() > 8 {
+            throw_unsup_format!("{UNSUPPORTED_ATOMICS_SIZE_MSG}");
+        }
+        let thread_infos = self.thread_infos.borrow();
+        let curr_thread_id = machine.threads.active_thread();
+        let genmc_tid = thread_infos.get_info(curr_thread_id).genmc_tid;
+
+        let genmc_address = address.bytes();
+        let genmc_size = size.bytes();
+
+        info!(
+            "GenMC: store, thread: {curr_thread_id:?} ({genmc_tid:?}), address: {addr} = {addr:#x}, size: {size:?}, ordering {memory_ordering:?}, value: {genmc_value:?}",
+            addr = address.bytes()
+        );
+
+        let mut mc = self.handle.borrow_mut();
+        let pinned_mc = mc.as_mut().unwrap();
+        let store_result = pinned_mc.handleStore(
+            genmc_tid.0,
+            genmc_address,
+            genmc_size,
+            genmc_value,
+            genmc_old_value,
+            memory_ordering,
+        );
+
+        if let Some(error) = store_result.error.as_ref() {
+            // FIXME(genmc): error handling
+            let msg = error.to_string_lossy().to_string();
+            info!("GenMC: store operation returned an error: \"{msg}\"");
+            throw_ub_format!("{}", msg);
+        }
+
+        interp_ok(store_result.isCoMaxWrite)
+    }
+
+    /**** Scheduling functionality ****/
+
+    pub fn schedule_thread<'tcx>(
+        &self,
+        ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
+    ) -> InterpResult<'tcx, ThreadId> {
+        assert!(!self.allow_data_races.get());
+        let thread_manager = &ecx.machine.threads;
+        let active_thread_id = thread_manager.active_thread();
+
+        let curr_thread_next_instr_kind =
+            if !thread_manager.active_thread_ref().get_state().is_enabled() {
+                // The current thread can get blocked (e.g., due to a thread join, assume statement, ...), then we need to ask GenMC for another thread to schedule.
+                // `Load` is a safe default for the next instruction type, since we may not know what the next instruction is.
+                ActionKind::Load
+            } else {
+                let Some(frame) = thread_manager.get_thread_stack(active_thread_id).last() else {
+                    return interp_ok(active_thread_id);
+                };
+                let either::Either::Left(loc) = frame.current_loc() else {
+                    // We are unwinding.
+                    return interp_ok(active_thread_id);
+                };
+                let basic_block = &frame.body().basic_blocks[loc.block];
+                if let Some(_statement) = basic_block.statements.get(loc.statement_index) {
+                    return interp_ok(active_thread_id);
+                }
+
+                // FIXME(genmc): determine terminator kind.
+                ActionKind::Load
+            };
+
+        info!(
+            "GenMC: schedule_thread, active thread: {active_thread_id:?}, next instr.: '{curr_thread_next_instr_kind:?}'"
+        );
+
+        // let curr_thread_user_block = self.curr_thread_user_block.replace(false);
+        let thread_infos = self.thread_infos.borrow();
+        let curr_thread_info = thread_infos.get_info(active_thread_id);
+
+        let mut mc = self.handle.borrow_mut();
+        let pinned_mc = mc.as_mut().unwrap();
+        let result =
+            pinned_mc.scheduleNext(curr_thread_info.genmc_tid.0, curr_thread_next_instr_kind);
+        if result >= 0 {
+            let genmc_next_thread_id = result.try_into().unwrap();
+            let genmc_next_thread_id = GenmcThreadId(genmc_next_thread_id);
+            let thread_infos = self.thread_infos.borrow();
+            let next_thread_id = thread_infos.get_info_genmc(genmc_next_thread_id).miri_tid;
+
+            return interp_ok(next_thread_id);
+        }
+
+        // Negative result means that GenMC has no next thread to schedule.
+        info!("GenMC: scheduleNext returned no thread to schedule, execution is finished.");
+        throw_machine_stop!(TerminationInfo::GenmcFinishedExecution);
+    }
+
+    /**** Blocking functionality ****/
+
+    fn handle_user_block<'tcx>(&self, _machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
+        todo!()
+    }
+}
+
 impl VisitProvenance for GenmcCtx {
     fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
         // We don't have any tags.
     }
 }
 
-impl GenmcCtx {
-    fn handle_user_block<'tcx>(&self, machine: &MiriMachine<'tcx>) -> InterpResult<'tcx, ()> {
-        todo!()
+impl std::fmt::Debug for GenmcCtx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenmcCtx")
+            // .field("mc", &self.mc)
+            .field("thread_infos", &self.thread_infos)
+            .finish_non_exhaustive()
     }
 }

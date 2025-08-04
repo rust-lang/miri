@@ -6,8 +6,6 @@ use super::GenmcParams;
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {
     pub(super) params: GenmcParams,
-    do_estimation: bool,
-    // FIXME(GenMC): add remaining options.
 }
 
 impl GenmcConfig {
@@ -29,7 +27,11 @@ impl GenmcConfig {
         if trimmed_arg.is_empty() {
             return Ok(()); // this corresponds to "-Zmiri-genmc"
         }
-        // FIXME(GenMC): implement remaining parameters.
-        todo!();
+        let _genmc_config = genmc_config.as_mut().unwrap();
+        let Some(trimmed_arg) = trimmed_arg.strip_prefix("-") else {
+            return Err(format!("Invalid GenMC argument \"-Zmiri-genmc{trimmed_arg}\""));
+        };
+        // FIXME(genmc): Add parsing for remaining parameters.
+        Err(format!("Invalid GenMC argument: \"-Zmiri-genmc-{trimmed_arg}\""))
     }
 }
