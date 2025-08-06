@@ -139,7 +139,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
                 // Find it if it was not cached.
-                let mut instance_and_crate: Option<(ty::Instance<'_>, CrateNum, bool)> = None;
+
+                struct SymbolTarget<'tcx> {
+                    instance: ty::Instance<'tcx>,
+                    cnum: CrateNum,
+                    is_weak: bool,
+                }
+                let mut symbol_target: Option<SymbolTarget<'tcx>> = None;
                 helpers::iter_exported_symbols(tcx, |cnum, def_id| {
                     let attrs = tcx.codegen_fn_attrs(def_id);
                     // Skip over imports of items.
@@ -158,15 +164,23 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let symbol_name = tcx.symbol_name(instance).name;
                     let is_weak = attrs.linkage == Some(Linkage::WeakAny);
                     if symbol_name == link_name.as_str() {
-                        if let Some((original_instance, original_cnum, original_is_weak)) =
-                            instance_and_crate
+                        if let Some(SymbolTarget {
+                            instance: original_instance,
+                            cnum: original_cnum,
+                            is_weak: original_is_weak,
+                        }) = symbol_target
                         {
+                            // There is more than one definition with this name. What we do now
+                            // depends on whether one or both definitions are weak.
                             match (is_weak, original_is_weak) {
                                 (false, true) => {
                                     // Original definition is a weak definition. Override it.
 
-                                    instance_and_crate =
-                                        Some((ty::Instance::mono(tcx, def_id), cnum, is_weak));
+                                    symbol_target = Some(SymbolTarget {
+                                        instance: ty::Instance::mono(tcx, def_id),
+                                        cnum,
+                                        is_weak,
+                                    });
                                 }
                                 (true, false) => {
                                     // Current definition is a weak definition. Keep the original one.
@@ -174,7 +188,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 (true, true) | (false, false) => {
                                     // Either both definitions are non-weak or both are weak. In
                                     // either case return an error. For weak definitions we error
-                                    // because it is undefined which definition would have been
+                                    // because it is unspecified which definition would have been
                                     // picked by the linker.
 
                                     // Make sure we are consistent wrt what is 'first' and 'second'.
@@ -205,14 +219,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 }
                             }
                         } else {
-                            instance_and_crate =
-                                Some((ty::Instance::mono(tcx, def_id), cnum, is_weak));
+                            symbol_target = Some(SymbolTarget {
+                                instance: ty::Instance::mono(tcx, def_id),
+                                cnum,
+                                is_weak,
+                            });
                         }
                     }
                     interp_ok(())
                 })?;
 
-                if let Some((instance, _, _)) = instance_and_crate {
+                if let Some(SymbolTarget { instance, .. }) = symbol_target {
                     if !matches!(tcx.def_kind(instance.def_id()), DefKind::Fn | DefKind::AssocFn) {
                         throw_ub_format!(
                             "attempt to call an exported symbol that is not defined as a function"
@@ -220,7 +237,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                 }
 
-                e.insert(instance_and_crate.map(|ic| ic.0))
+                e.insert(symbol_target.map(|SymbolTarget { instance, .. }| instance))
             }
         };
         match instance {
