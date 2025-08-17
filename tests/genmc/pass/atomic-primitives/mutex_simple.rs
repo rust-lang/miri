@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use crate::genmc::*;
 
-#[cfg(reps1)]
+#[cfg(not(reps2))]
 const REPS: u64 = 1;
 #[cfg(reps2)]
 const REPS: u64 = 2;

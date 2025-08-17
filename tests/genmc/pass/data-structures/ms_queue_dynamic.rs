@@ -8,8 +8,8 @@
 
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::c_void;
+use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering::*;
-use std::sync::atomic::{AtomicPtr};
 
 use libc::{self, pthread_attr_t, pthread_t};
 

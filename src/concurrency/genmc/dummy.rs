@@ -203,7 +203,6 @@ impl GenmcCtx {
         _machine: &MiriMachine<'tcx>,
         _alloc_id: AllocId,
         _address: Size,
-        _size: Size,
         _kind: MemoryKind,
     ) -> InterpResult<'tcx> {
         unreachable!()

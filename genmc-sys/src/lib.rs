@@ -29,6 +29,10 @@ impl GenmcScalar {
     pub const fn from_u64(value: u64) -> Self {
         Self { value, extra: 0, is_init: true }
     }
+
+    pub const fn has_provenance(&self) -> bool {
+        self.extra != 0
+    }
 }
 
 impl Default for GenmcParams {
@@ -140,15 +144,6 @@ mod ffi {
         UMin = 10,
     }
 
-    // TODO GENMC: do these have to be shared with the Rust side?
-    #[derive(Debug)]
-    enum StoreEventType {
-        Normal,
-        ReadModifyWrite,
-        CompareExchange,
-        MutexUnlockWrite,
-    }
-
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
@@ -160,42 +155,57 @@ mod ffi {
 
     #[must_use]
     #[derive(Debug)]
-    struct ReadModifyWriteResult {
-        old_value: GenmcScalar,
-        new_value: GenmcScalar,
-        isCoMaxWrite: bool,
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
-    }
-
-    #[must_use]
-    #[derive(Debug)]
-    struct MutexLockResult {
-        is_lock_acquired: bool,
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
-    }
-
-    #[must_use]
-    #[derive(Debug)]
-    struct CompareExchangeResult {
-        old_value: GenmcScalar, // TODO GENMC: handle bigger values
-        is_success: bool,
-        isCoMaxWrite: bool,
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
-    }
-
-    #[must_use]
-    #[derive(Debug)]
     struct LoadResult {
-        is_read_opt: bool,
-        read_value: GenmcScalar,     // TODO GENMC: handle bigger values
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
+        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        error: UniquePtr<CxxString>,
+        /// Indicates whether a value was read or not.
+        has_value: bool,
+        /// The value that was read. Should not be used if `has_value` is `false`.
+        read_value: GenmcScalar,
     }
 
     #[must_use]
     #[derive(Debug)]
     struct StoreResult {
-        error: UniquePtr<CxxString>, // TODO GENMC: pass more error info here
+        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        error: UniquePtr<CxxString>,
+        /// `true` if the write should also be reflected in Miri's memory representation.
         isCoMaxWrite: bool,
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct ReadModifyWriteResult {
+        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        error: UniquePtr<CxxString>,
+        /// The value that was read by the RMW operation as the left operand.
+        old_value: GenmcScalar,
+        /// The value that was produced by the RMW operation.
+        new_value: GenmcScalar,
+        /// `true` if the write should also be reflected in Miri's memory representation.
+        isCoMaxWrite: bool,
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct CompareExchangeResult {
+        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        error: UniquePtr<CxxString>,
+        /// The value that was read by the compare-exchange.
+        old_value: GenmcScalar,
+        /// `true` if compare_exchange op was successful.
+        is_success: bool,
+        /// `true` if the write should also be reflected in Miri's memory representation.
+        isCoMaxWrite: bool,
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct MutexLockResult {
+        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        error: UniquePtr<CxxString>,
+        /// Indicate whether the lock was acquired by this thread.
+        is_lock_acquired: bool,
     }
 
     /**** /\ Result & Error types /\ ****/
@@ -205,7 +215,6 @@ mod ffi {
 
         type MemOrdering;
         type RMWBinOp;
-        type StoreEventType;
 
         // Types for Scheduling queries:
         type ActionKind;
@@ -270,7 +279,6 @@ mod ffi {
             value: GenmcScalar,
             old_value: GenmcScalar,
             memory_ordering: MemOrdering,
-            store_event_type: StoreEventType,
         ) -> StoreResult;
         fn handleFence(self: Pin<&mut MiriGenMCShim>, thread_id: i32, memory_ordering: MemOrdering);
 
@@ -280,7 +288,7 @@ mod ffi {
             size: u64,
             alignment: u64,
         ) -> u64;
-        fn handleFree(self: Pin<&mut MiriGenMCShim>, thread_id: i32, address: u64, size: u64);
+        fn handleFree(self: Pin<&mut MiriGenMCShim>, thread_id: i32, address: u64);
 
         fn handleThreadCreate(self: Pin<&mut MiriGenMCShim>, thread_id: i32, parent_id: i32);
         fn handleThreadJoin(self: Pin<&mut MiriGenMCShim>, thread_id: i32, child_id: i32);

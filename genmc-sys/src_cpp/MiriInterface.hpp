@@ -7,13 +7,15 @@
 // GenMC generated headers:
 #include "config.h"
 
+// Miri `genmc-sys/src_cpp` headers:
+#include "ResultHandling.hpp"
+
 // GenMC headers:
-#include "Config/Config.hpp"
 #include "ExecutionGraph/EventLabel.hpp"
 #include "Static/ModuleID.hpp"
 #include "Support/MemOrdering.hpp"
 #include "Support/RMWOps.hpp"
-#include "Support/ResultHandling.hpp"
+#include "Verification/Config.hpp"
 #include "Verification/GenMCDriver.hpp"
 
 // C++ headers:
@@ -28,27 +30,8 @@ struct GenmcParams;
 
 using ThreadId = int;
 
-enum class StoreEventType : uint8_t {
-	Normal,
-	ReadModifyWrite,
-	CompareExchange,
-	MutexUnlockWrite,
-};
-
-struct MutexLockResult {
-	bool is_lock_acquired;
-	std::unique_ptr<ModelCheckerError> error; // TODO GENMC: pass more error info here
-
-	MutexLockResult(bool is_lock_acquired) : is_lock_acquired(is_lock_acquired), error(nullptr)
-	{}
-
-	static auto fromError(std::string msg) -> MutexLockResult
-	{
-		auto res = MutexLockResult(false);
-		res.error = std::make_unique<ModelCheckerError>(msg);
-		return res;
-	}
-};
+using AnnotID = ModuleID::ID;
+using AnnotT = SExpr<AnnotID>;
 
 // TODO GENMC: fix naming conventions
 
@@ -83,14 +66,14 @@ public:
 			      bool can_fail_spuriously);
 	[[nodiscard]] StoreResult handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
 					      GenmcScalar value, GenmcScalar old_val,
-					      MemOrdering ord, StoreEventType store_event_type);
+					      MemOrdering ord);
 
 	void handleFence(ThreadId thread_id, MemOrdering ord);
 
 	/**** Memory (de)allocation ****/
 
 	uintptr_t handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment);
-	void handleFree(ThreadId thread_id, uint64_t address, uint64_t size);
+	void handleFree(ThreadId thread_id, uint64_t address);
 
 	/**** Thread management ****/
 
@@ -110,14 +93,27 @@ public:
 		-> MutexLockResult;
 	auto handleMutexUnlock(ThreadId thread_id, uint64_t address, uint64_t size) -> StoreResult;
 
-	/**** Scheduling queries ****/
-
-	// TODO GENMC: implement
+	/**** Exploration related functionality ****/
 
 	auto scheduleNext(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
 		-> int64_t;
 
-	/**** TODO GENMC: Other stuff: ****/
+	bool isExplorationDone() { return GenMCDriver::done(); }
+
+	/** Increment the event index in the given thread by 1 and return the new event. */
+	[[nodiscard]] inline auto incPos(ThreadId tid) -> Event
+	{
+		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
+		return ++threadsAction[tid].event;
+	}
+	/** Decrement the event index in the given thread by 1 and return the new event. */
+	inline auto decPos(ThreadId tid) -> Event
+	{
+		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
+		return --threadsAction[tid].event;
+	}
+
+	/**** Printing and result querying ****/
 
 	auto getBlockedExecutionCount() const -> uint64_t
 	{
@@ -129,44 +125,22 @@ public:
 		return static_cast<uint64_t>(getResult().explored);
 	}
 
-	bool isExplorationDone() { return GenMCDriver::done(); }
-
-	/**** OTHER ****/
-
-	auto incPos(ThreadId tid) -> Event
-	{
-		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
-		return ++threadsAction[tid].event;
-	}
-	auto decPos(ThreadId tid) -> Event
-	{
-		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
-		return --threadsAction[tid].event;
-	}
-
 	void printGraph() { GenMCDriver::debugPrintGraph(); }
 
 	void printEstimationResults(const double elapsed_time_sec) const
 	{
-		// TODO GENMC(CLEANUP): should this happen on the Rust side?
+		// FIXME(GenMC,cleanup): should this happen on the Rust side?
 		const auto &res = getResult();
 		const auto *conf = getConf();
 
-		auto mean = std::llround(res.estimationMean);
-		auto sd = std::llround(std::sqrt(res.estimationVariance));
-		auto meanTimeSecs =
+		long long mean = std::llround(res.estimationMean);
+		long long sd = std::llround(std::sqrt(res.estimationVariance));
+		long double meanTimeSecs =
 			(long double)elapsed_time_sec / (res.explored + res.exploredBlocked);
-		// FIXME(io): restore the old precision after the print?
-		// PRINT(VerbosityLevel::Error)
-		// 	<< "Finished estimation in " << std::setprecision(2) << elapsed_time_sec
-		// 	<< " seconds.\n\n"
-		// 	<< "Total executions estimate: " << mean << " (+- " << sd << ")\n"
-		// 	<< "Time to completion estimate: " << std::setprecision(2)
-		// 	<< (meanTimeSecs * mean) << "s\n";
 		PRINT(VerbosityLevel::Error)
 			<< "Finished estimation in " << std::format("%.2f", elapsed_time_sec)
 			<< " seconds.\n\n"
-			<< "Total executions estimate: " << mean << " (+- " << sd << ")\n"
+			<< std::format("Total executions estimate: {} (+- {})\n", mean, sd)
 			<< "Time to completion estimate: "
 			<< std::format("%.2f", meanTimeSecs * mean) << "s\n";
 		GENMC_DEBUG(if (conf->printEstimationStats) PRINT(VerbosityLevel::Error)
@@ -224,6 +198,20 @@ private:
 		}
 		// either initLabel	==> update initValGetter
 		// or WriteLabel    ==> Update its value in place (only if non-atomic)
+	}
+
+	template <EventLabel::EventLabelKind k, typename... Ts>
+	HandleResult<SVal> handleLoadResetIfNone(std::function<void(SAddr)> oldValSetter,
+						 ThreadId tid, Ts &&...params)
+	{
+		const auto pos = incPos(tid);
+		const auto ret =
+			GenMCDriver::handleLoad<k>(oldValSetter, pos, std::forward<Ts>(params)...);
+		// If we didn't get a value, we reset the index of the current thread.
+		if (!std::holds_alternative<SVal>(ret)) {
+			decPos(tid);
+		}
+		return ret;
 	}
 
 	// TODO GENMC(mixed-size accesses):

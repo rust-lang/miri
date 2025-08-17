@@ -5,8 +5,8 @@
 #include "genmc-sys/src/lib.rs.h"
 
 // GenMC headers:
-#include "Config/Verbosity.hpp"
 #include "Support/Error.hpp"
+#include "Support/Verbosity.hpp"
 
 // C++ headers:
 #include <cstdint>

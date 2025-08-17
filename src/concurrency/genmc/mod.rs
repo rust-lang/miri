@@ -5,7 +5,7 @@ use std::time::Duration;
 use genmc_sys::cxx_extra::NonNullUniquePtr;
 use genmc_sys::{
     ActionKind, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim, RMWBinOp,
-    StoreEventType, createGenmcHandle,
+    createGenmcHandle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -517,48 +517,37 @@ impl GenmcCtx {
         alignment: Align,
         memory_kind: MemoryKind,
     ) -> InterpResult<'tcx, u64> {
+        if self.allow_data_races.get() {
+            unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
+        }
         let machine = &ecx.machine;
-        let chosen_address = if memory_kind == MiriMemoryKind::Global.into() {
+        if memory_kind == MiriMemoryKind::Global.into() {
             info!("GenMC: global memory allocation: {alloc_id:?}");
-            ecx.get_global_allocation_address(&self.global_allocations, alloc_id)?
-        } else {
-            // TODO GENMC: Does GenMC need to know about the kind of Memory?
+            return ecx.get_global_allocation_address(&self.global_allocations, alloc_id);
+        }
+        let thread_infos = self.thread_id_manager.borrow();
+        let curr_thread = machine.threads.active_thread();
+        let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
+        // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
+        let genmc_size = size.bytes().max(1);
+        info!(
+            "GenMC: handle_alloc (thread: {curr_thread:?} ({genmc_tid:?}), size: {}, alignment: {alignment:?}, memory_kind: {memory_kind:?})",
+            size.bytes()
+        );
 
-            // eprintln!(
-            //     "handle_alloc ({memory_kind:?}): Custom backtrace: {}",
-            //     std::backtrace::Backtrace::force_capture()
-            // );
-            // TODO GENMC: should we put this before the special handling for globals?
-            if self.allow_data_races.get() {
-                unreachable!(); // FIXME(genmc): can this happen and if yes, how should this be handled?
-            }
-            let thread_infos = self.thread_id_manager.borrow();
-            let curr_thread = machine.threads.active_thread();
-            let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
-            // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
-            let genmc_size = size.bytes().max(1);
-            info!(
-                "GenMC: handle_alloc (thread: {curr_thread:?} ({genmc_tid:?}), size: {}, alignment: {alignment:?}, memory_kind: {memory_kind:?})",
-                size.bytes()
-            );
+        let alignment = alignment.bytes();
 
-            let alignment = alignment.bytes();
+        let mut mc = self.handle.borrow_mut();
+        let pinned_mc = mc.as_mut();
+        let chosen_address = pinned_mc.handleMalloc(genmc_tid, genmc_size, alignment);
 
-            let mut mc = self.handle.borrow_mut();
-            let pinned_mc = mc.as_mut();
-            let chosen_address = pinned_mc.handleMalloc(genmc_tid, genmc_size, alignment);
-
-            // Non-global addresses should not be in the global address space or null.
-            assert_ne!(0, chosen_address, "GenMC malloc returned nullptr.");
-            assert_eq!(0, chosen_address & GENMC_GLOBAL_ADDRESSES_MASK);
-            chosen_address
-        };
+        // Non-global addresses should not be in the global address space or null.
+        assert_ne!(0, chosen_address, "GenMC malloc returned nullptr.");
+        assert_eq!(0, chosen_address & GENMC_GLOBAL_ADDRESSES_MASK);
         // Sanity check the address alignment:
-        assert_eq!(
-            0,
-            chosen_address % alignment.bytes(),
-            "GenMC returned address {chosen_address} == {chosen_address:#x} with lower alignment than requested ({:})!",
-            alignment.bytes()
+        assert!(
+            chosen_address.is_multiple_of(alignment),
+            "GenMC returned address {chosen_address:#x} with lower alignment than requested ({alignment}).",
         );
 
         interp_ok(chosen_address)
@@ -569,7 +558,6 @@ impl GenmcCtx {
         machine: &MiriMachine<'tcx>,
         alloc_id: AllocId,
         address: Size,
-        size: Size,
         kind: MemoryKind,
     ) -> InterpResult<'tcx> {
         assert_ne!(
@@ -585,12 +573,10 @@ impl GenmcCtx {
         let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
 
         let genmc_address = address.bytes();
-        // GenMC doesn't support ZSTs, so we set the minimum size to 1 byte
-        let genmc_size = size.bytes().max(1);
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
-        pinned_mc.handleFree(genmc_tid, genmc_address, genmc_size);
+        pinned_mc.handleFree(genmc_tid, genmc_address);
 
         // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
@@ -730,8 +716,9 @@ impl GenmcCtx {
             throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
         }
 
-        if load_result.is_read_opt {
-            todo!();
+        if !load_result.has_value {
+            // FIXME(GenMC): Implementing certain GenMC optimizations will lead to this.
+            unimplemented!("GenMC: load returned no value.");
         }
 
         info!("GenMC: load returned value: {:?}", load_result.read_value);
@@ -776,7 +763,6 @@ impl GenmcCtx {
             genmc_value,
             genmc_old_value,
             memory_ordering,
-            StoreEventType::Normal,
         );
 
         if let Some(error) = store_result.error.as_ref() {
@@ -830,6 +816,28 @@ impl GenmcCtx {
 
         if let Some(error) = rmw_result.error.as_ref() {
             throw_ub_format!("{}", error.to_string_lossy()); // TODO GENMC: proper error handling: find correct error here
+        }
+
+        // Check that both RMW arguments have sane provenance.
+        match (
+            genmc_rmw_op,
+            rmw_result.old_value.has_provenance(),
+            genmc_rhs_scalar.has_provenance(),
+        ) {
+            // compare-exchange should not swap a pointer and an integer.
+            // FIXME(GenMC): is this correct?
+            (RMWBinOp::Xchg, left, right) =>
+                if left != right {
+                    throw_ub_format!(
+                        "atomic compare-exchange arguments should either both have pointer provenance ({left} != {right}). Both arguments should be pointers, or both integers."
+                    );
+                },
+            // All other read-modify-write operations should never have a right-side argument that's a pointer.
+            (_, _, true) =>
+                throw_ub_format!(
+                    "atomic read-modify-write operation right argument has pointer provenance."
+                ),
+            _ => {}
         }
 
         let old_value_scalar = genmc_scalar_to_scalar(ecx, rmw_result.old_value, size)?;
