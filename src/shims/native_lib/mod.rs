@@ -21,7 +21,7 @@ mod ffi;
 )]
 pub mod trace;
 
-use self::ffi::{CArg, CPrimitive, FfiArg};
+use self::ffi::{OwnedArg, ScalarArg};
 use crate::*;
 
 /// The final results of an FFI trace, containing every relevant event detected
@@ -72,12 +72,12 @@ impl AccessRange {
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Call native host function and return the output as an immediate.
-    fn call_native_with_args<'a>(
+    fn call_native_with_args(
         &mut self,
         link_name: Symbol,
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
-        libffi_args: Vec<FfiArg<'a>>,
+        libffi_args: &[OwnedArg],
     ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let this = self.eval_context_mut();
         #[cfg(target_os = "linux")]
@@ -271,95 +271,90 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     /// Extract the value from the result of reading an operand from the machine
-    /// and convert it to a `CArg`.
-    fn op_to_ffi_arg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, CArg> {
+    /// and convert it to a `OwnedArg`.
+    fn op_to_ffi_arg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, OwnedArg> {
         let this = self.eval_context_ref();
         let scalar = |v| interp_ok(this.read_immediate(v)?.to_scalar());
         interp_ok(match v.layout.ty.kind() {
             // If the primitive provided can be converted to a type matching the type pattern
-            // then create a `CArg` of this primitive value with the corresponding `CArg` constructor.
+            // then create a `OwnedArg` of this primitive value with the corresponding `OwnedArg` constructor.
             // the ints
-            ty::Int(IntTy::I8) => CPrimitive::Int8(scalar(v)?.to_i8()?).into(),
-            ty::Int(IntTy::I16) => CPrimitive::Int16(scalar(v)?.to_i16()?).into(),
-            ty::Int(IntTy::I32) => CPrimitive::Int32(scalar(v)?.to_i32()?).into(),
-            ty::Int(IntTy::I64) => CPrimitive::Int64(scalar(v)?.to_i64()?).into(),
+            ty::Int(IntTy::I8) => ScalarArg::Int8(scalar(v)?.to_i8()?).into(),
+            ty::Int(IntTy::I16) => ScalarArg::Int16(scalar(v)?.to_i16()?).into(),
+            ty::Int(IntTy::I32) => ScalarArg::Int32(scalar(v)?.to_i32()?).into(),
+            ty::Int(IntTy::I64) => ScalarArg::Int64(scalar(v)?.to_i64()?).into(),
             ty::Int(IntTy::Isize) =>
-                CPrimitive::ISize(scalar(v)?.to_target_isize(this)?.try_into().unwrap()).into(),
+                ScalarArg::ISize(scalar(v)?.to_target_isize(this)?.try_into().unwrap()).into(),
             // the uints
-            ty::Uint(UintTy::U8) => CPrimitive::UInt8(scalar(v)?.to_u8()?).into(),
-            ty::Uint(UintTy::U16) => CPrimitive::UInt16(scalar(v)?.to_u16()?).into(),
-            ty::Uint(UintTy::U32) => CPrimitive::UInt32(scalar(v)?.to_u32()?).into(),
-            ty::Uint(UintTy::U64) => CPrimitive::UInt64(scalar(v)?.to_u64()?).into(),
+            ty::Uint(UintTy::U8) => ScalarArg::UInt8(scalar(v)?.to_u8()?).into(),
+            ty::Uint(UintTy::U16) => ScalarArg::UInt16(scalar(v)?.to_u16()?).into(),
+            ty::Uint(UintTy::U32) => ScalarArg::UInt32(scalar(v)?.to_u32()?).into(),
+            ty::Uint(UintTy::U64) => ScalarArg::UInt64(scalar(v)?.to_u64()?).into(),
             ty::Uint(UintTy::Usize) =>
-                CPrimitive::USize(scalar(v)?.to_target_usize(this)?.try_into().unwrap()).into(),
+                ScalarArg::USize(scalar(v)?.to_target_usize(this)?.try_into().unwrap()).into(),
             ty::RawPtr(..) => {
                 let ptr = scalar(v)?.to_pointer(this)?;
-                // Pointer without provenance may not access any memory anyway, skip.
-                if let Some(prov) = ptr.provenance {
-                    // The first time this happens, print a warning.
-                    if !this.machine.native_call_mem_warned.replace(true) {
-                        // Newly set, so first time we get here.
-                        this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem { tracing });
-                    }
-
-                    this.expose_provenance(prov)?;
-                };
+                this.expose_and_warn(ptr.provenance, tracing)?;
 
                 // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
                 // below to expose the actual interpreter-level allocation.
-                CPrimitive::RawPtr(std::ptr::with_exposed_provenance_mut(ptr.addr().bytes_usize()))
+                ScalarArg::RawPtr(std::ptr::with_exposed_provenance_mut(ptr.addr().bytes_usize()))
                     .into()
             }
             // For ADTs, create an FfiType from their fields.
             ty::Adt(adt_def, args) => {
-                let strukt = this.adt_to_ffitype(v.layout.ty, *adt_def, args)?;
+                let adt = this.adt_to_ffitype(v.layout.ty, *adt_def, args)?;
 
                 // Copy the raw bytes backing this arg.
                 let bytes = match v.as_mplace_or_imm() {
                     either::Either::Left(mplace) => {
-                        // We do all of this to grab the bytes without actually
-                        // stripping provenance from them, since it'll later be
-                        // exposed recursively.
-                        let ptr = mplace.ptr();
-                        // Make sure the provenance of this allocation is exposed;
-                        // there must be one for this mplace to be valid at all.
-                        // The interpreter-level allocation itself is exposed in
-                        // visit_reachable_allocs.
-                        this.expose_provenance(ptr.provenance.unwrap())?;
-                        // Then get the actual bytes.
+                        // Get the alloc id corresponding to this mplace, alongside
+                        // a pointer that's offset to point to this particular
+                        // mplace (not one at the base addr of the allocation).
+                        let mplace_ptr = mplace.ptr();
+                        let sz = mplace.layout.size.bytes_usize();
                         let id = this
                             .alloc_id_from_addr(
-                                ptr.addr().bytes(),
-                                mplace.layout.size.bytes_usize().try_into().unwrap(),
-                                /* only_exposed_allocations */ true,
+                                mplace_ptr.addr().bytes(),
+                                sz.try_into().unwrap(),
+                                /* only_exposed_allocations */ false,
                             )
                             .unwrap();
-                        let ptr_raw = this.get_alloc_bytes_unchecked_raw(id)?;
-                        // SAFETY: We know for sure that at ptr_raw the next layout.size bytes
-                        // are part of this allocation and initialised. They might be marked as
-                        // uninit in Miri, but all bytes returned by `MiriAllocBytes` are
+                        // Expose all provenances in the allocation within the byte
+                        // range of the struct, if any.
+                        let alloc = this.get_alloc_raw(id)?;
+                        let alloc_ptr = this.get_alloc_bytes_unchecked_raw(id)?;
+                        let start_addr =
+                            mplace_ptr.addr().bytes_usize().strict_sub(alloc_ptr.addr());
+                        for byte in start_addr..start_addr.strict_add(sz) {
+                            if let Some(prov) = alloc.provenance().get(Size::from_bytes(byte), this)
+                            {
+                                this.expose_provenance(prov)?;
+                            }
+                        }
+                        // SAFETY: We know for sure that at mplace_ptr.addr() the next layout.size
+                        // bytes are part of this allocation and initialised. They might be marked
+                        // as uninit in Miri, but all bytes returned by `MiriAllocBytes` are
                         // initialised.
                         unsafe {
-                            std::slice::from_raw_parts(ptr_raw, mplace.layout.size.bytes_usize())
-                                .to_vec()
-                                .into_boxed_slice()
+                            std::slice::from_raw_parts(
+                                alloc_ptr.with_addr(mplace_ptr.addr().bytes_usize()),
+                                mplace.layout.size.bytes_usize(),
+                            )
+                            .to_vec()
+                            .into_boxed_slice()
                         }
                     }
-                    either::Either::Right(imm) => {
-                        // For immediates, we know the backing scalar is going to be 128 bits,
-                        // so we can just copy that.
-                        // TODO: is it possible for this to be a scalar pair?
-                        let scalar = imm.to_scalar();
-                        if scalar.size().bytes() > 0 {
-                            let bits = scalar.to_bits(scalar.size())?;
-                            bits.to_ne_bytes().to_vec().into_boxed_slice()
-                        } else {
-                            throw_ub_format!("attempting to pass a ZST over FFI: {}", imm.layout.ty)
-                        }
+                    either::Either::Right(_) => {
+                        // TODO: support this!
+                        throw_unsup_format!(
+                            "Immediate structs can't be passed over FFI: {}",
+                            v.layout.ty
+                        )
                     }
                 };
 
-                ffi::CArg::Struct(strukt, bytes)
+                ffi::OwnedArg::Adt(adt, bytes)
             }
             _ => throw_unsup_format!("unsupported argument type for native call: {}", v.layout.ty),
         })
@@ -372,14 +367,15 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         adt_def: ty::AdtDef<'tcx>,
         args: &'tcx ty::List<ty::GenericArg<'tcx>>,
     ) -> InterpResult<'tcx, FfiType> {
-        // TODO: is this correct? Maybe `repr(transparent)` when the inner field
-        // is itself `repr(c)` is ok?
+        // TODO: Certain non-C reprs should be okay also.
         if !adt_def.repr().c() {
-            throw_ub_format!("passing a non-#[repr(C)] struct over FFI: {orig_ty}")
+            throw_unsup_format!("passing a non-#[repr(C)] struct over FFI: {orig_ty}")
         }
         // TODO: unions, etc.
         if !adt_def.is_struct() {
-            throw_unsup_format!("unsupported argument type for native call: {orig_ty} is an enum or union");
+            throw_unsup_format!(
+                "unsupported argument type for native call: {orig_ty} is an enum or union"
+            );
         }
 
         let this = self.eval_context_ref();
@@ -410,6 +406,20 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             _ => throw_unsup_format!("unsupported argument type for native call: {}", ty),
         })
     }
+
+    fn expose_and_warn(&self, prov: Option<Provenance>, tracing: bool) -> InterpResult<'tcx> {
+        let this = self.eval_context_ref();
+        if let Some(prov) = prov {
+            // The first time this happens, print a warning.
+            if !this.machine.native_call_mem_warned.replace(true) {
+                // Newly set, so first time we get here.
+                this.emit_diagnostic(NonHaltingDiagnostic::NativeCallSharedMem { tracing });
+            }
+
+            this.expose_provenance(prov)?;
+        };
+        interp_ok(())
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -439,12 +449,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let tracing = trace::Supervisor::is_enabled();
 
         // Get the function arguments, copy them, and prepare the type descriptions.
-        let mut libffi_args = Vec::<CArg>::with_capacity(args.len());
+        let mut libffi_args = Vec::<OwnedArg>::with_capacity(args.len());
         for arg in args.iter() {
-            libffi_args.push(this.op_to_carg(arg, tracing)?);
+            libffi_args.push(this.op_to_ffi_arg(arg, tracing)?);
         }
-        // Convert arguments to a libffi-compatible type.
-        let libffi_args = libffi_args.iter().map(|arg| arg.arg_downcast()).collect::<Vec<_>>();
 
         // Prepare all exposed memory (both previously exposed, and just newly exposed since a
         // pointer was passed as argument). Uninitialised memory is left as-is, but any data
@@ -487,7 +495,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Call the function and store output, depending on return type in the function signature.
         let (ret, maybe_memevents) =
-            this.call_native_with_args(link_name, dest, code_ptr, libffi_args)?;
+            this.call_native_with_args(link_name, dest, code_ptr, &libffi_args)?;
 
         if tracing {
             this.tracing_apply_accesses(maybe_memevents.unwrap())?;

@@ -1,11 +1,10 @@
-error: Undefined Behavior: passing a non-#[repr(C)] struct over FFI: PassMe
+error: unsupported operation: passing a non-#[repr(C)] struct over FFI: PassMe
   --> tests/native-lib/fail/struct_not_extern_c.rs:LL:CC
    |
 LL |     unsafe { pass_struct(pass_me) };
-   |              ^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
+   |              ^^^^^^^^^^^^^^^^^^^^ unsupported operation occurred here
    |
-   = help: this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior
-   = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
+   = help: this is likely not a bug in the program; it indicates that the program performed an operation that Miri does not support
    = note: BACKTRACE:
    = note: inside `main` at tests/native-lib/fail/struct_not_extern_c.rs:LL:CC
 

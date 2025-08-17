@@ -30,43 +30,6 @@ EXPORT int64_t add_short_to_long(int16_t x, int64_t y) {
   return x + y;
 }
 
-/* Test: test_pass_struct */
-
-typedef struct PassMe {
-    int32_t value;
-    int16_t other_value;
-} PassMe;
-
-EXPORT int32_t pass_struct(const PassMe pass_me) {
-  return pass_me.value + pass_me.other_value;
-}
-
-/* Test: test_pass_struct_complex */
-
-typedef struct Part1 {
-    uint16_t high;
-    uint16_t low;
-} Part1;
-
-typedef struct Part2 {
-    uint32_t bits;
-} Part2;
-
-typedef struct ComplexStruct {
-    Part1 part_1;
-    Part2 part_2;
-    uint32_t part_3;
-} ComplexStruct;
-
-EXPORT int32_t pass_struct_complex(const ComplexStruct complex) {
-  if ((((uint32_t)complex.part_1.high) << 16 | (uint32_t)complex.part_1.low) == complex.part_2.bits
-      && complex.part_2.bits == complex.part_3)
-    return 0;
-  else {
-    return 1;
-  }
-}
-
 // To test that functions not marked with EXPORT cannot be called by Miri.
 int32_t not_exported(void) {
   return 0;
