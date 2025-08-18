@@ -86,6 +86,8 @@ impl GlobalStateInner {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Allocate a new address for the given alloc id, or return the cached address.
+    /// Each alloc id is assigned one unique allocation which will not change if this function is called again with the same alloc id.
     fn get_global_allocation_address(
         &self,
         global_allocation_handler: &GlobalAllocationHandler,

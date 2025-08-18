@@ -113,17 +113,44 @@ public:
 		return --threadsAction[tid].event;
 	}
 
-	/**** Printing and result querying ****/
+	/**** Result querying functionality. ****/
 
+	// NOTE: We don't want to share the `VerificationResult` type with the Rust side, since it
+	// is very large, uses features that CXX.rs doesn't support and may change as GenMC changes.
+	// Instead, we only use the result on the C++ side, and only expose these getter function to
+	// the Rust side.
+
+	/// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
 	auto getBlockedExecutionCount() const -> uint64_t
 	{
 		return static_cast<uint64_t>(getResult().exploredBlocked);
 	}
 
+	/// Get the number of executions explored by GenMC (cast into a fixed with integer)
 	auto getExploredExecutionCount() const -> uint64_t
 	{
 		return static_cast<uint64_t>(getResult().explored);
 	}
+
+	/// Get all messages that GenMC produced (errors, warnings).
+	auto getResultMessage() const -> std::unique_ptr<std::string>
+	{
+		return std::make_unique<std::string>(getResult().message);
+	}
+
+	/// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
+	auto getErrorString() const -> std::unique_ptr<std::string>
+	{
+		const auto &result = GenMCDriver::getResult();
+		if (result.status.has_value()) {
+			// FIXME(genmc): format the error once std::format changes are merged into
+			// GenMC.
+			return std::make_unique<std::string>("FIXME(genmc): show error string");
+		}
+		return nullptr;
+	}
+
+	/**** Printing and estimation mode functionality. ****/
 
 	void printGraph() { GenMCDriver::debugPrintGraph(); }
 
@@ -200,6 +227,11 @@ private:
 		// or WriteLabel    ==> Update its value in place (only if non-atomic)
 	}
 
+	/**
+	 * Helper function for loads that need to reset the event counter when no value is returned.
+	 * Same syntax as `GenMCDriver::handleLoad`, but this takes a thread id instead of an Event.
+	 * Automatically calls `incPos` and `decPos` where needed for the given thread.
+	 */
 	template <EventLabel::EventLabelKind k, typename... Ts>
 	HandleResult<SVal> handleLoadResetIfNone(std::function<void(SAddr)> oldValSetter,
 						 ThreadId tid, Ts &&...params)
@@ -228,6 +260,11 @@ private:
 	 */
 	std::vector<Action> threadsAction;
 
+	/**
+	 * Map of already used annotation ids (e.g., for mutexes).
+	 * FIXME(GenMC): For multithreading support, this map and the counter below need to be
+	 * synchronized across threads.
+	 */
 	std::unordered_map<uint64_t, ModuleID::ID> annotation_id{};
 	ModuleID::ID annotation_id_counter = 0;
 };

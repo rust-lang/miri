@@ -501,11 +501,6 @@ impl<'tcx> ThreadManager<'tcx> {
         &mut self.threads[self.active_thread].stack
     }
 
-    /// TODO GENMC: this function can probably be removed once the GenmcCtx code is finished:
-    pub fn get_thread_stack(&self, id: ThreadId) -> &[Frame<'tcx, Provenance, FrameExtra<'tcx>>] {
-        &self.threads[id].stack
-    }
-
     pub fn all_stacks(
         &self,
     ) -> impl Iterator<Item = (ThreadId, &[Frame<'tcx, Provenance, FrameExtra<'tcx>>])> {
@@ -1271,8 +1266,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 SchedulingAction::ExecuteTimeoutCallback => {
                     this.run_timeout_callback()?;
                 }
-                // FIXME(genmc): properly handle sleep in GenMC mode.
                 SchedulingAction::Sleep(duration) => {
+                    // FIXME(genmc): properly handle sleep in GenMC mode.
+                    if this.machine.data_race.as_genmc_ref().is_some() {
+                        throw_unsup_format!("Sleeping is not yet supported in GenMC mode");
+                    }
                     this.machine.monotonic_clock.sleep(duration);
                 }
             }

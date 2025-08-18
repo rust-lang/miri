@@ -2,6 +2,8 @@ use genmc_sys::{MemOrdering, RMWBinOp};
 
 use crate::{AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd};
 
+// This file contains functionality to convert between Miri enums and their GenMC counterparts.
+
 impl AtomicReadOrd {
     pub(super) fn convert(self) -> MemOrdering {
         match self {
@@ -59,15 +61,18 @@ impl AtomicRwOrd {
     }
 }
 
+/// Convert a possibly signed Miri min/max operation to its GenMC counterpart.
 pub(super) fn min_max_to_genmc_rmw_op(min: bool, is_signed: bool) -> RMWBinOp {
+    // FIXME(genmc): is there a use for FMin/FMax? GenMC has (Min, UMin, FMin)
     match (min, is_signed) {
-        (true, true) => RMWBinOp::Min, // TODO GENMC: is there a use for FMin? (Min, UMin, FMin)
+        (true, true) => RMWBinOp::Min,
         (false, true) => RMWBinOp::Max,
         (true, false) => RMWBinOp::UMin,
         (false, false) => RMWBinOp::UMax,
     }
 }
 
+/// Convert a possibly negated binary operation to its GenMC counterpart.
 pub(super) fn to_genmc_rmw_op(bin_op: rustc_middle::mir::BinOp, negate: bool) -> RMWBinOp {
     match bin_op {
         rustc_middle::mir::BinOp::Add => RMWBinOp::Add,

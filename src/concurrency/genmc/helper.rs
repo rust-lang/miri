@@ -10,6 +10,8 @@ use crate::{
     BorTag, MiriInterpCx, MiriMachine, Pointer, Provenance, Scalar, ThreadId, throw_unsup_format,
 };
 
+/// This function is used to split up a large memory access into aligned, non-overlapping chunks of a limited size.
+/// Returns an iterator over the chunks, yielding `(base address, size)` of each chunk, ordered by address.
 pub fn split_access(address: Size, size: Size) -> impl Iterator<Item = (u64, u64)> {
     /// Maximum size memory access in bytes that GenMC supports.
     const MAX_SIZE: u64 = 8;
@@ -50,36 +52,20 @@ pub fn split_access(address: Size, size: Size) -> impl Iterator<Item = (u64, u64
     start_chunks.chain(aligned_chunks).chain(end_chunks)
 }
 
-/// Like `scalar_to_genmc_scalar`, but returns an error if the scalar is not an integer
-pub fn rhs_scalar_to_genmc_scalar<'tcx>(
-    ecx: &MiriInterpCx<'tcx>,
-    scalar: Scalar,
-) -> InterpResult<'tcx, GenmcScalar> {
-    if matches!(scalar, Scalar::Ptr(..)) {
-        throw_unsup_format!("Right hand side of atomic operation cannot be a pointer");
-    }
-    scalar_to_genmc_scalar(ecx, scalar)
-}
-
-pub fn option_scalar_to_genmc_scalar<'tcx>(
-    ecx: &MiriInterpCx<'tcx>,
-    maybe_scalar: Option<Scalar>,
-) -> InterpResult<'tcx, GenmcScalar> {
-    if let Some(scalar) = maybe_scalar {
-        scalar_to_genmc_scalar(ecx, scalar)
-    } else {
-        interp_ok(GenmcScalar::UNINIT)
-    }
-}
-
+/// Inverse function to `scalar_to_genmc_scalar`.
+///
+/// Convert a Miri `Scalar` to a `GenmcScalar`.
+/// To be able to restore pointer provenance from a `GenmcScalar`, the base address of the allocation of the pointer is also stored in the `GenmcScalar`.
+/// We cannot use the `AllocId` instead of the base address, since Miri has no control over the `AllocId`, and it may change across executions.
+/// Pointers with `Wildcard` provenance are not supported.
 pub fn scalar_to_genmc_scalar<'tcx>(
     ecx: &MiriInterpCx<'tcx>,
     scalar: Scalar,
 ) -> InterpResult<'tcx, GenmcScalar> {
     interp_ok(match scalar {
         rustc_const_eval::interpret::Scalar::Int(scalar_int) => {
-            // TODO GENMC: u128 support
-            let value: u64 = scalar_int.to_uint(scalar_int.size()).try_into().unwrap(); // TODO GENMC: doesn't work for size != 8
+            // FIXME(genmc): Add u128 support once GenMC supports it.
+            let value: u64 = scalar_int.to_uint(scalar_int.size()).try_into().unwrap();
             GenmcScalar { value, extra: 0, is_init: true }
         }
         rustc_const_eval::interpret::Scalar::Ptr(pointer, size) => {
@@ -96,14 +82,15 @@ pub fn scalar_to_genmc_scalar<'tcx>(
     })
 }
 
+/// Inverse function to `scalar_to_genmc_scalar`.
+///
+/// Convert a `GenmcScalar` back into a Miri `Scalar`.
+/// For pointers, attempt to convert the stored base address of their allocation back into an `AllocId`.
 pub fn genmc_scalar_to_scalar<'tcx>(
     ecx: &MiriInterpCx<'tcx>,
     scalar: GenmcScalar,
     size: Size,
 ) -> InterpResult<'tcx, Scalar> {
-    // TODO GENMC: proper handling of large integers
-    // TODO GENMC: proper handling of pointers (currently assumes all integers)
-
     if scalar.extra != 0 {
         // We have a pointer!
 
@@ -115,7 +102,7 @@ pub fn genmc_scalar_to_scalar<'tcx>(
         let Some(alloc_id) =
             ecx.alloc_id_from_addr(base_addr, alloc_size, only_exposed_allocations)
         else {
-            // TODO GENMC: what is the correct error in this case?
+            // TODO GENMC: what is the correct error in this case? Maybe give the pointer wildcard provenance instead?
             throw_unsup_format!(
                 "Cannot get allocation id of pointer received from GenMC (base address: 0x{base_addr:x}, pointer address: 0x{:x})",
                 addr.bytes()
@@ -140,29 +127,37 @@ pub fn genmc_scalar_to_scalar<'tcx>(
     interp_ok(Scalar::Int(value_scalar_int))
 }
 
-pub fn is_terminator_atomic<'tcx>(
+/// Check if a MIR terminator could be an atomic load operation.
+/// Currently this check is very conservative; all atomics are seen as possibly being loads.
+/// NOTE: This function panics if called with a thread that is not currently the active one.
+pub fn is_terminator_atomic_load<'tcx>(
     ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     terminator: &Terminator<'tcx>,
     thread_id: ThreadId,
 ) -> InterpResult<'tcx, bool> {
+    assert_eq!(
+        thread_id,
+        ecx.machine.threads.active_thread(),
+        "Can only call this function on the active thread."
+    );
     match &terminator.kind {
         // All atomics are modeled as function calls to intrinsic functions.
         // The one exception is thread joining, but those are also calls.
         TerminatorKind::Call { func, .. } | TerminatorKind::TailCall { func, .. } => {
-            let frame = ecx.machine.threads.get_thread_stack(thread_id).last().unwrap();
+            let frame = ecx.machine.threads.active_thread_stack().last().unwrap();
             let func_ty = func.ty(&frame.body().local_decls, *ecx.tcx);
             info!("GenMC: terminator is a call with operand: {func:?}, ty of operand: {func_ty:?}");
 
-            is_function_atomic(ecx, func_ty)
+            has_function_atomic_load_semantics(ecx, func_ty)
         }
         _ => interp_ok(false),
     }
 }
 
-fn is_function_atomic<'tcx>(
+/// Check if a call or tail-call could have atomic load semantics.
+fn has_function_atomic_load_semantics<'tcx>(
     ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     func_ty: Ty<'tcx>,
-    // func: &Operand<'tcx>,
 ) -> InterpResult<'tcx, bool> {
     let callee_def_id = match func_ty.kind() {
         ty::FnDef(def_id, _args) => def_id,
@@ -175,17 +170,12 @@ fn is_function_atomic<'tcx>(
     }
 
     let Some(intrinsic_def) = ecx.tcx.intrinsic(callee_def_id) else {
-        // TODO GENMC: Make this work for other platforms?
+        // FIXME(genmc): Make this work for other platforms.
         let item_name = ecx.tcx.item_name(*callee_def_id);
-        info!("GenMC:  function DefId: {callee_def_id:?}, item name: {item_name:?}");
-        if matches!(item_name.as_str(), "pthread_join" | "WaitForSingleObject") {
-            info!("GenMC:   found a 'join' terminator: '{}'", item_name.as_str(),);
-            return interp_ok(true);
-        }
-        return interp_ok(false);
+        return interp_ok(matches!(item_name.as_str(), "pthread_join" | "WaitForSingleObject"));
     };
     let intrinsice_name = intrinsic_def.name.as_str();
     info!("GenMC:   intrinsic name: '{intrinsice_name}'");
-    // TODO GENMC(ENHANCEMENT): make this more precise (only loads). How can we make this maintainable?
+    // FIXME(genmc): make this more precise (only loads). How can we make this maintainable?
     interp_ok(intrinsice_name.starts_with("atomic_"))
 }

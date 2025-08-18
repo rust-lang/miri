@@ -325,8 +325,20 @@ mod ffi {
             curr_thread_next_instr_kind: ActionKind,
         ) -> i64;
 
+        /**** Result querying functionality. ****/
+        // NOTE: We don't want to share the `VerificationResult` type with the Rust side, since it
+        // is very large, uses features that CXX.rs doesn't support and may change as GenMC changes.
+        // Instead, we only use the result on the C++ side, and only expose these getter function to
+        // the Rust side.
+
+        /// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
         fn getBlockedExecutionCount(self: &MiriGenMCShim) -> u64;
+        /// Get the number of executions explored by GenMC (cast into a fixed with integer)
         fn getExploredExecutionCount(self: &MiriGenMCShim) -> u64;
+        /// Get all messages that GenMC produced (errors, warnings).
+        fn getResultMessage(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
+        /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
+        fn getErrorString(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
 
         /// Check whether there are more executions to explore.
         /// If there are more executions, this method prepares for the next execution and returns `true`.
