@@ -237,12 +237,14 @@ pub fn report_error<'tcx>(
     let (title, helps) = if let MachineStop(info) = e.kind() {
         let info = info.downcast_ref::<TerminationInfo>().expect("invalid MachineStop payload");
         use TerminationInfo::*;
-        assert!(
-            ecx.machine.data_race.as_genmc_ref().is_none() || !matches!(info, Exit { .. }),
-            "Program exit in GenMC mode should use `GenmcFinishedExecution`."
-        );
         let title = match info {
-            &Exit { code, leak_check } => return Some((code, leak_check)),
+            &Exit { code, leak_check } => {
+                assert!(
+                    ecx.machine.data_race.as_genmc_ref().is_none(),
+                    "Program exit in GenMC mode should use `GenmcFinishedExecution`."
+                );
+                return Some((code, leak_check));
+            }
             Abort(_) => Some("abnormal termination"),
             Interrupted => None,
             UnsupportedInIsolation(_) | Int2PtrWithStrictProvenance | UnsupportedForeignItem(_) =>

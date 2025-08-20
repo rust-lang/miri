@@ -1,14 +1,11 @@
 use rustc_abi::Size;
-use rustc_const_eval::interpret::{InterpCx, InterpResult, interp_ok};
-use rustc_middle::mir::{Terminator, TerminatorKind};
-use rustc_middle::ty::{self, ScalarInt, Ty};
+use rustc_const_eval::interpret::{InterpResult, interp_ok};
+use rustc_middle::ty::ScalarInt;
 use tracing::info;
 
 use super::GenmcScalar;
 use crate::alloc_addresses::EvalContextExt as _;
-use crate::{
-    BorTag, MiriInterpCx, MiriMachine, Pointer, Provenance, Scalar, ThreadId, throw_unsup_format,
-};
+use crate::{BorTag, MiriInterpCx, Pointer, Provenance, Scalar, throw_unsup_format};
 
 /// This function is used to split up a large memory access into aligned, non-overlapping chunks of a limited size.
 /// Returns an iterator over the chunks, yielding `(base address, size)` of each chunk, ordered by address.
@@ -125,57 +122,4 @@ pub fn genmc_scalar_to_scalar<'tcx>(
     // FIXME(genmc): GenMC should be doing the truncation, not Miri.
     let (value_scalar_int, _got_truncated) = ScalarInt::truncate_from_uint(scalar.value, size);
     interp_ok(Scalar::Int(value_scalar_int))
-}
-
-/// Check if a MIR terminator could be an atomic load operation.
-/// Currently this check is very conservative; all atomics are seen as possibly being loads.
-/// NOTE: This function panics if called with a thread that is not currently the active one.
-pub fn is_terminator_atomic_load<'tcx>(
-    ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    terminator: &Terminator<'tcx>,
-    thread_id: ThreadId,
-) -> InterpResult<'tcx, bool> {
-    assert_eq!(
-        thread_id,
-        ecx.machine.threads.active_thread(),
-        "Can only call this function on the active thread."
-    );
-    match &terminator.kind {
-        // All atomics are modeled as function calls to intrinsic functions.
-        // The one exception is thread joining, but those are also calls.
-        TerminatorKind::Call { func, .. } | TerminatorKind::TailCall { func, .. } => {
-            let frame = ecx.machine.threads.active_thread_stack().last().unwrap();
-            let func_ty = func.ty(&frame.body().local_decls, *ecx.tcx);
-            info!("GenMC: terminator is a call with operand: {func:?}, ty of operand: {func_ty:?}");
-
-            has_function_atomic_load_semantics(ecx, func_ty)
-        }
-        _ => interp_ok(false),
-    }
-}
-
-/// Check if a call or tail-call could have atomic load semantics.
-fn has_function_atomic_load_semantics<'tcx>(
-    ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    func_ty: Ty<'tcx>,
-) -> InterpResult<'tcx, bool> {
-    let callee_def_id = match func_ty.kind() {
-        ty::FnDef(def_id, _args) => def_id,
-        _ => return interp_ok(true), // we don't know the callee, might be an intrinsic or pthread_join
-    };
-    if ecx.tcx.is_foreign_item(*callee_def_id) {
-        // Some shims, like pthread_join, must be considered loads. So just consider them all loads,
-        // these calls are not *that* common.
-        return interp_ok(true);
-    }
-
-    let Some(intrinsic_def) = ecx.tcx.intrinsic(callee_def_id) else {
-        // FIXME(genmc): Make this work for other platforms.
-        let item_name = ecx.tcx.item_name(*callee_def_id);
-        return interp_ok(matches!(item_name.as_str(), "pthread_join" | "WaitForSingleObject"));
-    };
-    let intrinsice_name = intrinsic_def.name.as_str();
-    info!("GenMC:   intrinsic name: '{intrinsice_name}'");
-    // FIXME(genmc): make this more precise (only loads). How can we make this maintainable?
-    interp_ok(intrinsice_name.starts_with("atomic_"))
 }

@@ -16,7 +16,8 @@ use rustc_middle::mir::Mutability;
 use rustc_middle::ty::layout::TyAndLayout;
 use rustc_span::Span;
 
-use crate::concurrency::{GenmcEvalContextExt as _, GlobalDataRaceHandler};
+use crate::concurrency::GlobalDataRaceHandler;
+use crate::concurrency::genmc::scheduling::EvalContextExt as _;
 use crate::shims::tls;
 use crate::*;
 
@@ -115,8 +116,7 @@ pub enum BlockReason {
 }
 
 /// The state of a thread.
-// TODO GENMC: is this ok to be pub?
-pub enum ThreadState<'tcx> {
+pub(crate) enum ThreadState<'tcx> {
     /// The thread is enabled and can be executed.
     Enabled,
     /// The thread is blocked on something.
@@ -138,16 +138,15 @@ impl<'tcx> std::fmt::Debug for ThreadState<'tcx> {
 }
 
 impl<'tcx> ThreadState<'tcx> {
-    // TODO GENMC: is it ok if these are pub?
-    pub fn is_enabled(&self) -> bool {
+    pub(crate) fn is_enabled(&self) -> bool {
         matches!(self, ThreadState::Enabled)
     }
 
-    pub fn is_terminated(&self) -> bool {
+    pub(crate) fn is_terminated(&self) -> bool {
         matches!(self, ThreadState::Terminated)
     }
 
-    pub fn is_blocked_on(&self, reason: BlockReason) -> bool {
+    pub(crate) fn is_blocked_on(&self, reason: BlockReason) -> bool {
         matches!(*self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
     }
 }
@@ -213,8 +212,8 @@ impl<'tcx> Thread<'tcx> {
         self.thread_name.as_deref()
     }
 
-    pub fn get_state(&self) -> &ThreadState<'tcx> {
-        // TODO GENMC: should this implementation detail be exposed?
+    /// Get the current state of this thread.
+    pub(crate) fn get_state(&self) -> &ThreadState<'tcx> {
         &self.state
     }
 
