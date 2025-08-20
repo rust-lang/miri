@@ -97,12 +97,10 @@ public:
 
 	/***** Exploration related functionality *****/
 
-	/** Returns -1 when no thread can/should be scheduled, or the thread id of the next thread
-	 * NOTE: this is safe because ThreadId is 32 bit, and we return a 64 bit integer
-	 * FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it
-	 * (see https://github.com/dtolnay/cxx/issues/87). */
+	/** Ask the GenMC scheduler for a new thread to schedule and return whether the execution is
+	 * finished, blocked, or can continue. */
 	auto scheduleNext(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
-		-> int64_t;
+		-> SchedulingResult;
 
 	/**
 	 * Check whether there are more executions to explore.

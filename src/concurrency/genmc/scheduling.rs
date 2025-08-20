@@ -1,4 +1,4 @@
-use genmc_sys::ActionKind;
+use genmc_sys::{ActionKind, ExecutionState};
 use rustc_middle::mir::{Terminator, TerminatorKind};
 use rustc_middle::ty::{self, Ty};
 use tracing::info;
@@ -108,17 +108,27 @@ impl GenmcCtx {
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut();
         let result = pinned_mc.scheduleNext(curr_thread_info, curr_thread_next_instr_kind);
-        if result >= 0 {
-            let next_thread_id = thread_infos
-                .try_get_miri_tid(result)
-                .expect("A thread id returned from GenMC should exist.");
-
-            return interp_ok(next_thread_id);
+        // Depending on the exec_state, we either schedule the given thread, or we are finished with this execution.
+        match result.exec_state {
+            ExecutionState::Ok =>
+                return interp_ok(
+                    thread_infos
+                        .try_get_miri_tid(result.next_thread)
+                        .expect("A thread id returned from GenMC should exist."),
+                ),
+            ExecutionState::Blocked => throw_machine_stop!(TerminationInfo::GenmcBlockedExecution),
+            ExecutionState::Finished => {
+                let exit_status = self.exec_state.exit_status.get().expect(
+                    "If the execution is finished, we should have a return value from the program.",
+                );
+                let leak_check = exit_status.do_leak_check();
+                throw_machine_stop!(TerminationInfo::Exit {
+                    code: exit_status.exit_code,
+                    leak_check
+                });
+            }
+            _ => unreachable!(),
         }
-
-        // Negative result means that GenMC has no next thread to schedule.
-        info!("GenMC: scheduleNext returned no thread to schedule, execution is finished.");
-        throw_machine_stop!(TerminationInfo::GenmcFinishedExecution);
     }
 }
 

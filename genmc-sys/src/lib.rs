@@ -171,6 +171,21 @@ mod ffi {
     /**** \/ Result & Error types \/ ****/
 
     #[must_use]
+    #[derive(Debug, Clone, Copy)]
+    enum ExecutionState {
+        Ok,
+        Blocked,
+        Finished,
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct SchedulingResult {
+        exec_state: ExecutionState,
+        next_thread: i32,
+    }
+
+    #[must_use]
     #[derive(Debug)]
     struct LoadResult {
         /// If there was an error, it will be stored in `error`, otherwise it is `None`.
@@ -247,6 +262,9 @@ mod ffi {
 
         /// Communication layer between Miri/Rust and GenMC/C++:
         type MiriGenMCShim;
+
+        type ExecutionState;
+        type SchedulingResult;
 
         /// Set up everything required for one run of GenMC, either in verification or estimation mode.
         fn createGenmcHandle(config: &GenmcParams, do_estimation: bool)
@@ -353,7 +371,7 @@ mod ffi {
             self: Pin<&mut MiriGenMCShim>,
             curr_thread_id: i32,
             curr_thread_next_instr_kind: ActionKind,
-        ) -> i64;
+        ) -> SchedulingResult;
 
         /// Check whether there are more executions to explore.
         /// If there are more executions, this method prepares for the next execution and returns `true`.

@@ -16,15 +16,17 @@
 #include <cstdint>
 
 auto MiriGenMCShim::scheduleNext(const int curr_thread_id,
-				 const ActionKind curr_thread_next_instr_kind) -> int64_t
+				 const ActionKind curr_thread_next_instr_kind) -> SchedulingResult
 {
 	// The current thread is the only one where the `kind` could have changed since we last made
 	// a scheduling decision.
 	threadsAction[curr_thread_id].kind = curr_thread_next_instr_kind;
 
 	if (const auto result = GenMCDriver::scheduleNext(threadsAction))
-		return static_cast<int64_t>(result.value());
-	return -1;
+		return SchedulingResult{ExecutionState::Ok, static_cast<int32_t>(result.value())};
+	if (GenMCDriver::isExecutionBlocked(threadsAction))
+		return SchedulingResult{ExecutionState::Blocked, 0};
+	return SchedulingResult{ExecutionState::Finished, 0};
 }
 
 /**** Execution start/end handling ****/

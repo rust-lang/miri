@@ -55,10 +55,6 @@ impl GenmcCtx {
         unreachable!()
     }
 
-    pub fn get_exit_status(&self) -> Option<(i32, bool)> {
-        unreachable!()
-    }
-
     /**** Memory access handling ****/
 
     pub(crate) fn handle_execution_start(&self) {

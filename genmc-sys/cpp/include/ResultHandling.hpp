@@ -51,6 +51,21 @@ struct GenmcScalar {
 	friend auto operator<<(llvm::raw_ostream &rhs, const GenmcScalar &v) -> llvm::raw_ostream &;
 };
 
+/**** Types for scheduling queries. ****/
+
+enum class ExecutionState : std::uint8_t {
+	Ok,
+	Blocked,
+	Finished,
+};
+
+struct SchedulingResult {
+	ExecutionState exec_state;
+	int32_t next_thread;
+};
+
+/**** Types for event handling. ****/
+
 struct LoadResult {
 	/// If there is an error, it will be stored in `error`, otherwise it is `None`
 	std::unique_ptr<ModelCheckerError> error;

@@ -41,13 +41,25 @@ pub use self::config::GenmcConfig;
 const UNSUPPORTED_ATOMICS_SIZE_MSG: &str =
     "GenMC mode currently does not support atomics larger than 8 bytes.";
 
+#[derive(Clone, Copy, Debug)]
+enum ExitType {
+    MainThreadFinish,
+    ExitCalled,
+}
+
 /// The exit status of a program.
 /// GenMC must store this if a thread exits while any others can still run.
 /// The other thread must also be explored before the program is terminated.
 #[derive(Clone, Copy, Debug)]
 struct ExitStatus {
     exit_code: i32,
-    leak_check: bool,
+    exit_type: ExitType,
+}
+
+impl ExitStatus {
+    fn do_leak_check(&self) -> bool {
+        matches!(self.exit_type, ExitType::MainThreadFinish)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -163,17 +175,6 @@ impl GenmcCtx {
     pub fn is_exploration_done(&self) -> bool {
         let mut mc = self.handle.borrow_mut();
         mc.as_mut().isExplorationDone()
-    }
-
-    /// Returns the exit status of the program, or `None` if neither the main thread finished nor any thread called an exit function.
-    pub fn get_exit_status(&self) -> Option<(i32, bool)> {
-        let ExitStatus { exit_code, leak_check } = self.exec_state.exit_status.get()?;
-        Some((exit_code, leak_check))
-    }
-
-    /// Set the exit status for the current execution once the main thread finished or any thread calls an exit function.
-    fn set_exit_status(&self, exit_code: i32, leak_check: bool) {
-        self.exec_state.exit_status.set(Some(ExitStatus { exit_code, leak_check }));
     }
 
     /// Select whether data race free actions should be allowed. This function should be used carefully!
@@ -736,13 +737,22 @@ impl GenmcCtx {
         is_exit_call: bool,
     ) -> InterpResult<'tcx> {
         // Calling `libc::exit` doesn't do cleanup, so we skip the leak check in that case.
-        let leak_check = !is_exit_call;
-        self.set_exit_status(exit_code, leak_check);
+        let exit_status = ExitStatus {
+            exit_code,
+            exit_type: if is_exit_call { ExitType::ExitCalled } else { ExitType::MainThreadFinish },
+        };
+
+        if let Some(old_exit_status) = self.exec_state.exit_status.get() {
+            throw_ub_format!(
+                "Exit called twice, first with status {old_exit_status:?}, now with status {exit_status:?}",
+            );
+        }
 
         // FIXME(genmc): Add a flag to continue exploration even when the program exits with a non-zero exit code.
         if exit_code != 0 {
             info!("GenMC: 'exit' called with non-zero argument, aborting execution.");
-            throw_machine_stop!(TerminationInfo::GenmcFinishedExecution);
+            let leak_check = exit_status.do_leak_check();
+            throw_machine_stop!(TerminationInfo::Exit { code: exit_code, leak_check });
         }
 
         if is_exit_call {
@@ -752,6 +762,8 @@ impl GenmcCtx {
             let mut mc = self.handle.borrow_mut();
             mc.as_mut().handleThreadKill(genmc_tid);
         }
+        // We continue executing now, so we store the exit status.
+        self.exec_state.exit_status.set(Some(exit_status));
         interp_ok(())
     }
 }
