@@ -26,7 +26,6 @@ pub mod miri_genmc {
 
     pub fn run_genmc_mode(
         _config: &MiriConfig,
-        _genmc_config: &GenmcConfig,
         _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
         _target_usize_max: u64,
         _mode: Mode,
@@ -49,10 +48,6 @@ impl GenmcCtx {
     }
 
     pub fn get_explored_execution_count(&self) -> usize {
-        unreachable!()
-    }
-
-    pub fn print_genmc_graph(&self) {
         unreachable!()
     }
 

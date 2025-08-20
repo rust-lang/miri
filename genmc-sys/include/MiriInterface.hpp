@@ -46,12 +46,17 @@ public:
 
 	/**** Execution start/end handling ****/
 
+	// This function must be called at the start of any execution, before any events are
+	// reported to GenMC.
 	void handleExecutionStart();
+	// This function must be called at the end of any execution, even if an error was found
+	// during the execution.
 	std::unique_ptr<ModelCheckerError> handleExecutionEnd();
+
+	/***** Functions for handling events encountered during program execution. *****/
 
 	/**** Memory access handling ****/
 
-	///////////////////
 	[[nodiscard]] LoadResult handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
 					    MemOrdering ord, GenmcScalar old_val);
 	[[nodiscard]] ReadModifyWriteResult
@@ -71,19 +76,16 @@ public:
 	void handleFence(ThreadId thread_id, MemOrdering ord);
 
 	/**** Memory (de)allocation ****/
-
 	uintptr_t handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment);
 	void handleFree(ThreadId thread_id, uint64_t address);
 
 	/**** Thread management ****/
-
 	void handleThreadCreate(ThreadId thread_id, ThreadId parent_id);
 	void handleThreadJoin(ThreadId thread_id, ThreadId child_id);
 	void handleThreadFinish(ThreadId thread_id, uint64_t ret_val);
 	void handleThreadKill(ThreadId thread_id);
 
 	/**** Blocking instructions ****/
-
 	void handleUserBlock(ThreadId thread_id);
 
 	/**** Mutex handling ****/
@@ -93,25 +95,20 @@ public:
 		-> MutexLockResult;
 	auto handleMutexUnlock(ThreadId thread_id, uint64_t address, uint64_t size) -> StoreResult;
 
-	/**** Exploration related functionality ****/
+	/***** Exploration related functionality *****/
 
+	/** Returns -1 when no thread can/should be scheduled, or the thread id of the next thread
+	 * NOTE: this is safe because ThreadId is 32 bit, and we return a 64 bit integer
+	 * FIXME(genmc,cxx): could directly return std::optional if CXX ever supports sharing it
+	 * (see https://github.com/dtolnay/cxx/issues/87). */
 	auto scheduleNext(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
 		-> int64_t;
 
+	/**
+	 * Check whether there are more executions to explore.
+	 * If there are more executions, this method prepares for the next execution and returns
+	 * `true`. Returns true if there are no more executions to explore. */
 	bool isExplorationDone() { return GenMCDriver::done(); }
-
-	/** Increment the event index in the given thread by 1 and return the new event. */
-	[[nodiscard]] inline auto incPos(ThreadId tid) -> Event
-	{
-		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
-		return ++threadsAction[tid].event;
-	}
-	/** Decrement the event index in the given thread by 1 and return the new event. */
-	inline auto decPos(ThreadId tid) -> Event
-	{
-		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
-		return --threadsAction[tid].event;
-	}
 
 	/**** Result querying functionality. ****/
 
@@ -120,7 +117,8 @@ public:
 	// Instead, we only use the result on the C++ side, and only expose these getter function to
 	// the Rust side.
 
-	/// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
+	/// Get the number of blocked executions encountered by GenMC (cast into a fixed with
+	/// integer)
 	auto getBlockedExecutionCount() const -> uint64_t
 	{
 		return static_cast<uint64_t>(getResult().exploredBlocked);
@@ -152,8 +150,6 @@ public:
 
 	/**** Printing and estimation mode functionality. ****/
 
-	void printGraph() { GenMCDriver::debugPrintGraph(); }
-
 	void printEstimationResults(const double elapsed_time_sec) const
 	{
 		// FIXME(GenMC,cleanup): should this happen on the Rust side?
@@ -180,6 +176,19 @@ public:
 							   bool estimation_mode);
 
 private:
+	/** Increment the event index in the given thread by 1 and return the new event. */
+	[[nodiscard]] inline auto incPos(ThreadId tid) -> Event
+	{
+		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
+		return ++threadsAction[tid].event;
+	}
+	/** Decrement the event index in the given thread by 1 and return the new event. */
+	inline auto decPos(ThreadId tid) -> Event
+	{
+		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
+		return --threadsAction[tid].event;
+	}
+
 	/**
 	 * @brief Try to insert the initial value of a memory location.
 	 * @param addr

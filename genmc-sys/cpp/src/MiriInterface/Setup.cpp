@@ -1,0 +1,181 @@
+/** This file contains functionality related to creation of the GenMCDriver,
+ * including translating settings set by Miri.  */
+
+#include "MiriInterface.hpp"
+
+// Miri C++ helpers:
+#include "Helper.hpp"
+
+// CXX.rs generated headers:
+#include "genmc-sys/src/lib.rs.h"
+
+// GenMC headers:
+#include "Support/Error.hpp"
+#include "Support/Verbosity.hpp"
+
+// C++ headers:
+#include <cstdint>
+
+/**
+ * Translate the Miri-GenMC `LogLevel` to the GenMC `VerbosityLevel`.
+ * Downgrade any debug options to `Tip` if `ENABLE_GENMC_DEBUG` is not enabled.
+ */
+static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
+{
+	switch (log_level) {
+	case LogLevel::Quiet:
+		return VerbosityLevel::Quiet;
+	case LogLevel::Error:
+		return VerbosityLevel::Error;
+	case LogLevel::Warning:
+		return VerbosityLevel::Warning;
+	case LogLevel::Tip:
+		return VerbosityLevel::Tip;
+#ifdef ENABLE_GENMC_DEBUG
+	case LogLevel::Debug1Revisits:
+		return VerbosityLevel::Debug1;
+	case LogLevel::Debug2MemoryAccesses:
+		return VerbosityLevel::Debug2;
+	case LogLevel::Debug3ReadsFrom:
+		return VerbosityLevel::Debug3;
+#else
+	// Downgrade to `Tip` if the debug levels are not available.
+	case LogLevel::Debug1Revisits:
+	case LogLevel::Debug2MemoryAccesses:
+	case LogLevel::Debug3ReadsFrom:
+		return VerbosityLevel::Tip;
+#endif
+	default:
+		WARN_ONCE("unknown-log-level",
+			  "Unknown `LogLevel`, defaulting to `VerbosityLevel::Tip`.");
+		return VerbosityLevel::Tip;
+	}
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+auto MiriGenMCShim::createHandle(const GenmcParams &config, bool estimation_mode)
+	-> std::unique_ptr<MiriGenMCShim>
+{
+	auto conf = std::make_shared<Config>();
+
+	conf->skipNonAtomicInitializedCheck = true;
+
+	// Set whether GenMC should print execution graphs after every explored/blocked execution.
+	conf->printExecGraphs =
+		(config.print_execution_graphs == ExecutiongraphPrinting::Explored ||
+		 config.print_execution_graphs == ExecutiongraphPrinting::ExploredAndBlocked);
+	conf->printBlockedExecs =
+		(config.print_execution_graphs == ExecutiongraphPrinting::Blocked ||
+		 config.print_execution_graphs == ExecutiongraphPrinting::ExploredAndBlocked);
+
+	// `1024` is the default value that GenMC uses.
+	// If any thread has at least this many events, a warning/tip will be printed.
+	//
+	// Miri produces a lot more events than GenMC, so the graph size warning triggers on almost
+	// all programs. The current value is large enough so the warning is not be triggered by any
+	// reasonable programs.
+	// FIXME(genmc): The emitted warning mentions features not supported by Miri ('--unroll'
+	// parameter).
+	// FIXME(genmc): A more appropriate limit should be chosen once the warning is useful for
+	// Miri.
+	conf->warnOnGraphSize = 1024 * 1024;
+
+	// The `logLevel` is not part of the config struct, but the static variable `logLevel`.
+	logLevel = to_genmc_verbosity_level(config.log_level);
+
+	// We only support the RC11 memory model for Rust.
+	conf->model = ModelType::RC11;
+
+	// This prints the seed that GenMC picks for randomized scheduling during estimation mode.
+	conf->printRandomScheduleSeed = config.print_random_schedule_seed;
+
+	// FIXME(genmc): supporting IPR requires annotations for `assume` and `spinloops`.
+	conf->ipr = false;
+	// FIXME(genmc): supporting BAM requires `Barrier` support + detecting whether return value
+	// of barriers are used.
+	conf->disableBAM = true;
+
+	// Instruction caching could help speed up verification by filling the graph from cache, if
+	// the list of values read by all load events in a thread have been seen before. Combined
+	// with not replaying completed threads, this can also reducing the amount of Mir
+	// interpretation required by Miri. With the current setup, this would be incorrect, since
+	// Miri doesn't give GenMC the actual values read by non-atomic reads.
+	conf->instructionCaching = false;
+	// Many of Miri's checks work under the assumption that threads are only executed in an
+	// order that could actually happen during a normal execution. Formally, this means that
+	// replaying an execution needs to respect the po-rf-relation of the executiongraph (po ==
+	// program-order, rf == reads-from). This means, any event in the graph, when replayed, must
+	// happen after any events that happen before it in the same graph according to the program
+	// code, and all (non-atomic) reads must happen after the write event they read from.
+	//
+	// Not replaying completed threads means any read event from that thread never happens in
+	// Miri's memory, so this would only work if there are never any non-atomic reads from any
+	// value written by the skipped thread.
+	conf->replayCompletedThreads = true;
+
+	// FIXME(genmc): implement symmetry reduction.
+	ERROR_ON(config.do_symmetry_reduction,
+		 "Symmetry reduction is currently unsupported in GenMC mode.");
+	conf->symmetryReduction = config.do_symmetry_reduction;
+
+	// FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
+	conf->schedulePolicy = SchedulePolicy::WF;
+
+	// Set the maximal number of executions tested in estimation mode.
+	conf->estimationMax = config.estimation_max;
+	// Set the mode used for this driver, either estimation or verification.
+	const auto mode = conf->estimate ? GenMCDriver::Mode(GenMCDriver::EstimationMode{})
+					 : GenMCDriver::Mode(GenMCDriver::VerificationMode{});
+
+	// Running Miri-GenMC without race detection is not supported.
+	// Disabling this option also changes the behavior of the replay scheduler to only schedule
+	// at atomic operations, which is required with Miri. This happens because Miri can generate
+	// multiple GenMC events for a single MIR terminator. Without this option, the scheduler
+	// might incorrectly schedule an atomic MIR terminator because the first event it creates is
+	// a non-atomic (e.g., `StorageLive`).
+	conf->disableRaceDetection = false;
+
+	// Miri can already check for unfreed memory. Also, GenMC cannot distinguish between memory
+	// that is allowed to leak and memory that is not.
+	conf->warnUnfreedMemory = false;
+
+	// FIXME(GenMC): This function currently exits on error, but will return an error value in
+	// the future. The return value should be checked once this change is made.
+	checkConfig(*conf);
+
+	auto driver = std::make_unique<MiriGenMCShim>(std::move(conf), mode);
+
+	auto *driverPtr = driver.get();
+	auto initValGetter = [driverPtr](const AAccess &access) {
+		const auto addr = access.getAddr();
+		if (!driverPtr->initVals_.contains(addr)) {
+			LOG(VerbosityLevel::Warning)
+				<< "WARNING: TODO GENMC: requested initial value for address "
+				<< addr << ", but there is none.\n";
+			return SVal(0xCC00CC00);
+			// BUG_ON(!driverPtr->initVals_.contains(addr));
+		}
+		auto result = driverPtr->initVals_[addr];
+		if (!result.is_init) {
+			LOG(VerbosityLevel::Warning)
+				<< "WARNING: TODO GENMC: requested initial value for address "
+				<< addr << ", but the memory is uninitialized.\n";
+			return SVal(0xFF00FF00);
+		}
+		LOG(VerbosityLevel::Warning)
+			<< "MiriGenMCShim: requested initial value for address " << addr
+			<< " == " << addr.get() << ", returning: " << result << "\n";
+		return result.toSVal();
+	};
+	driver->getExec().getGraph().setInitValGetter(initValGetter);
+
+	return driver;
+}
+
+// This needs to be available to Miri, but clang-tidy wants it static
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+auto createGenmcHandle(const GenmcParams &config, bool estimation_mode)
+	-> std::unique_ptr<MiriGenMCShim>
+{
+	return MiriGenMCShim::createHandle(config, estimation_mode);
+}

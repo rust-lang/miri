@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::{GenmcConfig, GenmcCtx, MiriConfig};
+use crate::{GenmcCtx, MiriConfig};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -28,7 +28,6 @@ impl Display for Mode {
 /// Returns `None` is an error is detected, or `Some(return_value)` with the return value of the last run of the program.
 pub fn run_genmc_mode(
     config: &MiriConfig,
-    genmc_config: &GenmcConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
     target_usize_max: u64,
     mode: Mode,
@@ -39,16 +38,8 @@ pub fn run_genmc_mode(
     for rep in 0u64.. {
         tracing::info!("Miri-GenMC loop {}", rep + 1);
 
-        // Execute the program until completion or an error happens:
-        let result = eval_entry(genmc_ctx.clone());
-        // We always print the graph when requested, even on errors.
-        // This may not be needed if Miri makes use of GenMC's error message at some point, since it already includes the graph.
-        // FIXME(genmc): Currently GenMC is missing some info from Miri to be able to fully print the execution graph.
-        if genmc_config.print_exec_graphs() {
-            genmc_ctx.print_genmc_graph();
-        }
-        // Return if there was an error, or get the return code of the program.
-        let return_code = result?;
+        // Execute the program until completion to get the return value, or return if an error happens:
+        let return_code = eval_entry(genmc_ctx.clone())?;
 
         // Some errors are not returned immediately during execution, so check for them here:
         if let Some(error) = genmc_ctx.try_get_error() {

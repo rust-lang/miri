@@ -1,3 +1,5 @@
+/** This file contains functionality related to handling mutexes.  */
+
 #include "MiriInterface.hpp"
 
 // Miri C++ helpers:

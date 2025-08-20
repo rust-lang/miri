@@ -196,7 +196,6 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
             if genmc_config.do_estimation()
                 && miri_genmc::run_genmc_mode(
                     &config,
-                    genmc_config,
                     eval_entry_once,
                     target_usize_max,
                     miri_genmc::Mode::Estimation,
@@ -210,7 +209,6 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
 
             let return_code = miri_genmc::run_genmc_mode(
                 &config,
-                genmc_config,
                 eval_entry_once,
                 target_usize_max,
                 miri_genmc::Mode::Verification,

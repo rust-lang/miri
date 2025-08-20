@@ -42,6 +42,7 @@ impl Default for GenmcParams {
             log_level: Default::default(),
             do_symmetry_reduction: false, // TODO GENMC (PERFORMANCE): maybe make this default `true`
             estimation_max: 1000,
+            print_execution_graphs: Default::default(),
         }
     }
 }
@@ -51,6 +52,12 @@ impl Default for LogLevel {
         // FIXME(genmc): set `Warning` by default once changes to GenMC are upstreamed.
         // FIXME(genmc): set `Tip` by default once the GenMC tips are relevant to Miri.
         Self::Error
+    }
+}
+
+impl Default for ExecutiongraphPrinting {
+    fn default() -> Self {
+        Self::None
     }
 }
 
@@ -82,6 +89,7 @@ mod ffi {
         pub log_level: LogLevel,
         pub do_symmetry_reduction: bool,
         pub estimation_max: u32,
+        pub print_execution_graphs: ExecutiongraphPrinting,
     }
 
     /// This is mostly equivalent to GenMC `VerbosityLevel`, but the debug log levels are always present (not conditionally compiled based on `ENABLE_GENMC_DEBUG`).
@@ -108,6 +116,15 @@ mod ffi {
         /// Also includes the previous debug log level.
         /// Downgraded to `Tip` if `GENMC_DEBUG` is not enabled.
         Debug3ReadsFrom,
+    }
+
+    #[derive(Debug)]
+    /// Setting for controlling which executiongraphs GenMC prints after every execution.
+    enum ExecutiongraphPrinting {
+        None,
+        Explored,
+        Blocked,
+        ExploredAndBlocked,
     }
 
     #[derive(Debug)]
@@ -213,6 +230,8 @@ mod ffi {
     unsafe extern "C++" {
         include!("MiriInterface.hpp");
 
+        // Types for event handling:
+        type GenmcScalar;
         type MemOrdering;
         type RMWBinOp;
 
@@ -226,19 +245,23 @@ mod ffi {
         type CompareExchangeResult;
         type MutexLockResult;
 
-        type GenmcScalar;
-
-        // type OperatingMode; // Estimation(budget) or Verification
-
+        /// Communication layer between Miri/Rust and GenMC/C++:
         type MiriGenMCShim;
 
+        /// Set up everything required for one run of GenMC, either in verification or estimation mode.
         fn createGenmcHandle(config: &GenmcParams, do_estimation: bool)
         -> UniquePtr<MiriGenMCShim>;
+        /// Get the bit mask that GenMC expects for global memory allocations.
         fn getGlobalAllocStaticMask() -> u64;
 
+        /// This function must be called at the start of any execution, before any events are reported to GenMC.
         fn handleExecutionStart(self: Pin<&mut MiriGenMCShim>);
+        /// This function must be called at the end of any execution, even if an error was found during the execution.
         fn handleExecutionEnd(self: Pin<&mut MiriGenMCShim>) -> UniquePtr<CxxString>;
 
+        /***** Functions for handling events encountered during program execution. *****/
+
+        /**** Memory access handling ****/
         fn handleLoad(
             self: Pin<&mut MiriGenMCShim>,
             thread_id: i32,
@@ -282,6 +305,7 @@ mod ffi {
         ) -> StoreResult;
         fn handleFence(self: Pin<&mut MiriGenMCShim>, thread_id: i32, memory_ordering: MemOrdering);
 
+        /**** Memory (de)allocation ****/
         fn handleMalloc(
             self: Pin<&mut MiriGenMCShim>,
             thread_id: i32,
@@ -290,6 +314,7 @@ mod ffi {
         ) -> u64;
         fn handleFree(self: Pin<&mut MiriGenMCShim>, thread_id: i32, address: u64);
 
+        /**** Thread management ****/
         fn handleThreadCreate(self: Pin<&mut MiriGenMCShim>, thread_id: i32, parent_id: i32);
         fn handleThreadJoin(self: Pin<&mut MiriGenMCShim>, thread_id: i32, child_id: i32);
         fn handleThreadFinish(self: Pin<&mut MiriGenMCShim>, thread_id: i32, ret_val: u64);
@@ -318,14 +343,24 @@ mod ffi {
             size: u64,
         ) -> StoreResult;
 
-        /**** Scheduling ****/
+        /***** Exploration related functionality *****/
+
+        /// Ask GenMC which thread should be scheduled next.
+        /// Returns -1 if no more threads can/should be scheduled in the current execution.
+        /// Returns the id of the thread that should be scheduled next.
+        /// NOTE: This is GenMC's thread id, which needs to be mapped back to a Miri `ThreadId` before it can be used.
         fn scheduleNext(
             self: Pin<&mut MiriGenMCShim>,
             curr_thread_id: i32,
             curr_thread_next_instr_kind: ActionKind,
         ) -> i64;
 
+        /// Check whether there are more executions to explore.
+        /// If there are more executions, this method prepares for the next execution and returns `true`.
+        fn isExplorationDone(self: Pin<&mut MiriGenMCShim>) -> bool;
+
         /**** Result querying functionality. ****/
+
         // NOTE: We don't want to share the `VerificationResult` type with the Rust side, since it
         // is very large, uses features that CXX.rs doesn't support and may change as GenMC changes.
         // Instead, we only use the result on the C++ side, and only expose these getter function to
@@ -340,11 +375,9 @@ mod ffi {
         /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
         fn getErrorString(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
 
-        /// Check whether there are more executions to explore.
-        /// If there are more executions, this method prepares for the next execution and returns `true`.
-        fn isExplorationDone(self: Pin<&mut MiriGenMCShim>) -> bool;
+        /**** Printing functionality. ****/
 
-        fn printGraph(self: Pin<&mut MiriGenMCShim>);
+        /// Print the results of a run in estimation mode.
         fn printEstimationResults(self: &MiriGenMCShim, elapsed_time_sec: f64);
     }
 }

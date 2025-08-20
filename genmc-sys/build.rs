@@ -211,9 +211,12 @@ fn compile_cpp_dependencies(genmc_path: &Path) {
     let definitions = llvm_definitions.split(";");
 
     let cpp_files = [
-        "./src_cpp/MiriInterface/MiriInterface.cpp",
-        "./src_cpp/MiriInterface/Mutex.cpp",
-        "./src_cpp/ResultHandling.cpp",
+        "./cpp/src/MiriInterface/EventHandling.cpp",
+        "./cpp/src/MiriInterface/Exploration.cpp",
+        "./cpp/src/MiriInterface/Mutex.cpp",
+        "./cpp/src/MiriInterface/Setup.cpp",
+        "./cpp/src/MiriInterface/ThreadManagement.cpp",
+        "./cpp/src/ResultHandling.cpp",
     ];
 
     let mut bridge = cxx_build::bridge("src/lib.rs");
@@ -229,7 +232,7 @@ fn compile_cpp_dependencies(genmc_path: &Path) {
         .std("c++23")
         .include(genmc_include_dir)
         .include(llvm_include_dirs)
-        .include("./src_cpp")
+        .include("./cpp/include")
         .files(&cpp_files)
         .compile("genmc_interop");
 

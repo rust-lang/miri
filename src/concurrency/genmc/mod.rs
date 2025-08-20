@@ -122,11 +122,6 @@ impl GenmcCtx {
             .expect("there should always be a message")
     }
 
-    pub fn print_genmc_graph(&self) {
-        let mut mc = self.handle.borrow_mut();
-        mc.as_mut().printGraph();
-    }
-
     /// This function determines if we should continue exploring executions or if we are done.
     ///
     /// In GenMC mode, the input program should be repeatedly executed until this function returns `true` or an error is found.

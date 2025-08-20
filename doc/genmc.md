@@ -24,6 +24,8 @@ MIRIFLAGS="-Zmiri-genmc" cargo miri run
 ### Supported Parameters
 - `-Zmiri-genmc`: Enable GenMC mode (not required if any other GenMC options are used).
 - `-Zmiri-genmc-log=LOG_LEVEL`: Change the log level for GenMC. Default: `warning`.
+- `-Zmiri-genmc-print-exec-graphs={none,explored,blocked,all}`: Make GenMC print certain executiongraphs of the program (default: None).
+- `-Zmiri-genmc-print-exec-graphs`: Shorthand for suffix `=explored`.
 
 #### Available log levels
 Every log level includes all previous log levels.
