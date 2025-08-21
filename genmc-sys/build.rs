@@ -273,5 +273,5 @@ fn main() {
     // cloned (since cargo detects that as a file modification).
     println!("cargo::rerun-if-changed={RUST_CXX_BRIDGE_FILE_PATH}");
     println!("cargo::rerun-if-changed=./src");
-    println!("cargo::rerun-if-changed=./src_cpp");
+    println!("cargo::rerun-if-changed=./cpp");
 }
