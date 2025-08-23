@@ -1,7 +1,7 @@
 use std::collections::hash_map::Entry;
 use std::sync::RwLock;
 
-use genmc_sys::{GENMC_GLOBAL_ADDRESSES_MASK, getGlobalAllocStaticMask};
+use genmc_sys::{GENMC_GLOBAL_ADDRESSES_MASK, get_global_alloc_static_mask};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rustc_const_eval::interpret::{AllocId, AllocInfo, InterpResult, interp_ok};
@@ -43,7 +43,7 @@ impl GlobalStateInner {
     /// No addresses higher than this will be allocated.
     /// Will return an error if the given address limit is too small to allocate any addresses.
     fn new(last_addr: u64) -> Self {
-        assert_eq!(GENMC_GLOBAL_ADDRESSES_MASK, getGlobalAllocStaticMask());
+        assert_eq!(GENMC_GLOBAL_ADDRESSES_MASK, get_global_alloc_static_mask());
         assert_ne!(GENMC_GLOBAL_ADDRESSES_MASK, 0);
         // FIXME(genmc): Remove if non-64bit targets are supported.
         assert!(

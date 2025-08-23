@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use genmc_sys::{
     GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim, UniquePtr,
-    createGenmcHandle,
+    create_genmc_handle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -107,7 +107,7 @@ impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
     pub fn new(miri_config: &MiriConfig, target_usize_max: u64) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
-        let handle = RefCell::new(createGenmcHandle(&genmc_config.params));
+        let handle = RefCell::new(create_genmc_handle(&genmc_config.params));
         let global_allocations = Arc::new(GlobalAllocationHandler::new(target_usize_max));
         Self { handle, global_allocations, exec_state: Default::default() }
     }
@@ -115,13 +115,13 @@ impl GenmcCtx {
     /// Get the number of blocked executions encountered by GenMC.
     pub fn get_blocked_execution_count(&self) -> u64 {
         let mc = self.handle.borrow();
-        mc.as_ref().unwrap().getBlockedExecutionCount()
+        mc.as_ref().unwrap().get_blocked_execution_count()
     }
 
     /// Get the number of explored executions encountered by GenMC.
     pub fn get_explored_execution_count(&self) -> u64 {
         let mc = self.handle.borrow();
-        mc.as_ref().unwrap().getExploredExecutionCount()
+        mc.as_ref().unwrap().get_explored_execution_count()
     }
 
     /// Check if GenMC encountered an error that wasn't immediately returned during execution.
@@ -130,7 +130,7 @@ impl GenmcCtx {
         let mc = self.handle.borrow();
         mc.as_ref()
             .unwrap()
-            .getErrorString()
+            .get_error_string()
             .as_ref()
             .map(|error| error.to_string_lossy().to_string())
     }
@@ -141,7 +141,7 @@ impl GenmcCtx {
         let mc = self.handle.borrow();
         mc.as_ref()
             .unwrap()
-            .getResultMessage()
+            .get_result_message()
             .as_ref()
             .map(|error| error.to_string_lossy().to_string())
             .expect("there should always be a message")
@@ -152,7 +152,7 @@ impl GenmcCtx {
     /// In GenMC mode, the input program should be repeatedly executed until this function returns `true` or an error is found.
     pub fn is_exploration_done(&self) -> bool {
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().unwrap().isExplorationDone()
+        mc.as_mut().unwrap().is_exploration_done()
     }
 
     /// Select whether data race free actions should be allowed. This function should be used carefully!

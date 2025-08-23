@@ -50,7 +50,7 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-auto MiriGenMCShim::createHandle(const GenmcParams &config)
+auto MiriGenMCShim::create_handle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
 	auto conf = std::make_shared<Config>();
@@ -149,8 +149,8 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 
 // This needs to be available to Miri, but clang-tidy wants it static
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-auto createGenmcHandle(const GenmcParams &config)
+auto create_genmc_handle(const GenmcParams &config)
 	-> std::unique_ptr<MiriGenMCShim>
 {
-	return MiriGenMCShim::createHandle(config);
+	return MiriGenMCShim::create_handle(config);
 }

@@ -86,7 +86,7 @@ public:
 	 * Check whether there are more executions to explore.
 	 * If there are more executions, this method prepares for the next execution and returns
 	 * `true`. Returns true if there are no more executions to explore. */
-	bool isExplorationDone() { return GenMCDriver::done(); }
+	bool is_exploration_done() { return GenMCDriver::done(); }
 
 	/**** Result querying functionality. ****/
 
@@ -97,25 +97,25 @@ public:
 
 	/// Get the number of blocked executions encountered by GenMC (cast into a fixed with
 	/// integer)
-	auto getBlockedExecutionCount() const -> uint64_t
+	auto get_blocked_execution_count() const -> uint64_t
 	{
 		return static_cast<uint64_t>(getResult().exploredBlocked);
 	}
 
 	/// Get the number of executions explored by GenMC (cast into a fixed with integer)
-	auto getExploredExecutionCount() const -> uint64_t
+	auto get_explored_execution_count() const -> uint64_t
 	{
 		return static_cast<uint64_t>(getResult().explored);
 	}
 
 	/// Get all messages that GenMC produced (errors, warnings).
-	auto getResultMessage() const -> std::unique_ptr<std::string>
+	auto get_result_message() const -> std::unique_ptr<std::string>
 	{
 		return std::make_unique<std::string>(getResult().message);
 	}
 
 	/// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
-	auto getErrorString() const -> std::unique_ptr<std::string>
+	auto get_error_string() const -> std::unique_ptr<std::string>
 	{
 		const auto &result = GenMCDriver::getResult();
 		if (result.status.has_value())
@@ -123,7 +123,7 @@ public:
 		return nullptr;
 	}
 
-	static std::unique_ptr<MiriGenMCShim> createHandle(const GenmcParams &config);
+	static std::unique_ptr<MiriGenMCShim> create_handle(const GenmcParams &config);
 
 private:
 	/** Increment the event index in the given thread by 1 and return the new event. */
@@ -173,8 +173,8 @@ private:
 /**** Functions available to Miri ****/
 
 // NOTE: CXX doesn't support exposing static methods to Rust currently, so we expose this function instead.
-std::unique_ptr<MiriGenMCShim> createGenmcHandle(const GenmcParams &config);
+std::unique_ptr<MiriGenMCShim> create_genmc_handle(const GenmcParams &config);
 
-constexpr auto getGlobalAllocStaticMask() -> uint64_t { return SAddr::staticMask; }
+constexpr auto get_global_alloc_static_mask() -> uint64_t { return SAddr::staticMask; }
 
 #endif /* GENMC_MIRI_INTERFACE_HPP */

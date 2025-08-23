@@ -9,7 +9,7 @@ pub use self::ffi::*;
 /// This means the mask, interpreted as an address, is the lower bound of where the global address space starts.
 ///
 /// FIXME(genmc): rework this if non-64bit support is added to GenMC (the current allocation scheme only allows for 64bit addresses).
-/// FIXME(genmc): currently we use `getGlobalAllocStaticMask()` to ensure the constant is consistent between Miri and GenMC,
+/// FIXME(genmc): currently we use `get_global_alloc_static_mask()` to ensure the constant is consistent between Miri and GenMC,
 ///   but if https://github.com/dtolnay/cxx/issues/1051 is fixed we could share the constant directly.
 pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 
@@ -188,9 +188,9 @@ mod ffi {
         type SchedulingResult;
 
         /// Set up everything required for one run of GenMC, either in verification or estimation mode.
-        fn createGenmcHandle(config: &GenmcParams) -> UniquePtr<MiriGenMCShim>;
+        fn create_genmc_handle(config: &GenmcParams) -> UniquePtr<MiriGenMCShim>;
         /// Get the bit mask that GenMC expects for global memory allocations.
-        fn getGlobalAllocStaticMask() -> u64;
+        fn get_global_alloc_static_mask() -> u64;
 
         /// This function must be called at the start of any execution, before any events are reported to GenMC.
         fn handleExecutionStart(self: Pin<&mut MiriGenMCShim>);
@@ -247,7 +247,7 @@ mod ffi {
 
         /// Check whether there are more executions to explore.
         /// If there are more executions, this method prepares for the next execution and returns `true`.
-        fn isExplorationDone(self: Pin<&mut MiriGenMCShim>) -> bool;
+        fn is_exploration_done(self: Pin<&mut MiriGenMCShim>) -> bool;
 
         /**** Result querying functionality. ****/
 
@@ -257,12 +257,12 @@ mod ffi {
         // the Rust side.
 
         /// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
-        fn getBlockedExecutionCount(self: &MiriGenMCShim) -> u64;
+        fn get_blocked_execution_count(self: &MiriGenMCShim) -> u64;
         /// Get the number of executions explored by GenMC (cast into a fixed with integer)
-        fn getExploredExecutionCount(self: &MiriGenMCShim) -> u64;
+        fn get_explored_execution_count(self: &MiriGenMCShim) -> u64;
         /// Get all messages that GenMC produced (errors, warnings).
-        fn getResultMessage(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
+        fn get_result_message(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
         /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
-        fn getErrorString(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
+        fn get_error_string(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
     }
 }
