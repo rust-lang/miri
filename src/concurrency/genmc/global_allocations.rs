@@ -10,6 +10,18 @@ use tracing::info;
 
 use crate::alloc_addresses::AddressGenerator;
 
+#[derive(Debug)]
+struct GlobalStateInner {
+    /// The base address for each allocation.
+    /// This is the inverse of `int_to_ptr_map`.
+    base_addr: FxHashMap<AllocId, u64>,
+    /// We use the same address generator that Miri uses in normal operation.
+    address_generator: AddressGenerator,
+    /// The address generator needs an Rng to randomize the offsets between allocations.
+    /// We don't use the `MiriMachine` Rng, since we don't want it to be reset after every execution.
+    rng: StdRng,
+}
+
 /// Allocator for global memory in GenMC mode.
 /// Miri doesn't discover all global allocations statically like LLI does for GenMC.
 /// The existing global memory allocator in GenMC doesn't support this, so we take over these allocations.
@@ -24,18 +36,6 @@ impl GlobalAllocationHandler {
     pub fn new(last_addr: u64) -> GlobalAllocationHandler {
         Self(RwLock::new(GlobalStateInner::new(last_addr)))
     }
-}
-
-#[derive(Debug)]
-struct GlobalStateInner {
-    /// The base address for each allocation.
-    /// This is the inverse of `int_to_ptr_map`.
-    base_addr: FxHashMap<AllocId, u64>,
-    /// We use the same address generator that Miri uses in normal operation.
-    address_generator: AddressGenerator,
-    /// The address generator needs an Rng to randomize the offsets between allocations.
-    /// We don't use the `MiriMachine` Rng, since we don't want it to be reset after every execution.
-    rng: StdRng,
 }
 
 impl GlobalStateInner {
