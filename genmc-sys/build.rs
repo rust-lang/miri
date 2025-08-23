@@ -259,8 +259,7 @@ fn main() {
             genmc_src_path.display()
         );
         // Rebuild files in the given path change.
-        // FIXME(genmc): using the full directory instead of `./src` causes spurious rebuilds for some reason.
-        println!("cargo::rerun-if-changed={}", genmc_src_path.join("src").display());
+        println!("cargo::rerun-if-changed={}", genmc_src_path.display());
         genmc_src_path
     } else {
         downloading::download_genmc()
