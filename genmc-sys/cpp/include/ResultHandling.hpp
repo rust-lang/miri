@@ -91,22 +91,6 @@ public:
 	static LoadResult noValue() { return LoadResult(false); }
 	static LoadResult fromValue(SVal value) { return LoadResult(true, value); }
 	static LoadResult fromError(std::string msg) { return LoadResult(msg); }
-
-	/**** Operators: ****/
-
-	LoadResult &operator=(const LoadResult &rhs)
-	{
-		has_value = rhs.has_value;
-		read_value = rhs.read_value;
-		if (rhs.error.get() != nullptr) {
-			error = std::make_unique<ModelCheckerError>(*rhs.error);
-		}
-		else
-		{
-			error = nullptr;
-		}
-		return *this;
-	}
 };
 
 struct StoreResult {
