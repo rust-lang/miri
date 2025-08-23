@@ -35,20 +35,16 @@
 [[nodiscard]] auto MiriGenMCShim::handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
 											 MemOrdering ord, GenmcScalar old_val) -> LoadResult
 {
-	const auto addr = SAddr(address);
-	const auto aSize = ASize(size);
 	// `type` is only used for printing.
 	const auto type = AType::Unsigned;
-
 	const auto ret = handleLoadResetIfNone<EventLabel::EventLabelKind::Read>(
-		thread_id, ord, addr, aSize, type);
+		thread_id, ord, SAddr(address), ASize(size), type);
+
 	if (const auto *err = std::get_if<VerificationError>(&ret))
 		return LoadResult::from_error(*err);
-
-	const auto *retVal = std::get_if<SVal>(&ret);
-	if (retVal != nullptr)
-		return LoadResult::from_value(*retVal);
-
+	const auto *ret_val = std::get_if<SVal>(&ret);
+	if (ret_val != nullptr)
+		return LoadResult::from_value(*ret_val);
 	ERROR("Unimplemented: load returned unexpected result.");
 }
 
@@ -59,14 +55,11 @@
 	auto pos = incPos(thread_id);
 
 	auto addr = SAddr(address);
-	auto aSize = ASize(size);
 	// `type` is only used for printing.
 	auto type = AType::Unsigned;
-
-	auto val = value.toSVal();
-
 	const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
-		pos, ord, addr, aSize, type, val, EventDeps());
+		pos, ord, addr, ASize(size), type, value.toSVal(), EventDeps());
+
 	if (const auto *err = std::get_if<VerificationError>(&ret))
 		return StoreResult::from_error(*err);
 	if (!std::holds_alternative<std::monostate>(ret))
@@ -89,14 +82,13 @@ auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t ali
 	auto stype = StorageType::ST_Volatile;
 	auto spc = AddressSpace::AS_User;
 
-	const SVal retVal =
+	const SVal ret_val =
 		GenMCDriver::handleMalloc(pos, size, alignment, sd, stype, spc, EventDeps());
-	return retVal.get();
+	return ret_val.get();
 }
 
 void MiriGenMCShim::handleFree(ThreadId thread_id, uint64_t address)
 {
 	const auto pos = incPos(thread_id);
-	const auto addr = SAddr(address);
-	GenMCDriver::handleFree(pos, addr, EventDeps());
+	GenMCDriver::handleFree(pos, SAddr(address), EventDeps());
 }

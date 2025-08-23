@@ -137,8 +137,8 @@ auto MiriGenMCShim::createHandle(const GenmcParams &config)
 
 	auto driver = std::make_unique<MiriGenMCShim>(std::move(conf), mode);
 
-	auto *driverPtr = driver.get();
-	auto initValGetter = [driverPtr](const AAccess &access) {
+	auto *driver_ptr = driver.get();
+	auto initValGetter = [driver_ptr](const AAccess &access) {
 		// FIXME(genmc): Add proper support for initial values.
 		return SVal(0xff);
 	};

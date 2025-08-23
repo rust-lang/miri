@@ -118,11 +118,8 @@ public:
 	auto getErrorString() const -> std::unique_ptr<std::string>
 	{
 		const auto &result = GenMCDriver::getResult();
-		if (result.status.has_value()) {
-			// FIXME(genmc): format the error once std::format changes are merged into
-			// GenMC.
-			return std::make_unique<std::string>("FIXME(genmc): show error string");
-		}
+		if (result.status.has_value())
+			return std::make_unique<std::string>(format_error(result.status.value()));
 		return nullptr;
 	}
 
@@ -132,14 +129,14 @@ private:
 	/** Increment the event index in the given thread by 1 and return the new event. */
 	[[nodiscard]] inline auto incPos(ThreadId tid) -> Event
 	{
-		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
-		return ++threadsAction[tid].event;
+		ERROR_ON(tid >= threads_action_.size(), "ThreadId out of bounds");
+		return ++threads_action_[tid].event;
 	}
 	/** Decrement the event index in the given thread by 1 and return the new event. */
 	inline auto decPos(ThreadId tid) -> Event
 	{
-		ERROR_ON(tid >= threadsAction.size(), "ThreadId out of bounds");
-		return --threadsAction[tid].event;
+		ERROR_ON(tid >= threads_action_.size(), "ThreadId out of bounds");
+		return --threads_action_[tid].event;
 	}
 
 	/**
@@ -170,7 +167,7 @@ private:
 	 * `ActionKind` of the next instruction and the last event index added to the ExecutionGraph
 	 * in a given thread.
 	 */
-	std::vector<Action> threadsAction;
+	std::vector<Action> threads_action_;
 };
 
 /**** Functions available to Miri ****/

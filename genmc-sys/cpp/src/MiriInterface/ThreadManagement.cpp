@@ -24,10 +24,10 @@ void MiriGenMCShim::handleThreadCreate(ThreadId thread_id, ThreadId parent_id)
 	const ThreadInfo childInfo = ThreadInfo{thread_id, parent_id, fun_id, arg};
 
 	// NOTE: Default memory ordering (`Release`) used here.
-	auto childTid = GenMCDriver::handleThreadCreate(pos, childInfo, EventDeps());
-
-	BUG_ON(childTid != thread_id || childTid <= 0 || childTid != threadsAction.size());
-	threadsAction.push_back(Action(ActionKind::Load, Event(childTid, 0)));
+	auto child_tid = GenMCDriver::handleThreadCreate(pos, childInfo, EventDeps());
+	// Sanity check the thread id. GenMC should respect the choice of thread id Miri made.
+	BUG_ON(child_tid != thread_id || child_tid <= 0 || child_tid != threads_action_.size());
+	threads_action_.push_back(Action(ActionKind::Load, Event(child_tid, 0)));
 }
 
 void MiriGenMCShim::handleThreadJoin(ThreadId thread_id, ThreadId child_id)
