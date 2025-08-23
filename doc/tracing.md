@@ -1,6 +1,6 @@
 # Documentation for the tracing infrastructure in Miri
 
-Miri can be traced to understand how much time is spent in its various components (e.g. borrow tracker, data race checker, etc.). When tracing is enabled, running Miri will create a `.json` trace file that can be opened and analyzed in [Perfetto](https://ui.perfetto.dev/). The events and spans generated throughout the codebase are collected by [the `tracing` crate](https://crates.io/crates/tracing), which then dispatches them to the code that writes to the trace file, but also to the logger if logging is enabled. For any questions regarding this documentation you may contact [Stypox](https://rust-lang.zulipchat.com/#narrow/dm/627563-Stypox) on Zulip. 
+Miri can be traced to understand how much time is spent in its various components (e.g. borrow tracker, data race checker, etc.). When tracing is enabled, running Miri will create a `.json` trace file that can be opened and analyzed in [Perfetto](https://ui.perfetto.dev/). For any questions regarding this documentation you may contact [Stypox](https://rust-lang.zulipchat.com/#narrow/dm/627563-Stypox) on Zulip.
 
 ## Obtaining a trace file
 
@@ -43,7 +43,7 @@ You will see the boxes "Global Legacy Events" and "Process 1" on the left of the
     - "frame": what is the current stack frame in the interpreted program
     - "step": what statement/terminator in the MIR of the interpreted program is being executed
 
-Spans are represented as colored boxes in the timeline, while instantaneous events are represented by tiny arrows. Events were there even before any tracing was added, because they are the same events that would get logged if logging was enabled.
+Spans are represented as colored boxes in the timeline, while instantaneous events are represented by tiny arrows. (Events exist because rustc and Miri also use the `tracing` crate for debug logging, and those logs turn into events in the trace.)
 
 ![](./img/perfetto_timeline.png)
 
@@ -59,7 +59,7 @@ let _trace = enter_trace_span!(M, layouting::fn_abi_of_instance, ?instance, ?ext
 
 ### SQL tables
 
-Perfetto supports querying the span/event database using SQLite queries. Just type `:` in the search bar at the top to enter SQL mode, and then you will be able to enter SQL queries there. The relevant SQL tables are:
+Perfetto supports querying the span/event database using SQL queries (see the [docs](https://perfetto.dev/docs/analysis/perfetto-sql-syntax)). Just type `:` in the search bar at the top to enter SQL mode, and then you will be able to enter SQL queries there. The relevant SQL tables are:
 - `slices`: contains all spans and events; events can be distinguished from spans since their `dur` is 0. Relevant columns are:
     - `id`: a unique primary-key ID for the span (assigned by Perfetto, not present in the trace file)
     - `ts` and `dur`: the beginning and duration of the span, in nanoseconds
@@ -147,7 +147,6 @@ This is the kind of table you would get out:
 
 ### Statistics about subnames of a span
 
-
 Use the following SQL to see statistics about the subnames of spans with the same name (replace "SPAN_NAME" with the name of the span you want to see subname statistics of):
 
 ```sql
@@ -194,7 +193,7 @@ fn enter_trace_span(span: impl FnOnce() -> tracing::Span) -> impl EnteredTraceSp
 
 where `EnteredTraceSpan` is just a marker trait implemented by `()` and `tracing::span::EnteredSpan`. This function returns `()` by default (without calling the `span` closure), except in `MiriMachine` where if tracing is enabled it will return `span().entered()`.
 
-The code in `rustc_const_eval` calls this function when it wants to do tracing, and the compiler will supposedly optimize out tracing calls when tracing is disabled.
+The code in `rustc_const_eval` calls this function when it wants to do tracing, and the compiler will (hopefully) optimize out tracing calls when tracing is disabled.
 
 ### The `enter_trace_span!()` macro
 
@@ -255,6 +254,10 @@ let _trace = enter_trace_span!(M, step::eval_statement)
 ```
 
 ## Implementation details
+
+Here we explain how tracing is implemented internally.
+
+The events and spans generated throughout the codebase are collected by [the `tracing` crate](https://crates.io/crates/tracing), which then dispatches them to the code that writes to the trace file, but also to the logger if logging is enabled. 
 
 ### Choice of tracing library
 
@@ -330,5 +333,3 @@ After compiling Miri, you can run the following command to make a flamegraph usi
 ```sh
 perf record  --call-graph dwarf -F 999 ./miri/target/debug/miri --edition 2021 --sysroot ~/.cache/miri ./tests/pass/hashmap.rs && perf script | inferno-collapse-perf | inferno-flamegraph > flamegraph.svg
 ```
-
-![](./img/flamegraph.svg)
