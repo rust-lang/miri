@@ -3,9 +3,6 @@
 
 #include "MiriInterface.hpp"
 
-// Miri C++ helpers:
-#include "Helper.hpp"
-
 // CXX.rs generated headers:
 #include "genmc-sys/src/lib.rs.h"
 
@@ -45,11 +42,12 @@
 
 	const auto ret = handleLoadResetIfNone<EventLabel::EventLabelKind::Read>(
 		thread_id, ord, addr, aSize, type);
-	RETURN_IF_ERROR(ret, LoadResult);
+	if (const auto *err = std::get_if<VerificationError>(&ret))
+		return LoadResult::from_error(*err);
 
 	const auto *retVal = std::get_if<SVal>(&ret);
 	if (retVal != nullptr)
-		return LoadResult::fromValue(*retVal);
+		return LoadResult::from_value(*retVal);
 
 	ERROR("Unimplemented: load returned unexpected result.");
 }
@@ -69,15 +67,12 @@
 
 	const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
 		pos, ord, addr, aSize, type, val, EventDeps());
-
-	RETURN_IF_ERROR(ret, StoreResult);
-
+	if (const auto *err = std::get_if<VerificationError>(&ret))
+		return StoreResult::from_error(*err);
 	if (!std::holds_alternative<std::monostate>(ret))
-	{
 		ERROR("store returned unexpected result");
-	}
 
-	// TODO GENMC(mixed-accesses): calculate this value
+	// FIXME(mixed-accesses): calculate this value
 	const auto &g = getExec().getGraph();
 	const bool isCoMaxWrite = g.co_max(addr)->getPos() == pos;
 	return StoreResult::ok(isCoMaxWrite);

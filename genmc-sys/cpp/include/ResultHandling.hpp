@@ -2,6 +2,7 @@
 #define GENMC_RESULT_HANDLING_HPP
 
 #include "Support/SVal.hpp"
+#include "Verification/VerificationError.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -12,18 +13,28 @@
  * printing functionality with the Rust side. */
 using ModelCheckerError = std::string;
 
+static auto format_error(VerificationError err) -> ModelCheckerError
+{
+	auto buf = std::string();
+	auto s = llvm::raw_string_ostream(buf);
+	s << err;
+	return s.str();
+}
+
 /**
  * This type is the Miri equivalent to GenMC's `SVal`, but with the addition of a field to mark the
  * value as uninitialized.
  */
-struct GenmcScalar {
+struct GenmcScalar
+{
 	uint64_t value;
 	bool is_init;
 
 	explicit GenmcScalar() : value(0), is_init(false) {}
-	explicit GenmcScalar(uint64_t value, uint64_t extra)
+	explicit GenmcScalar(uint64_t value)
 		: value(value), is_init(true)
-	{}
+	{
+	}
 	explicit GenmcScalar(SVal val) : value(val.get()), is_init(true) {}
 
 	/** Convert to a GenMC SVal. Panics if the value is uninitialized. */
@@ -52,20 +63,23 @@ struct GenmcScalar {
 
 /**** Types for scheduling queries. ****/
 
-enum class ExecutionState : std::uint8_t {
+enum class ExecutionState : std::uint8_t
+{
 	Ok,
 	Blocked,
 	Finished,
 };
 
-struct SchedulingResult {
+struct SchedulingResult
+{
 	ExecutionState exec_state;
 	int32_t next_thread;
 };
 
 /**** Types for event handling. ****/
 
-struct LoadResult {
+struct LoadResult
+{
 	/// If there is an error, it will be stored in `error`, otherwise it is `None`
 	std::unique_ptr<ModelCheckerError> error;
 	/// Indicates whether a value was read or not.
@@ -76,24 +90,28 @@ struct LoadResult {
 private:
 	explicit LoadResult(bool has_value, SVal value)
 		: has_value(true), read_value(GenmcScalar(value)), error(nullptr)
-	{}
+	{
+	}
 	explicit LoadResult(bool has_value)
 		: has_value(has_value), read_value(GenmcScalar()), error(nullptr)
-	{}
+	{
+	}
 	explicit LoadResult(std::string error)
 		: has_value(false), read_value(GenmcScalar()),
-		  error(std::make_unique<ModelCheckerError>(error))
-	{}
+		  error(std::make_unique<std::string>(error))
+	{
+	}
 
 public:
 	/**** Construction functions: ****/
 
-	static LoadResult noValue() { return LoadResult(false); }
-	static LoadResult fromValue(SVal value) { return LoadResult(true, value); }
-	static LoadResult fromError(std::string msg) { return LoadResult(msg); }
+	static LoadResult no_value() { return LoadResult(false); }
+	static LoadResult from_value(SVal value) { return LoadResult(true, value); }
+	static LoadResult from_error(VerificationError err) { return LoadResult(format_error(err)); }
 };
 
-struct StoreResult {
+struct StoreResult
+{
 	/// if not `nullptr`, it contains an error encountered during the handling of the store.
 	std::unique_ptr<ModelCheckerError> error;
 	/// `true` if the write should also be reflected in Miri's memory representation.
@@ -101,11 +119,11 @@ struct StoreResult {
 
 	static StoreResult ok(bool isCoMaxWrite) { return StoreResult{nullptr, isCoMaxWrite}; }
 
-	static StoreResult fromError(std::string msg)
+	static StoreResult from_error(VerificationError err)
 	{
-		auto store_result = StoreResult{};
-		store_result.error = std::make_unique<ModelCheckerError>(msg);
-		return store_result;
+		return StoreResult{
+			/* error: */ std::make_unique<std::string>(format_error(err)),
+			/* isCoMaxWrite: */ false};
 	}
 };
 

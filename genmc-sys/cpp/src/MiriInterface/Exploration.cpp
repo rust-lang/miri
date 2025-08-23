@@ -2,9 +2,6 @@
 
 #include "MiriInterface.hpp"
 
-// Miri C++ helpers:
-#include "Helper.hpp"
-
 // CXX.rs generated headers:
 #include "genmc-sys/src/lib.rs.h"
 
