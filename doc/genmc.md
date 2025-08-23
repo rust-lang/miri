@@ -9,9 +9,7 @@ Miri-GenMC integrates that model checker into Miri.
 
 ## Usage
 
-**IMPORTANT: The license of GenMC and thus the `genmc-sys` crate in the Miri repo is currently "GPL-3.0-or-later", so a binary produced with the `genmc` feature is subject to the requirements of the GPL. As long as that remains the case, the `genmc` feature of Miri is OFF-BY-DEFAULT and must be OFF for all Miri releases.**
-
-For testing/developing Miri-GenMC (while keeping in mind the licensing issues):
+For testing/developing Miri-GenMC:
 - clone the Miri repo.
 - build Miri-GenMC with `./miri build --features=genmc`.
 - OR: install Miri-GenMC in the current system with `./miri install --features=genmc`
