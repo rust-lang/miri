@@ -7,10 +7,10 @@
 
 typedef struct PassMe {
     int32_t value;
-    int16_t other_value;
+    int64_t other_value;
 } PassMe;
 
-EXPORT int32_t pass_struct(const PassMe pass_me) {
+EXPORT int64_t pass_struct(const PassMe pass_me) {
   return pass_me.value + pass_me.other_value;
 }
 

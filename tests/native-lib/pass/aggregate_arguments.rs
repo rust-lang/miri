@@ -8,11 +8,11 @@ fn test_pass_struct() {
     #[repr(C)]
     struct PassMe {
         value: i32,
-        other_value: i16,
+        other_value: i64,
     }
 
     extern "C" {
-        fn pass_struct(s: PassMe) -> i32;
+        fn pass_struct(s: PassMe) -> i64;
     }
 
     let pass_me = PassMe { value: 42, other_value: 1337 };

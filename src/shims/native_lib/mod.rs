@@ -1,10 +1,11 @@
 //! Implements calling functions from a native library.
 
+use std::io::Write;
 use std::ops::Deref;
 
 use libffi::low::CodePtr;
 use libffi::middle::Type as FfiType;
-use rustc_abi::Size;
+use rustc_abi::{HasDataLayout, Size};
 use rustc_middle::ty::{self as ty, IntTy, Ty, UintTy};
 use rustc_span::Symbol;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ mod ffi;
 )]
 pub mod trace;
 
-use self::ffi::{OwnedArg, ScalarArg};
+use self::ffi::OwnedArg;
 use crate::*;
 
 /// The final results of an FFI trace, containing every relevant event detected
@@ -77,7 +78,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         link_name: Symbol,
         dest: &MPlaceTy<'tcx>,
         ptr: CodePtr,
-        libffi_args: &[OwnedArg],
+        libffi_args: &mut [OwnedArg],
     ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let this = self.eval_context_mut();
         #[cfg(target_os = "linux")]
@@ -274,90 +275,122 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// and convert it to a `OwnedArg`.
     fn op_to_ffi_arg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, OwnedArg> {
         let this = self.eval_context_ref();
-        let scalar = |v| interp_ok(this.read_immediate(v)?.to_scalar());
-        interp_ok(match v.layout.ty.kind() {
-            // If the primitive provided can be converted to a type matching the type pattern
-            // then create a `OwnedArg` of this primitive value with the corresponding `OwnedArg` constructor.
-            // the ints
-            ty::Int(IntTy::I8) => ScalarArg::Int8(scalar(v)?.to_i8()?).into(),
-            ty::Int(IntTy::I16) => ScalarArg::Int16(scalar(v)?.to_i16()?).into(),
-            ty::Int(IntTy::I32) => ScalarArg::Int32(scalar(v)?.to_i32()?).into(),
-            ty::Int(IntTy::I64) => ScalarArg::Int64(scalar(v)?.to_i64()?).into(),
-            ty::Int(IntTy::Isize) =>
-                ScalarArg::ISize(scalar(v)?.to_target_isize(this)?.try_into().unwrap()).into(),
-            // the uints
-            ty::Uint(UintTy::U8) => ScalarArg::UInt8(scalar(v)?.to_u8()?).into(),
-            ty::Uint(UintTy::U16) => ScalarArg::UInt16(scalar(v)?.to_u16()?).into(),
-            ty::Uint(UintTy::U32) => ScalarArg::UInt32(scalar(v)?.to_u32()?).into(),
-            ty::Uint(UintTy::U64) => ScalarArg::UInt64(scalar(v)?.to_u64()?).into(),
-            ty::Uint(UintTy::Usize) =>
-                ScalarArg::USize(scalar(v)?.to_target_usize(this)?.try_into().unwrap()).into(),
-            ty::RawPtr(..) => {
-                let ptr = scalar(v)?.to_pointer(this)?;
-                this.expose_and_warn(ptr.provenance, tracing)?;
 
-                // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
-                // below to expose the actual interpreter-level allocation.
-                ScalarArg::RawPtr(std::ptr::with_exposed_provenance_mut(ptr.addr().bytes_usize()))
-                    .into()
+        // This should go first so that we emit unsupported before doing a bunch
+        // of extra work for types that aren't supported yet.
+        let ty = this.ty_to_ffitype(v.layout.ty)?;
+
+        // Now grab the bytes of the argument.
+        let bytes = match v.as_mplace_or_imm() {
+            either::Either::Left(mplace) => {
+                // Get the alloc id corresponding to this mplace, alongside
+                // a pointer that's offset to point to this particular
+                // mplace (not one at the base addr of the allocation).
+                let mplace_ptr = mplace.ptr();
+                let sz = mplace.layout.size.bytes_usize();
+                if sz == 0 {
+                    throw_unsup_format!("Attempting to pass a ZST over FFI");
+                }
+                let (id, ofs, _) = this.ptr_get_alloc_id(mplace_ptr, sz.try_into().unwrap())?;
+                let ofs = ofs.bytes_usize();
+                // Expose all provenances in the allocation within the byte
+                // range of the struct, if any.
+                let alloc = this.get_alloc_raw(id)?;
+                let alloc_ptr = this.get_alloc_bytes_unchecked_raw(id)?;
+                for prov in alloc.provenance().get_range(this, (ofs..ofs.strict_add(sz)).into()) {
+                    this.expose_provenance(prov)?;
+                }
+                // SAFETY: We know for sure that at alloc_ptr + ofs the next layout.size
+                // bytes are part of this allocation and initialised. They might be marked
+                // as uninit in Miri, but all bytes returned by `MiriAllocBytes` are
+                // initialised.
+                unsafe {
+                    Box::from(std::slice::from_raw_parts(
+                        alloc_ptr.add(ofs),
+                        mplace.layout.size.bytes_usize(),
+                    ))
+                }
             }
-            // For ADTs, create an FfiType from their fields.
-            ty::Adt(adt_def, args) => {
-                let adt = this.adt_to_ffitype(v.layout.ty, *adt_def, args)?;
+            either::Either::Right(imm) => {
+                let (first, maybe_second) = imm.to_scalar_and_meta();
+                // If a scalar is a pointer, then expose its provenance.
+                if let interpret::Scalar::Ptr(p, _) = first {
+                    // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
+                    // below to expose the actual interpreter-level allocation.
+                    this.expose_and_warn(Some(p.provenance), tracing)?;
+                }
 
-                // Copy the raw bytes backing this arg.
-                let bytes = match v.as_mplace_or_imm() {
-                    either::Either::Left(mplace) => {
-                        // Get the alloc id corresponding to this mplace, alongside
-                        // a pointer that's offset to point to this particular
-                        // mplace (not one at the base addr of the allocation).
-                        let mplace_ptr = mplace.ptr();
-                        let sz = mplace.layout.size.bytes_usize();
-                        let id = this
-                            .alloc_id_from_addr(
-                                mplace_ptr.addr().bytes(),
-                                sz.try_into().unwrap(),
-                                /* only_exposed_allocations */ false,
-                            )
-                            .unwrap();
-                        // Expose all provenances in the allocation within the byte
-                        // range of the struct, if any.
-                        let alloc = this.get_alloc_raw(id)?;
-                        let alloc_ptr = this.get_alloc_bytes_unchecked_raw(id)?;
-                        let start_addr =
-                            mplace_ptr.addr().bytes_usize().strict_sub(alloc_ptr.addr());
-                        for prov in alloc
-                            .provenance()
-                            .get_range(this, (start_addr..start_addr.strict_add(sz)).into())
-                        {
-                            this.expose_provenance(prov)?;
-                        }
-                        // SAFETY: We know for sure that at mplace_ptr.addr() the next layout.size
-                        // bytes are part of this allocation and initialised. They might be marked
-                        // as uninit in Miri, but all bytes returned by `MiriAllocBytes` are
-                        // initialised.
-                        unsafe {
-                            std::slice::from_raw_parts(
-                                alloc_ptr.with_addr(mplace_ptr.addr().bytes_usize()),
-                                mplace.layout.size.bytes_usize(),
-                            )
-                            .to_vec()
-                            .into_boxed_slice()
-                        }
-                    }
-                    either::Either::Right(_) => {
-                        // TODO: support this!
-                        throw_unsup_format!(
-                            "Immediate structs can't be passed over FFI: {}",
-                            v.layout.ty
-                        )
-                    }
+                // Turn the scalar(s) into u128s so we can write their bytes
+                // into the buffer.
+                let (sc_int_first, sz_first) = {
+                    let sc = first.to_scalar_int()?;
+                    (sc.to_bits_unchecked(), sc.size().bytes_usize())
                 };
+                let (sc_int_second, sz_second) = match maybe_second {
+                    MemPlaceMeta::Meta(sc) => {
+                        // Might also be a pointer.
+                        if let interpret::Scalar::Ptr(p, _) = first {
+                            this.expose_and_warn(Some(p.provenance), tracing)?;
+                        }
+                        let sc = sc.to_scalar_int()?;
+                        (sc.to_bits_unchecked(), sc.size().bytes_usize())
+                    }
+                    MemPlaceMeta::None => (0, 0),
+                };
+                let sz = imm.layout.size.bytes_usize();
+                // TODO: Is this actually ok? Seems like the only way to figure
+                // out how the scalars are laid out relative to each other.
+                let align_second = match imm.layout.backend_repr {
+                    rustc_abi::BackendRepr::Scalar(_) => 1,
+                    rustc_abi::BackendRepr::ScalarPair(_, sc2) => sc2.align(this).bytes_usize(),
+                    _ => unreachable!(),
+                };
+                // How many bytes to skip between scalars if necessary for alignment.
+                let skip = sz_first.next_multiple_of(align_second).strict_sub(sz_first);
 
-                ffi::OwnedArg::Adt(adt, bytes)
+                let mut bytes: Box<[u8]> = (0..sz).map(|_| 0u8).collect();
+
+                // Copy over the bytes in an endianness-agnostic way. Since each
+                // scalar may be up to 128 bits and write_target_uint doesn't
+                // give us an easy way to do multiple writes in a row, we
+                // adapt its logic for two consecutive writes.
+                let mut bytes_wr = bytes.as_mut();
+                match this.data_layout().endian {
+                    rustc_abi::Endian::Little => {
+                        // Only write as many bytes as specified, not all of the u128.
+                        let wr = bytes_wr.write(&sc_int_first.to_le_bytes()[..sz_first]).unwrap();
+                        assert_eq!(wr, sz_first);
+                        // If the second scalar is zeroed, it's more efficient to skip it.
+                        if sc_int_second != 0 {
+                            bytes_wr = bytes_wr.split_at_mut(skip).1;
+                            let wr =
+                                bytes_wr.write(&sc_int_second.to_le_bytes()[..sz_second]).unwrap();
+                            assert_eq!(wr, sz_second);
+                        }
+                    }
+                    rustc_abi::Endian::Big => {
+                        // TODO: My gut says this is wrong, let's see if CI complains.
+                        let wr = bytes_wr
+                            .write(&sc_int_first.to_be_bytes()[16usize.strict_sub(sz_first)..])
+                            .unwrap();
+                        assert_eq!(wr, sz_first);
+                        if sc_int_second != 0 {
+                            bytes_wr = bytes_wr.split_at_mut(skip).1;
+                            let wr = bytes_wr
+                                .write(
+                                    &sc_int_second.to_be_bytes()[16usize.strict_sub(sz_second)..],
+                                )
+                                .unwrap();
+                            assert_eq!(wr, sz_second);
+                        }
+                    }
+                }
+                // Any remaining bytes are padding, so ignore.
+
+                bytes
             }
-            _ => throw_unsup_format!("unsupported argument type for native call: {}", v.layout.ty),
-        })
+        };
+        interp_ok(OwnedArg::new(ty, bytes))
     }
 
     /// Parses an ADT to construct the matching libffi type.
@@ -495,7 +528,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Call the function and store output, depending on return type in the function signature.
         let (ret, maybe_memevents) =
-            this.call_native_with_args(link_name, dest, code_ptr, &libffi_args)?;
+            this.call_native_with_args(link_name, dest, code_ptr, &mut libffi_args)?;
 
         if tracing {
             this.tracing_apply_accesses(maybe_memevents.unwrap())?;

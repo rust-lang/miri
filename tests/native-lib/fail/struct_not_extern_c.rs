@@ -6,11 +6,11 @@
 
 pub struct PassMe {
     pub value: i32,
-    pub other_value: i16,
+    pub other_value: i64,
 }
 
 extern "C" {
-    fn pass_struct(s: PassMe) -> i32;
+    fn pass_struct(s: PassMe) -> i64;
 }
 
 fn main() {
