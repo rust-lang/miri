@@ -15,7 +15,7 @@ pub unsafe fn call<R: libffi::high::CType>(fun: CodePtr, args: &[OwnedArg]) -> R
     let cif = Cif::new(arg_tys, R::reify().into_middle());
     // SAFETY: Caller upholds that the function is safe to call, and since we
     // were passed a slice reference we know the `OwnedArg`s won't have been
-    // by this point.
+    // dropped by this point.
     unsafe { cif.call(fun, &arg_ptrs) }
 }
 
