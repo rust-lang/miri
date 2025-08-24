@@ -326,11 +326,11 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         let alloc_ptr = this.get_alloc_bytes_unchecked_raw(id)?;
                         let start_addr =
                             mplace_ptr.addr().bytes_usize().strict_sub(alloc_ptr.addr());
-                        for byte in start_addr..start_addr.strict_add(sz) {
-                            if let Some(prov) = alloc.provenance().get(Size::from_bytes(byte), this)
-                            {
-                                this.expose_provenance(prov)?;
-                            }
+                        for prov in alloc
+                            .provenance()
+                            .get_range(this, (start_addr..start_addr.strict_add(sz)).into())
+                        {
+                            this.expose_provenance(prov)?;
                         }
                         // SAFETY: We know for sure that at mplace_ptr.addr() the next layout.size
                         // bytes are part of this allocation and initialised. They might be marked
