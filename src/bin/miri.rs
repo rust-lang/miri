@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode,
+    PointerArithmetic, ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -187,9 +187,21 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         }
 
         if let Some(_genmc_config) = &config.genmc_config {
-            let _genmc_ctx = Rc::new(GenmcCtx::new(&config));
+            let target_usize_max = tcx.target_usize_max();
+            let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
+                miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
+            };
 
-            todo!("GenMC mode not yet implemented");
+            // FIXME(genmc): add estimation mode here.
+
+            let return_code =
+                miri_genmc::run_genmc_mode(&config, eval_entry_once, target_usize_max)
+                    .unwrap_or_else(|| {
+                        tcx.dcx().abort_if_errors();
+                        rustc_driver::EXIT_FAILURE
+                    });
+
+            exit(return_code);
         };
 
         if let Some(many_seeds) = self.many_seeds.take() {
@@ -735,9 +747,11 @@ fn main() {
     // Validate settings for data race detection and GenMC mode.
     if miri_config.genmc_config.is_some() {
         if !miri_config.data_race_detector {
-            fatal_error!("Cannot disable data race detection in GenMC mode (currently)");
+            fatal_error!("Cannot disable data race detection in GenMC mode");
         } else if !miri_config.weak_memory_emulation {
             fatal_error!("Cannot disable weak memory emulation in GenMC mode");
+        } else if !miri_config.native_lib.is_empty() {
+            fatal_error!("native-lib not supported in GenMC mode.");
         }
         if miri_config.borrow_tracker.is_some() {
             eprintln!(

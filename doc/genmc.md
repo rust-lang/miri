@@ -9,9 +9,7 @@ Miri-GenMC integrates that model checker into Miri.
 
 ## Usage
 
-**IMPORTANT: The license of GenMC and thus the `genmc-sys` crate in the Miri repo is currently "GPL-3.0-or-later", so a binary produced with the `genmc` feature is subject to the requirements of the GPL. As long as that remains the case, the `genmc` feature of Miri is OFF-BY-DEFAULT and must be OFF for all Miri releases.**
-
-For testing/developing Miri-GenMC (while keeping in mind the licensing issues):
+For testing/developing Miri-GenMC:
 - clone the Miri repo.
 - build Miri-GenMC with `./miri build --features=genmc`.
 - OR: install Miri-GenMC in the current system with `./miri install --features=genmc`
@@ -20,6 +18,21 @@ Basic usage:
 ```shell
 MIRIFLAGS="-Zmiri-genmc" cargo miri run
 ```
+
+Note that `cargo miri test` in GenMC mode is currently not supported.
+
+### Supported Parameters
+
+- `-Zmiri-genmc`: Enable GenMC mode (not required if any other GenMC options are used).
+- `-Zmiri-genmc-log=LOG_LEVEL`: Change the log level for GenMC. Default: `warning`.
+  - `quiet`:    Disable logging.
+  - `error`:    Print errors.
+  - `warning`:  Print errors and warnings.
+  - `tip`:      Print errors, warnings and tips.
+  - If Miri is built with debug assertions, there are additional log levels available (downgraded to `tip` without debug assertions):
+    - `debug1`:   Print revisits considered by GenMC.
+    - `debug2`:   Print the execution graph after every memory access.
+    - `debug3`:   Print reads-from values considered by GenMC.
 
 <!-- FIXME(genmc): explain options. -->
 
