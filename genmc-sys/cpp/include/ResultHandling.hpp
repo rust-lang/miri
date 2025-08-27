@@ -13,118 +13,107 @@
  * printing functionality with the Rust side. */
 using ModelCheckerError = std::string;
 
-static auto format_error(VerificationError err) -> ModelCheckerError
-{
-	auto buf = std::string();
-	auto s = llvm::raw_string_ostream(buf);
-	s << err;
-	return s.str();
+static auto format_error(VerificationError err) -> ModelCheckerError {
+    auto buf = std::string();
+    auto s = llvm::raw_string_ostream(buf);
+    s << err;
+    return s.str();
 }
 
 /**
  * This type is the Miri equivalent to GenMC's `SVal`, but with the addition of a field to mark the
  * value as uninitialized.
  */
-struct GenmcScalar
-{
-	uint64_t value;
-	bool is_init;
+struct GenmcScalar {
+    uint64_t value;
+    bool is_init;
 
-	explicit GenmcScalar() : value(0), is_init(false) {}
-	explicit GenmcScalar(uint64_t value)
-		: value(value), is_init(true)
-	{
-	}
-	explicit GenmcScalar(SVal val) : value(val.get()), is_init(true) {}
+    explicit GenmcScalar() : value(0), is_init(false) {}
+    explicit GenmcScalar(uint64_t value) : value(value), is_init(true) {}
+    explicit GenmcScalar(SVal val) : value(val.get()), is_init(true) {}
 
-	/** Convert to a GenMC SVal. Panics if the value is uninitialized. */
-	auto toSVal() const -> SVal
-	{
-		ERROR_ON(!is_init, "attempt to convert uninitialized GenmcScalar to an SVal\n");
-		return SVal(value);
-	}
+    /** Convert to a GenMC SVal. Panics if the value is uninitialized. */
+    auto toSVal() const -> SVal {
+        ERROR_ON(!is_init, "attempt to convert uninitialized GenmcScalar to an SVal\n");
+        return SVal(value);
+    }
 
-	bool operator==(const GenmcScalar &other) const
-	{
-		// Treat uninitialized values as being equal.
-		if (!is_init && !other.is_init)
-			return true;
+    bool operator==(const GenmcScalar& other) const {
+        // Treat uninitialized values as being equal.
+        if (!is_init && !other.is_init)
+            return true;
 
-		// An initialized scalar is never equal to an uninitialized one.
-		if (is_init != other.is_init)
-			return false;
+        // An initialized scalar is never equal to an uninitialized one.
+        if (is_init != other.is_init)
+            return false;
 
-		// Compare the actual values
-		return value == other.value;
-	}
+        // Compare the actual values
+        return value == other.value;
+    }
 
-	friend auto operator<<(llvm::raw_ostream &rhs, const GenmcScalar &v) -> llvm::raw_ostream &;
+    friend auto operator<<(llvm::raw_ostream& rhs, const GenmcScalar& v) -> llvm::raw_ostream&;
 };
 
 /**** Types for scheduling queries. ****/
 
-enum class ExecutionState : std::uint8_t
-{
-	Ok,
-	Blocked,
-	Finished,
+enum class ExecutionState : std::uint8_t {
+    Ok,
+    Blocked,
+    Finished,
 };
 
-struct SchedulingResult
-{
-	ExecutionState exec_state;
-	int32_t next_thread;
+struct SchedulingResult {
+    ExecutionState exec_state;
+    int32_t next_thread;
 };
 
 /**** Types for event handling. ****/
 
-struct LoadResult
-{
-	/// If there is an error, it will be stored in `error`, otherwise it is `None`
-	std::unique_ptr<ModelCheckerError> error;
-	/// Indicates whether a value was read or not.
-	bool has_value;
-	/// The value that was read. Should not be used if `has_value` is `false`.
-	GenmcScalar read_value;
+struct LoadResult {
+    /// If there is an error, it will be stored in `error`, otherwise it is `None`
+    std::unique_ptr<ModelCheckerError> error;
+    /// Indicates whether a value was read or not.
+    bool has_value;
+    /// The value that was read. Should not be used if `has_value` is `false`.
+    GenmcScalar read_value;
 
-private:
-	explicit LoadResult(bool has_value, SVal value)
-		: has_value(true), read_value(GenmcScalar(value)), error(nullptr)
-	{
-	}
-	explicit LoadResult(bool has_value)
-		: has_value(has_value), read_value(GenmcScalar()), error(nullptr)
-	{
-	}
-	explicit LoadResult(std::string error)
-		: has_value(false), read_value(GenmcScalar()),
-		  error(std::make_unique<std::string>(error))
-	{
-	}
+  private:
+    explicit LoadResult(bool has_value, SVal value)
+        : has_value(true), read_value(GenmcScalar(value)), error(nullptr) {}
+    explicit LoadResult(bool has_value)
+        : has_value(has_value), read_value(GenmcScalar()), error(nullptr) {}
+    explicit LoadResult(std::string error)
+        : has_value(false), read_value(GenmcScalar()), error(std::make_unique<std::string>(error)) {
+    }
 
-public:
-	/**** Construction functions: ****/
+  public:
+    /**** Construction functions: ****/
 
-	static LoadResult no_value() { return LoadResult(false); }
-	static LoadResult from_value(SVal value) { return LoadResult(true, value); }
-	static LoadResult from_error(VerificationError err) { return LoadResult(format_error(err)); }
+    static LoadResult no_value() {
+        return LoadResult(false);
+    }
+    static LoadResult from_value(SVal value) {
+        return LoadResult(true, value);
+    }
+    static LoadResult from_error(VerificationError err) {
+        return LoadResult(format_error(err));
+    }
 };
 
-struct StoreResult
-{
-	/// if not `nullptr`, it contains an error encountered during the handling of the store.
-	std::unique_ptr<ModelCheckerError> error;
-	/// `true` if the write should also be reflected in Miri's memory representation.
-	bool isCoMaxWrite;
+struct StoreResult {
+    /// if not `nullptr`, it contains an error encountered during the handling of the store.
+    std::unique_ptr<ModelCheckerError> error;
+    /// `true` if the write should also be reflected in Miri's memory representation.
+    bool isCoMaxWrite;
 
-	static StoreResult ok(bool isCoMaxWrite) { return StoreResult{nullptr, isCoMaxWrite}; }
+    static StoreResult ok(bool isCoMaxWrite) {
+        return StoreResult { nullptr, isCoMaxWrite };
+    }
 
-	static StoreResult from_error(VerificationError err)
-	{
-		return StoreResult{
-			/* error: */ std::make_unique<std::string>(format_error(err)),
-			/* isCoMaxWrite: */ false};
-	}
+    static StoreResult from_error(VerificationError err) {
+        return StoreResult { /* error: */ std::make_unique<std::string>(format_error(err)),
+                             /* isCoMaxWrite: */ false };
+    }
 };
 
 #endif /* GENMC_RESULT_HANDLING_HPP */

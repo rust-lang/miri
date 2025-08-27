@@ -70,6 +70,16 @@ The process for obtaining them is as follows:
   If you place this directory inside the Miri folder, it is recommended to call it `genmc-src` as that tells `./miri fmt` to avoid
   formatting the Rust files inside that folder.
 
+### Formatting the C++ code
+
+For formatting the C++ code we provide a `.clang-format` file in the `genmc-sys` directory.
+With `clang-format` installed, run this command to format the c++ files (replace the `-i` with `--dry-run` to just see the changes.):
+```
+cd path/to/miri/genmc-sys/cpp/
+find . -name "*.cpp" -o -name "*.hpp" | xargs clang-format --style=file:"path/to/miri/path/to/genmc-sys/.clang-format" -i
+```
+NOTE: this is currently not done automatically on pull requests to Miri.
+
 <!-- FIXME(genmc): explain how submitting code to GenMC should be handled. -->
 
 <!-- FIXME(genmc): explain development. -->

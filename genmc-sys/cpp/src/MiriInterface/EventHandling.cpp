@@ -32,63 +32,82 @@
 
 /**** Memory access handling ****/
 
-[[nodiscard]] auto MiriGenMCShim::handleLoad(ThreadId thread_id, uint64_t address, uint64_t size,
-											 MemOrdering ord, GenmcScalar old_val) -> LoadResult
-{
-	// `type` is only used for printing.
-	const auto type = AType::Unsigned;
-	const auto ret = handleLoadResetIfNone<EventLabel::EventLabelKind::Read>(
-		thread_id, ord, SAddr(address), ASize(size), type);
+[[nodiscard]] auto MiriGenMCShim::handleLoad(
+    ThreadId thread_id,
+    uint64_t address,
+    uint64_t size,
+    MemOrdering ord,
+    GenmcScalar old_val
+) -> LoadResult {
+    // `type` is only used for printing.
+    const auto type = AType::Unsigned;
+    const auto ret = handleLoadResetIfNone<EventLabel::EventLabelKind::Read>(
+        thread_id,
+        ord,
+        SAddr(address),
+        ASize(size),
+        type
+    );
 
-	if (const auto *err = std::get_if<VerificationError>(&ret))
-		return LoadResult::from_error(*err);
-	const auto *ret_val = std::get_if<SVal>(&ret);
-	if (ret_val != nullptr)
-		return LoadResult::from_value(*ret_val);
-	ERROR("Unimplemented: load returned unexpected result.");
+    if (const auto* err = std::get_if<VerificationError>(&ret))
+        return LoadResult::from_error(*err);
+    const auto* ret_val = std::get_if<SVal>(&ret);
+    if (ret_val != nullptr)
+        return LoadResult::from_value(*ret_val);
+    ERROR("Unimplemented: load returned unexpected result.");
 }
 
-[[nodiscard]] auto MiriGenMCShim::handleStore(ThreadId thread_id, uint64_t address, uint64_t size,
-											  GenmcScalar value, GenmcScalar old_val,
-											  MemOrdering ord) -> StoreResult
-{
-	auto pos = incPos(thread_id);
+[[nodiscard]] auto MiriGenMCShim::handleStore(
+    ThreadId thread_id,
+    uint64_t address,
+    uint64_t size,
+    GenmcScalar value,
+    GenmcScalar old_val,
+    MemOrdering ord
+) -> StoreResult {
+    auto pos = incPos(thread_id);
 
-	auto addr = SAddr(address);
-	// `type` is only used for printing.
-	auto type = AType::Unsigned;
-	const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
-		pos, ord, addr, ASize(size), type, value.toSVal(), EventDeps());
+    auto addr = SAddr(address);
+    // `type` is only used for printing.
+    auto type = AType::Unsigned;
+    const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
+        pos,
+        ord,
+        addr,
+        ASize(size),
+        type,
+        value.toSVal(),
+        EventDeps()
+    );
 
-	if (const auto *err = std::get_if<VerificationError>(&ret))
-		return StoreResult::from_error(*err);
-	if (!std::holds_alternative<std::monostate>(ret))
-		ERROR("store returned unexpected result");
+    if (const auto* err = std::get_if<VerificationError>(&ret))
+        return StoreResult::from_error(*err);
+    if (!std::holds_alternative<std::monostate>(ret))
+        ERROR("store returned unexpected result");
 
-	// FIXME(mixed-accesses): calculate this value
-	const auto &g = getExec().getGraph();
-	const bool isCoMaxWrite = g.co_max(addr)->getPos() == pos;
-	return StoreResult::ok(isCoMaxWrite);
+    // FIXME(mixed-accesses): calculate this value
+    const auto& g = getExec().getGraph();
+    const bool isCoMaxWrite = g.co_max(addr)->getPos() == pos;
+    return StoreResult::ok(isCoMaxWrite);
 }
 
 /**** Memory (de)allocation ****/
 
-auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment) -> uint64_t
-{
-	auto pos = incPos(thread_id);
+auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment)
+    -> uint64_t {
+    auto pos = incPos(thread_id);
 
-	// These are only used for printing and features Miri-GenMC doesn't support (yet).
-	auto sd = StorageDuration::SD_Heap;
-	auto stype = StorageType::ST_Volatile;
-	auto spc = AddressSpace::AS_User;
+    // These are only used for printing and features Miri-GenMC doesn't support (yet).
+    auto sd = StorageDuration::SD_Heap;
+    auto stype = StorageType::ST_Volatile;
+    auto spc = AddressSpace::AS_User;
 
-	const SVal ret_val =
-		GenMCDriver::handleMalloc(pos, size, alignment, sd, stype, spc, EventDeps());
-	return ret_val.get();
+    const SVal ret_val =
+        GenMCDriver::handleMalloc(pos, size, alignment, sd, stype, spc, EventDeps());
+    return ret_val.get();
 }
 
-void MiriGenMCShim::handleFree(ThreadId thread_id, uint64_t address)
-{
-	const auto pos = incPos(thread_id);
-	GenMCDriver::handleFree(pos, SAddr(address), EventDeps());
+void MiriGenMCShim::handleFree(ThreadId thread_id, uint64_t address) {
+    const auto pos = incPos(thread_id);
+    GenMCDriver::handleFree(pos, SAddr(address), EventDeps());
 }
