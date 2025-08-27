@@ -135,15 +135,15 @@ impl<'tcx> std::fmt::Debug for ThreadState<'tcx> {
 }
 
 impl<'tcx> ThreadState<'tcx> {
-    pub(crate) fn is_enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         matches!(self, ThreadState::Enabled)
     }
 
-    pub(crate) fn is_terminated(&self) -> bool {
+    fn is_terminated(&self) -> bool {
         matches!(self, ThreadState::Terminated)
     }
 
-    pub(crate) fn is_blocked_on(&self, reason: BlockReason) -> bool {
+    fn is_blocked_on(&self, reason: BlockReason) -> bool {
         matches!(*self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
     }
 }
@@ -210,7 +210,7 @@ impl<'tcx> Thread<'tcx> {
     }
 
     /// Return whether this thread is enabled or not.
-    #[cfg_attr(not(feature = "genmc"), allow(unused))] // only used if `genmc` feature is enabled.
+    #[allow(unused)] // only used if `genmc` feature is enabled.
     pub(crate) fn is_enabled(&self) -> bool {
         self.state.is_enabled()
     }

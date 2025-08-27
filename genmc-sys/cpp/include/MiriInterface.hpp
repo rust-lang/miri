@@ -100,6 +100,9 @@ struct MiriGenmcShim : private GenMCDriver {
     // Instead, we only use the result on the C++ side, and only expose these getter function to
     // the Rust side.
 
+    // Note that CXX.rs doesn't support returning a C++ string to Rust by value,
+    // it must be behind an indirection like a `unique_ptr` (tested with CXX 1.0.170).
+
     /// Get the number of blocked executions encountered by GenMC (cast into a fixed with
     /// integer)
     auto get_blocked_execution_count() const -> uint64_t {
