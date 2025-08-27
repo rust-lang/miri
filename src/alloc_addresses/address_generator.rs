@@ -14,6 +14,7 @@ fn align_addr(addr: u64, align: u64) -> u64 {
     }
 }
 
+/// This provides the logic to generate addresses for memory allocations in a given address range.
 #[derive(Debug)]
 pub struct AddressGenerator {
     /// This is used as a memory address when a new pointer is casted to an integer. It

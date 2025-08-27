@@ -12,13 +12,12 @@ use crate::alloc_addresses::AddressGenerator;
 
 #[derive(Debug)]
 struct GlobalStateInner {
-    /// The base address for each allocation.
-    /// This is the inverse of `int_to_ptr_map`.
+    /// The base address for each *global* allocation.
     base_addr: FxHashMap<AllocId, u64>,
     /// We use the same address generator that Miri uses in normal operation.
     address_generator: AddressGenerator,
     /// The address generator needs an Rng to randomize the offsets between allocations.
-    /// We don't use the `MiriMachine` Rng, since we don't want it to be reset after every execution.
+    /// We don't use the `MiriMachine` Rng since this is global, cross-machine state.
     rng: StdRng,
 }
 
@@ -33,16 +32,11 @@ struct GlobalStateInner {
 pub struct GlobalAllocationHandler(RwLock<GlobalStateInner>);
 
 impl GlobalAllocationHandler {
-    pub fn new(last_addr: u64) -> GlobalAllocationHandler {
-        Self(RwLock::new(GlobalStateInner::new(last_addr)))
-    }
-}
-
-impl GlobalStateInner {
-    /// Create a new global address generator with a given max address (corresponding to the highest address available on the target platform, unless another limit exists).
+    /// Create a new global address generator with a given max address `last_addr`
+    /// (corresponding to the highest address available on the target platform, unless another limit exists).
     /// No addresses higher than this will be allocated.
-    /// Will return an error if the given address limit is too small to allocate any addresses.
-    fn new(last_addr: u64) -> Self {
+    /// Will panic if the given address limit is too small to allocate any addresses.
+    pub fn new(last_addr: u64) -> GlobalAllocationHandler {
         assert_eq!(GENMC_GLOBAL_ADDRESSES_MASK, get_global_alloc_static_mask());
         assert_ne!(GENMC_GLOBAL_ADDRESSES_MASK, 0);
         // FIXME(genmc): Remove if non-64bit targets are supported.
@@ -50,14 +44,16 @@ impl GlobalStateInner {
             GENMC_GLOBAL_ADDRESSES_MASK < last_addr,
             "only 64bit platforms are currently supported (highest address {last_addr:#x} <= minimum global address {GENMC_GLOBAL_ADDRESSES_MASK:#x})."
         );
-        Self {
+        Self(RwLock::new(GlobalStateInner {
             base_addr: FxHashMap::default(),
             address_generator: AddressGenerator::new(GENMC_GLOBAL_ADDRESSES_MASK..last_addr),
             // FIXME(genmc): We could provide a way to changes this seed, to allow for different global addresses.
             rng: StdRng::seed_from_u64(0),
-        }
+        }))
     }
+}
 
+impl GlobalStateInner {
     fn global_allocate_addr<'tcx>(
         &mut self,
         alloc_id: AllocId,

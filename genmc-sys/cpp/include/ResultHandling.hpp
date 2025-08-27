@@ -1,8 +1,10 @@
 #ifndef GENMC_RESULT_HANDLING_HPP
 #define GENMC_RESULT_HANDLING_HPP
 
+// CXX.rs generated headers:
 #include "Support/SVal.hpp"
 #include "Verification/VerificationError.hpp"
+#include "rust/cxx.h"
 
 #include <cstdint>
 #include <memory>
@@ -70,7 +72,7 @@ struct SchedulingResult {
 /**** Types for event handling. ****/
 
 struct LoadResult {
-    /// If there is an error, it will be stored in `error`, otherwise it is `None`
+    /// If not null, contains the error encountered during the handling of the load.
     std::unique_ptr<ModelCheckerError> error;
     /// Indicates whether a value was read or not.
     bool has_value;
@@ -101,7 +103,7 @@ struct LoadResult {
 };
 
 struct StoreResult {
-    /// if not `nullptr`, it contains an error encountered during the handling of the store.
+    /// If not null, contains the error encountered during the handling of the store.
     std::unique_ptr<ModelCheckerError> error;
     /// `true` if the write should also be reflected in Miri's memory representation.
     bool is_coherence_order_maximal_write;

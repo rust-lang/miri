@@ -1,5 +1,8 @@
 use std::rc::Rc;
 
+use rustc_middle::ty::TyCtxt;
+
+use crate::rustc_const_eval::interpret::PointerArithmetic;
 use crate::{GenmcCtx, MiriConfig};
 
 /// Do a complete run of the program in GenMC mode.
@@ -8,11 +11,12 @@ use crate::{GenmcCtx, MiriConfig};
 /// - All possible executions are explored.
 ///
 /// FIXME(genmc): add estimation mode setting.
-pub fn run_genmc_mode(
+pub fn run_genmc_mode<'tcx>(
     config: &MiriConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
-    target_usize_max: u64,
+    tcx: TyCtxt<'tcx>,
 ) -> Option<i32> {
+    let target_usize_max = tcx.target_usize_max();
     let genmc_ctx = Rc::new(GenmcCtx::new(config, target_usize_max));
 
     for rep in 0u64.. {

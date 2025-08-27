@@ -464,6 +464,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
 impl<'tcx> MiriMachine<'tcx> {
     pub fn free_alloc_id(&mut self, dead_id: AllocId, size: Size, align: Align, kind: MemoryKind) {
+        // In GenMC mode, we don't remove the allocation, so we can provide better errors for pointers sent to GenMC and back.
+        if self.data_race.as_genmc_ref().is_some() {
+            return;
+        }
+
         let global_state = self.alloc_addresses.get_mut();
         let rng = self.rng.get_mut();
 
@@ -482,12 +487,8 @@ impl<'tcx> MiriMachine<'tcx> {
         let addr = *global_state.base_addr.get(&dead_id).unwrap();
         let pos =
             global_state.int_to_ptr_map.binary_search_by_key(&addr, |(addr, _)| *addr).unwrap();
-
-        // In GenMC mode, we don't remove the allocation, so we can provide better errors for pointers sent to GenMC and back.
-        if self.data_race.as_genmc_ref().is_none() {
-            let removed = global_state.int_to_ptr_map.remove(pos);
-            assert_eq!(removed, (addr, dead_id)); // double-check that we removed the right thing
-        }
+        let removed = global_state.int_to_ptr_map.remove(pos);
+        assert_eq!(removed, (addr, dead_id)); // double-check that we removed the right thing
         // We can also remove it from `exposed`, since this allocation can anyway not be returned by
         // `alloc_id_from_addr` any more.
         global_state.exposed.remove(&dead_id);

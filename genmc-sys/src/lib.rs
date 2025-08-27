@@ -5,7 +5,7 @@ pub use cxx::UniquePtr;
 pub use self::ffi::*;
 
 /// Defined in "genmc/src/Support/SAddr.hpp".
-/// The first bit of all global addresses must be set to `1`, the rest are the actual address.
+/// The first bit of all global addresses must be set to `1`.
 /// This means the mask, interpreted as an address, is the lower bound of where the global address space starts.
 ///
 /// FIXME(genmc): rework this if non-64bit support is added to GenMC (the current allocation scheme only allows for 64bit addresses).
@@ -126,9 +126,7 @@ mod ffi {
         is_init: bool,
     }
 
-    /**** \/ Result & Error types \/ ****/
-
-    // FIXME(genmc): Rework error handling (likely requires changes on the GenMC side).
+    /**** Result & Error types ****/
 
     #[must_use]
     #[derive(Debug, Clone, Copy)]
@@ -148,7 +146,7 @@ mod ffi {
     #[must_use]
     #[derive(Debug)]
     struct LoadResult {
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        /// If not null, contains the error encountered during the handling of the load.
         error: UniquePtr<CxxString>,
         /// Indicates whether a value was read or not.
         has_value: bool,
@@ -159,13 +157,11 @@ mod ffi {
     #[must_use]
     #[derive(Debug)]
     struct StoreResult {
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        /// If not null, contains the error encountered during the handling of the store.
         error: UniquePtr<CxxString>,
         /// `true` if the write should also be reflected in Miri's memory representation.
         is_coherence_order_maximal_write: bool,
     }
-
-    /**** /\ Result & Error types /\ ****/
 
     unsafe extern "C++" {
         include!("MiriInterface.hpp");
@@ -188,7 +184,7 @@ mod ffi {
         type SchedulingResult;
 
         /// Set up everything required for one run of GenMC, either in verification or estimation mode.
-        fn create_genmc_handle(config: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
+        fn create_genmc_handle(params: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
         /// Get the bit mask that GenMC expects for global memory allocations.
         fn get_global_alloc_static_mask() -> u64;
 
@@ -255,12 +251,17 @@ mod ffi {
         // is very large, uses features that CXX.rs doesn't support and may change as GenMC changes.
         // Instead, we only use the result on the C++ side, and only expose these getter function to
         // the Rust side.
+        // Each `GenMCDriver` contains one `VerificationResult`, and each `MiriGenmcShim` contains on `GenMCDriver`.
+        // GenMC builds up the content of the `struct VerificationResult` over the course of an exploration,
+        // but it's safe to look at it at any point, since it is only accessible through exactly one `MiriGenmcShim`.
+        // All these functions for querying the result can be safely called repeatedly and at any time,
+        // though the results may be incomplete if called before `handle_execution_end`.
 
         /// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
         fn get_blocked_execution_count(self: &MiriGenmcShim) -> u64;
         /// Get the number of executions explored by GenMC (cast into a fixed with integer)
         fn get_explored_execution_count(self: &MiriGenmcShim) -> u64;
-        /// Get all messages that GenMC produced (errors, warnings).
+        /// Get all messages that GenMC produced (errors, warnings), combined into one string.
         fn get_result_message(self: &MiriGenmcShim) -> UniquePtr<CxxString>;
         /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
         fn get_error_string(self: &MiriGenmcShim) -> UniquePtr<CxxString>;

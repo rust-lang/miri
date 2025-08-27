@@ -750,7 +750,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         // The program didn't actually do a read, so suppress the memory access hooks.
         // This is also a very special exception where we just ignore an error -- if this read
         // was UB e.g. because the memory is uninitialized, we don't want to know!
-        let old_val = this.run_for_validation_mut(|this| this.read_scalar(dest)).discard_err();
+        let old_val = this.run_for_validation_ref(|this| this.read_scalar(dest)).discard_err();
 
         // Inform GenMC about the atomic store.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
@@ -924,10 +924,6 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         this.atomic_access_check(place, AtomicAccessType::Rmw)?;
 
-        // // FIXME(GenMC): this comment is wrong:
-        // Failure ordering cannot be stronger than success ordering, therefore first attempt
-        // to read with the failure ordering and if successful then try again with the success
-        // read ordering and write in the success case.
         // Read as immediate for the sake of `binary_op()`
         let old = this.allow_data_races_mut(|this| this.read_immediate(place))?;
 
@@ -1013,8 +1009,12 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// the moment when that clock snapshot was taken via `release_clock`.
     fn acquire_clock(&self, clock: &VClock) {
         let this = self.eval_context_ref();
-        if let Some(data_race) = this.machine.data_race.as_vclocks_ref() {
-            data_race.acquire_clock(clock, &this.machine.threads);
+        match &this.machine.data_race {
+            GlobalDataRaceHandler::None => {}
+            GlobalDataRaceHandler::Genmc(_genmc_ctx) =>
+                panic!("acquire_clock should not be called in GenMC mode."),
+            GlobalDataRaceHandler::Vclocks(data_race) =>
+                data_race.acquire_clock(clock, &this.machine.threads),
         }
     }
 }

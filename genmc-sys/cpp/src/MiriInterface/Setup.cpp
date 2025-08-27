@@ -51,7 +51,7 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-auto MiriGenmcShim::create_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim> {
+auto MiriGenmcShim::create_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim> {
     auto conf = std::make_shared<Config>();
 
     conf->skipNonAtomicInitializedCheck = true;
@@ -74,13 +74,13 @@ auto MiriGenmcShim::create_handle(const GenmcParams& config) -> std::unique_ptr<
     conf->warnOnGraphSize = 1024 * 1024;
 
     // The `logLevel` is not part of the config struct, but the static variable `logLevel`.
-    logLevel = to_genmc_verbosity_level(config.log_level);
+    logLevel = to_genmc_verbosity_level(params.log_level);
 
     // We only support the RC11 memory model for Rust.
     conf->model = ModelType::RC11;
 
     // This prints the seed that GenMC picks for randomized scheduling during estimation mode.
-    conf->printRandomScheduleSeed = config.print_random_schedule_seed;
+    conf->printRandomScheduleSeed = params.print_random_schedule_seed;
 
     // FIXME(genmc): supporting IPR requires annotations for `assume` and `spinloops`.
     conf->ipr = false;
@@ -108,10 +108,10 @@ auto MiriGenmcShim::create_handle(const GenmcParams& config) -> std::unique_ptr<
 
     // FIXME(genmc): implement symmetry reduction.
     ERROR_ON(
-        config.do_symmetry_reduction,
+        params.do_symmetry_reduction,
         "Symmetry reduction is currently unsupported in GenMC mode."
     );
-    conf->symmetryReduction = config.do_symmetry_reduction;
+    conf->symmetryReduction = params.do_symmetry_reduction;
 
     // FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
     conf->schedulePolicy = SchedulePolicy::WF;
@@ -150,6 +150,6 @@ auto MiriGenmcShim::create_handle(const GenmcParams& config) -> std::unique_ptr<
 
 // This needs to be available to Miri, but clang-tidy wants it static
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-auto create_genmc_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim> {
-    return MiriGenmcShim::create_handle(config);
+auto create_genmc_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim> {
+    return MiriGenmcShim::create_handle(params);
 }

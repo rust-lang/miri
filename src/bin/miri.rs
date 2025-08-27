@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    PointerArithmetic, ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
+    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -187,19 +187,17 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         }
 
         if let Some(_genmc_config) = &config.genmc_config {
-            let target_usize_max = tcx.target_usize_max();
             let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
                 miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
             };
 
             // FIXME(genmc): add estimation mode here.
 
-            let return_code =
-                miri_genmc::run_genmc_mode(&config, eval_entry_once, target_usize_max)
-                    .unwrap_or_else(|| {
-                        tcx.dcx().abort_if_errors();
-                        rustc_driver::EXIT_FAILURE
-                    });
+            let return_code = miri_genmc::run_genmc_mode(&config, eval_entry_once, tcx)
+                .unwrap_or_else(|| {
+                    tcx.dcx().abort_if_errors();
+                    rustc_driver::EXIT_FAILURE
+                });
 
             exit(return_code);
         };

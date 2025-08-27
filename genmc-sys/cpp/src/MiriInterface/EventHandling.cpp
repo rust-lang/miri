@@ -52,9 +52,9 @@
     if (const auto* err = std::get_if<VerificationError>(&ret))
         return LoadResult::from_error(*err);
     const auto* ret_val = std::get_if<SVal>(&ret);
-    if (ret_val != nullptr)
-        return LoadResult::from_value(*ret_val);
-    ERROR("Unimplemented: load returned unexpected result.");
+    if (ret_val == nullptr)
+        ERROR("Unimplemented: load returned unexpected result.");
+    return LoadResult::from_value(*ret_val);
 }
 
 [[nodiscard]] auto MiriGenmcShim::handle_store(
@@ -99,11 +99,19 @@ auto MiriGenmcShim::handle_malloc(ThreadId thread_id, uint64_t size, uint64_t al
 
     // These are only used for printing and features Miri-GenMC doesn't support (yet).
     const auto storage_duration = StorageDuration::SD_Heap;
+    // Volatile, as opposed to "persistent" (i.e., non-volatile memory that persists over reboots)
     const auto storage_type = StorageType::ST_Volatile;
     const auto address_space = AddressSpace::AS_User;
 
-    const SVal ret_val =
-        GenMCDriver::handleMalloc(pos, size, alignment, storage_duration, storage_type, address_space, EventDeps());
+    const SVal ret_val = GenMCDriver::handleMalloc(
+        pos,
+        size,
+        alignment,
+        storage_duration,
+        storage_type,
+        address_space,
+        EventDeps()
+    );
     return ret_val.get();
 }
 

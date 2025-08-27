@@ -110,7 +110,7 @@ struct MiriGenmcShim : private GenMCDriver {
         return static_cast<uint64_t>(getResult().explored);
     }
 
-    /// Get all messages that GenMC produced (errors, warnings).
+    /// Get all messages that GenMC produced (errors, warnings), combined into one string.
     auto get_result_message() const -> std::unique_ptr<std::string> {
         return std::make_unique<std::string>(getResult().message);
     }
@@ -123,7 +123,7 @@ struct MiriGenmcShim : private GenMCDriver {
         return nullptr;
     }
 
-    static auto create_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim>;
+    static auto create_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim>;
 
   private:
     /** Increment the event index in the given thread by 1 and return the new event. */
@@ -169,7 +169,7 @@ struct MiriGenmcShim : private GenMCDriver {
 
 // NOTE: CXX doesn't support exposing static methods to Rust currently, so we expose this function
 // instead.
-auto create_genmc_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim>;
+auto create_genmc_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim>;
 
 constexpr auto get_global_alloc_static_mask() -> uint64_t {
     return SAddr::staticMask;

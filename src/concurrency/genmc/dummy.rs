@@ -16,12 +16,14 @@ pub struct GenmcConfig {}
 pub mod miri_genmc {
     use std::rc::Rc;
 
+    use rustc_middle::ty::TyCtxt;
+
     use crate::{GenmcCtx, MiriConfig};
 
-    pub fn run_genmc_mode(
+    pub fn run_genmc_mode<'tcx>(
         _config: &MiriConfig,
         _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
-        _target_usize_max: u64,
+        _tcx: TyCtxt<'tcx>,
     ) -> Option<i32> {
         unreachable!();
     }
