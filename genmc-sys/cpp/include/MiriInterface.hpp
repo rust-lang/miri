@@ -30,35 +30,35 @@ struct GenmcParams;
 
 using ThreadId = int;
 
-struct MiriGenMCShim : private GenMCDriver {
+struct MiriGenmcShim : private GenMCDriver {
 
   public:
-    MiriGenMCShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
+    MiriGenmcShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
         : GenMCDriver(std::move(conf), nullptr, mode) {}
 
-    virtual ~MiriGenMCShim() {}
+    virtual ~MiriGenmcShim() {}
 
     /**** Execution start/end handling ****/
 
     // This function must be called at the start of any execution, before any events are
     // reported to GenMC.
-    void handleExecutionStart();
+    void handle_execution_start();
     // This function must be called at the end of any execution, even if an error was found
     // during the execution.
-    std::unique_ptr<ModelCheckerError> handleExecutionEnd();
+    std::unique_ptr<ModelCheckerError> handle_execution_end();
 
     /***** Functions for handling events encountered during program execution. *****/
 
     /**** Memory access handling ****/
 
-    [[nodiscard]] LoadResult handleLoad(
+    [[nodiscard]] LoadResult handle_load(
         ThreadId thread_id,
         uint64_t address,
         uint64_t size,
         MemOrdering ord,
         GenmcScalar old_val
     );
-    [[nodiscard]] StoreResult handleStore(
+    [[nodiscard]] StoreResult handle_store(
         ThreadId thread_id,
         uint64_t address,
         uint64_t size,
@@ -68,27 +68,27 @@ struct MiriGenMCShim : private GenMCDriver {
     );
 
     /**** Memory (de)allocation ****/
-    uintptr_t handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment);
-    void handleFree(ThreadId thread_id, uint64_t address);
+    auto handle_malloc(ThreadId thread_id, uint64_t size, uint64_t alignment) -> uint64_t;
+    void handle_free(ThreadId thread_id, uint64_t address);
 
     /**** Thread management ****/
-    void handleThreadCreate(ThreadId thread_id, ThreadId parent_id);
-    void handleThreadJoin(ThreadId thread_id, ThreadId child_id);
-    void handleThreadFinish(ThreadId thread_id, uint64_t ret_val);
-    void handleThreadKill(ThreadId thread_id);
+    void handle_thread_create(ThreadId thread_id, ThreadId parent_id);
+    void handle_thread_join(ThreadId thread_id, ThreadId child_id);
+    void handle_thread_finish(ThreadId thread_id, uint64_t ret_val);
+    void handle_thread_kill(ThreadId thread_id);
 
     /***** Exploration related functionality *****/
 
     /** Ask the GenMC scheduler for a new thread to schedule and return whether the execution is
      * finished, blocked, or can continue. */
-    auto scheduleNext(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
+    auto schedule_next(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
         -> SchedulingResult;
 
     /**
      * Check whether there are more executions to explore.
      * If there are more executions, this method prepares for the next execution and returns
      * `true`. Returns true if there are no more executions to explore. */
-    bool is_exploration_done() {
+    auto is_exploration_done() -> bool {
         return GenMCDriver::done();
     }
 
@@ -123,16 +123,16 @@ struct MiriGenMCShim : private GenMCDriver {
         return nullptr;
     }
 
-    static std::unique_ptr<MiriGenMCShim> create_handle(const GenmcParams& config);
+    static auto create_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim>;
 
   private:
     /** Increment the event index in the given thread by 1 and return the new event. */
-    [[nodiscard]] inline auto incPos(ThreadId tid) -> Event {
+    [[nodiscard]] inline auto inc_pos(ThreadId tid) -> Event {
         ERROR_ON(tid >= threads_action_.size(), "ThreadId out of bounds");
         return ++threads_action_[tid].event;
     }
     /** Decrement the event index in the given thread by 1 and return the new event. */
-    inline auto decPos(ThreadId tid) -> Event {
+    inline auto dec_pos(ThreadId tid) -> Event {
         ERROR_ON(tid >= threads_action_.size(), "ThreadId out of bounds");
         return --threads_action_[tid].event;
     }
@@ -140,15 +140,15 @@ struct MiriGenMCShim : private GenMCDriver {
     /**
      * Helper function for loads that need to reset the event counter when no value is returned.
      * Same syntax as `GenMCDriver::handleLoad`, but this takes a thread id instead of an Event.
-     * Automatically calls `incPos` and `decPos` where needed for the given thread.
+     * Automatically calls `inc_pos` and `dec_pos` where needed for the given thread.
      */
     template <EventLabel::EventLabelKind k, typename... Ts>
-    HandleResult<SVal> handleLoadResetIfNone(ThreadId tid, Ts&&... params) {
-        const auto pos = incPos(tid);
+    auto handle_load_reset_if_none(ThreadId tid, Ts&&... params) -> HandleResult<SVal> {
+        const auto pos = inc_pos(tid);
         const auto ret = GenMCDriver::handleLoad<k>(pos, std::forward<Ts>(params)...);
         // If we didn't get a value, we reset the index of the current thread.
         if (!std::holds_alternative<SVal>(ret)) {
-            decPos(tid);
+            dec_pos(tid);
         }
         return ret;
     }
@@ -169,7 +169,7 @@ struct MiriGenMCShim : private GenMCDriver {
 
 // NOTE: CXX doesn't support exposing static methods to Rust currently, so we expose this function
 // instead.
-std::unique_ptr<MiriGenMCShim> create_genmc_handle(const GenmcParams& config);
+auto create_genmc_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim>;
 
 constexpr auto get_global_alloc_static_mask() -> uint64_t {
     return SAddr::staticMask;

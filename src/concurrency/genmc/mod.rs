@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use genmc_sys::{
-    GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenMCShim, UniquePtr,
+    GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenmcShim, UniquePtr,
     create_genmc_handle,
 };
 use rustc_abi::{Align, Size};
@@ -92,7 +92,7 @@ impl PerExecutionState {
 /// Some state is reset between each execution in the same run.
 pub struct GenmcCtx {
     /// Handle to the GenMC model checker.
-    handle: RefCell<UniquePtr<MiriGenMCShim>>,
+    handle: RefCell<UniquePtr<MiriGenmcShim>>,
 
     /// Keep track of global allocations, to ensure they keep the same address across different executions, even if the order of allocations changes.
     /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
@@ -184,7 +184,7 @@ impl GenmcCtx {
         self.exec_state.reset();
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().unwrap().handleExecutionStart();
+        mc.as_mut().unwrap().handle_execution_start();
     }
 
     /// Inform GenMC that the program's execution has ended.
@@ -196,7 +196,7 @@ impl GenmcCtx {
         _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
     ) -> Result<(), String> {
         let mut mc = self.handle.borrow_mut();
-        let result = mc.as_mut().unwrap().handleExecutionEnd();
+        let result = mc.as_mut().unwrap().handle_execution_end();
         if let Some(msg) = result.as_ref() {
             Err(msg.to_string_lossy().to_string())
         } else {
@@ -469,7 +469,7 @@ impl GenmcCtx {
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut().unwrap();
-        let chosen_address = pinned_mc.handleMalloc(genmc_tid, genmc_size, alignment);
+        let chosen_address = pinned_mc.handle_malloc(genmc_tid, genmc_size, alignment);
 
         // Non-global addresses should not be in the global address space or null.
         assert_ne!(0, chosen_address, "GenMC malloc returned nullptr.");
@@ -507,7 +507,7 @@ impl GenmcCtx {
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut().unwrap();
-        pinned_mc.handleFree(genmc_tid, genmc_address);
+        pinned_mc.handle_free(genmc_tid, genmc_address);
 
         interp_ok(())
     }
@@ -530,7 +530,7 @@ impl GenmcCtx {
         let genmc_new_tid = thread_infos.add_thread(new_thread_id);
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().unwrap().handleThreadCreate(genmc_new_tid, genmc_parent_tid);
+        mc.as_mut().unwrap().handle_thread_create(genmc_new_tid, genmc_parent_tid);
 
         interp_ok(())
     }
@@ -547,7 +547,7 @@ impl GenmcCtx {
         let genmc_child_tid = thread_infos.get_genmc_tid(child_thread_id);
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().unwrap().handleThreadJoin(genmc_curr_tid, genmc_child_tid);
+        mc.as_mut().unwrap().handle_thread_join(genmc_curr_tid, genmc_child_tid);
 
         interp_ok(())
     }
@@ -567,7 +567,7 @@ impl GenmcCtx {
         );
 
         let mut mc = self.handle.borrow_mut();
-        mc.as_mut().unwrap().handleThreadFinish(genmc_tid, ret_val);
+        mc.as_mut().unwrap().handle_thread_finish(genmc_tid, ret_val);
     }
 
     /// Handle a call to `libc::exit` or the exit of the main thread.
@@ -602,7 +602,7 @@ impl GenmcCtx {
             let genmc_tid = thread_infos.get_genmc_tid(thread);
 
             let mut mc = self.handle.borrow_mut();
-            mc.as_mut().unwrap().handleThreadKill(genmc_tid);
+            mc.as_mut().unwrap().handle_thread_kill(genmc_tid);
         }
         // We continue executing now, so we store the exit status.
         self.exec_state.exit_status.set(Some(exit_status));
@@ -652,7 +652,7 @@ impl GenmcCtx {
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut().unwrap();
-        let load_result = pinned_mc.handleLoad(
+        let load_result = pinned_mc.handle_load(
             genmc_tid,
             genmc_address,
             genmc_size,
@@ -707,7 +707,7 @@ impl GenmcCtx {
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut().unwrap();
-        let store_result = pinned_mc.handleStore(
+        let store_result = pinned_mc.handle_store(
             genmc_tid,
             genmc_address,
             genmc_size,

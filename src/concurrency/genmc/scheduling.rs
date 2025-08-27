@@ -42,7 +42,7 @@ impl GenmcCtx {
 
         let mut mc = self.handle.borrow_mut();
         let pinned_mc = mc.as_mut().unwrap();
-        let result = pinned_mc.scheduleNext(curr_thread_info, curr_thread_next_instr_kind);
+        let result = pinned_mc.schedule_next(curr_thread_info, curr_thread_next_instr_kind);
         // Depending on the exec_state, we either schedule the given thread, or we are finished with this execution.
         match result.exec_state {
             ExecutionState::Ok =>

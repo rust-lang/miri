@@ -51,7 +51,7 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-auto MiriGenMCShim::create_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenMCShim> {
+auto MiriGenmcShim::create_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim> {
     auto conf = std::make_shared<Config>();
 
     conf->skipNonAtomicInitializedCheck = true;
@@ -136,20 +136,20 @@ auto MiriGenMCShim::create_handle(const GenmcParams& config) -> std::unique_ptr<
     // the future. The return value should be checked once this change is made.
     checkConfig(*conf);
 
-    auto driver = std::make_unique<MiriGenMCShim>(std::move(conf), mode);
+    auto driver = std::make_unique<MiriGenmcShim>(std::move(conf), mode);
 
     auto* driver_ptr = driver.get();
-    auto initValGetter = [driver_ptr](const AAccess& access) {
+    auto init_val_getter = [driver_ptr](const AAccess& access) {
         // FIXME(genmc): Add proper support for initial values.
         return SVal(0xff);
     };
-    driver->getExec().getGraph().setInitValGetter(initValGetter);
+    driver->getExec().getGraph().setInitValGetter(init_val_getter);
 
     return driver;
 }
 
 // This needs to be available to Miri, but clang-tidy wants it static
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-auto create_genmc_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenMCShim> {
-    return MiriGenMCShim::create_handle(config);
+auto create_genmc_handle(const GenmcParams& config) -> std::unique_ptr<MiriGenmcShim> {
+    return MiriGenmcShim::create_handle(config);
 }

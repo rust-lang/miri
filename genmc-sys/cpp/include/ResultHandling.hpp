@@ -33,7 +33,7 @@ struct GenmcScalar {
     explicit GenmcScalar(SVal val) : value(val.get()), is_init(true) {}
 
     /** Convert to a GenMC SVal. Panics if the value is uninitialized. */
-    auto toSVal() const -> SVal {
+    auto to_genmc_sval() const -> SVal {
         ERROR_ON(!is_init, "attempt to convert uninitialized GenmcScalar to an SVal\n");
         return SVal(value);
     }

@@ -182,34 +182,34 @@ mod ffi {
         type StoreResult;
 
         /// Communication layer between Miri/Rust and GenMC/C++:
-        type MiriGenMCShim;
+        type MiriGenmcShim;
 
         type ExecutionState;
         type SchedulingResult;
 
         /// Set up everything required for one run of GenMC, either in verification or estimation mode.
-        fn create_genmc_handle(config: &GenmcParams) -> UniquePtr<MiriGenMCShim>;
+        fn create_genmc_handle(config: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
         /// Get the bit mask that GenMC expects for global memory allocations.
         fn get_global_alloc_static_mask() -> u64;
 
         /// This function must be called at the start of any execution, before any events are reported to GenMC.
-        fn handleExecutionStart(self: Pin<&mut MiriGenMCShim>);
+        fn handle_execution_start(self: Pin<&mut MiriGenmcShim>);
         /// This function must be called at the end of any execution, even if an error was found during the execution.
-        fn handleExecutionEnd(self: Pin<&mut MiriGenMCShim>) -> UniquePtr<CxxString>;
+        fn handle_execution_end(self: Pin<&mut MiriGenmcShim>) -> UniquePtr<CxxString>;
 
         /***** Functions for handling events encountered during program execution. *****/
 
         /**** Memory access handling ****/
-        fn handleLoad(
-            self: Pin<&mut MiriGenMCShim>,
+        fn handle_load(
+            self: Pin<&mut MiriGenmcShim>,
             thread_id: i32,
             address: u64,
             size: u64,
             memory_ordering: MemOrdering,
             old_value: GenmcScalar,
         ) -> LoadResult;
-        fn handleStore(
-            self: Pin<&mut MiriGenMCShim>,
+        fn handle_store(
+            self: Pin<&mut MiriGenmcShim>,
             thread_id: i32,
             address: u64,
             size: u64,
@@ -219,19 +219,19 @@ mod ffi {
         ) -> StoreResult;
 
         /**** Memory (de)allocation ****/
-        fn handleMalloc(
-            self: Pin<&mut MiriGenMCShim>,
+        fn handle_malloc(
+            self: Pin<&mut MiriGenmcShim>,
             thread_id: i32,
             size: u64,
             alignment: u64,
         ) -> u64;
-        fn handleFree(self: Pin<&mut MiriGenMCShim>, thread_id: i32, address: u64);
+        fn handle_free(self: Pin<&mut MiriGenmcShim>, thread_id: i32, address: u64);
 
         /**** Thread management ****/
-        fn handleThreadCreate(self: Pin<&mut MiriGenMCShim>, thread_id: i32, parent_id: i32);
-        fn handleThreadJoin(self: Pin<&mut MiriGenMCShim>, thread_id: i32, child_id: i32);
-        fn handleThreadFinish(self: Pin<&mut MiriGenMCShim>, thread_id: i32, ret_val: u64);
-        fn handleThreadKill(self: Pin<&mut MiriGenMCShim>, thread_id: i32);
+        fn handle_thread_create(self: Pin<&mut MiriGenmcShim>, thread_id: i32, parent_id: i32);
+        fn handle_thread_join(self: Pin<&mut MiriGenmcShim>, thread_id: i32, child_id: i32);
+        fn handle_thread_finish(self: Pin<&mut MiriGenmcShim>, thread_id: i32, ret_val: u64);
+        fn handle_thread_kill(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
 
         /***** Exploration related functionality *****/
 
@@ -239,15 +239,15 @@ mod ffi {
         /// Returns -1 if no more threads can/should be scheduled in the current execution.
         /// Returns the id of the thread that should be scheduled next.
         /// NOTE: This is GenMC's thread id, which needs to be mapped back to a Miri `ThreadId` before it can be used.
-        fn scheduleNext(
-            self: Pin<&mut MiriGenMCShim>,
+        fn schedule_next(
+            self: Pin<&mut MiriGenmcShim>,
             curr_thread_id: i32,
             curr_thread_next_instr_kind: ActionKind,
         ) -> SchedulingResult;
 
         /// Check whether there are more executions to explore.
         /// If there are more executions, this method prepares for the next execution and returns `true`.
-        fn is_exploration_done(self: Pin<&mut MiriGenMCShim>) -> bool;
+        fn is_exploration_done(self: Pin<&mut MiriGenmcShim>) -> bool;
 
         /**** Result querying functionality. ****/
 
@@ -257,12 +257,12 @@ mod ffi {
         // the Rust side.
 
         /// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
-        fn get_blocked_execution_count(self: &MiriGenMCShim) -> u64;
+        fn get_blocked_execution_count(self: &MiriGenmcShim) -> u64;
         /// Get the number of executions explored by GenMC (cast into a fixed with integer)
-        fn get_explored_execution_count(self: &MiriGenMCShim) -> u64;
+        fn get_explored_execution_count(self: &MiriGenmcShim) -> u64;
         /// Get all messages that GenMC produced (errors, warnings).
-        fn get_result_message(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
+        fn get_result_message(self: &MiriGenmcShim) -> UniquePtr<CxxString>;
         /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
-        fn get_error_string(self: &MiriGenMCShim) -> UniquePtr<CxxString>;
+        fn get_error_string(self: &MiriGenmcShim) -> UniquePtr<CxxString>;
     }
 }

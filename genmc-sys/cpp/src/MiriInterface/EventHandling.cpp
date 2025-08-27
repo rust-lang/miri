@@ -32,7 +32,7 @@
 
 /**** Memory access handling ****/
 
-[[nodiscard]] auto MiriGenMCShim::handleLoad(
+[[nodiscard]] auto MiriGenmcShim::handle_load(
     ThreadId thread_id,
     uint64_t address,
     uint64_t size,
@@ -41,7 +41,7 @@
 ) -> LoadResult {
     // `type` is only used for printing.
     const auto type = AType::Unsigned;
-    const auto ret = handleLoadResetIfNone<EventLabel::EventLabelKind::Read>(
+    const auto ret = handle_load_reset_if_none<EventLabel::EventLabelKind::Read>(
         thread_id,
         ord,
         SAddr(address),
@@ -57,7 +57,7 @@
     ERROR("Unimplemented: load returned unexpected result.");
 }
 
-[[nodiscard]] auto MiriGenMCShim::handleStore(
+[[nodiscard]] auto MiriGenmcShim::handle_store(
     ThreadId thread_id,
     uint64_t address,
     uint64_t size,
@@ -65,7 +65,7 @@
     GenmcScalar old_val,
     MemOrdering ord
 ) -> StoreResult {
-    auto pos = incPos(thread_id);
+    auto pos = inc_pos(thread_id);
 
     auto addr = SAddr(address);
     // `type` is only used for printing.
@@ -76,7 +76,7 @@
         addr,
         ASize(size),
         type,
-        value.toSVal(),
+        value.to_genmc_sval(),
         EventDeps()
     );
 
@@ -93,9 +93,9 @@
 
 /**** Memory (de)allocation ****/
 
-auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t alignment)
+auto MiriGenmcShim::handle_malloc(ThreadId thread_id, uint64_t size, uint64_t alignment)
     -> uint64_t {
-    auto pos = incPos(thread_id);
+    auto pos = inc_pos(thread_id);
 
     // These are only used for printing and features Miri-GenMC doesn't support (yet).
     auto sd = StorageDuration::SD_Heap;
@@ -107,7 +107,7 @@ auto MiriGenMCShim::handleMalloc(ThreadId thread_id, uint64_t size, uint64_t ali
     return ret_val.get();
 }
 
-void MiriGenMCShim::handleFree(ThreadId thread_id, uint64_t address) {
-    const auto pos = incPos(thread_id);
+void MiriGenmcShim::handle_free(ThreadId thread_id, uint64_t address) {
+    const auto pos = inc_pos(thread_id);
     GenMCDriver::handleFree(pos, SAddr(address), EventDeps());
 }

@@ -12,7 +12,7 @@
 // C++ headers:
 #include <cstdint>
 
-auto MiriGenMCShim::scheduleNext(
+auto MiriGenmcShim::schedule_next(
     const int curr_thread_id,
     const ActionKind curr_thread_next_instr_kind
 ) -> SchedulingResult {
@@ -29,13 +29,13 @@ auto MiriGenMCShim::scheduleNext(
 
 /**** Execution start/end handling ****/
 
-void MiriGenMCShim::handleExecutionStart() {
+void MiriGenmcShim::handle_execution_start() {
     threads_action_.clear();
     threads_action_.push_back(Action(ActionKind::Load, Event::getInit()));
     GenMCDriver::handleExecutionStart();
 }
 
-auto MiriGenMCShim::handleExecutionEnd() -> std::unique_ptr<ModelCheckerError> {
+auto MiriGenmcShim::handle_execution_end() -> std::unique_ptr<ModelCheckerError> {
     // FIXME(genmc): add error handling once GenMC returns an error here.
     GenMCDriver::handleExecutionEnd(threads_action_);
     return {};
