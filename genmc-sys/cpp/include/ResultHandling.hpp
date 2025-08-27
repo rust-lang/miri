@@ -104,15 +104,15 @@ struct StoreResult {
     /// if not `nullptr`, it contains an error encountered during the handling of the store.
     std::unique_ptr<ModelCheckerError> error;
     /// `true` if the write should also be reflected in Miri's memory representation.
-    bool isCoMaxWrite;
+    bool is_coherence_order_maximal_write;
 
-    static StoreResult ok(bool isCoMaxWrite) {
-        return StoreResult { nullptr, isCoMaxWrite };
+    static StoreResult ok(bool is_coherence_order_maximal_write) {
+        return StoreResult { nullptr, is_coherence_order_maximal_write };
     }
 
     static StoreResult from_error(VerificationError err) {
         return StoreResult { /* error: */ std::make_unique<std::string>(format_error(err)),
-                             /* isCoMaxWrite: */ false };
+                             /* is_coherence_order_maximal_write: */ false };
     }
 };
 

@@ -721,7 +721,7 @@ impl GenmcCtx {
             throw_ub_format!("{}", error.to_string_lossy());
         }
 
-        interp_ok(store_result.isCoMaxWrite)
+        interp_ok(store_result.is_coherence_order_maximal_write)
     }
 
     /**** Blocking functionality ****/

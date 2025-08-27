@@ -65,11 +65,10 @@
     GenmcScalar old_val,
     MemOrdering ord
 ) -> StoreResult {
-    auto pos = inc_pos(thread_id);
-
-    auto addr = SAddr(address);
+    const auto pos = inc_pos(thread_id);
+    const auto addr = SAddr(address);
     // `type` is only used for printing.
-    auto type = AType::Unsigned;
+    const auto type = AType::Unsigned;
     const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
         pos,
         ord,
@@ -85,25 +84,26 @@
     if (!std::holds_alternative<std::monostate>(ret))
         ERROR("store returned unexpected result");
 
-    // FIXME(mixed-accesses): calculate this value
+    // FIXME(genmc,mixed-accesses): Use the value that GenMC returns from handleStore (once
+    // available).
     const auto& g = getExec().getGraph();
-    const bool isCoMaxWrite = g.co_max(addr)->getPos() == pos;
-    return StoreResult::ok(isCoMaxWrite);
+    const bool is_coherence_order_maximal_write = g.co_max(addr)->getPos() == pos;
+    return StoreResult::ok(is_coherence_order_maximal_write);
 }
 
 /**** Memory (de)allocation ****/
 
 auto MiriGenmcShim::handle_malloc(ThreadId thread_id, uint64_t size, uint64_t alignment)
     -> uint64_t {
-    auto pos = inc_pos(thread_id);
+    const auto pos = inc_pos(thread_id);
 
     // These are only used for printing and features Miri-GenMC doesn't support (yet).
-    auto sd = StorageDuration::SD_Heap;
-    auto stype = StorageType::ST_Volatile;
-    auto spc = AddressSpace::AS_User;
+    const auto storage_duration = StorageDuration::SD_Heap;
+    const auto storage_type = StorageType::ST_Volatile;
+    const auto address_space = AddressSpace::AS_User;
 
     const SVal ret_val =
-        GenMCDriver::handleMalloc(pos, size, alignment, sd, stype, spc, EventDeps());
+        GenMCDriver::handleMalloc(pos, size, alignment, storage_duration, storage_type, address_space, EventDeps());
     return ret_val.get();
 }
 

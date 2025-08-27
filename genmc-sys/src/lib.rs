@@ -162,7 +162,7 @@ mod ffi {
         /// If there was an error, it will be stored in `error`, otherwise it is `None`.
         error: UniquePtr<CxxString>,
         /// `true` if the write should also be reflected in Miri's memory representation.
-        isCoMaxWrite: bool,
+        is_coherence_order_maximal_write: bool,
     }
 
     /**** /\ Result & Error types /\ ****/
