@@ -30,11 +30,6 @@ struct GenmcParams;
 
 using ThreadId = int;
 
-using AnnotID = ModuleID::ID;
-using AnnotT = SExpr<AnnotID>;
-
-// TODO GENMC: fix naming conventions
-
 struct MiriGenMCShim : private GenMCDriver
 {
 
