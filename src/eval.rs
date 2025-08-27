@@ -303,13 +303,13 @@ impl<'tcx> MainThreadState<'tcx> {
                 // to be like a global `static`, so that all memory reached by it is considered to "not leak".
                 this.terminate_active_thread(TlsAllocAction::Leak)?;
 
-                // In GenMC mode, we let GenMC decide what happens on main thread exit.
+                // In GenMC mode, we do not immediately stop execution on main thread exit.
                 if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
                     // If there's no error, execution will continue (on another thread).
                     genmc_ctx.handle_exit(
                         ThreadId::MAIN_THREAD,
                         exit_code,
-                        /* is_exit_call */ false,
+                        crate::concurrency::ExitType::MainThreadFinish,
                     )?;
                 } else {
                     // Stop interpreter loop.

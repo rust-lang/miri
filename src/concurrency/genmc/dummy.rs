@@ -2,10 +2,17 @@ use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult};
 use rustc_middle::mir;
 
+pub use self::run::run_genmc_mode;
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
     MiriMachine, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
 };
+
+#[derive(Clone, Copy, Debug)]
+pub enum ExitType {
+    MainThreadFinish,
+    ExitCalled,
+}
 
 #[derive(Debug)]
 pub struct GenmcCtx {}
@@ -13,7 +20,7 @@ pub struct GenmcCtx {}
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {}
 
-pub mod miri_genmc {
+mod run {
     use std::rc::Rc;
 
     use rustc_middle::ty::TyCtxt;
@@ -145,7 +152,7 @@ impl GenmcCtx {
         _fail: AtomicReadOrd,
         _can_fail_spuriously: bool,
         _old_value: Scalar,
-    ) -> InterpResult<'tcx, (Scalar, bool, bool)> {
+    ) -> InterpResult<'tcx, (Scalar, Option<Scalar>, bool)> {
         unreachable!()
     }
 
@@ -218,7 +225,7 @@ impl GenmcCtx {
         &self,
         _thread: ThreadId,
         _exit_code: i32,
-        _is_exit_call: bool,
+        _exit_type: ExitType,
     ) -> InterpResult<'tcx> {
         unreachable!()
     }

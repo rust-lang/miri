@@ -4,7 +4,7 @@ use std::ffi::c_void;
 
 use libc::{self, pthread_attr_t, pthread_t};
 
-/// Spawn 1 thread using `pthread_create`, abort the process on any errors.
+/// Spawn a thread using `pthread_create`, abort the process on any errors.
 pub unsafe fn spawn_pthread(
     f: extern "C" fn(*mut c_void) -> *mut c_void,
     value: *mut c_void,
@@ -14,6 +14,31 @@ pub unsafe fn spawn_pthread(
     let attr: *const pthread_attr_t = std::ptr::null();
 
     if unsafe { libc::pthread_create(&raw mut thread_id, attr, f, value) } != 0 {
+        std::process::abort();
+    }
+    thread_id
+}
+
+/// Unsafe because we do *not* check that `F` is `Send + 'static`.
+/// That makes it much easier to write tests...
+pub unsafe fn spawn_pthread_closure<F: FnOnce()>(f: F) -> pthread_t {
+    let mut thread_id: pthread_t = 0;
+    let attr: *const pthread_attr_t = std::ptr::null();
+    let f = Box::new(f);
+    extern "C" fn thread_func<F: FnOnce()>(f: *mut c_void) -> *mut c_void {
+        let f = unsafe { Box::from_raw(f as *mut F) };
+        f();
+        std::ptr::null_mut()
+    }
+    if unsafe {
+        libc::pthread_create(
+            &raw mut thread_id,
+            attr,
+            thread_func::<F>,
+            Box::into_raw(f) as *mut c_void,
+        )
+    } != 0
+    {
         std::process::abort();
     }
     thread_id

@@ -35,10 +35,12 @@ impl ThreadIdMap {
         // NOTE: We select the new thread ids as integers incremented by one (we use the length as the counter).
         let next_thread_id = self.genmc_to_miri.len();
         let genmc_tid = next_thread_id.try_into().unwrap();
-        // FIXME(genmc): Fix this, or document this where ThreadIds are created (where is this?)
-        if self.miri_to_genmc.insert(thread_id, genmc_tid).is_some() {
-            panic!("Cannot reuse thread ids: thread id {thread_id:?} already inserted.");
-        }
+        // If there is already an entry, we override it.
+        // This could happen if Miri were to reuse `ThreadId`s, but we assume that if this happens, the previous thread with that id doesn't exist anymore.
+        self.miri_to_genmc
+            .entry(thread_id)
+            .and_modify(|old_genmc_tid| *old_genmc_tid = genmc_tid)
+            .or_insert(genmc_tid);
         self.genmc_to_miri.push(thread_id);
 
         genmc_tid
@@ -52,10 +54,13 @@ impl ThreadIdMap {
     }
 
     #[must_use]
-    /// Try to get the Miri `ThreadId` corresponding to a given GenMC thread id.
-    pub fn try_get_miri_tid(&self, genmc_tid: impl TryInto<i32>) -> Option<ThreadId> {
-        let genmc_tid: i32 = genmc_tid.try_into().ok()?;
-        let index: usize = genmc_tid.try_into().ok()?;
-        self.genmc_to_miri.get(index).cloned()
+    /// Get the Miri `ThreadId` corresponding to a given GenMC thread id.
+    /// Panics if the given thread id isn't valid.
+    pub fn get_miri_tid(&self, genmc_tid: i32) -> ThreadId {
+        let index: usize = genmc_tid.try_into().unwrap();
+        self.genmc_to_miri
+            .get(index)
+            .cloned()
+            .expect("A thread id returned from GenMC should exist.")
     }
 }

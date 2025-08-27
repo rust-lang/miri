@@ -674,11 +674,8 @@ impl<'tcx> MiriMachine<'tcx> {
             thread_cpu_affinity
                 .insert(threads.active_thread(), CpuAffinityMask::new(&layout_cx, config.num_cpus));
         }
-        let alloc_addresses = RefCell::new(alloc_addresses::GlobalStateInner::new(
-            config,
-            stack_addr,
-            /* last_addr */ tcx.target_usize_max(),
-        ));
+        let alloc_addresses =
+            RefCell::new(alloc_addresses::GlobalStateInner::new(config, stack_addr, tcx));
         MiriMachine {
             tcx,
             borrow_tracker,

@@ -929,22 +929,22 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // Inform GenMC about the atomic atomic compare exchange.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            let (old_value, is_co_maximal_write, cmpxchg_success) = genmc_ctx
-                .atomic_compare_exchange(
-                    this,
-                    place.ptr().addr(),
-                    place.layout.size,
-                    this.read_scalar(expect_old)?,
-                    new,
-                    success,
-                    fail,
-                    can_fail_spuriously,
-                    old.to_scalar(),
-                )?;
+            let (old_value, new_value, cmpxchg_success) = genmc_ctx.atomic_compare_exchange(
+                this,
+                place.ptr().addr(),
+                place.layout.size,
+                this.read_scalar(expect_old)?,
+                new,
+                success,
+                fail,
+                can_fail_spuriously,
+                old.to_scalar(),
+            )?;
+
             // The store might be the latest store in coherence order (determined by GenMC).
             // If it is, we need to update the value in Miri's memory:
-            if is_co_maximal_write {
-                this.allow_data_races_mut(|this| this.write_scalar(new, place))?;
+            if let Some(new_value) = new_value {
+                this.allow_data_races_mut(|this| this.write_scalar(new_value, place))?;
             }
             return interp_ok(Immediate::ScalarPair(old_value, Scalar::from_bool(cmpxchg_success)));
         }

@@ -113,7 +113,7 @@ pub enum BlockReason {
 }
 
 /// The state of a thread.
-pub(crate) enum ThreadState<'tcx> {
+enum ThreadState<'tcx> {
     /// The thread is enabled and can be executed.
     Enabled,
     /// The thread is blocked on something.
@@ -209,10 +209,10 @@ impl<'tcx> Thread<'tcx> {
         self.thread_name.as_deref()
     }
 
-    /// Get the current state of this thread.
-    #[allow(unused)] // Note: only used if `genmc` feature is enabled.
-    pub(crate) fn get_state(&self) -> &ThreadState<'tcx> {
-        &self.state
+    /// Return whether this thread is enabled or not.
+    #[cfg_attr(not(feature = "genmc"), allow(unused))] // only used if `genmc` feature is enabled.
+    pub(crate) fn is_enabled(&self) -> bool {
+        self.state.is_enabled()
     }
 
     /// Get the name of the current thread for display purposes; will include thread ID if not set.
@@ -348,10 +348,9 @@ impl VisitProvenance for Frame<'_, Provenance, FrameExtra<'_>> {
     }
 }
 
-// FIXME(genmc,question): is this ok to be public?
 /// The moment in time when a blocked thread should be woken up.
 #[derive(Debug)]
-pub(crate) enum Timeout {
+enum Timeout {
     Monotonic(Instant),
     RealTime(SystemTime),
 }
@@ -411,6 +410,7 @@ pub struct ThreadManager<'tcx> {
     /// A mapping from a thread-local static to the thread specific allocation.
     thread_local_allocs: FxHashMap<(DefId, ThreadId), StrictPointer>,
     /// A flag that indicates that we should change the active thread.
+    /// Completely ignored in GenMC mode.
     yield_active_thread: bool,
     /// A flag that indicates that we should do round robin scheduling of threads else randomized scheduling is used.
     fixed_scheduling: bool,
@@ -710,7 +710,6 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
             let thread_manager = &mut this.machine.threads;
             thread_manager.active_thread = next_thread_id;
-            thread_manager.yield_active_thread = false;
 
             assert!(thread_manager.threads[thread_manager.active_thread].state.is_enabled());
             return interp_ok(SchedulingAction::ExecuteStep);
@@ -954,7 +953,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
 
-        // FIXME(genmc,question): Is it correct to move this code here?
         match &mut this.machine.data_race {
             GlobalDataRaceHandler::None => {}
             GlobalDataRaceHandler::Vclocks(data_race) =>
@@ -991,6 +989,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         callback: DynUnblockCallback<'tcx>,
     ) {
         let this = self.eval_context_mut();
+        if timeout.is_some() && this.machine.data_race.as_genmc_ref().is_some() {
+            panic!("Unimplemented: Timeouts not yet supported in GenMC mode.");
+        }
         let timeout = timeout.map(|(clock, anchor, duration)| {
             let anchor = match clock {
                 TimeoutClock::RealTime => {
@@ -1254,10 +1255,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.run_timeout_callback()?;
                 }
                 SchedulingAction::Sleep(duration) => {
-                    // FIXME(genmc): properly handle sleep in GenMC mode.
-                    if this.machine.data_race.as_genmc_ref().is_some() {
-                        throw_unsup_format!("Sleeping is not yet supported in GenMC mode");
-                    }
                     this.machine.monotonic_clock.sleep(duration);
                 }
             }

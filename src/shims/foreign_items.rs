@@ -448,7 +448,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     genmc_ctx.handle_exit(
                         this.machine.threads.active_thread(),
                         code,
-                        /* is_exit_call */ true,
+                        crate::concurrency::ExitType::ExitCalled,
                     )?;
                     todo!(); // FIXME(genmc): Add a way to return here that is allowed to not do progress (can't use existing EmulateItemResult variants).
                 }

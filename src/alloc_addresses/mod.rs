@@ -8,6 +8,7 @@ use std::cell::RefCell;
 
 use rustc_abi::{Align, Size};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_middle::ty::TyCtxt;
 
 pub use self::address_generator::AddressGenerator;
 use self::reuse_pool::ReusePool;
@@ -78,14 +79,14 @@ impl VisitProvenance for GlobalStateInner {
 }
 
 impl GlobalStateInner {
-    pub fn new(config: &MiriConfig, stack_addr: u64, last_addr: u64) -> Self {
+    pub fn new<'tcx>(config: &MiriConfig, stack_addr: u64, tcx: TyCtxt<'tcx>) -> Self {
         GlobalStateInner {
             int_to_ptr_map: Vec::default(),
             base_addr: FxHashMap::default(),
             prepared_alloc_bytes: FxHashMap::default(),
             reuse: ReusePool::new(config),
             exposed: FxHashSet::default(),
-            address_generator: AddressGenerator::new(stack_addr..last_addr),
+            address_generator: AddressGenerator::new(stack_addr..tcx.target_usize_max()),
             provenance_mode: config.provenance_mode,
         }
     }

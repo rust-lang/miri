@@ -79,7 +79,7 @@ impl fmt::Display for TerminationInfo {
             TreeBorrowsUb { title, .. } => write!(f, "{title}"),
             Deadlock => write!(f, "the evaluated program deadlocked"),
             GenmcBlockedExecution =>
-                write!(f, "GenMC determined that the execution got blocked (this is not an error)."),
+                write!(f, "GenMC determined that the execution got blocked (this is not an error)"),
             MultipleSymbolDefinitions { link_name, .. } =>
                 write!(f, "multiple definitions of symbol `{link_name}`"),
             SymbolShimClashing { link_name, .. } =>
@@ -246,7 +246,7 @@ pub fn report_error<'tcx>(
                 None
             }
             GenmcBlockedExecution => {
-                // This case should only be used in GenMC mode.
+                // This case should only happen in GenMC mode.
                 assert!(ecx.machine.data_race.as_genmc_ref().is_some());
                 // The program got blocked by GenMC without finishing the execution.
                 // No cleanup code was executed, so we don't do any leak checks.

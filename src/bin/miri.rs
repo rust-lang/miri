@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use miri::{
     BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, miri_genmc,
+    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, run_genmc_mode,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -193,11 +193,10 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
 
             // FIXME(genmc): add estimation mode here.
 
-            let return_code = miri_genmc::run_genmc_mode(&config, eval_entry_once, tcx)
-                .unwrap_or_else(|| {
-                    tcx.dcx().abort_if_errors();
-                    rustc_driver::EXIT_FAILURE
-                });
+            let return_code = run_genmc_mode(&config, eval_entry_once, tcx).unwrap_or_else(|| {
+                tcx.dcx().abort_if_errors();
+                rustc_driver::EXIT_FAILURE
+            });
 
             exit(return_code);
         };
@@ -757,6 +756,8 @@ fn main() {
             );
             miri_config.borrow_tracker = None;
         }
+        // We enable fixed scheduling so Miri doesn't randomly yield before a terminator.
+        miri_config.fixed_scheduling = true;
     } else if miri_config.weak_memory_emulation && !miri_config.data_race_detector {
         fatal_error!(
             "Weak memory emulation cannot be enabled when the data race detector is disabled"

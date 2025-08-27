@@ -80,7 +80,8 @@ struct MiriGenmcShim : private GenMCDriver {
     /***** Exploration related functionality *****/
 
     /** Ask the GenMC scheduler for a new thread to schedule and return whether the execution is
-     * finished, blocked, or can continue. */
+     * finished, blocked, or can continue.
+     * Updates the next instruction kind for the given thread id. */
     auto schedule_next(const int curr_thread_id, const ActionKind curr_thread_next_instr_kind)
         -> SchedulingResult;
 

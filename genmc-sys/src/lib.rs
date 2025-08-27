@@ -231,10 +231,9 @@ mod ffi {
 
         /***** Exploration related functionality *****/
 
-        /// Ask GenMC which thread should be scheduled next.
-        /// Returns -1 if no more threads can/should be scheduled in the current execution.
-        /// Returns the id of the thread that should be scheduled next.
-        /// NOTE: This is GenMC's thread id, which needs to be mapped back to a Miri `ThreadId` before it can be used.
+        /// Ask the GenMC scheduler for a new thread to schedule and
+        /// return whether the execution is finished, blocked, or can continue.
+        /// Updates the next instruction kind for the given thread id.
         fn schedule_next(
             self: Pin<&mut MiriGenmcShim>,
             curr_thread_id: i32,
