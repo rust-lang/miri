@@ -1007,15 +1007,16 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
 
     /// Acquire the given clock into the current thread, establishing synchronization with
     /// the moment when that clock snapshot was taken via `release_clock`.
-    fn acquire_clock(&self, clock: &VClock) {
+    fn acquire_clock(&self, clock: &VClock) -> InterpResult<'tcx> {
         let this = self.eval_context_ref();
         match &this.machine.data_race {
             GlobalDataRaceHandler::None => {}
             GlobalDataRaceHandler::Genmc(_genmc_ctx) =>
-                panic!("acquire_clock should not be called in GenMC mode."),
+                throw_unsup_format!("acquire_clock is not (yet) supported in GenMC mode."),
             GlobalDataRaceHandler::Vclocks(data_race) =>
                 data_race.acquire_clock(clock, &this.machine.threads),
         }
+        interp_ok(())
     }
 }
 

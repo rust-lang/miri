@@ -183,7 +183,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.active_thread(),
         ) {
             if let Some(clock) = clock {
-                this.acquire_clock(&clock);
+                this.acquire_clock(&clock)?;
             }
             interp_ok(reuse_addr)
         } else {
