@@ -210,8 +210,7 @@ impl<'tcx> Thread<'tcx> {
     }
 
     /// Return whether this thread is enabled or not.
-    #[allow(unused)] // only used if `genmc` feature is enabled.
-    pub(crate) fn is_enabled(&self) -> bool {
+    pub fn is_enabled(&self) -> bool {
         self.state.is_enabled()
     }
 

@@ -16,7 +16,7 @@ pub fn split_access(address: Size, size: Size) -> impl Iterator<Item = (u64, u64
     let end_address = start_address + size.bytes();
 
     let start_address_aligned = start_address.next_multiple_of(MAX_ACCESS_SIZE);
-    let end_address_aligned = (end_address / MAX_ACCESS_SIZE) * MAX_ACCESS_SIZE;
+    let end_address_aligned = (end_address / MAX_ACCESS_SIZE) * MAX_ACCESS_SIZE; // prev_multiple_of
 
     info!(
         "GenMC: splitting NA memory access into {MAX_ACCESS_SIZE} byte chunks: {}B + {} * {MAX_ACCESS_SIZE}B + {}B = {size:?}",

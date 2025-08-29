@@ -756,7 +756,8 @@ fn main() {
             );
             miri_config.borrow_tracker = None;
         }
-        // We enable fixed scheduling so Miri doesn't randomly yield before a terminator.
+        // We enable fixed scheduling so Miri doesn't randomly yield before a terminator, which anyway
+        // would be a NOP in GenMC mode.
         miri_config.fixed_scheduling = true;
     } else if miri_config.weak_memory_emulation && !miri_config.data_race_detector {
         fatal_error!(

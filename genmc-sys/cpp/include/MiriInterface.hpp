@@ -28,6 +28,7 @@
 
 struct GenmcParams;
 
+// GenMC uses `int` for its thread IDs.
 using ThreadId = int;
 
 struct MiriGenmcShim : private GenMCDriver {

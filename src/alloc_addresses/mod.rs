@@ -465,7 +465,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
 impl<'tcx> MiriMachine<'tcx> {
     pub fn free_alloc_id(&mut self, dead_id: AllocId, size: Size, align: Align, kind: MemoryKind) {
-        // In GenMC mode, we don't remove the allocation, so we can provide better errors for pointers sent to GenMC and back.
+        // In GenMC mode, we can't remove dead allocation info since such pointers can
+        // still be stored in atomics and we need this info to convert GenMC pointers to Miri pointers.
+        // `global_state.reuse` is also unused so we can just skip this entire function.
         if self.data_race.as_genmc_ref().is_some() {
             return;
         }
