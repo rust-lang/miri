@@ -375,33 +375,31 @@ impl GenmcCtx {
             return interp_ok(());
         }
 
-        if size.bytes() <= MAX_ACCESS_SIZE {
+        let handle_load = |address, size| {
             // NOTE: Values loaded non-atomically are still handled by Miri, so we discard whatever we get from GenMC
             let _read_value = self.handle_load(
                 machine,
                 address,
                 size,
                 MemOrdering::NotAtomic,
-                // Don't use DUMMY here, since that might have it stored as the initial value of the chunk.
+                // This value is used to update the co-maximal store event to the same location.
+                // We don't need to update that store, since if it is ever read by any atomic loads, the value will be updated then.
+                // We use uninit for lack of a better value, since we don't know whether the location we currently load from is initialized or not.
                 GenmcScalar::UNINIT,
             )?;
-            return interp_ok(());
+            interp_ok(())
+        };
+
+        // This load is small enough so GenMC can handle it.
+        if size.bytes() <= MAX_ACCESS_SIZE {
+            return handle_load(address, size);
         }
 
-        // This is too big to be a single GenMC access, we have to split it.
+        // This load is too big to be a single GenMC access, we have to split it.
         // FIXME(genmc): This will misbehave if there are non-64bit-atomics in there.
         // Needs proper support on the GenMC side for large and mixed atomic accesses.
         for (address, size) in split_access(address, size) {
-            let chunk_addr = Size::from_bytes(address);
-            let chunk_size = Size::from_bytes(size);
-            let _read_value = self.handle_load(
-                machine,
-                chunk_addr,
-                chunk_size,
-                MemOrdering::NotAtomic,
-                // Don't use DUMMY here, since that might have it stored as the initial value of the chunk.
-                GenmcScalar::UNINIT,
-            )?;
+            handle_load(Size::from_bytes(address), Size::from_bytes(size))?;
         }
         interp_ok(())
     }
@@ -429,36 +427,38 @@ impl GenmcCtx {
             return interp_ok(());
         }
 
-        if size.bytes() <= MAX_ACCESS_SIZE {
+        let handle_store = |address, size| {
+            // We always write the the stored values to Miri's memory, whether GenMC says the write is co-maximal or not.
+            // The GenMC scheduler ensures that replaying an execution happens in porf-respecting order (po := program order, rf: reads-from order).
+            // This means that for any non-atomic read Miri performs, the corresponding write has already been replayed.
             let _is_co_max_write = self.handle_store(
                 machine,
                 address,
                 size,
-                // We use DUMMY, since we don't know the actual value, but GenMC expects something.
-                GenmcScalar::DUMMY,
-                // Don't use DUMMY here, since that might have it stored as the initial value of the chunk.
+                // We use a dummy value here, since we don't know the actual value, but GenMC expects something.
+                // The only way this value could be read is by an atomic load from a non-atomic store.
+                // FIXME(genmc): update once mixed atomic-non-atomic support is added. Afterwards, this value should never be readable.
+                GenmcScalar::from_u64(0xDEADBEEF),
+                // This value is used to update the co-maximal store event to the same location.
+                // This old value cannot be read anymore by any future loads, since we are doing another non-atomic store to the same location.
+                // Any future load will either see the store we are adding now, or we have a data race (there can only be one possible non-atomic value to read from at any time).
+                // We use uninit for lack of a better value, since we don't know whether the location we currently write to is initialized or not.
                 GenmcScalar::UNINIT,
                 MemOrdering::NotAtomic,
             )?;
-            return interp_ok(());
+            interp_ok(())
+        };
+
+        // This store is small enough so GenMC can handle it.
+        if size.bytes() <= MAX_ACCESS_SIZE {
+            return handle_store(address, size);
         }
 
-        // This is too big to be a single GenMC access, we have to split it.
+        // This store is too big to be a single GenMC access, we have to split it.
         // FIXME(genmc): This will misbehave if there are non-64bit-atomics in there.
         // Needs proper support on the GenMC side for large and mixed atomic accesses.
         for (address, size) in split_access(address, size) {
-            let chunk_addr = Size::from_bytes(address);
-            let chunk_size = Size::from_bytes(size);
-            let _is_co_max_write = self.handle_store(
-                machine,
-                chunk_addr,
-                chunk_size,
-                // We use DUMMY, since we don't know the actual value, but GenMC expects something.
-                GenmcScalar::DUMMY,
-                // Don't use DUMMY here, since that might have it stored as the initial value of the chunk.
-                GenmcScalar::UNINIT,
-                MemOrdering::NotAtomic,
-            )?;
+            handle_store(Size::from_bytes(address), Size::from_bytes(size))?;
         }
         interp_ok(())
     }

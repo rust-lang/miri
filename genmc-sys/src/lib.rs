@@ -20,9 +20,6 @@ pub const GENMC_MAIN_THREAD_ID: i32 = 0;
 
 impl GenmcScalar {
     pub const UNINIT: Self = Self { value: 0, is_init: false };
-    /// GenMC expects a value for all stores, but we cannot always provide one (e.g., non-atomic writes).
-    /// FIXME(genmc): remove this if a permanent fix is ever found.
-    pub const DUMMY: Self = Self::from_u64(0xDEADBEEF);
 
     pub const fn from_u64(value: u64) -> Self {
         Self { value, is_init: true }
