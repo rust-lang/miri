@@ -75,8 +75,7 @@ The process for obtaining them is as follows:
 For formatting the C++ code we provide a `.clang-format` file in the `genmc-sys` directory.
 With `clang-format` installed, run this command to format the c++ files (replace the `-i` with `--dry-run` to just see the changes.):
 ```
-cd path/to/miri/genmc-sys/cpp/
-find . -name "*.cpp" -o -name "*.hpp" | xargs clang-format --style=file:"path/to/miri/path/to/genmc-sys/.clang-format" -i
+find ./genmc-sys/cpp/ -name "*.cpp" -o -name "*.hpp" | xargs clang-format --style=file:"./genmc-sys/.clang-format" -i
 ```
 NOTE: this is currently not done automatically on pull requests to Miri.
 
