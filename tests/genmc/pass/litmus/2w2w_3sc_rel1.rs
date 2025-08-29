@@ -18,12 +18,12 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
     unsafe {
         let ids = [
             spawn_pthread_closure(|| {
-                Y.store(1, Release);
-                X.store(2, Release);
+                X.store(1, SeqCst);
+                Y.store(2, SeqCst);
             }),
             spawn_pthread_closure(|| {
-                X.store(1, Release);
-                Y.store(2, Release);
+                Y.store(1, Release);
+                X.store(2, SeqCst);
             }),
         ];
         // Join so we can read the final values.
