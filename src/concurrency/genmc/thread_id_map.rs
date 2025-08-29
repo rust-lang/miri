@@ -37,10 +37,7 @@ impl ThreadIdMap {
         let genmc_tid = next_thread_id.try_into().unwrap();
         // If there is already an entry, we override it.
         // This could happen if Miri were to reuse `ThreadId`s, but we assume that if this happens, the previous thread with that id doesn't exist anymore.
-        self.miri_to_genmc
-            .entry(thread_id)
-            .and_modify(|old_genmc_tid| *old_genmc_tid = genmc_tid)
-            .or_insert(genmc_tid);
+        self.miri_to_genmc.insert(thread_id, genmc_tid);
         self.genmc_to_miri.push(thread_id);
 
         genmc_tid

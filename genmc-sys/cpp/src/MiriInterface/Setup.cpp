@@ -147,9 +147,3 @@ auto MiriGenmcShim::create_handle(const GenmcParams& params) -> std::unique_ptr<
 
     return driver;
 }
-
-// This needs to be available to Miri, but clang-tidy wants it static
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-auto create_genmc_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim> {
-    return MiriGenmcShim::create_handle(params);
-}

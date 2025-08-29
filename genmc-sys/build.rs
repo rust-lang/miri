@@ -223,7 +223,6 @@ fn compile_cpp_dependencies(genmc_path: &Path) {
         "./cpp/src/MiriInterface/Exploration.cpp",
         "./cpp/src/MiriInterface/Setup.cpp",
         "./cpp/src/MiriInterface/ThreadManagement.cpp",
-        "./cpp/src/ResultHandling.cpp",
     ];
 
     let mut bridge = cxx_build::bridge("src/lib.rs");

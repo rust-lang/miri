@@ -1,10 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use genmc_sys::{
-    GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenmcShim, UniquePtr,
-    create_genmc_handle,
-};
+use genmc_sys::{GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenmcShim, UniquePtr};
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
 use rustc_middle::{mir, throw_machine_stop, throw_ub_format, throw_unsup_format};
@@ -23,7 +20,6 @@ use crate::{
 mod config;
 mod global_allocations;
 mod helper;
-mod mapping;
 mod run;
 pub(crate) mod scheduling;
 mod thread_id_map;
@@ -106,7 +102,7 @@ impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
     pub fn new(miri_config: &MiriConfig, target_usize_max: u64) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
-        let handle = RefCell::new(create_genmc_handle(&genmc_config.params));
+        let handle = RefCell::new(MiriGenmcShim::create_handle(&genmc_config.params));
         let global_allocations = Arc::new(GlobalAllocationHandler::new(target_usize_max));
         Self { handle, global_allocations, exec_state: Default::default() }
     }

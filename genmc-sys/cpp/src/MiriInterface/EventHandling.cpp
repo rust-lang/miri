@@ -50,11 +50,14 @@
     );
 
     if (const auto* err = std::get_if<VerificationError>(&ret))
-        return LoadResult::from_error(*err);
+        return LoadResult::from_error(format_error(*err));
     const auto* ret_val = std::get_if<SVal>(&ret);
     if (ret_val == nullptr)
         ERROR("Unimplemented: load returned unexpected result.");
-    return LoadResult::from_value(*ret_val);
+    return LoadResult::from_value(GenmcScalar {
+        /* value: */ ret_val->get(),
+        /* is_init: */ true,
+    });
 }
 
 [[nodiscard]] auto MiriGenmcShim::handle_store(
@@ -65,29 +68,27 @@
     GenmcScalar old_val,
     MemOrdering ord
 ) -> StoreResult {
+    ERROR_ON(!value.is_init, "Cannot store an uninitialized value.\n");
     const auto pos = inc_pos(thread_id);
-    const auto addr = SAddr(address);
-    // `type` is only used for printing.
-    const auto type = AType::Unsigned;
     const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
         pos,
         ord,
-        addr,
+        SAddr(address),
         ASize(size),
-        type,
-        value.to_genmc_sval(),
+        /* type */ AType::Unsigned, // `type` is only used for printing.
+        SVal(value.value),
         EventDeps()
     );
 
     if (const auto* err = std::get_if<VerificationError>(&ret))
-        return StoreResult::from_error(*err);
+        return StoreResult::from_error_(format_error(*err));
     if (!std::holds_alternative<std::monostate>(ret))
         ERROR("store returned unexpected result");
 
     // FIXME(genmc,mixed-accesses): Use the value that GenMC returns from handleStore (once
     // available).
     const auto& g = getExec().getGraph();
-    const bool is_coherence_order_maximal_write = g.co_max(addr)->getPos() == pos;
+    const bool is_coherence_order_maximal_write = g.co_max(SAddr(address))->getPos() == pos;
     return StoreResult::ok(is_coherence_order_maximal_write);
 }
 

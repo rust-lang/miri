@@ -35,7 +35,7 @@ void MiriGenmcShim::handle_execution_start() {
     GenMCDriver::handleExecutionStart();
 }
 
-auto MiriGenmcShim::handle_execution_end() -> std::unique_ptr<ModelCheckerError> {
+auto MiriGenmcShim::handle_execution_end() -> std::unique_ptr<std::string> {
     // FIXME(genmc): add error handling once GenMC returns an error here.
     GenMCDriver::handleExecutionEnd(threads_action_);
     return {};

@@ -1,10 +1,11 @@
+use genmc_sys::MemOrdering;
 use rustc_abi::Size;
 use rustc_const_eval::interpret::{InterpResult, interp_ok};
 use rustc_middle::ty::ScalarInt;
 use tracing::info;
 
 use super::GenmcScalar;
-use crate::{MiriInterpCx, Scalar, throw_unsup_format};
+use crate::{AtomicReadOrd, AtomicWriteOrd, MiriInterpCx, Scalar, throw_unsup_format};
 
 /// Maximum size memory access in bytes that GenMC supports.
 pub(super) const MAX_ACCESS_SIZE: u64 = 8;
@@ -73,4 +74,24 @@ pub fn genmc_scalar_to_scalar<'tcx>(
     // FIXME(genmc): GenMC should be doing the truncation, not Miri.
     let (value_scalar_int, _got_truncated) = ScalarInt::truncate_from_uint(scalar.value, size);
     interp_ok(Scalar::Int(value_scalar_int))
+}
+
+impl AtomicReadOrd {
+    pub(super) fn to_genmc(self) -> MemOrdering {
+        match self {
+            AtomicReadOrd::Relaxed => MemOrdering::Relaxed,
+            AtomicReadOrd::Acquire => MemOrdering::Acquire,
+            AtomicReadOrd::SeqCst => MemOrdering::SequentiallyConsistent,
+        }
+    }
+}
+
+impl AtomicWriteOrd {
+    pub(super) fn to_genmc(self) -> MemOrdering {
+        match self {
+            AtomicWriteOrd::Relaxed => MemOrdering::Relaxed,
+            AtomicWriteOrd::Release => MemOrdering::Release,
+            AtomicWriteOrd::SeqCst => MemOrdering::SequentiallyConsistent,
+        }
+    }
 }

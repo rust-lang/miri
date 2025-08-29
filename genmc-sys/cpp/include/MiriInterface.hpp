@@ -27,6 +27,10 @@
 /**** Types available to Miri ****/
 
 struct GenmcParams;
+struct GenmcScalar;
+struct SchedulingResult;
+struct LoadResult;
+struct StoreResult;
 
 // GenMC uses `int` for its thread IDs.
 using ThreadId = int;
@@ -46,7 +50,8 @@ struct MiriGenmcShim : private GenMCDriver {
     void handle_execution_start();
     // This function must be called at the end of any execution, even if an error was found
     // during the execution.
-    std::unique_ptr<ModelCheckerError> handle_execution_end();
+    // Returns `null`, or a string containing an error message if an error occured.
+    std::unique_ptr<std::string> handle_execution_end();
 
     /***** Functions for handling events encountered during program execution. *****/
 
@@ -124,7 +129,7 @@ struct MiriGenmcShim : private GenMCDriver {
     auto get_error_string() const -> std::unique_ptr<std::string> {
         const auto& result = GenMCDriver::getResult();
         if (result.status.has_value())
-            return std::make_unique<std::string>(format_error(result.status.value()));
+            return format_error(result.status.value());
         return nullptr;
     }
 
@@ -171,10 +176,6 @@ struct MiriGenmcShim : private GenMCDriver {
 };
 
 /**** Functions available to Miri ****/
-
-// NOTE: CXX doesn't support exposing static methods to Rust currently, so we expose this function
-// instead.
-auto create_genmc_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim>;
 
 constexpr auto get_global_alloc_static_mask() -> uint64_t {
     return SAddr::staticMask;

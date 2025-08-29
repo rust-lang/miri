@@ -19,8 +19,8 @@ pub fn run_genmc_mode<'tcx>(
     let target_usize_max = tcx.target_usize_max();
     let genmc_ctx = Rc::new(GenmcCtx::new(config, target_usize_max));
 
+    // `rep` is used to report the progress, Miri will panic on wrap-around.
     for rep in 0u64.. {
-        // will panic on wrap-around
         tracing::info!("Miri-GenMC loop {}", rep + 1);
 
         // Execute the program until completion to get the return value, or return if an error happens:

@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use cxx::CxxString;
 pub use cxx::UniquePtr;
 
 pub use self::ffi::*;
@@ -63,8 +64,34 @@ impl FromStr for LogLevel {
     }
 }
 
+impl LoadResult {
+    fn no_value() -> Self {
+        Self { error: UniquePtr::null(), has_value: false, read_value: GenmcScalar::UNINIT }
+    }
+
+    fn from_value(read_value: GenmcScalar) -> Self {
+        LoadResult { error: UniquePtr::null(), has_value: true, read_value }
+    }
+
+    fn from_error(error: UniquePtr<CxxString>) -> Self {
+        LoadResult { error, has_value: false, read_value: GenmcScalar::UNINIT }
+    }
+}
+
+impl StoreResult {
+    fn ok(is_coherence_order_maximal_write: bool) -> Self {
+        StoreResult { error: UniquePtr::null(), is_coherence_order_maximal_write }
+    }
+
+    fn from_error_(error: UniquePtr<CxxString>) -> Self {
+        return StoreResult { error, is_coherence_order_maximal_write: false };
+    }
+}
+
 #[cxx::bridge]
 mod ffi {
+    /**** Types shared between Miri/Rust and Miri/C++ through cxx_bridge: ****/
+
     /// Parameters that will be given to GenMC for setting up the model checker.
     /// (The fields of this struct are visible to both Rust and C++)
     #[derive(Clone, Debug)]
@@ -101,32 +128,13 @@ mod ffi {
         Debug3ReadsFrom,
     }
 
-    #[derive(Debug)]
-    enum ActionKind {
-        /// Any Mir terminator that's atomic and has load semantics.
-        Load,
-        /// Anything that's not a `Load`.
-        NonLoad,
-    }
-
-    #[derive(Debug)]
-    enum MemOrdering {
-        NotAtomic = 0,
-        Relaxed = 1,
-        // We skip 2 in case we support consume.
-        Acquire = 3,
-        Release = 4,
-        AcquireRelease = 5,
-        SequentiallyConsistent = 6,
-    }
-
+    /// This type corresponds to `Option<SVal>` (or `std::optional<SVal>`), where `SVal` is the type that GenMC uses for storing values.
+    /// CXX doesn't support `std::optional` currently, so we need to use an extra `bool` to define whether this value is initialized or not.
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
         is_init: bool,
     }
-
-    /**** Result & Error types ****/
 
     #[must_use]
     #[derive(Debug, Clone, Copy)]
@@ -163,34 +171,70 @@ mod ffi {
         is_coherence_order_maximal_write: bool,
     }
 
+    /**** Types shared between Miri/Rust and GenMC/C++ through cxx_bridge: ****/
+
+    #[derive(Debug)]
+    /// Corresponds to GenMC's type with the same name.
+    /// Should only be modified if changed by GenMC.
+    enum ActionKind {
+        /// Any Mir terminator that's atomic and has load semantics.
+        Load,
+        /// Anything that's not a `Load`.
+        NonLoad,
+    }
+
+    #[derive(Debug)]
+    /// Corresponds to GenMC's type with the same name.
+    /// Should only be modified if changed by GenMC.
+    enum MemOrdering {
+        NotAtomic = 0,
+        Relaxed = 1,
+        // We skip 2 in case we support consume.
+        Acquire = 3,
+        Release = 4,
+        AcquireRelease = 5,
+        SequentiallyConsistent = 6,
+    }
+
+    extern "Rust" {
+        #[Self = "LoadResult"]
+        fn no_value() -> LoadResult;
+
+        #[Self = "LoadResult"]
+        fn from_value(scalar: GenmcScalar) -> LoadResult;
+
+        #[Self = "LoadResult"]
+        fn from_error(error: UniquePtr<CxxString>) -> LoadResult;
+
+        #[Self = "StoreResult"]
+        fn ok(is_coherence_order_maximal_write: bool) -> StoreResult;
+
+        // FIXME(genmc): Having multiple associated functions with the same name causes a name collision (CXX issue 1584: https://github.com/dtolnay/cxx/issues/1584)
+        #[Self = "StoreResult"]
+        fn from_error_(error: UniquePtr<CxxString>) -> StoreResult;
+    }
+
+    // SAFETY: TODO
     unsafe extern "C++" {
         include!("MiriInterface.hpp");
 
-        // Types for event handling:
-        type GenmcScalar;
-        type MemOrdering;
-
-        // Types for Scheduling queries:
-        type ActionKind;
-
-        // Result / Error types:
-        type LoadResult;
-        type StoreResult;
-
-        /// Communication layer between Miri/Rust and GenMC/C++:
+        /**** Types shared between Miri/Rust and Miri/C++: ****/
         type MiriGenmcShim;
 
-        type ExecutionState;
-        type SchedulingResult;
+        /**** Types shared between Miri/Rust and GenMC/C++: ****/
+        type ActionKind;
+        type MemOrdering;
 
         /// Set up everything required for one run of GenMC, either in verification or estimation mode.
-        fn create_genmc_handle(params: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
+        #[Self = "MiriGenmcShim"]
+        fn create_handle(params: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
         /// Get the bit mask that GenMC expects for global memory allocations.
         fn get_global_alloc_static_mask() -> u64;
 
         /// This function must be called at the start of any execution, before any events are reported to GenMC.
         fn handle_execution_start(self: Pin<&mut MiriGenmcShim>);
         /// This function must be called at the end of any execution, even if an error was found during the execution.
+        /// Returns `null`, or a string containing an error message if an error occured.
         fn handle_execution_end(self: Pin<&mut MiriGenmcShim>) -> UniquePtr<CxxString>;
 
         /***** Functions for handling events encountered during program execution. *****/
