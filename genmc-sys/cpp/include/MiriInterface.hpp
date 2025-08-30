@@ -164,13 +164,12 @@ struct MiriGenmcShim : private GenMCDriver {
     }
 
     /**
-     * Currently, the interpreter is responsible for maintaining `ExecutionGraph` event indices.
-     * The interpreter is also responsible for informing GenMC about the `ActionKind` of the
-     * next instruction in each thread.
+     * GenMC uses the term `Action` to refer to a struct of:
+     * - `ActionKind`, storing whether the next instruction in a thread may be a load
+     * - `Event`, storing the most recent event index added for a thread
      *
-     * This vector contains this data in the expected format `Action`, which consists of the
-     * `ActionKind` of the next instruction and the last event index added to the ExecutionGraph
-     * in a given thread.
+     * Here we store the "action" for each thread. In particular we use this to assign event
+     * indices, since GenMC expects us to do that.
      */
     std::vector<Action> threads_action_;
 };

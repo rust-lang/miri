@@ -80,7 +80,7 @@ impl StoreResult {
         StoreResult { error: UniquePtr::null(), is_coherence_order_maximal_write }
     }
 
-    fn from_error_(error: UniquePtr<CxxString>) -> Self {
+    fn from_error(error: UniquePtr<CxxString>) -> Self {
         return StoreResult { error, is_coherence_order_maximal_write: false };
     }
 }
@@ -208,10 +208,13 @@ mod ffi {
 
         // FIXME(genmc): Having multiple associated functions with the same name causes a name collision (CXX issue 1584: https://github.com/dtolnay/cxx/issues/1584)
         #[Self = "StoreResult"]
-        fn from_error_(error: UniquePtr<CxxString>) -> StoreResult;
+        fn from_error(error: UniquePtr<CxxString>) -> StoreResult;
     }
 
-    // SAFETY: TODO
+    // # SAFETY
+    // This block is unsafe to allow defining safe methods inside.
+    //
+    // FIXME(genmc): expand with more details
     unsafe extern "C++" {
         include!("MiriInterface.hpp");
 

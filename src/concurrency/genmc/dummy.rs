@@ -4,8 +4,8 @@ use rustc_middle::mir;
 
 pub use self::run::run_genmc_mode;
 use crate::{
-    AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriConfig,
-    MiriMachine, Scalar, ThreadId, ThreadManager, VisitProvenance, VisitWith,
+    AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriMachine, Scalar,
+    ThreadId, ThreadManager, VisitProvenance, VisitWith,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -37,9 +37,7 @@ mod run {
 }
 
 impl GenmcCtx {
-    pub fn new(_miri_config: &MiriConfig) -> Self {
-        unreachable!()
-    }
+    // We don't provide the `new` function in the dummy module.
 
     pub fn get_blocked_execution_count(&self) -> usize {
         unreachable!()
@@ -54,17 +52,6 @@ impl GenmcCtx {
     }
 
     /**** Memory access handling ****/
-
-    pub(crate) fn handle_execution_start(&self) {
-        unreachable!()
-    }
-
-    pub(crate) fn handle_execution_end<'tcx>(
-        &self,
-        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    ) -> Result<(), String> {
-        unreachable!()
-    }
 
     pub(super) fn set_ongoing_action_data_race_free(&self, _enable: bool) {
         unreachable!()

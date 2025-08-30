@@ -1,7 +1,9 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
 use rustc_middle::ty::TyCtxt;
 
+use super::GlobalState;
 use crate::rustc_const_eval::interpret::PointerArithmetic;
 use crate::{GenmcCtx, MiriConfig};
 
@@ -16,19 +18,27 @@ pub fn run_genmc_mode<'tcx>(
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
     tcx: TyCtxt<'tcx>,
 ) -> Option<i32> {
-    let target_usize_max = tcx.target_usize_max();
-    let genmc_ctx = Rc::new(GenmcCtx::new(config, target_usize_max));
+    // There exists only one `global_state` per full run in GenMC mode.
+    // It is shared by all `GenmcCtx` in this run.
+    // FIXME(genmc): implement multithreading once GenMC supports it.
+    let global_state = Arc::new(GlobalState::new(tcx.target_usize_max()));
+    let genmc_ctx = Rc::new(GenmcCtx::new(config, global_state));
 
     // `rep` is used to report the progress, Miri will panic on wrap-around.
     for rep in 0u64.. {
         tracing::info!("Miri-GenMC loop {}", rep + 1);
 
+        // Prepare for the next execution.
+        genmc_ctx.prepare_next_execution();
+        // Inform GenMC that a new execution starts.
+        genmc_ctx.handle_execution_start();
+
         // Execute the program until completion to get the return value, or return if an error happens:
         // FIXME(genmc): add an option to allow the user to see the GenMC output message when the verification is done.
         let return_code = eval_entry(genmc_ctx.clone())?;
 
-        // Some errors are not returned immediately during execution, so check for them here:
-        if let Some(error) = genmc_ctx.try_get_error() {
+        // We inform GenMC that the execution is complete. If there was an error, we print it.
+        if let Some(error) = genmc_ctx.handle_execution_end() {
             // Since we don't have any span information for the error at this point,
             // or the error is about the entire execution, we print GenMC's error message to give at least some feedback.
             eprintln!("(GenMC) Error detected: {error}");

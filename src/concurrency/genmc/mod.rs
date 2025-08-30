@@ -74,6 +74,19 @@ impl PerExecutionState {
     }
 }
 
+#[derive(Debug)]
+struct GlobalState {
+    /// Keep track of global allocations, to ensure they keep the same address across different executions, even if the order of allocations changes.
+    /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
+    global_allocations: GlobalAllocationHandler,
+}
+
+impl GlobalState {
+    fn new(target_usize_max: u64) -> Self {
+        Self { global_allocations: GlobalAllocationHandler::new(target_usize_max) }
+    }
+}
+
 /// The main interface with GenMC.
 /// Each `GenmcCtx` owns one `MiriGenmcShim`, which owns one `GenMCDriver` (the GenMC model checker).
 /// For each GenMC run (estimation or verification), one or more `GenmcCtx` are created (one per Miri thread).
@@ -89,22 +102,21 @@ pub struct GenmcCtx {
     /// Handle to the GenMC model checker.
     handle: RefCell<UniquePtr<MiriGenmcShim>>,
 
-    /// Keep track of global allocations, to ensure they keep the same address across different executions, even if the order of allocations changes.
-    /// The `AllocId` for globals is stable across executions, so we can use it as an identifier.
-    global_allocations: Arc<GlobalAllocationHandler>,
-
     /// State that is reset at the start of every execution.
     exec_state: PerExecutionState,
+
+    /// State that persists across executions.
+    /// All `GenmcCtx` in one verification step share this state.
+    global_state: Arc<GlobalState>,
 }
 
 /// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    pub fn new(miri_config: &MiriConfig, target_usize_max: u64) -> Self {
+    fn new(miri_config: &MiriConfig, global_state: Arc<GlobalState>) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
         let handle = RefCell::new(MiriGenmcShim::create_handle(&genmc_config.params));
-        let global_allocations = Arc::new(GlobalAllocationHandler::new(target_usize_max));
-        Self { handle, global_allocations, exec_state: Default::default() }
+        Self { handle, exec_state: Default::default(), global_state }
     }
 
     /// Get the number of blocked executions encountered by GenMC.
@@ -173,11 +185,15 @@ impl GenmcCtx {
 
 /// GenMC event handling. These methods are used to inform GenMC about events happening in the program, and to handle scheduling decisions.
 impl GenmcCtx {
+    /// Prepare for the next execution.
+    /// Must be called before `handle_execution_start` for every execution.
+    fn prepare_next_execution(&self) {
+        self.exec_state.reset();
+    }
+
     /// Inform GenMC that a new program execution has started.
     /// This function should be called at the start of every execution.
-    pub(crate) fn handle_execution_start(&self) {
-        self.exec_state.reset();
-
+    fn handle_execution_start(&self) {
         let mut mc = self.handle.borrow_mut();
         mc.as_mut().unwrap().handle_execution_start();
     }
@@ -186,17 +202,24 @@ impl GenmcCtx {
     ///
     /// This function must be called even when the execution is blocked
     /// (i.e., it returned a `InterpErrorKind::MachineStop` with error kind `TerminationInfo::GenmcBlockedExecution`).
-    pub(crate) fn handle_execution_end<'tcx>(
-        &self,
-        _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    ) -> Result<(), String> {
+    /// Don't call this function if an error was found.
+    ///
+    /// GenMC detects certain errors only when the execution ends.
+    /// If an error occured, a string containing a short error description is returned.
+    ///
+    /// GenMC currently doesn't return an error in all cases immediately when one happens.
+    /// This function will also check for those, and return their error description.
+    ///
+    /// To get the all messages (warnings, errors) that GenMC produces, use the `get_result_message` method.
+    fn handle_execution_end(&self) -> Option<String> {
         let mut mc = self.handle.borrow_mut();
         let result = mc.as_mut().unwrap().handle_execution_end();
-        if let Some(msg) = result.as_ref() {
-            Err(msg.to_string_lossy().to_string())
-        } else {
-            Ok(())
-        }
+        result.as_ref().map(|msg| msg.to_string_lossy().to_string())?;
+
+        // GenMC currently does not return an error value immediately in all cases.
+        // We manually query for any errors here to ensure we don't miss any.
+        drop(mc); // `try_get_error` needs access to the `RefCell`.
+        self.try_get_error()
     }
 
     /**** Memory access handling ****/
@@ -435,8 +458,8 @@ impl GenmcCtx {
                 machine,
                 address,
                 size,
-                // We use a dummy value here, since we don't know the actual value, but GenMC expects something.
-                // The only way this value could be read is by an atomic load from a non-atomic store.
+                // We don't know the value that this store will write, but GenMC expects that we give it an actual value.
+                // The only way this value could ever be read is by an atomic load from a non-atomic store.
                 // FIXME(genmc): update once mixed atomic-non-atomic support is added. Afterwards, this value should never be readable.
                 GenmcScalar::from_u64(0xDEADBEEF),
                 // This value is used to update the co-maximal store event to the same location.
@@ -480,7 +503,8 @@ impl GenmcCtx {
         );
         let machine = &ecx.machine;
         if memory_kind == MiriMemoryKind::Global.into() {
-            return ecx.get_global_allocation_address(&self.global_allocations, alloc_id);
+            return ecx
+                .get_global_allocation_address(&self.global_state.global_allocations, alloc_id);
         }
         let thread_infos = self.exec_state.thread_id_manager.borrow();
         let curr_thread = machine.threads.active_thread();

@@ -81,7 +81,7 @@
     );
 
     if (const auto* err = std::get_if<VerificationError>(&ret))
-        return StoreResult::from_error_(format_error(*err));
+        return StoreResult::from_error(format_error(*err));
     if (!std::holds_alternative<std::monostate>(ret))
         ERROR("store returned unexpected result");
 

@@ -4,7 +4,9 @@
 // This test is the equivalent to the litmus "pass" test `2w2w_3sc_rel1`.
 // Here we test different atomic orderings that should all allow an execution where (X, Y) == (1, 1) at the end.
 //
-// Miri without GenMC is unable to produce this program execution, even with -Zmiri-many-seeds.
+// This code has subtle UB because it incorrectly unsafely asserts that the result (1, 1) is impossible.
+//
+// Miri without GenMC is unable to produce this program execution and thus detect the UB, even with -Zmiri-many-seeds.
 
 #![no_main]
 
