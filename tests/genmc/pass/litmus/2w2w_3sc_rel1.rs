@@ -29,7 +29,7 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
         // Join so we can read the final values.
         join_pthreads(ids);
 
-        // Print the final values:
+        // Check that we don't get any unexpected values:
         let result = (X.load(Relaxed), Y.load(Relaxed));
         if !matches!(result, (1, 2) | (1, 1) | (2, 2) | (2, 1)) {
             std::process::abort();
