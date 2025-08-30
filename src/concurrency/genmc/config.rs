@@ -1,11 +1,14 @@
-use super::GenmcParams;
+use genmc_sys::{GenmcParams, LogLevel};
 
 /// Configuration for GenMC mode.
 /// The `params` field is shared with the C++ side.
 /// The remaining options are kept on the Rust side.
 #[derive(Debug, Default, Clone)]
 pub struct GenmcConfig {
+    /// Parameters sent to the C++ side to create a new handle to the GenMC model checker.
     pub(super) params: GenmcParams,
+    /// The log level for GenMC.
+    pub(super) log_level: LogLevel,
 }
 
 impl GenmcConfig {
@@ -32,7 +35,7 @@ impl GenmcConfig {
             return Err(format!("Invalid GenMC argument \"-Zmiri-genmc{trimmed_arg}\""));
         };
         if let Some(log_level) = trimmed_arg.strip_prefix("log=") {
-            genmc_config.params.log_level = log_level.parse()?;
+            genmc_config.log_level = log_level.parse()?;
         } else {
             return Err(format!("Invalid GenMC argument: \"-Zmiri-genmc-{trimmed_arg}\""));
         }

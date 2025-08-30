@@ -50,8 +50,15 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     }
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-auto MiriGenmcShim::create_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim> {
+/* unsafe */ void set_log_level_raw(LogLevel log_level) {
+    // The `logLevel` is a static, non-atomic variable.
+    // It should never be changed if `MiriGenmcShim` still exists, since any of its methods may read
+    // the `logLevel`, otherwise it may cause data races.
+    logLevel = to_genmc_verbosity_level(log_level);
+}
+
+/* unsafe */ auto MiriGenmcShim::create_handle(const GenmcParams& params)
+    -> std::unique_ptr<MiriGenmcShim> {
     auto conf = std::make_shared<Config>();
 
     conf->skipNonAtomicInitializedCheck = true;
@@ -72,9 +79,6 @@ auto MiriGenmcShim::create_handle(const GenmcParams& params) -> std::unique_ptr<
     // FIXME(genmc): A more appropriate limit should be chosen once the warning is useful for
     // Miri.
     conf->warnOnGraphSize = 1024 * 1024;
-
-    // The `logLevel` is not part of the config struct, but the static variable `logLevel`.
-    logLevel = to_genmc_verbosity_level(params.log_level);
 
     // We only support the RC11 memory model for Rust.
     conf->model = ModelType::RC11;

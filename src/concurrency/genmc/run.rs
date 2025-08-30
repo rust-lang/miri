@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use genmc_sys::Genmc;
 use rustc_middle::ty::TyCtxt;
 
 use super::GlobalState;
@@ -14,6 +15,7 @@ use crate::{GenmcCtx, MiriConfig};
 ///
 /// FIXME(genmc): add estimation mode setting.
 pub fn run_genmc_mode<'tcx>(
+    genmc: Genmc,
     config: &MiriConfig,
     eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
     tcx: TyCtxt<'tcx>,
@@ -22,7 +24,7 @@ pub fn run_genmc_mode<'tcx>(
     // It is shared by all `GenmcCtx` in this run.
     // FIXME(genmc): implement multithreading once GenMC supports it.
     let global_state = Arc::new(GlobalState::new(tcx.target_usize_max()));
-    let genmc_ctx = Rc::new(GenmcCtx::new(config, global_state));
+    let genmc_ctx = Rc::new(GenmcCtx::new(genmc, config, global_state));
 
     // `rep` is used to report the progress, Miri will panic on wrap-around.
     for rep in 0u64.. {

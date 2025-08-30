@@ -4,6 +4,9 @@ pub use cxx::UniquePtr;
 
 pub use self::ffi::*;
 
+mod genmc;
+pub use genmc::Genmc;
+
 /// Defined in "genmc/src/Support/SAddr.hpp".
 /// The first bit of all global addresses must be set to `1`.
 /// This means the mask, interpreted as an address, is the lower bound of where the global address space starts.
@@ -27,11 +30,7 @@ impl GenmcScalar {
 
 impl Default for GenmcParams {
     fn default() -> Self {
-        Self {
-            print_random_schedule_seed: false,
-            log_level: Default::default(),
-            do_symmetry_reduction: false,
-        }
+        Self { print_random_schedule_seed: false, do_symmetry_reduction: false }
     }
 }
 
@@ -69,7 +68,6 @@ mod ffi {
     #[derive(Clone, Debug)]
     struct GenmcParams {
         pub print_random_schedule_seed: bool,
-        pub log_level: LogLevel,
         pub do_symmetry_reduction: bool,
         // FIXME(GenMC): Add remaining parameters.
     }
@@ -171,7 +169,10 @@ mod ffi {
     // # SAFETY
     // This block is unsafe to allow defining safe methods inside.
     //
-    // FIXME(genmc): expand with more details
+    // `get_global_alloc_static_mask` is safe since it just returns a constant.
+    // All methods on `MiriGenmcShim` are safe by the correct usage of the two unsafe functions
+    // `set_log_level_raw` and `MiriGenmcShim::create_handle`.
+    // See the doc comment on those two functions for their safety requirements.
     unsafe extern "C++" {
         include!("MiriInterface.hpp");
 
@@ -182,9 +183,27 @@ mod ffi {
         type ActionKind;
         type MemOrdering;
 
-        /// Set up everything required for one run of GenMC, either in verification or estimation mode.
+        /// Set the log level for GenMC.
+        ///
+        /// # SAFETY
+        /// This function is not thread safe, since it writes to the global, mutable, non-atomic `logLevel` variable.
+        /// Any GenMC function may read from `logLevel` unsynchronized.
+        /// The safest way to use this function is to set the log level exactly once before first calling `create_handle`.
+        /// Never calling this function is safe, GenMC will fall back to its default log level.
+        unsafe fn set_log_level_raw(log_level: LogLevel);
+
+        /// Create a new `MiriGenmcShim`, which wraps a `GenMCDriver`.
+        ///
+        /// # SAFETY
+        /// This function is marked as unsafe since the `logLevel` global variable is non-atomic.
+        /// This function should not be called in an unsynchronized way with `set_log_level_raw`, since
+        /// this function and any methods on the returned `MiriGenmcShim` may read the `logLevel`,
+        /// causing a data race.
+        /// The safest way to use these functions is to call `set_log_level_raw` once, and only then
+        /// start creating handles.
+        /// There should not be any other (safe) way to create a `MiriGenmcShim`.
         #[Self = "MiriGenmcShim"]
-        fn create_handle(params: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
+        unsafe fn create_handle(params: &GenmcParams) -> UniquePtr<MiriGenmcShim>;
         /// Get the bit mask that GenMC expects for global memory allocations.
         fn get_global_alloc_static_mask() -> u64;
 

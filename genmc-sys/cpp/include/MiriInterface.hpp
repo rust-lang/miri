@@ -24,9 +24,11 @@
 #include <iomanip>
 #include <memory>
 
-/**** Types available to Miri ****/
+/**** Types available to both Rust and C++ ****/
 
 struct GenmcParams;
+enum class LogLevel : std::uint8_t;
+
 struct GenmcScalar;
 struct SchedulingResult;
 struct LoadResult;
@@ -35,11 +37,34 @@ struct StoreResult;
 // GenMC uses `int` for its thread IDs.
 using ThreadId = int;
 
+/// Set the log level for GenMC.
+///
+/// # SAFETY
+/// This function is not thread safe, since it writes to the global, mutable, non-atomic `logLevel`
+/// variable. Any GenMC function may read from `logLevel` unsynchronized.
+/// The safest way to use this function is to set the log level exactly once before first calling
+/// `create_handle`.
+/// Never calling this function is safe, GenMC will fall back to its default log level.
+/* unsafe */ void set_log_level_raw(LogLevel log_level);
+
 struct MiriGenmcShim : private GenMCDriver {
 
   public:
     MiriGenmcShim(std::shared_ptr<const Config> conf, Mode mode /* = VerificationMode{} */)
         : GenMCDriver(std::move(conf), nullptr, mode) {}
+
+    /// Create a new `MiriGenmcShim`, which wraps a `GenMCDriver`.
+    ///
+    /// # SAFETY
+    /// This function is marked as unsafe since the `logLevel` global variable is non-atomic.
+    /// This function should not be called in an unsynchronized way with `set_log_level_raw`, since
+    /// this function and any methods on the returned `MiriGenmcShim` may read the `logLevel`,
+    /// causing a data race.
+    /// The safest way to use these functions is to call `set_log_level_raw` once, and only then
+    /// start creating handles.
+    /// There should not be any other (safe) way to create a `MiriGenmcShim`.
+    /* unsafe */ static auto create_handle(const GenmcParams& params)
+        -> std::unique_ptr<MiriGenmcShim>;
 
     virtual ~MiriGenmcShim() {}
 
@@ -132,8 +157,6 @@ struct MiriGenmcShim : private GenMCDriver {
             return format_error(result.status.value());
         return nullptr;
     }
-
-    static auto create_handle(const GenmcParams& params) -> std::unique_ptr<MiriGenmcShim>;
 
   private:
     /** Increment the event index in the given thread by 1 and return the new event. */

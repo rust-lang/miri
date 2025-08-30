@@ -24,10 +24,16 @@ mod run;
 pub(crate) mod scheduling;
 mod thread_id_map;
 
-pub use genmc_sys::GenmcParams;
+pub use genmc_sys::Genmc;
 
 pub use self::config::GenmcConfig;
 pub use self::run::run_genmc_mode;
+
+/// Initialize GenMC by setting everything required.
+/// The returned `Genmc` struct is used to interact with GenMC in a safe way.
+pub fn initialize_genmc(genmc_config: &GenmcConfig) -> Genmc {
+    Genmc::new(genmc_config.log_level)
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExitType {
@@ -113,9 +119,9 @@ pub struct GenmcCtx {
 /// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    fn new(miri_config: &MiriConfig, global_state: Arc<GlobalState>) -> Self {
+    fn new(genmc: Genmc, miri_config: &MiriConfig, global_state: Arc<GlobalState>) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
-        let handle = RefCell::new(MiriGenmcShim::create_handle(&genmc_config.params));
+        let handle = RefCell::new(genmc.create_driver_handle(&genmc_config.params));
         Self { handle, exec_state: Default::default(), global_state }
     }
 

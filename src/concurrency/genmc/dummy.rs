@@ -8,6 +8,13 @@ use crate::{
     ThreadId, ThreadManager, VisitProvenance, VisitWith,
 };
 
+#[derive(Clone, Copy)]
+pub struct Genmc {}
+
+pub fn initialize_genmc(_genmc_config: &GenmcConfig) -> Genmc {
+    unreachable!();
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ExitType {
     MainThreadFinish,
@@ -25,9 +32,11 @@ mod run {
 
     use rustc_middle::ty::TyCtxt;
 
+    use super::Genmc;
     use crate::{GenmcCtx, MiriConfig};
 
     pub fn run_genmc_mode<'tcx>(
+        _genmc: Genmc,
         _config: &MiriConfig,
         _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
         _tcx: TyCtxt<'tcx>,
