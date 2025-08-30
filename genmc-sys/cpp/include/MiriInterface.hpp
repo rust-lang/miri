@@ -39,7 +39,8 @@ using ThreadId = int;
 
 /// Set the log level for GenMC.
 ///
-/// # SAFETY
+/// # Safety
+///
 /// This function is not thread safe, since it writes to the global, mutable, non-atomic `logLevel`
 /// variable. Any GenMC function may read from `logLevel` unsynchronized.
 /// The safest way to use this function is to set the log level exactly once before first calling
@@ -55,7 +56,8 @@ struct MiriGenmcShim : private GenMCDriver {
 
     /// Create a new `MiriGenmcShim`, which wraps a `GenMCDriver`.
     ///
-    /// # SAFETY
+    /// # Safety
+    ///
     /// This function is marked as unsafe since the `logLevel` global variable is non-atomic.
     /// This function should not be called in an unsynchronized way with `set_log_level_raw`, since
     /// this function and any methods on the returned `MiriGenmcShim` may read the `logLevel`,

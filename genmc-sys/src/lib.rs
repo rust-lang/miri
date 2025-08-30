@@ -1,11 +1,9 @@
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 pub use cxx::UniquePtr;
 
 pub use self::ffi::*;
-
-mod genmc;
-pub use genmc::Genmc;
 
 /// Defined in "genmc/src/Support/SAddr.hpp".
 /// The first bit of all global addresses must be set to `1`.
@@ -19,6 +17,33 @@ pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 /// GenMC thread ids are C++ type `int`, which is equivalent to Rust's `i32` on most platforms.
 /// The main thread always has thread id 0.
 pub const GENMC_MAIN_THREAD_ID: i32 = 0;
+
+/// Changing GenMC's log level is not thread safe, so we limit it to only be set once to prevent any data races.
+/// This value will be initialized when the first `MiriGenmcShim` is created.
+static GENMC_LOG_LEVEL: OnceLock<LogLevel> = OnceLock::new();
+
+// Create a new handle to the GenMC model checker.
+// The first call to this function determines the log level of GenMC, any future call with a different log level will panic.
+pub fn create_genmc_driver_handle(
+    params: &GenmcParams,
+    genmc_log_level: LogLevel,
+) -> UniquePtr<MiriGenmcShim> {
+    // # Safety
+    //
+    // Only setting the GenMC log level once is guaranteed by the `OnceLock`.
+    // No other place calls `set_log_level_raw`, so the `logLevel` value in GenMC will not change once we initialize it once.
+    // All functions that use GenMC's `logLevel` can only be accessed in safe Rust through a `MiriGenmcShim`.
+    // There is no way to get `MiriGenmcShim` other than through `create_handle`, and we only call it *after* setting the log level, preventing any possible data races.
+    assert_eq!(
+        &genmc_log_level,
+        GENMC_LOG_LEVEL.get_or_init(|| {
+            unsafe { set_log_level_raw(genmc_log_level) };
+            genmc_log_level
+        }),
+        "Attempt to change the GenMC log level after it was already set"
+    );
+    unsafe { MiriGenmcShim::create_handle(params) }
+}
 
 impl GenmcScalar {
     pub const UNINIT: Self = Self { value: 0, is_init: false };
@@ -166,7 +191,8 @@ mod ffi {
         SequentiallyConsistent = 6,
     }
 
-    // # SAFETY
+    // # Safety
+    //
     // This block is unsafe to allow defining safe methods inside.
     //
     // `get_global_alloc_static_mask` is safe since it just returns a constant.
@@ -185,7 +211,8 @@ mod ffi {
 
         /// Set the log level for GenMC.
         ///
-        /// # SAFETY
+        /// # Safety
+        ///
         /// This function is not thread safe, since it writes to the global, mutable, non-atomic `logLevel` variable.
         /// Any GenMC function may read from `logLevel` unsynchronized.
         /// The safest way to use this function is to set the log level exactly once before first calling `create_handle`.
@@ -194,7 +221,8 @@ mod ffi {
 
         /// Create a new `MiriGenmcShim`, which wraps a `GenMCDriver`.
         ///
-        /// # SAFETY
+        /// # Safety
+        ///
         /// This function is marked as unsafe since the `logLevel` global variable is non-atomic.
         /// This function should not be called in an unsynchronized way with `set_log_level_raw`, since
         /// this function and any methods on the returned `MiriGenmcShim` may read the `logLevel`,
