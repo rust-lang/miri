@@ -1,6 +1,5 @@
 //! Implements calling functions from a native library.
 
-use std::io::Write;
 use std::ops::Deref;
 
 use libffi::low::CodePtr;
@@ -289,7 +288,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let mplace_ptr = mplace.ptr();
                 let sz = mplace.layout.size.bytes_usize();
                 if sz == 0 {
-                    throw_unsup_format!("Attempting to pass a ZST over FFI");
+                    throw_unsup_format!("attempting to pass a ZST over FFI");
                 }
                 let (id, ofs, _) = this.ptr_get_alloc_id(mplace_ptr, sz.try_into().unwrap())?;
                 let ofs = ofs.bytes_usize();
@@ -312,80 +311,49 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
             either::Either::Right(imm) => {
-                let (first, maybe_second) = imm.to_scalar_and_meta();
-                // If a scalar is a pointer, then expose its provenance.
-                if let interpret::Scalar::Ptr(p, _) = first {
-                    // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
-                    // below to expose the actual interpreter-level allocation.
-                    this.expose_and_warn(Some(p.provenance), tracing)?;
-                }
-
-                // Turn the scalar(s) into u128s so we can write their bytes
-                // into the buffer.
-                let (sc_int_first, sz_first) = {
-                    let sc = first.to_scalar_int()?;
-                    (sc.to_bits_unchecked(), sc.size().bytes_usize())
-                };
-                let (sc_int_second, sz_second) = match maybe_second {
-                    MemPlaceMeta::Meta(sc) => {
-                        // Might also be a pointer.
-                        if let interpret::Scalar::Ptr(p, _) = first {
-                            this.expose_and_warn(Some(p.provenance), tracing)?;
-                        }
-                        let sc = sc.to_scalar_int()?;
-                        (sc.to_bits_unchecked(), sc.size().bytes_usize())
+                // A little helper to write scalars to our byte array.
+                let write_scalar = |this: &MiriInterpCx<'tcx>, sc: Scalar, bytes: &mut [u8]| {
+                    // If a scalar is a pointer, then expose its provenance.
+                    if let interpret::Scalar::Ptr(p, _) = sc {
+                        // This relies on the `expose_provenance` in the `visit_reachable_allocs` callback
+                        // below to expose the actual interpreter-level allocation.
+                        this.expose_and_warn(Some(p.provenance), tracing)?;
                     }
-                    MemPlaceMeta::None => (0, 0),
+                    // `bytes[0]` should be the first byte we want to write to.
+                    write_target_uint(
+                        this.data_layout().endian,
+                        &mut bytes[..sc.size().bytes_usize()],
+                        sc.to_scalar_int()?.to_bits_unchecked(),
+                    )
+                    .unwrap();
+                    interp_ok(())
                 };
-                let sz = imm.layout.size.bytes_usize();
-                // TODO: Is this actually ok? Seems like the only way to figure
-                // out how the scalars are laid out relative to each other.
-                let align_second = match imm.layout.backend_repr {
-                    rustc_abi::BackendRepr::Scalar(_) => 1,
-                    rustc_abi::BackendRepr::ScalarPair(_, sc2) => sc2.align(this).bytes_usize(),
-                    _ => unreachable!(),
-                };
-                // How many bytes to skip between scalars if necessary for alignment.
-                let skip = sz_first.next_multiple_of(align_second).strict_sub(sz_first);
 
-                let mut bytes: Box<[u8]> = (0..sz).map(|_| 0u8).collect();
+                let mut bytes: Box<[u8]> =
+                    (0..imm.layout.size.bytes_usize()).map(|_| 0u8).collect();
 
-                // Copy over the bytes in an endianness-agnostic way. Since each
-                // scalar may be up to 128 bits and write_target_uint doesn't
-                // give us an easy way to do multiple writes in a row, we
-                // adapt its logic for two consecutive writes.
-                let mut bytes_wr = bytes.as_mut();
-                match this.data_layout().endian {
-                    rustc_abi::Endian::Little => {
-                        // Only write as many bytes as specified, not all of the u128.
-                        let wr = bytes_wr.write(&sc_int_first.to_le_bytes()[..sz_first]).unwrap();
-                        assert_eq!(wr, sz_first);
-                        // If the second scalar is zeroed, it's more efficient to skip it.
-                        if sc_int_second != 0 {
-                            bytes_wr = bytes_wr.split_at_mut(skip).1;
-                            let wr =
-                                bytes_wr.write(&sc_int_second.to_le_bytes()[..sz_second]).unwrap();
-                            assert_eq!(wr, sz_second);
-                        }
-                    }
-                    rustc_abi::Endian::Big => {
-                        // TODO: My gut says this is wrong, let's see if CI complains.
-                        let wr = bytes_wr
-                            .write(&sc_int_first.to_be_bytes()[16usize.strict_sub(sz_first)..])
-                            .unwrap();
-                        assert_eq!(wr, sz_first);
-                        if sc_int_second != 0 {
-                            bytes_wr = bytes_wr.split_at_mut(skip).1;
-                            let wr = bytes_wr
-                                .write(
-                                    &sc_int_second.to_be_bytes()[16usize.strict_sub(sz_second)..],
+                match *imm {
+                    Immediate::Scalar(sc) => write_scalar(this, sc, &mut bytes)?,
+                    Immediate::ScalarPair(sc_first, sc_second) => {
+                        // The first scalar has an offset of zero.
+                        let ofs_second = {
+                            let rustc_abi::BackendRepr::ScalarPair(a, b) = imm.layout.backend_repr
+                            else {
+                                span_bug!(
+                                    this.cur_span(),
+                                    "op_to_ffi_arg: invalid scalar pair layout: {:#?}",
+                                    imm.layout
                                 )
-                                .unwrap();
-                            assert_eq!(wr, sz_second);
-                        }
+                            };
+                            a.size(this).align_to(b.align(this).abi).bytes_usize()
+                        };
+
+                        write_scalar(this, sc_first, &mut bytes)?;
+                        write_scalar(this, sc_second, &mut bytes[ofs_second..])?;
                     }
+                    Immediate::Uninit =>
+                        span_bug!(this.cur_span(), "op_to_ffi_arg: argument is uninit: {:#?}", imm),
                 }
-                // Any remaining bytes are padding, so ignore.
 
                 bytes
             }
