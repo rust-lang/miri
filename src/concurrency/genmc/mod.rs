@@ -56,8 +56,8 @@ impl ExitStatus {
     }
 }
 
-#[derive(Debug, Default)]
 /// State that is reset at the start of every execution.
+#[derive(Debug, Default)]
 struct PerExecutionState {
     /// Thread id management, such as mapping between Miri `ThreadId` and GenMC's thread ids, or selecting GenMC thread ids.
     thread_id_manager: RefCell<ThreadIdMap>,
@@ -95,7 +95,8 @@ impl GlobalState {
 
 /// The main interface with GenMC.
 /// Each `GenmcCtx` owns one `MiriGenmcShim`, which owns one `GenMCDriver` (the GenMC model checker).
-/// For each GenMC run (estimation or verification), one or more `GenmcCtx` are created (one per Miri thread).
+/// For each GenMC run (estimation or verification), one or more `GenmcCtx` can be created (one per Miri thread).
+/// However, for now, we only ever have one `GenmcCtx` per run.
 ///
 /// In multithreading, each worker thread has its own `GenmcCtx`, which will have their results combined in the end.
 /// FIXME(genmc): implement multithreading.
@@ -465,7 +466,8 @@ impl GenmcCtx {
                 address,
                 size,
                 // We don't know the value that this store will write, but GenMC expects that we give it an actual value.
-                // The only way this value could ever be read is by an atomic load from a non-atomic store.
+                // Unfortunately, there are situations where this value can actually become visible
+                // to the program: when there is an atomic load reading from a non-atomic store.
                 // FIXME(genmc): update once mixed atomic-non-atomic support is added. Afterwards, this value should never be readable.
                 GenmcScalar::from_u64(0xDEADBEEF),
                 // This value is used to update the co-maximal store event to the same location.
