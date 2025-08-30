@@ -1,6 +1,5 @@
 use std::str::FromStr;
 
-use cxx::CxxString;
 pub use cxx::UniquePtr;
 
 pub use self::ffi::*;
@@ -58,30 +57,6 @@ impl FromStr for LogLevel {
             "debug3" => LogLevel::Debug3ReadsFrom,
             _ => return Err("invalid log level"),
         })
-    }
-}
-
-impl LoadResult {
-    fn no_value() -> Self {
-        Self { error: UniquePtr::null(), has_value: false, read_value: GenmcScalar::UNINIT }
-    }
-
-    fn from_value(read_value: GenmcScalar) -> Self {
-        LoadResult { error: UniquePtr::null(), has_value: true, read_value }
-    }
-
-    fn from_error(error: UniquePtr<CxxString>) -> Self {
-        LoadResult { error, has_value: false, read_value: GenmcScalar::UNINIT }
-    }
-}
-
-impl StoreResult {
-    fn ok(is_coherence_order_maximal_write: bool) -> Self {
-        StoreResult { error: UniquePtr::null(), is_coherence_order_maximal_write }
-    }
-
-    fn from_error(error: UniquePtr<CxxString>) -> Self {
-        return StoreResult { error, is_coherence_order_maximal_write: false };
     }
 }
 
@@ -191,24 +166,6 @@ mod ffi {
         Release = 4,
         AcquireRelease = 5,
         SequentiallyConsistent = 6,
-    }
-
-    extern "Rust" {
-        #[Self = "LoadResult"]
-        fn no_value() -> LoadResult;
-
-        #[Self = "LoadResult"]
-        fn from_value(scalar: GenmcScalar) -> LoadResult;
-
-        #[Self = "LoadResult"]
-        fn from_error(error: UniquePtr<CxxString>) -> LoadResult;
-
-        #[Self = "StoreResult"]
-        fn ok(is_coherence_order_maximal_write: bool) -> StoreResult;
-
-        // FIXME(genmc): Having multiple associated functions with the same name causes a name collision (CXX issue 1584: https://github.com/dtolnay/cxx/issues/1584)
-        #[Self = "StoreResult"]
-        fn from_error(error: UniquePtr<CxxString>) -> StoreResult;
     }
 
     // # SAFETY

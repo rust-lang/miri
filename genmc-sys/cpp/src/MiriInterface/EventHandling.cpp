@@ -50,14 +50,11 @@
     );
 
     if (const auto* err = std::get_if<VerificationError>(&ret))
-        return LoadResult::from_error(format_error(*err));
+        return LoadResultExt::from_error(format_error(*err));
     const auto* ret_val = std::get_if<SVal>(&ret);
     if (ret_val == nullptr)
         ERROR("Unimplemented: load returned unexpected result.");
-    return LoadResult::from_value(GenmcScalar {
-        /* value: */ ret_val->get(),
-        /* is_init: */ true,
-    });
+    return LoadResultExt::from_value(*ret_val);
 }
 
 [[nodiscard]] auto MiriGenmcShim::handle_store(
@@ -68,7 +65,6 @@
     GenmcScalar old_val,
     MemOrdering ord
 ) -> StoreResult {
-    ERROR_ON(!value.is_init, "Cannot store an uninitialized value.\n");
     const auto pos = inc_pos(thread_id);
     const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::Write>(
         pos,
@@ -76,20 +72,21 @@
         SAddr(address),
         ASize(size),
         /* type */ AType::Unsigned, // `type` is only used for printing.
-        SVal(value.value),
+        GenmcScalarExt::to_sval(value),
         EventDeps()
     );
 
     if (const auto* err = std::get_if<VerificationError>(&ret))
-        return StoreResult::from_error(format_error(*err));
+        return StoreResultExt::from_error(format_error(*err));
     if (!std::holds_alternative<std::monostate>(ret))
         ERROR("store returned unexpected result");
 
     // FIXME(genmc,mixed-accesses): Use the value that GenMC returns from handleStore (once
     // available).
     const auto& g = getExec().getGraph();
-    const bool is_coherence_order_maximal_write = g.co_max(SAddr(address))->getPos() == pos;
-    return StoreResult::ok(is_coherence_order_maximal_write);
+    return StoreResultExt::ok(
+        /* is_coherence_order_maximal_write */ g.co_max(SAddr(address))->getPos() == pos
+    );
 }
 
 /**** Memory (de)allocation ****/
@@ -119,4 +116,5 @@ auto MiriGenmcShim::handle_malloc(ThreadId thread_id, uint64_t size, uint64_t al
 void MiriGenmcShim::handle_free(ThreadId thread_id, uint64_t address) {
     const auto pos = inc_pos(thread_id);
     GenMCDriver::handleFree(pos, SAddr(address), EventDeps());
+    // FIXME(genmc): add error handling once GenMC returns errors from `handleFree`
 }

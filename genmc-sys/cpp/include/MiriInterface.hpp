@@ -174,10 +174,77 @@ struct MiriGenmcShim : private GenMCDriver {
     std::vector<Action> threads_action_;
 };
 
-/**** Functions available to Miri ****/
-
+/// Get the bit mask that GenMC expects for global memory allocations.
+/// FIXME(genmc): currently we use `get_global_alloc_static_mask()` to ensure the
+/// `SAddr::staticMask` constant is consistent between Miri and GenMC, but if
+/// https://github.com/dtolnay/cxx/issues/1051 is fixed we could share the constant
+///   directly.
 constexpr auto get_global_alloc_static_mask() -> uint64_t {
     return SAddr::staticMask;
 }
+
+// CXX.rs generated headers:
+// NOTE: this must be included *after* `MiriGenmcShim` and all the other types we use are defined,
+// otherwise there will be compilation errors due to missing definitions.
+#include "genmc-sys/src/lib.rs.h"
+
+/**** Result handling ****/
+// NOTE: these must come after the cxx_bridge generated code, since that contains the actual
+// definitions of these types.
+
+namespace GenmcScalarExt {
+inline GenmcScalar uninit() {
+    return GenmcScalar {
+        /* value: */ 0,
+        /* is_init: */ false,
+    };
+}
+
+inline GenmcScalar from_sval(SVal sval) {
+    return GenmcScalar {
+        /* value: */ sval.get(),
+        /* is_init: */ true,
+    };
+}
+
+inline SVal to_sval(GenmcScalar scalar) {
+    ERROR_ON(!scalar.is_init, "Cannot convert an uninitialized `GenmcScalar` into an `SVal`\n");
+    return SVal(scalar.value);
+}
+} // namespace GenmcScalarExt
+
+namespace LoadResultExt {
+inline LoadResult no_value() {
+    return LoadResult {
+        /* error: */ std::unique_ptr<std::string>(nullptr),
+        /* has_value: */ false,
+        /* read_value: */ GenmcScalarExt::uninit(),
+    };
+}
+
+inline LoadResult from_value(SVal read_value) {
+    return LoadResult { /* error: */ std::unique_ptr<std::string>(nullptr),
+                        /* has_value: */ true,
+                        /* read_value: */ GenmcScalarExt::from_sval(read_value) };
+}
+
+inline LoadResult from_error(std::unique_ptr<std::string> error) {
+    return LoadResult { /* error: */ std::move(error),
+                        /* has_value: */ false,
+                        /* read_value: */ GenmcScalarExt::uninit() };
+}
+} // namespace LoadResultExt
+
+namespace StoreResultExt {
+inline StoreResult ok(bool is_coherence_order_maximal_write) {
+    return StoreResult { /* error: */ std::unique_ptr<std::string>(nullptr),
+                         is_coherence_order_maximal_write };
+}
+
+inline StoreResult from_error(std::unique_ptr<std::string> error) {
+    return StoreResult { /* error: */ std::move(error),
+                         /* is_coherence_order_maximal_write: */ false };
+}
+} // namespace StoreResultExt
 
 #endif /* GENMC_MIRI_INTERFACE_HPP */
