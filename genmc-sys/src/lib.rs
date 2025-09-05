@@ -69,8 +69,6 @@ impl Default for LogLevel {
 }
 
 impl Default for ExecutiongraphPrinting {
-    /// GenMC graphs can be quite large since Miri produces a lot of (non-atomic) events.
-    /// GenMC also does not print graphs by default.
     fn default() -> Self {
         Self::None
     }
@@ -134,6 +132,7 @@ mod ffi {
 
     #[derive(Debug)]
     /// Setting to control which execution graphs GenMC prints after every execution.
+    /// GenMC graphs can be quite large since Miri produces a lot of (non-atomic) events.
     enum ExecutiongraphPrinting {
         /// Print no graphs.
         None,
@@ -308,9 +307,8 @@ mod ffi {
             thread_id: i32,
             address: u64,
             size: u64,
-            load_ordering: MemOrdering,
-            store_ordering: MemOrdering,
             rmw_op: RMWBinOp,
+            ordering: MemOrdering,
             rhs_value: GenmcScalar,
             old_value: GenmcScalar,
         ) -> ReadModifyWriteResult;

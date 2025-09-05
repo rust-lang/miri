@@ -113,16 +113,13 @@ impl AtomicFenceOrd {
 }
 
 impl AtomicRwOrd {
-    /// Split up the atomic success ordering of a read-modify-write operation into GenMC's representation.
-    /// Note that both returned orderings are currently identical, because this is what GenMC expects.
-    pub(super) fn to_genmc_memory_orderings(self) -> (MemOrdering, MemOrdering) {
+    pub(super) fn to_genmc(self) -> MemOrdering {
         match self {
-            AtomicRwOrd::Relaxed => (MemOrdering::Relaxed, MemOrdering::Relaxed),
-            AtomicRwOrd::Acquire => (MemOrdering::Acquire, MemOrdering::Acquire),
-            AtomicRwOrd::Release => (MemOrdering::Release, MemOrdering::Release),
-            AtomicRwOrd::AcqRel => (MemOrdering::AcquireRelease, MemOrdering::AcquireRelease),
-            AtomicRwOrd::SeqCst =>
-                (MemOrdering::SequentiallyConsistent, MemOrdering::SequentiallyConsistent),
+            AtomicRwOrd::Relaxed => MemOrdering::Relaxed,
+            AtomicRwOrd::Acquire => MemOrdering::Acquire,
+            AtomicRwOrd::Release => MemOrdering::Release,
+            AtomicRwOrd::AcqRel => MemOrdering::AcquireRelease,
+            AtomicRwOrd::SeqCst => MemOrdering::SequentiallyConsistent,
         }
     }
 }

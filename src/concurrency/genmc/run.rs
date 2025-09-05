@@ -37,9 +37,9 @@ pub fn run_genmc_mode<'tcx>(
         let Some(return_code) = eval_entry(genmc_ctx.clone()) else {
             // If requested, print the output GenMC produced:
             if genmc_config.print_genmc_output {
-                eprintln!("=============================================");
+                eprintln!("== raw GenMC output =========================");
                 eprintln!("{}", genmc_ctx.get_result_message());
-                eprintln!("=============================================");
+                eprintln!("== end of raw GenMC output ==================");
             }
             return None;
         };

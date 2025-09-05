@@ -565,8 +565,6 @@ impl GenmcCtx {
         let genmc_new_tid = thread_infos.add_thread(new_thread_id);
 
         self.handle.borrow_mut().pin_mut().handle_thread_create(genmc_new_tid, genmc_parent_tid);
-
-        // TODO GENMC (ERROR HANDLING): can this ever fail?
         interp_ok(())
     }
 
@@ -771,17 +769,15 @@ impl GenmcCtx {
 
         let curr_thread_id = ecx.machine.threads.active_thread();
         let genmc_tid = self.exec_state.thread_id_manager.borrow().get_genmc_tid(curr_thread_id);
-        let (load_ordering, store_ordering) = ordering.to_genmc_memory_orderings();
         debug!(
-            "GenMC: atomic_rmw_op, thread: {curr_thread_id:?} ({genmc_tid:?}) (op: {genmc_rmw_op:?}, rhs value: {genmc_rhs_scalar:?}), address: {address:?}, size: {size:?}, orderings: ({load_ordering:?}, {store_ordering:?})",
+            "GenMC: atomic_rmw_op, thread: {curr_thread_id:?} ({genmc_tid:?}) (op: {genmc_rmw_op:?}, rhs value: {genmc_rhs_scalar:?}), address: {address:?}, size: {size:?}, ordering: {ordering:?}",
         );
         let rmw_result = self.handle.borrow_mut().pin_mut().handle_read_modify_write(
             genmc_tid,
             address.bytes(),
             size.bytes(),
-            load_ordering,
-            store_ordering,
             genmc_rmw_op,
+            ordering.to_genmc(),
             genmc_rhs_scalar,
             genmc_old_value,
         );
@@ -790,8 +786,6 @@ impl GenmcCtx {
             // FIXME(genmc): error handling
             throw_ub_format!("{}", error.to_string_lossy());
         }
-
-        // FIXME(genmc): Check that both RMW arguments have sane provenance.
 
         let old_value_scalar = genmc_scalar_to_scalar(ecx, rmw_result.old_value, size)?;
 

@@ -1,6 +1,9 @@
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
 
-// This tests is the test `checks_fail` from loom/test/smoke.rs adapted for Miri-GenMC.
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: Copyright (c) 2019 Carl Lerche
+
+// This is the test `checks_fail` from loom/test/smoke.rs adapted for Miri-GenMC.
 // https://github.com/tokio-rs/loom/blob/dbf32b04bae821c64be44405a0bb72ca08741558/tests/smoke.rs
 
 // This test checks that an incorrect implementation of an incrementing counter is detected.

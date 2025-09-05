@@ -95,9 +95,8 @@ struct MiriGenmcShim : private GenMCDriver {
         ThreadId thread_id,
         uint64_t address,
         uint64_t size,
-        MemOrdering loadOrd,
-        MemOrdering store_ordering,
         RMWBinOp rmw_op,
+        MemOrdering ordering,
         GenmcScalar rhs_value,
         GenmcScalar old_val
     );

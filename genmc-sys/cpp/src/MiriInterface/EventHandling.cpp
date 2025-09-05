@@ -98,26 +98,22 @@ void MiriGenmcShim::handle_fence(ThreadId thread_id, MemOrdering ord) {
     ThreadId thread_id,
     uint64_t address,
     uint64_t size,
-    MemOrdering loadOrd,
-    MemOrdering store_ordering,
     RMWBinOp rmw_op,
+    MemOrdering ordering,
     GenmcScalar rhs_value,
     GenmcScalar old_val
 ) -> ReadModifyWriteResult {
-    const auto addr = SAddr(address);
-    // `type` is only used for printing.
-    const auto type = AType::Unsigned;
-
-    const auto rhsVal = GenmcScalarExt::to_sval(rhs_value);
-
+    // NOTE: Both the store and load events should get the same `ordering`, it should not be split
+    // into a load and a store component. This means we can have for example `AcqRel` loads and
+    // stores, but this is intended for RMW operations.
     const auto load_ret = handle_load_reset_if_none<EventLabel::EventLabelKind::FaiRead>(
         thread_id,
-        loadOrd,
-        addr,
+        ordering,
+        SAddr(address),
         ASize(size),
-        type,
+        AType::Unsigned, // The type is only used for printing.
         rmw_op,
-        rhsVal,
+        GenmcScalarExt::to_sval(rhs_value),
         EventDeps()
     );
     if (const auto* err = std::get_if<VerificationError>(&load_ret))
@@ -128,15 +124,16 @@ void MiriGenmcShim::handle_fence(ThreadId thread_id, MemOrdering ord) {
         ERROR("Unimplemented: read-modify-write returned unexpected result.");
     }
     const auto read_old_val = *ret_val;
-    const auto new_value = executeRMWBinOp(read_old_val, rhsVal, size, rmw_op);
+    const auto new_value =
+        executeRMWBinOp(read_old_val, GenmcScalarExt::to_sval(rhs_value), size, rmw_op);
 
     const auto storePos = inc_pos(thread_id);
     const auto store_ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::FaiWrite>(
         storePos,
-        store_ordering,
-        addr,
+        ordering,
+        SAddr(address),
         ASize(size),
-        type,
+        AType::Unsigned, // The type is only used for printing.
         new_value
     );
     if (const auto* err = std::get_if<VerificationError>(&store_ret))

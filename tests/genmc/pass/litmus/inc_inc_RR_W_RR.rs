@@ -21,7 +21,7 @@ static mut D: u64 = 0;
 #[unsafe(no_mangle)]
 fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
     let thread_order = [thread_1, thread_2, thread_3, thread_4, thread_5];
-    let ids = unsafe { create_pthreads_no_params(thread_order) };
+    let ids = unsafe { spawn_pthreads_no_params(thread_order) };
     unsafe { join_pthreads(ids) };
 
     if unsafe { A == 42 && B == 2 && C == 1 && D == 42 } {
