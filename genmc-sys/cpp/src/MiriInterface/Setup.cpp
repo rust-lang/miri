@@ -82,8 +82,8 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     // Miri.
     conf->warnOnGraphSize = 1024 * 1024;
 
-    // We only support the RC11 memory model for Rust.
-    conf->model = ModelType::RC11;
+    // We only support the `RC11` memory model for Rust, and `SC` when weak memory emulation is disabled.
+    conf->model = params.disable_weak_memory_emulation ? ModelType::SC : ModelType::RC11;
 
     // This prints the seed that GenMC picks for randomized scheduling during estimation mode.
     conf->printRandomScheduleSeed = params.print_random_schedule_seed;

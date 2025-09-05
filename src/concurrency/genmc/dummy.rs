@@ -242,4 +242,8 @@ impl GenmcConfig {
             Err(format!("GenMC is not supported on this target"))
         }
     }
+
+    pub fn disable_weak_memory_emulation(&mut self) {
+        unreachable!();
+    }
 }

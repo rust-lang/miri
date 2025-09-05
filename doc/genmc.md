@@ -37,7 +37,9 @@ Note that `cargo miri test` in GenMC mode is currently not supported.
     - `debug2`:   Print the execution graph after every memory access.
     - `debug3`:   Print reads-from values considered by GenMC.
 
-<!-- FIXME(genmc): explain options. -->
+#### Regular Miri parameters useful for GenMC mode
+
+- `-Zmiri-disable-weak-memory-emulation`: Disable any weak memory effects (effectively upgrading all atomic orderings in the program to `SeqCst`). This option may reduce the number of explored program executions, but any bugs related to weak memory effects will be missed. This option can help determine if an error is caused by weak memory effects (i.e., if it disappears with this option enabled).
 
 <!-- FIXME(genmc): explain Miri-GenMC specific functions. -->
 

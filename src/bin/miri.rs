@@ -746,11 +746,11 @@ fn main() {
         many_seeds.map(|seeds| ManySeedsConfig { seeds, keep_going: many_seeds_keep_going });
 
     // Validate settings for data race detection and GenMC mode.
-    if miri_config.genmc_config.is_some() {
+    if let Some(genmc_ctx) = &mut miri_config.genmc_config {
         if !miri_config.data_race_detector {
             fatal_error!("Cannot disable data race detection in GenMC mode");
         } else if !miri_config.weak_memory_emulation {
-            fatal_error!("Cannot disable weak memory emulation in GenMC mode");
+            genmc_ctx.disable_weak_memory_emulation();
         } else if !miri_config.native_lib.is_empty() {
             fatal_error!("native-lib not supported in GenMC mode.");
         } else if miri_config.isolated_op != miri::IsolatedOp::Reject(miri::RejectOpWith::Abort) {

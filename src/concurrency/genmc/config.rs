@@ -63,4 +63,10 @@ impl GenmcConfig {
         }
         Ok(())
     }
+
+    /// Set the memory model used by GenMC to "Sequential Consistency" (SC).
+    /// This will disable any weak memory effects, which reduces the number of program executions that will be explored.
+    pub fn disable_weak_memory_emulation(&mut self) {
+        self.params.disable_weak_memory_emulation = true;
+    }
 }

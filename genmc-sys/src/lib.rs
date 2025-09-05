@@ -58,6 +58,7 @@ impl Default for GenmcParams {
             do_symmetry_reduction: false,
             // GenMC graphs can be quite large since Miri produces a lot of (non-atomic) events.
             print_execution_graphs: ExecutiongraphPrinting::None,
+            disable_weak_memory_emulation: false,
         }
     }
 }
@@ -97,6 +98,8 @@ mod ffi {
         pub print_random_schedule_seed: bool,
         pub do_symmetry_reduction: bool,
         pub print_execution_graphs: ExecutiongraphPrinting,
+        /// Enabling this will set the memory model used by GenMC to "Sequential Consistency" (SC).
+        pub disable_weak_memory_emulation: bool,
     }
 
     /// This is mostly equivalent to GenMC `VerbosityLevel`, but the debug log levels are always present (not conditionally compiled based on `ENABLE_GENMC_DEBUG`).
