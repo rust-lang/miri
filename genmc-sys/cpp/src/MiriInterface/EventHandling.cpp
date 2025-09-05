@@ -106,6 +106,9 @@ void MiriGenmcShim::handle_fence(ThreadId thread_id, MemOrdering ord) {
     // NOTE: Both the store and load events should get the same `ordering`, it should not be split
     // into a load and a store component. This means we can have for example `AcqRel` loads and
     // stores, but this is intended for RMW operations.
+
+    // Somewhat confusingly, the GenMC term for RMW read/write labels is
+    // `FaiRead` and `FaiWrite`.
     const auto load_ret = handle_load_reset_if_none<EventLabel::EventLabelKind::FaiRead>(
         thread_id,
         ordering,

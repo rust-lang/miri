@@ -56,7 +56,8 @@ impl Default for GenmcParams {
         Self {
             print_random_schedule_seed: false,
             do_symmetry_reduction: false,
-            print_execution_graphs: ExecutiongraphPrinting::default(),
+            // GenMC graphs can be quite large since Miri produces a lot of (non-atomic) events.
+            print_execution_graphs: ExecutiongraphPrinting::None,
         }
     }
 }
@@ -65,12 +66,6 @@ impl Default for LogLevel {
     fn default() -> Self {
         // FIXME(genmc): set `Tip` by default once the GenMC tips are relevant to Miri.
         Self::Warning
-    }
-}
-
-impl Default for ExecutiongraphPrinting {
-    fn default() -> Self {
-        Self::None
     }
 }
 
@@ -132,7 +127,6 @@ mod ffi {
 
     #[derive(Debug)]
     /// Setting to control which execution graphs GenMC prints after every execution.
-    /// GenMC graphs can be quite large since Miri produces a lot of (non-atomic) events.
     enum ExecutiongraphPrinting {
         /// Print no graphs.
         None,
@@ -200,7 +194,8 @@ mod ffi {
         is_coherence_order_maximal_write: bool,
     }
 
-    /**** Types shared between Miri/Rust and GenMC/C++ through cxx_bridge: ****/
+    /**** These are GenMC types that we have to copy-paste here since cxx does not support
+    "importing" externally defined C++ types. ****/
 
     #[derive(Debug)]
     /// Corresponds to GenMC's type with the same name.
@@ -254,7 +249,9 @@ mod ffi {
         /**** Types shared between Miri/Rust and Miri/C++: ****/
         type MiriGenmcShim;
 
-        /**** Types shared between Miri/Rust and GenMC/C++: ****/
+        /**** Types shared between Miri/Rust and GenMC/C++:
+        (This tells cxx that the enums defined above are already defined on the C++ side;
+        it will emit assertions to ensure that the two definitions agree.) ****/
         type ActionKind;
         type MemOrdering;
         type RMWBinOp;

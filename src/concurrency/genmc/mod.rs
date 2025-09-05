@@ -743,7 +743,8 @@ impl GenmcCtx {
     }
 
     /// Inform GenMC about an atomic read-modify-write operation.
-    /// For GenMC, compare-exchange and atomic-swap are also RMW (see `RMWBinOp` for full list of operations).
+    /// This includes atomic swap (also often called "exchange"), but does *not*
+    /// include compare-exchange (see `RMWBinOp` for full list of operations).
     /// Returns the previous value at that memory location, and optionally the value that should be written back to Miri's memory.
     fn handle_atomic_rmw_op<'tcx>(
         &self,
