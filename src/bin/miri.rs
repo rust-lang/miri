@@ -753,6 +753,8 @@ fn main() {
             fatal_error!("Cannot disable weak memory emulation in GenMC mode");
         } else if !miri_config.native_lib.is_empty() {
             fatal_error!("native-lib not supported in GenMC mode.");
+        } else if miri_config.isolated_op != miri::IsolatedOp::Reject(miri::RejectOpWith::Abort) {
+            fatal_error!("Cannot disable isolation in GenMC mode");
         }
         if miri_config.borrow_tracker.is_some() {
             eprintln!(
