@@ -184,13 +184,11 @@ fn compile_cpp_dependencies(genmc_path: &Path) {
     // Part 1:
     // Compile the GenMC library using cmake.
 
-    let cmakelists_path = genmc_path.join("CMakeLists.txt");
-
     // FIXME(genmc,cargo): Switch to using `CARGO_CFG_DEBUG_ASSERTIONS` once https://github.com/rust-lang/cargo/issues/15760 is completed.
     // Enable/disable additional debug checks, prints and options for GenMC, based on the Rust profile (debug/release)
     let enable_genmc_debug = matches!(std::env::var("PROFILE").as_deref().unwrap(), "debug");
 
-    let mut config = cmake::Config::new(cmakelists_path);
+    let mut config = cmake::Config::new(genmc_path);
     config
         .always_configure(false) // We don't need to reconfigure on subsequent compilation runs.
         .out_dir(genmc_build_dir)
