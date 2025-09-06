@@ -746,26 +746,11 @@ fn main() {
         many_seeds.map(|seeds| ManySeedsConfig { seeds, keep_going: many_seeds_keep_going });
 
     // Validate settings for data race detection and GenMC mode.
-    if let Some(genmc_ctx) = &mut miri_config.genmc_config {
-        if !miri_config.data_race_detector {
-            fatal_error!("Cannot disable data race detection in GenMC mode");
-        } else if !miri_config.weak_memory_emulation {
-            genmc_ctx.disable_weak_memory_emulation();
-        } else if !miri_config.native_lib.is_empty() {
-            fatal_error!("native-lib not supported in GenMC mode.");
-        } else if miri_config.isolated_op != miri::IsolatedOp::Reject(miri::RejectOpWith::Abort) {
-            fatal_error!("Cannot disable isolation in GenMC mode");
-        }
-        if miri_config.borrow_tracker.is_some() {
-            eprintln!(
-                "warning: borrow tracking has been disabled, it is not (yet) supported in GenMC mode."
-            );
-            miri_config.borrow_tracker = None;
-        }
-        // We enable fixed scheduling so Miri doesn't randomly yield before a terminator, which anyway
-        // would be a NOP in GenMC mode.
-        miri_config.fixed_scheduling = true;
-    } else if miri_config.weak_memory_emulation && !miri_config.data_race_detector {
+    if let Err(err) = GenmcConfig::validate_genmc_mode_settings(&mut miri_config) {
+        fatal_error!("Invalid settings: {err}");
+    }
+
+    if miri_config.weak_memory_emulation && !miri_config.data_race_detector {
         fatal_error!(
             "Weak memory emulation cannot be enabled when the data race detector is disabled"
         );

@@ -1,6 +1,7 @@
 use genmc_sys::LogLevel;
 
 use super::GenmcParams;
+use crate::{IsolatedOp, MiriConfig, RejectOpWith};
 
 /// Configuration for GenMC mode.
 /// The `params` field is shared with the C++ side.
@@ -68,5 +69,40 @@ impl GenmcConfig {
     /// This will disable any weak memory effects, which reduces the number of program executions that will be explored.
     pub fn disable_weak_memory_emulation(&mut self) {
         self.params.disable_weak_memory_emulation = true;
+    }
+
+    /// Validate settings for GenMC mode (NOP if GenMC mode disabled).
+    ///
+    /// Unsupported configurations return an error.
+    /// Adjusts Miri settings where required, printing a warnings if the change might be unexpected for the user.
+    pub fn validate_genmc_mode_settings(miri_config: &mut MiriConfig) -> Result<(), &'static str> {
+        let Some(genmc_config) = miri_config.genmc_config.as_mut() else {
+            return Ok(());
+        };
+
+        // Check for disallowed configurations.
+        if !miri_config.data_race_detector {
+            return Err("Cannot disable data race detection in GenMC mode");
+        } else if !miri_config.native_lib.is_empty() {
+            return Err("native-lib not supported in GenMC mode.");
+        } else if miri_config.isolated_op != IsolatedOp::Reject(RejectOpWith::Abort) {
+            return Err("Cannot disable isolation in GenMC mode");
+        }
+
+        // Adjust settings where needed.
+        if !miri_config.weak_memory_emulation {
+            genmc_config.disable_weak_memory_emulation();
+        }
+        if miri_config.borrow_tracker.is_some() {
+            eprintln!(
+                "warning: borrow tracking has been disabled, it is not (yet) supported in GenMC mode."
+            );
+            miri_config.borrow_tracker = None;
+        }
+        // We enable fixed scheduling so Miri doesn't randomly yield before a terminator, which anyway
+        // would be a NOP in GenMC mode.
+        miri_config.fixed_scheduling = true;
+
+        Ok(())
     }
 }

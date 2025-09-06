@@ -246,4 +246,10 @@ impl GenmcConfig {
     pub fn disable_weak_memory_emulation(&mut self) {
         unreachable!();
     }
+
+    pub fn validate_genmc_mode_settings(
+        _miri_config: &mut crate::MiriConfig,
+    ) -> Result<(), &'static str> {
+        Ok(())
+    }
 }
