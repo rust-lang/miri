@@ -197,7 +197,7 @@ impl GenmcCtx {
     pub fn schedule_thread<'tcx>(
         &self,
         _ecx: &InterpCx<'tcx, MiriMachine<'tcx>>,
-    ) -> InterpResult<'tcx, ThreadId> {
+    ) -> InterpResult<'tcx, Option<ThreadId>> {
         unreachable!()
     }
 

@@ -705,12 +705,12 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // In GenMC mode, we let GenMC do the scheduling.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            let next_thread_id = genmc_ctx.schedule_thread(this)?;
+            if let Some(next_thread_id) = genmc_ctx.schedule_thread(this)? {
+                let thread_manager = &mut this.machine.threads;
+                thread_manager.active_thread = next_thread_id;
 
-            let thread_manager = &mut this.machine.threads;
-            thread_manager.active_thread = next_thread_id;
-
-            assert!(thread_manager.threads[thread_manager.active_thread].state.is_enabled());
+                assert!(thread_manager.threads[thread_manager.active_thread].state.is_enabled());
+            };
             return interp_ok(SchedulingAction::ExecuteStep);
         }
 
