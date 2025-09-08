@@ -58,7 +58,7 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     logLevel = to_genmc_verbosity_level(log_level);
 }
 
-/* unsafe */ auto MiriGenmcShim::create_handle(const GenmcParams& params)
+/* unsafe */ auto MiriGenmcShim::create_handle(const GenmcParams& params, bool estimation_mode)
     -> std::unique_ptr<MiriGenmcShim> {
     auto conf = std::make_shared<Config>();
 
@@ -82,7 +82,8 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     // Miri.
     conf->warnOnGraphSize = 1024 * 1024;
 
-    // We only support the `RC11` memory model for Rust, and `SC` when weak memory emulation is disabled.
+    // We only support the `RC11` memory model for Rust, and `SC` when weak memory emulation is
+    // disabled.
     conf->model = params.disable_weak_memory_emulation ? ModelType::SC : ModelType::RC11;
 
     // This prints the seed that GenMC picks for randomized scheduling during estimation mode.
@@ -119,12 +120,15 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     );
     conf->symmetryReduction = params.do_symmetry_reduction;
 
-    // FIXME(genmc): expose this setting to Miri (useful for testing Miri-GenMC).
-    conf->schedulePolicy = SchedulePolicy::WF;
+    // Set the scheduling policy. GenMC uses `WFR` in estimation mode.
+    conf->schedulePolicy = estimation_mode ? SchedulePolicy::WFR : params.schedule_policy;
 
+    // Set the min and max number of executions tested in estimation mode.
+    conf->estimationMin = 10;
+    conf->estimationMax = params.estimation_max;
     // Set the mode used for this driver, either estimation or verification.
-    // FIXME(genmc): implement estimation mode.
-    const auto mode = GenMCDriver::Mode(GenMCDriver::VerificationMode {});
+    const auto mode = estimation_mode ? GenMCDriver::Mode(GenMCDriver::EstimationMode {})
+                                      : GenMCDriver::Mode(GenMCDriver::VerificationMode {});
 
     // Running Miri-GenMC without race detection is not supported.
     // Disabling this option also changes the behavior of the replay scheduler to only schedule

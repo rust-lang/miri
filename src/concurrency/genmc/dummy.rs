@@ -1,7 +1,7 @@
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult};
 
-pub use self::run::run_genmc_mode;
+pub use self::run::{GenmcMode, run_genmc_mode};
 use crate::intrinsics::AtomicRmwOp;
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, MemoryKind, MiriMachine, Scalar,
@@ -27,10 +27,17 @@ mod run {
 
     use crate::{GenmcCtx, MiriConfig};
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum GenmcMode {
+        Estimation,
+        Verification,
+    }
+
     pub fn run_genmc_mode<'tcx>(
         _config: &MiriConfig,
         _eval_entry: impl Fn(Rc<GenmcCtx>) -> Option<i32>,
         _tcx: TyCtxt<'tcx>,
+        _mode: GenmcMode,
     ) -> Option<i32> {
         unreachable!();
     }
@@ -38,6 +45,10 @@ mod run {
 
 impl GenmcCtx {
     // We don't provide the `new` function in the dummy module.
+
+    pub fn print_estimation_result(&self) {
+        unreachable!()
+    }
 
     pub fn get_blocked_execution_count(&self) -> usize {
         unreachable!()
@@ -241,6 +252,10 @@ impl GenmcConfig {
         } else {
             Err(format!("GenMC is not supported on this target"))
         }
+    }
+
+    pub fn do_estimation(&self) -> bool {
+        unreachable!()
     }
 
     pub fn validate_genmc_mode_settings(

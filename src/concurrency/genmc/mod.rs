@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::time::Duration;
 
 use genmc_sys::{
     GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering, MiriGenmcShim, RMWBinOp, UniquePtr,
@@ -35,7 +36,7 @@ mod thread_id_map;
 pub use genmc_sys::GenmcParams;
 
 pub use self::config::GenmcConfig;
-pub use self::run::run_genmc_mode;
+pub use self::run::{GenmcMode, run_genmc_mode};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExitType {
@@ -128,11 +129,39 @@ pub struct GenmcCtx {
 /// GenMC Context creation and administrative / query actions
 impl GenmcCtx {
     /// Create a new `GenmcCtx` from a given config.
-    fn new(miri_config: &MiriConfig, global_state: Arc<GlobalState>) -> Self {
+    fn new(miri_config: &MiriConfig, global_state: Arc<GlobalState>, mode: GenmcMode) -> Self {
         let genmc_config = miri_config.genmc_config.as_ref().unwrap();
-        let handle =
-            RefCell::new(create_genmc_driver_handle(&genmc_config.params, genmc_config.log_level));
+        let handle = RefCell::new(create_genmc_driver_handle(
+            &genmc_config.params,
+            genmc_config.log_level,
+            /* do_estimation: */ mode == GenmcMode::Estimation,
+        ));
         Self { handle, exec_state: Default::default(), global_state }
+    }
+
+    /// Given the time taken for the estimation mode run,
+    /// print an estimation for how many executions the entire verification will require and give a total time estimate.
+    pub fn print_estimation_result(&self, elapsed_time: Duration) {
+        let result = self.handle.borrow().get_estimation_results();
+        let elapsed_time_sec = elapsed_time.as_secs_f64();
+        let estimated_time_sec = elapsed_time_sec * result.mean as f64
+            / (u64::saturating_add(result.explored_execs, result.blocked_execs)) as f64;
+
+        if result.mean < 0 || result.sd < 0 {
+            eprintln!("WARNING: Estimation gave weird results, there may have been an overflow.");
+        }
+        eprintln!("Finished estimation in {elapsed_time_sec:.2} seconds.");
+        eprintln!("  Explored executions: {}", result.explored_execs);
+        if result.blocked_execs != 0 {
+            eprintln!("  Blocked  executions: {}", result.blocked_execs);
+        }
+        if result.moot_execs != 0 {
+            // Moot executions are only counted by GenMC in debug mode.
+            eprintln!("  Moot     executions: {}", result.moot_execs);
+        }
+        eprintln!("Total executions estimate: {} (+- {})", result.mean, result.sd);
+        eprintln!("Time to completion estimate: {estimated_time_sec:.2}s");
+        eprintln!();
     }
 
     /// Get the number of blocked executions encountered by GenMC.

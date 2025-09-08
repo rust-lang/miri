@@ -38,8 +38,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use miri::{
-    BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, MiriConfig, MiriEntryFnType,
-    ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode, run_genmc_mode,
+    BacktraceStyle, BorrowTrackerMethod, GenmcConfig, GenmcCtx, GenmcMode, MiriConfig,
+    MiriEntryFnType, ProvenanceMode, RetagFields, TreeBorrowsParams, ValidationMode,
+    run_genmc_mode,
 };
 use rustc_abi::ExternAbi;
 use rustc_data_structures::sync;
@@ -186,17 +187,26 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
                     optimizations is usually marginal at best.");
         }
 
-        if let Some(_genmc_config) = &config.genmc_config {
+        if let Some(genmc_config) = &config.genmc_config {
             let eval_entry_once = |genmc_ctx: Rc<GenmcCtx>| {
                 miri::eval_entry(tcx, entry_def_id, entry_type, &config, Some(genmc_ctx))
             };
 
-            // FIXME(genmc): add estimation mode here.
-
-            let return_code = run_genmc_mode(&config, eval_entry_once, tcx).unwrap_or_else(|| {
+            // Estimate the execution space and runtime, if enabled.
+            if genmc_config.do_estimation()
+                && run_genmc_mode(&config, eval_entry_once, tcx, GenmcMode::Estimation).is_none()
+            {
+                // We might already find an error during estimation, then we should stop here.
                 tcx.dcx().abort_if_errors();
-                rustc_driver::EXIT_FAILURE
-            });
+                exit(rustc_driver::EXIT_FAILURE);
+            }
+
+            let return_code =
+                run_genmc_mode(&config, eval_entry_once, tcx, GenmcMode::Verification)
+                    .unwrap_or_else(|| {
+                        tcx.dcx().abort_if_errors();
+                        rustc_driver::EXIT_FAILURE
+                    });
 
             exit(return_code);
         };
