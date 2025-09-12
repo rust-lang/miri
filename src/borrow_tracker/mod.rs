@@ -233,6 +233,7 @@ pub enum BorrowTrackerMethod {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TreeBorrowsParams {
     pub precise_interior_mut: bool,
+    pub start_mut_ref_on_fn_entry_as_active: bool,
 }
 
 impl BorrowTrackerMethod {
