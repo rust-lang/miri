@@ -412,6 +412,9 @@ mod ffi {
         fn handle_thread_finish(self: Pin<&mut MiriGenmcShim>, thread_id: i32, ret_val: u64);
         fn handle_thread_kill(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
 
+        /**** Blocking instructions ****/
+        fn handle_thread_block(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
+
         /***** Exploration related functionality *****/
 
         /// Ask the GenMC scheduler for a new thread to schedule and

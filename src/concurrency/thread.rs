@@ -110,6 +110,8 @@ pub enum BlockReason {
     Eventfd,
     /// Blocked on unnamed_socket.
     UnnamedSocket,
+    /// Blocked on a GenMC `assume` statement (GenMC mode only).
+    GenmcAssume,
 }
 
 /// The state of a thread.
@@ -572,6 +574,7 @@ impl<'tcx> ThreadManager<'tcx> {
     /// See <https://docs.microsoft.com/en-us/windows/win32/procthread/thread-handles-and-identifiers>:
     /// > The handle is valid until closed, even after the thread it represents has been terminated.
     fn detach_thread(&mut self, id: ThreadId, allow_terminated_joined: bool) -> InterpResult<'tcx> {
+        // FIXME(genmc): does GenMC need to know about detached threads?
         trace!("detaching {:?}", id);
 
         let is_ub = if allow_terminated_joined && self.threads[id].state.is_terminated() {
@@ -705,12 +708,29 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // In GenMC mode, we let GenMC do the scheduling.
         if let Some(genmc_ctx) = this.machine.data_race.as_genmc_ref() {
-            if let Some(next_thread_id) = genmc_ctx.schedule_thread(this)? {
-                let thread_manager = &mut this.machine.threads;
-                thread_manager.active_thread = next_thread_id;
-
-                assert!(thread_manager.threads[thread_manager.active_thread].state.is_enabled());
+            let Some(next_thread_id) = genmc_ctx.schedule_thread(this)? else {
+                return interp_ok(SchedulingAction::ExecuteStep);
             };
+            // GenMC determined that we can schedule this thread again, so we unblock it:
+            // FIXME(genmc): should we even block the threads in Miri?
+            match &this.machine.threads.threads[next_thread_id].state {
+                ThreadState::Blocked {
+                    reason: block_reason @ (BlockReason::Mutex | BlockReason::GenmcAssume),
+                    ..
+                } => {
+                    info!(
+                        "GenMC: schedule returned thread {next_thread_id:?}, which is blocked, so we unblock it now."
+                    );
+                    this.unblock_thread(next_thread_id, *block_reason)?;
+                }
+                _ => {}
+            }
+
+            let thread_manager = &mut this.machine.threads;
+            thread_manager.active_thread = next_thread_id;
+
+            assert!(thread_manager.threads[thread_manager.active_thread].state.is_enabled());
+
             return interp_ok(SchedulingAction::ExecuteStep);
         }
 
