@@ -1,0 +1,142 @@
+/** This file contains functionality related to handling mutexes.  */
+
+#include "MiriInterface.hpp"
+
+// CXX.rs generated headers:
+#include "genmc-sys/src/lib.rs.h"
+
+auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint64_t size)
+    -> MutexLockResult {
+    // FIXME(genmc,multithreading): ensure this annotation id is unique even if Miri runs GenMC mode
+    // multithreaded. We cannot use the address directly, since it is 64 bits, and `ID` is an
+    // `unsigned int`.
+    ModuleID::ID annot_id;
+    auto [it, inserted] = annotation_id.try_emplace(address, annotation_id_counter);
+    if (inserted) {
+        annot_id = annotation_id_counter++;
+    } else {
+        annot_id = it->second;
+    }
+    const auto annot = std::move(Annotation(
+        AssumeType::Spinloop,
+        Annotation::ExprVP(NeExpr<AnnotID>::create(
+                               RegisterExpr<AnnotID>::create(ASize(size).getBits(), annot_id),
+                               ConcreteExpr<AnnotID>::create(ASize(size).getBits(), SVal(1))
+        )
+                               .release())
+    ));
+
+    // Mutex starts out unlocked, so we always say the previous value is "unlocked".
+    const auto old_val = SVal(0);
+    const auto load_ret = handle_load_reset_if_none<EventLabel::EventLabelKind::LockCasRead>(
+        thread_id,
+        old_val,
+        address,
+        size,
+        annot,
+        EventDeps()
+    );
+    if (const auto* err = std::get_if<VerificationError>(&load_ret))
+        return MutexLockResultExt::from_error(format_error(*err));
+    // If we get a `Reset`, GenMC decided that this lock operation should not yet run, since it
+    // would not acquire the mutex. Like the handling of the case further down where we read a `1`
+    // ("Mutex already locked"), Miri should call the handle function again once the current thread
+    // is scheduled by GenMC the next time.
+    if (std::holds_alternative<Reset>(load_ret))
+        return MutexLockResultExt::ok(false);
+
+    const auto* ret_val = std::get_if<SVal>(&load_ret);
+    ERROR_ON(!ret_val, "Unimplemented: mutex lock returned unexpected result.");
+    ERROR_ON(*ret_val != SVal(0) && *ret_val != SVal(1), "Mutex read value was neither 0 nor 1");
+    const bool is_lock_acquired = *ret_val == SVal(0);
+    if (is_lock_acquired) {
+        const auto store_ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::LockCasWrite>(
+            inc_pos(thread_id),
+            old_val,
+            address,
+            size,
+            EventDeps()
+        );
+        if (const auto* err = std::get_if<VerificationError>(&store_ret))
+            return MutexLockResultExt::from_error(format_error(*err));
+        // We don't update Miri's memory for this operation so we don't need to know if the store
+        // was the co-maximal store, but we still check that we at least get a boolean as the result
+        // of the store.
+        const bool* is_coherence_order_maximal_write = std::get_if<bool>(&store_ret);
+        ERROR_ON(
+            nullptr == is_coherence_order_maximal_write,
+            "Unimplemented: store part of mutex try_lock returned unexpected result."
+        );
+    } else {
+        // We did not acquire the mutex, so we tell GenMC to block the thread until we can acquire
+        // it.
+        GenMCDriver::handleAssume(inc_pos(thread_id), AssumeType::Spinloop);
+    }
+    return MutexLockResultExt::ok(is_lock_acquired);
+}
+
+auto MiriGenmcShim::handle_mutex_try_lock(ThreadId thread_id, uint64_t address, uint64_t size)
+    -> MutexLockResult {
+    auto& currPos = threads_action_[thread_id].event;
+    // Mutex starts out unlocked, so we always say the previous value is "unlocked".
+    const auto old_val = SVal(0);
+    const auto load_ret = GenMCDriver::handleLoad<EventLabel::EventLabelKind::TrylockCasRead>(
+        ++currPos,
+        old_val,
+        SAddr(address),
+        ASize(size)
+    );
+    if (const auto* err = std::get_if<VerificationError>(&load_ret))
+        return MutexLockResultExt::from_error(format_error(*err));
+    const auto* ret_val = std::get_if<SVal>(&load_ret);
+    if (nullptr == ret_val) {
+        ERROR("Unimplemented: mutex trylock load returned unexpected result.");
+    }
+
+    ERROR_ON(*ret_val != SVal(0) && *ret_val != SVal(1), "Mutex read value was neither 0 nor 1");
+    const bool is_lock_acquired = *ret_val == SVal(0);
+    if (!is_lock_acquired) {
+        return MutexLockResultExt::ok(false); /* Lock already held. */
+    }
+
+    const auto store_ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::TrylockCasWrite>(
+        ++currPos,
+        old_val,
+        SAddr(address),
+        ASize(size)
+    );
+    if (const auto* err = std::get_if<VerificationError>(&store_ret))
+        return MutexLockResultExt::from_error(format_error(*err));
+    // We don't update Miri's memory for this operation so we don't need to know if the store was
+    // co-maximal, but we still check that we get a boolean result.
+    const bool* is_coherence_order_maximal_write = std::get_if<bool>(&store_ret);
+    ERROR_ON(
+        nullptr == is_coherence_order_maximal_write,
+        "Unimplemented: store part of mutex try_lock returned unexpected result."
+    );
+    return MutexLockResultExt::ok(true);
+}
+
+auto MiriGenmcShim::handle_mutex_unlock(ThreadId thread_id, uint64_t address, uint64_t size)
+    -> StoreResult {
+    const auto pos = inc_pos(thread_id);
+    const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::UnlockWrite>(
+        pos,
+        // Mutex starts out unlocked, so we always say the previous value is "unlocked".
+        /* old_val */ SVal(0),
+        MemOrdering::Release,
+        SAddr(address),
+        ASize(size),
+        AType::Signed,
+        SVal(0),
+        EventDeps()
+    );
+    if (const auto* err = std::get_if<VerificationError>(&ret))
+        return StoreResultExt::from_error(format_error(*err));
+    const bool* is_coherence_order_maximal_write = std::get_if<bool>(&ret);
+    ERROR_ON(
+        nullptr == is_coherence_order_maximal_write,
+        "Unimplemented: store part of mutex unlock returned unexpected result."
+    );
+    return StoreResultExt::ok(*is_coherence_order_maximal_write);
+}

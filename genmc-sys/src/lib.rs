@@ -254,6 +254,15 @@ mod ffi {
         is_coherence_order_maximal_write: bool,
     }
 
+    #[must_use]
+    #[derive(Debug)]
+    struct MutexLockResult {
+        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        error: UniquePtr<CxxString>,
+        /// Indicate whether the lock was acquired by this thread.
+        is_lock_acquired: bool,
+    }
+
     /**** These are GenMC types that we have to copy-paste here since cxx does not support
     "importing" externally defined C++ types. ****/
 
@@ -431,6 +440,26 @@ mod ffi {
         /// Note: this function is currently hardcoded for `AssumeType::User`, corresponding to user supplied assume statements.
         /// This can become a parameter once more types of assumes are added.
         fn handle_assume_block(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
+
+        /**** Mutex handling ****/
+        fn handle_mutex_lock(
+            self: Pin<&mut MiriGenmcShim>,
+            thread_id: i32,
+            address: u64,
+            size: u64,
+        ) -> MutexLockResult;
+        fn handle_mutex_try_lock(
+            self: Pin<&mut MiriGenmcShim>,
+            thread_id: i32,
+            address: u64,
+            size: u64,
+        ) -> MutexLockResult;
+        fn handle_mutex_unlock(
+            self: Pin<&mut MiriGenmcShim>,
+            thread_id: i32,
+            address: u64,
+            size: u64,
+        ) -> StoreResult;
 
         /***** Exploration related functionality *****/
 

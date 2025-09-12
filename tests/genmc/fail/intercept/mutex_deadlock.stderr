@@ -1,0 +1,26 @@
+Running GenMC Verification...
+error: unsupported operation: Could not lock Mutex, which may indicate a deadlock. (GenMC mode does not fully support deadlock detection yet).
+  --> RUSTLIB/std/src/sync/poison/mutex.rs:LL:CC
+   |
+LL |             self.inner.lock();
+   |                             ^ unsupported operation occurred here
+   |
+   = help: this is likely not a bug in the program; it indicates that the program performed an operation that Miri does not support
+   = note: BACKTRACE on thread `unnamed-ID`:
+   = note: inside `std::sync::Mutex::<u64>::lock` at RUSTLIB/std/src/sync/poison/mutex.rs:LL:CC
+note: inside closure
+  --> tests/genmc/fail/intercept/mutex_deadlock.rs:LL:CC
+   |
+LL |             let mut x = X.lock().unwrap();
+   |                         ^^^^^^^^
+   = note: inside `<std::boxed::Box<{closure@tests/genmc/fail/intercept/mutex_deadlock.rs:LL:CC}> as std::ops::FnOnce<()>>::call_once` at RUSTLIB/alloc/src/boxed.rs:LL:CC
+note: inside `genmc::spawn_pthread_closure::thread_func::<{closure@tests/genmc/fail/intercept/mutex_deadlock.rs:LL:CC}>`
+  --> tests/genmc/fail/intercept/../../../utils/genmc.rs:LL:CC
+   |
+LL |         f();
+   |         ^^^
+
+note: add `-Zmiri-genmc-print-genmc-output` to MIRIFLAGS to see the detailed GenMC error report
+
+error: aborting due to 1 previous error
+
