@@ -146,6 +146,16 @@ impl<'tcx> NewPermission {
         let ty_is_freeze = pointee.is_freeze(*cx.tcx, cx.typing_env());
         let is_protected = retag_kind == RetagKind::FnEntry;
 
+        let start_mut_ref_on_fn_entry_as_active = cx
+            .machine
+            .borrow_tracker
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .borrow_tracker_method
+            .get_tree_borrows_params()
+            .start_mut_ref_on_fn_entry_as_active;
+
         if matches!(ref_mutability, Some(Mutability::Mut) | None if !ty_is_unpin) {
             // Mutable reference / Box to pinning type: retagging is a NOP.
             // FIXME: with `UnsafePinned`, this should do proper per-byte tracking.
@@ -155,6 +165,9 @@ impl<'tcx> NewPermission {
         let freeze_perm = match ref_mutability {
             // Shared references are frozen.
             Some(Mutability::Not) => Permission::new_frozen(),
+            // Mutable references on fn entry are activated based on config
+            Some(Mutability::Mut) if start_mut_ref_on_fn_entry_as_active && is_protected =>
+                Permission::new_active(),
             // Mutable references and Boxes are reserved.
             _ => Permission::new_reserved_frz(),
         };
