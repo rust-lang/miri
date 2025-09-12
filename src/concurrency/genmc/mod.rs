@@ -199,6 +199,7 @@ impl GenmcCtx {
     ///
     /// In GenMC mode, the input program should be repeatedly executed until this function returns `true` or an error is found.
     pub fn is_exploration_done(&self) -> bool {
+        // FIXME(genmc): `is_exploration_done` can cause GenMC errors in some cases (see `try_get_error`)
         self.handle.borrow_mut().pin_mut().is_exploration_done()
     }
 
