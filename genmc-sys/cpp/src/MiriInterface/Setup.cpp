@@ -126,6 +126,8 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
     // Set the min and max number of executions tested in estimation mode.
     conf->estimationMin = 10;
     conf->estimationMax = params.estimation_max;
+    // Deviation threshold % under which estimation is deemed good enough.
+    conf->sdThreshold = 10;
     // Set the mode used for this driver, either estimation or verification.
     const auto mode = estimation_mode ? GenMCDriver::Mode(GenMCDriver::EstimationMode {})
                                       : GenMCDriver::Mode(GenMCDriver::VerificationMode {});
