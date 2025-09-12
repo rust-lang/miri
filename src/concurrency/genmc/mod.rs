@@ -144,6 +144,7 @@ impl GenmcCtx {
     pub fn print_estimation_result(&self, elapsed_time: Duration) {
         let result = self.handle.borrow().get_estimation_results();
         let elapsed_time_sec = elapsed_time.as_secs_f64();
+        #[allow(clippy::as_conversions)]
         let estimated_time_sec = elapsed_time_sec * result.mean as f64
             / (u64::saturating_add(result.explored_execs, result.blocked_execs)) as f64;
 
