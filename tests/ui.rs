@@ -341,11 +341,11 @@ fn main() -> Result<()> {
     }
 
     // We only enable GenMC tests when the `genmc` feature is enabled, but also only on platforms we support:
-    // FIXME(genmc,macos): Add `target_os = "macos"` once `https://github.com/dtolnay/cxx/issues/1535` is fixed.
+    // FIXME(genmc,platform support): Add more platforms when GenMC supports them.
     // FIXME(genmc,cross-platform): remove `host == target` check once cross-platform support with GenMC is possible.
     if cfg!(all(
         feature = "genmc",
-        target_os = "linux",
+        any(target_os = "linux", target_os = "macos"),
         target_pointer_width = "64",
         target_endian = "little"
     )) && host == target
