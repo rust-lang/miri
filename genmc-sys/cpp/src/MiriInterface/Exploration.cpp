@@ -40,3 +40,18 @@ auto MiriGenmcShim::handle_execution_end() -> std::unique_ptr<std::string> {
     GenMCDriver::handleExecutionEnd();
     return {};
 }
+
+/**** Estimation mode result ****/
+
+auto MiriGenmcShim::get_estimation_results() const -> EstimationResult {
+    const auto& res = getResult();
+    uint64_t moot = 0;
+    GENMC_DEBUG(moot = static_cast<uint64_t>(res.exploredMoot););
+    return EstimationResult {
+        .mean = static_cast<int64_t>(std::llround(res.estimationMean)),
+        .sd = static_cast<int64_t>(std::llround(std::sqrt(res.estimationVariance))),
+        .explored_execs = static_cast<uint64_t>(res.explored),
+        .blocked_execs = static_cast<uint64_t>(res.exploredBlocked),
+        .moot_execs = moot,
+    };
+}
