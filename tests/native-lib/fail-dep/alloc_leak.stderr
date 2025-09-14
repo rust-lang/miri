@@ -1,0 +1,12 @@
+error: memory leaked: ALLOC (C heap, size: 4, align: 4), allocated here:
+  --> tests/native-lib/fail-dep/alloc_leak.rs:LL:CC
+   |
+LL |     let _bytes = unsafe { allocate_bytes(4) }.cast::<u8>();
+   |                           ^^^^^^^^^^^^^^^^^
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+note: set `MIRIFLAGS=-Zmiri-ignore-leaks` to disable this check
+
+error: aborting due to 1 previous error
+

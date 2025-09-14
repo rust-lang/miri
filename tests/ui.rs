@@ -58,6 +58,7 @@ fn build_native_lib(target: &str) -> PathBuf {
             "tests/native-lib/aggregate_arguments.c",
             "tests/native-lib/ptr_read_access.c",
             "tests/native-lib/ptr_write_access.c",
+            "tests/native-lib/native_alloc.c",
             // Ensure we notice serious problems in the C code.
             "-Wall",
             "-Wextra",
@@ -338,7 +339,9 @@ fn main() -> Result<()> {
     ui(Mode::Fail, "tests/fail-dep", &target, WithDependencies, tmpdir.path())?;
     if cfg!(all(unix, feature = "native-lib")) && target == host {
         ui(Mode::Pass, "tests/native-lib/pass", &target, WithoutDependencies, tmpdir.path())?;
+        ui(Mode::Pass, "tests/native-lib/pass-dep", &target, WithDependencies, tmpdir.path())?;
         ui(Mode::Fail, "tests/native-lib/fail", &target, WithoutDependencies, tmpdir.path())?;
+        ui(Mode::Fail, "tests/native-lib/fail-dep", &target, WithDependencies, tmpdir.path())?;
     }
 
     // We only enable GenMC tests when the `genmc` feature is enabled, but also only on platforms we support:
