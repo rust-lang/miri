@@ -1,0 +1,30 @@
+Thread 2 executing: after enter
+Thread 1 executing: before read
+error: Undefined Behavior: read access through <TAG> at ALLOC[0x0] is forbidden
+  --> tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
+   |
+LL |         let _val = unsafe { *ptr.0 };
+   |                             ^^^^^^ Undefined Behavior occurred here
+   |
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
+   = help: the accessed tag <TAG> is foreign to the protected tag <TAG> (i.e., it is not a child)
+   = help: this foreign read access would cause the protected tag <TAG> (currently Active) to become Disabled
+   = help: protected tags must never be Disabled
+help: the accessed tag <TAG> was created here
+  --> tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
+   |
+LL |     let target_alias = &*target;
+   |                        ^^^^^^^^
+help: the protected tag <TAG> was created here, in the initial state Active
+  --> tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
+   |
+LL | fn may_insert_spurious_write(_x: &mut u32, b: IdxBarrier) {
+   |                              ^^
+   = note: BACKTRACE (of the first span) on thread `unnamed-ID`:
+   = note: inside closure at tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+
