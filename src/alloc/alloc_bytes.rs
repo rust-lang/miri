@@ -12,8 +12,12 @@ use crate::helpers::ToU64 as _;
 
 #[derive(Clone, Debug)]
 pub enum MiriAllocParams {
+    /// Allocation was created by calling `alloc::alloc()`.
     Global,
+    /// Allocation came from the isolated allocator.
     Isolated(Rc<RefCell<IsolatedAlloc>>),
+    /// Page mapped elsewhere that we don't try to deallocate.
+    Forged(usize),
 }
 
 /// Allocation bytes that explicitly handle the layout of the data they're storing.
@@ -27,8 +31,7 @@ pub struct MiriAllocBytes {
     /// * If `self.layout.size() == 0`, then `self.ptr` was allocated with the equivalent layout with size 1.
     /// * Otherwise, `self.ptr` points to memory allocated with `self.layout`.
     ptr: *mut u8,
-    /// Whether this instance of `MiriAllocBytes` had its allocation created by calling `alloc::alloc()`
-    /// (`Global`) or the discrete allocator (`Isolated`)
+    /// Metadata on where this allocation came from and therefore how to deallocate it.
     params: MiriAllocParams,
 }
 
@@ -56,6 +59,13 @@ impl Drop for MiriAllocBytes {
                 MiriAllocParams::Global => alloc::dealloc(self.ptr, alloc_layout),
                 MiriAllocParams::Isolated(alloc) =>
                     alloc.borrow_mut().dealloc(self.ptr, alloc_layout),
+                // We can't nicely support mapping a page on one side of the FFI
+                // bound and freeing on the other, so just do nothing on an attempt
+                // to free.
+                //
+                // FIXME: Should emit an unsupported diagnostic when `libc::munmap()`
+                // is manually called on memory backed by forged bytes.
+                MiriAllocParams::Forged(_) => (),
             }
         }
     }
@@ -121,6 +131,7 @@ impl AllocBytes for MiriAllocBytes {
             match params {
                 MiriAllocParams::Global => alloc::alloc(layout),
                 MiriAllocParams::Isolated(alloc) => alloc.borrow_mut().alloc(layout),
+                MiriAllocParams::Forged(addr) => std::ptr::with_exposed_provenance_mut(*addr),
             }
         };
         let alloc_bytes = MiriAllocBytes::alloc_with(size.to_u64(), align, params, alloc_fn)
@@ -141,6 +152,7 @@ impl AllocBytes for MiriAllocBytes {
             match params {
                 MiriAllocParams::Global => alloc::alloc_zeroed(layout),
                 MiriAllocParams::Isolated(alloc) => alloc.borrow_mut().alloc_zeroed(layout),
+                MiriAllocParams::Forged(addr) => std::ptr::with_exposed_provenance_mut(*addr),
             }
         };
         MiriAllocBytes::alloc_with(size, align, params, alloc_fn).ok()
