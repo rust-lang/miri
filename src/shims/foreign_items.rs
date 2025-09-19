@@ -487,15 +487,13 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             // GenMC mode: Assume statements block the current thread when their condition is false.
-            "miri_genmc_verifier_assume" => {
+            "miri_genmc_assume" => {
                 let [condition] =
                     this.check_shim_sig_lenient(abi, CanonAbi::Rust, link_name, args)?;
                 if this.machine.data_race.as_genmc_ref().is_some() {
                     this.handle_genmc_verifier_assume(condition)?;
                 } else {
-                    tracing::warn!(
-                        "GenMC: function `miri_genmc_verifier_assume` used, but GenMC mode is not active, skip ..."
-                    );
+                    throw_unsup_format!("miri_genmc_assume is only supported in GenMC mode")
                 }
             }
 

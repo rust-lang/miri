@@ -21,7 +21,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::*;
 
 use crate::genmc::*;
-use crate::utils::miri_genmc_verifier_assume;
+use crate::utils::miri_genmc_assume;
 
 static X: AtomicU64 = AtomicU64::new(0);
 static Y: AtomicU64 = AtomicU64::new(0);
@@ -34,11 +34,11 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
 
     unsafe {
         let t0 = || {
-            miri_genmc_verifier_assume(2 > Y.load(Relaxed) || Y.load(Relaxed) > 3);
+            miri_genmc_assume(2 > Y.load(Relaxed) || Y.load(Relaxed) > 3);
             X.store(1, Relaxed);
         };
         let t1 = || {
-            miri_genmc_verifier_assume(X.load(Relaxed) < 3);
+            miri_genmc_assume(X.load(Relaxed) < 3);
             Y.store(3, Relaxed);
             std::sync::atomic::fence(SeqCst);
             Y.store(4, Relaxed);

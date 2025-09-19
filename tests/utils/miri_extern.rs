@@ -149,5 +149,5 @@ extern "Rust" {
     pub fn miri_promise_symbolic_alignment(ptr: *const (), align: usize);
 
     /// Blocks the current execution if the argument is false
-    pub fn miri_genmc_verifier_assume(condition: bool);
+    pub fn miri_genmc_assume(condition: bool);
 }

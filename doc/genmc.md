@@ -74,7 +74,7 @@ This can be done conditionally, for example by adding a feature to your `Cargo.t
 extern "Rust" {
   // This is a special function that Miri provides.
   // It blocks the thread calling this function if the condition is false.
-  pub fn miri_genmc_verifier_assume(condition: bool);
+  pub fn miri_genmc_assume(condition: bool);
 }
 
 fn spin_until_true(flag: &AtomicBool) {
@@ -82,7 +82,7 @@ fn spin_until_true(flag: &AtomicBool) {
   while (!flag.load(Relaxed)) {}
 
   #[cfg(feature = "genmc")]
-  unsafe { miri_genmc_verifier_assume(flag.load(Relaxed)); }
+  unsafe { miri_genmc_assume(flag.load(Relaxed)); }
 }
 ```
 Such transformations can lead to an exponential reduction in verification time!
