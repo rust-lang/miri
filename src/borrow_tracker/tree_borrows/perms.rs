@@ -41,7 +41,7 @@ enum PermissionPriv {
     /// represents: a unique pointer;
     /// allows: child reads, child writes;
     /// rejects: foreign reads (Frozen), foreign writes (Disabled).
-    Active,
+    Unique,
     /// represents: a shared pointer;
     /// allows: all read accesses;
     /// rejects child writes (UB), foreign writes (Disabled).
@@ -76,8 +76,8 @@ impl PartialOrd for PermissionPriv {
             (_, Disabled) => Less,
             (Frozen, _) => Greater,
             (_, Frozen) => Less,
-            (Active, _) => Greater,
-            (_, Active) => Less,
+            (Unique, _) => Greater,
+            (_, Unique) => Less,
             (ReservedIM, ReservedIM) => Equal,
             (ReservedFrz { conflicted: c1 }, ReservedFrz { conflicted: c2 }) => {
                 // `bool` is ordered such that `false <= true`, so this works as intended.
@@ -116,7 +116,7 @@ impl PermissionPriv {
             ReservedIM if prot => unreachable!("Protected ReservedIM should not exist!"),
             ReservedIM => IdempotentForeignAccess::Write,
             // Active changes on any foreign access (becomes Frozen/Disabled).
-            Active => IdempotentForeignAccess::None,
+            Unique => IdempotentForeignAccess::None,
             // Frozen survives foreign reads, but not writes.
             Frozen => IdempotentForeignAccess::Read,
             // Disabled survives foreign reads and writes. It survives them
@@ -139,7 +139,7 @@ mod transition {
             Disabled => return None,
             // The inner data `ty_is_freeze` of `Reserved` is always irrelevant for Read
             // accesses, since the data is not being mutated. Hence the `{ .. }`.
-            readable @ (Cell | ReservedFrz { .. } | ReservedIM | Active | Frozen) => readable,
+            readable @ (Cell | ReservedFrz { .. } | ReservedIM | Unique | Frozen) => readable,
         })
     }
 
@@ -167,7 +167,7 @@ mod transition {
                 assert!(!protected);
                 res
             }
-            Active =>
+            Unique =>
                 if protected {
                     // We wrote, someone else reads -- that's bad.
                     // (Since Active is always initialized, this move-to-protected will mean insta-UB.)
@@ -192,7 +192,7 @@ mod transition {
             ReservedFrz { conflicted: true } if protected => return None,
             // A write always activates the 2-phase borrow, even with interior
             // mutability
-            ReservedFrz { .. } | ReservedIM | Active => Active,
+            ReservedFrz { .. } | ReservedIM | Unique => Unique,
             Frozen | Disabled => return None,
         })
     }
@@ -267,7 +267,7 @@ impl Permission {
     /// Default initial permission of the root of a new tree at inbounds positions.
     /// Must *only* be used for the root, this is not in general an "initial" permission!
     pub fn new_active() -> Self {
-        Self { inner: Active }
+        Self { inner: Unique }
     }
 
     /// Default initial permission of a reborrowed mutable reference that is either
@@ -309,7 +309,7 @@ impl Permission {
             // Do not do perform access if it is a `Cell`, as this
             // can cause data races when using thread-safe data types.
             Cell => None,
-            Active => Some(AccessKind::Write),
+            Unique => Some(AccessKind::Write),
             _ => Some(AccessKind::Read),
         }
     }
@@ -356,8 +356,8 @@ impl Permission {
             // foreign reads and then remaining writable (i.e., Reserved*).
             // Replacing a state by itself is always okay, even if the child state is protected.
             // Active can be replaced by Frozen, since it is not protected.
-            (Active, Active | Frozen | Disabled) => true,
-            (_, Active) => false,
+            (Unique, Unique | Frozen | Disabled) => true,
+            (_, Unique) => false,
             // Frozen can only be replaced by Disabled (and itself).
             (Frozen, Frozen | Disabled) => true,
             (_, Frozen) => false,
@@ -410,7 +410,7 @@ pub mod diagnostics {
                     ReservedFrz { conflicted: false } => "Reserved",
                     ReservedFrz { conflicted: true } => "Reserved (conflicted)",
                     ReservedIM => "Reserved (interior mutable)",
-                    Active => "Active",
+                    Unique => "Active",
                     Frozen => "Frozen",
                     Disabled => "Disabled",
                 }
@@ -441,7 +441,7 @@ pub mod diagnostics {
                 ReservedFrz { conflicted: false } => "Res ",
                 ReservedFrz { conflicted: true } => "ResC",
                 ReservedIM => "ReIM",
-                Active => "Act ",
+                Unique => "Act ",
                 Frozen => "Frz ",
                 Disabled => "Dis ",
             }
@@ -455,7 +455,7 @@ pub mod diagnostics {
             assert!(self.is_possible());
             assert!(!self.is_noop());
             match (self.from, self.to) {
-                (_, Active) => "the first write to a 2-phase borrowed mutable reference",
+                (_, Unique) => "the first write to a 2-phase borrowed mutable reference",
                 (_, Frozen) => "a loss of write permissions",
                 (ReservedFrz { conflicted: false }, ReservedFrz { conflicted: true }) =>
                     "a temporary loss of write permissions until function exit",
@@ -504,7 +504,7 @@ pub mod diagnostics {
                     // when the error is a failed `Read`.
                     match (self.to, insufficient.inner) {
                         (Frozen, Frozen) => true,
-                        (Active, Frozen) => true,
+                        (Unique, Frozen) => true,
                         (Disabled, Disabled) => true,
                         (
                             ReservedFrz { conflicted: true, .. },
@@ -514,12 +514,12 @@ pub mod diagnostics {
                         // errors than it being `Frozen`. If we try to access a `Disabled`,
                         // then where it became `Frozen` (or `Active` or `Reserved`) is the least
                         // of our concerns for now.
-                        (ReservedFrz { conflicted: true } | Active | Frozen, Disabled) => false,
+                        (ReservedFrz { conflicted: true } | Unique | Frozen, Disabled) => false,
                         (ReservedFrz { conflicted: true }, Frozen) => false,
 
                         // `Active`, `Reserved`, and `Cell` have all permissions, so a
                         // `ChildAccessForbidden(Reserved | Active)` can never exist.
-                        (_, Active) | (_, ReservedFrz { conflicted: false }) | (_, Cell) =>
+                        (_, Unique) | (_, ReservedFrz { conflicted: false }) | (_, Cell) =>
                             unreachable!("this permission cannot cause an error"),
                         // No transition has `Reserved { conflicted: false }` or `ReservedIM`
                         // as its `.to` unless it's a noop. `Cell` cannot be in its `.to`
@@ -531,7 +531,7 @@ pub mod diagnostics {
                         // We assume that the error was triggered on the same location that
                         // the transition `self` applies to, so permissions found must be increasing
                         // in the order `self.from < self.to <= insufficient.inner`
-                        (Active | Frozen | Disabled, ReservedFrz { .. } | ReservedIM)
+                        (Unique | Frozen | Disabled, ReservedFrz { .. } | ReservedIM)
                         | (Disabled, Frozen)
                         | (ReservedFrz { .. }, ReservedIM) =>
                             unreachable!("permissions between self and err must be increasing"),
@@ -545,7 +545,7 @@ pub mod diagnostics {
                     match (self.to, before_disabled.inner) {
                         // We absolutely want to know where it was activated/frozen/marked
                         // conflicted.
-                        (Active, Active) => true,
+                        (Unique, Unique) => true,
                         (Frozen, Frozen) => true,
                         (
                             ReservedFrz { conflicted: true, .. },
@@ -562,7 +562,7 @@ pub mod diagnostics {
                         // A potential `Reserved { conflicted: false }
                         //   -> Reserved { conflicted: true }` is inexistant or irrelevant,
                         // and so is the `Reserved { conflicted: false } -> Active`
-                        (Active, Frozen) => false,
+                        (Unique, Frozen) => false,
                         (ReservedFrz { conflicted: true }, _) => false,
 
                         (_, Disabled) =>
@@ -578,9 +578,9 @@ pub mod diagnostics {
                         // Permissions only evolve in the order `Reserved -> Active -> Frozen -> Disabled`,
                         // so permissions found must be increasing in the order
                         // `self.from < self.to <= forbidden.from < forbidden.to`.
-                        (Disabled, Cell | ReservedFrz { .. } | ReservedIM | Active | Frozen)
-                        | (Frozen, Cell | ReservedFrz { .. } | ReservedIM | Active)
-                        | (Active, Cell | ReservedFrz { .. } | ReservedIM) =>
+                        (Disabled, Cell | ReservedFrz { .. } | ReservedIM | Unique | Frozen)
+                        | (Frozen, Cell | ReservedFrz { .. } | ReservedIM | Unique)
+                        | (Unique, Cell | ReservedFrz { .. } | ReservedIM) =>
                             unreachable!("permissions between self and err must be increasing"),
                     }
                 }
@@ -617,7 +617,7 @@ mod propagation_optimization_checks {
     impl Exhaustive for PermissionPriv {
         fn exhaustive() -> Box<dyn Iterator<Item = Self>> {
             Box::new(
-                vec![Active, Frozen, Disabled, ReservedIM, Cell]
+                vec![Unique, Frozen, Disabled, ReservedIM, Cell]
                     .into_iter()
                     .chain(<bool>::exhaustive().map(|conflicted| ReservedFrz { conflicted })),
             )
