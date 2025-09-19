@@ -88,12 +88,15 @@ fn get_function_kind<'tcx>(
     };
     let intrinsice_name = intrinsic_def.name.as_str();
     let Some(suffix) = intrinsice_name.strip_prefix("atomic_") else {
-        return interp_ok(NonAtomic); // Non-atomic, so guaranteed not an atomic load
+        return interp_ok(NonAtomic); // Non-atomic intrinsic, so guaranteed not an atomic load
     };
-    // `atomic_store` is guaranteed not a load.
+    // `atomic_store`, `atomic_fence` and `atomic_singlethreadfence` are not considered loads.
     // Any future `atomic_*` intrinsics may have load semantics, so we err on the side of caution and classify them as "maybe loads".
-    // FIXME(genmc): make this more precise. (`atomic_fence`? `atomic_singlethreadfence`?)
-    interp_ok(MaybeAtomic(if suffix == "store" { ActionKind::NonLoad } else { ActionKind::Load }))
+    interp_ok(MaybeAtomic(if matches!(suffix, "store" | "fence" | "singlethreadfence") {
+        ActionKind::NonLoad
+    } else {
+        ActionKind::Load
+    }))
 }
 
 impl GenmcCtx {
