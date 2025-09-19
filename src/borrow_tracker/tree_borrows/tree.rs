@@ -618,14 +618,14 @@ impl Tree {
 impl<'tcx> Tree {
     /// Insert a new tag in the tree.
     ///
-    /// `initial_perms` defines the initial permissions for the part of memory
-    /// that is already considered "initialized" immediately. The ranges in this
-    /// map are relative to `base_offset`.
+    /// `initial_perms` defines the initial permissions for a block of memory starting at
+    /// `base_offset`. These may nor may not be already marked as "accessed".
     /// `default_perm` defines the initial permission for the rest of the allocation.
+    /// These are definitely not "accessed".
     ///
-    /// For all non-accessed locations in the RangeMap (those that haven't had an
+    /// For all non-accessed locations in `initial_perms` (those that haven't had an
     /// implicit read), their SIFA must be weaker than or as weak as the SIFA of
-    /// `default_perm`.
+    /// `default_perm`; otherwise, this will panic.
     pub(super) fn new_child(
         &mut self,
         base_offset: Size,
