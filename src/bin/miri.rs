@@ -517,6 +517,14 @@ fn main() {
             miri_config.borrow_tracker =
                 Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams {
                     precise_interior_mut: true,
+                    start_mut_ref_on_fn_entry_as_active: false,
+                }));
+            miri_config.provenance_mode = ProvenanceMode::Strict;
+        } else if arg == "-Zmiri-tree-borrows-strong" {
+            miri_config.borrow_tracker =
+                Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams {
+                    precise_interior_mut: true,
+                    start_mut_ref_on_fn_entry_as_active: true,
                 }));
             miri_config.provenance_mode = ProvenanceMode::Strict;
         } else if arg == "-Zmiri-tree-borrows-no-precise-interior-mut" {
