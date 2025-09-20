@@ -32,11 +32,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
                 |this, unblock: UnblockKind| {
                     assert_eq!(unblock, UnblockKind::Ready);
-
-                    let condition = this.run_for_validation_ref(|this| this.read_scalar(&condition))?.to_bool()?;
-                    assert!(condition);
-
-                    interp_ok(())
+                    unreachable!("GenMC should never unblock a thread blocked by an `assume`.");
                 }
             ),
         );
