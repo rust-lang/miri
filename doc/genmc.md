@@ -52,8 +52,6 @@ Note that `cargo miri test` in GenMC mode is currently not supported.
 
 ### Optimizing verification times
 
-<!-- FIXME(genmc): explain how to use miri_start and pthreads to reduce workload -->
-
 #### Reducing the number of explored executions
 
 The number of explored executions in a concurrent program can increase super-exponentially in the size of the program.
