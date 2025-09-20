@@ -134,6 +134,9 @@ struct MiriGenmcShim : private GenMCDriver {
     void handle_thread_finish(ThreadId thread_id, uint64_t ret_val);
     void handle_thread_kill(ThreadId thread_id);
 
+    /**** Blocking instructions ****/
+    void handle_user_assume_block(ThreadId thread_id);
+
     /***** Exploration related functionality *****/
 
     /** Ask the GenMC scheduler for a new thread to schedule and return whether the execution is

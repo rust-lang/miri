@@ -258,9 +258,11 @@ mod ffi {
     /// Corresponds to GenMC's type with the same name.
     /// Should only be modified if changed by GenMC.
     enum ActionKind {
-        /// Any Mir terminator that's atomic and has load semantics.
+        /// Any MIR terminator that's atomic and that may have load semantics.
+        /// This includes functions with atomic properties, such as `pthread_create`.
+        /// If the exact type of the terminator cannot be determined, load is a safe default `Load`.
         Load,
-        /// Anything that's not a `Load`.
+        /// Anything that's definitely not a `Load`.
         NonLoad,
     }
 
@@ -411,6 +413,9 @@ mod ffi {
         fn handle_thread_join(self: Pin<&mut MiriGenmcShim>, thread_id: i32, child_id: i32);
         fn handle_thread_finish(self: Pin<&mut MiriGenmcShim>, thread_id: i32, ret_val: u64);
         fn handle_thread_kill(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
+
+        /**** Blocking instructions ****/
+        fn handle_user_assume_block(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
 
         /***** Exploration related functionality *****/
 

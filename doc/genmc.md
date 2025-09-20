@@ -50,6 +50,52 @@ Note that `cargo miri test` in GenMC mode is currently not supported.
 
 <!-- FIXME(genmc): add tips for using Miri-GenMC more efficiently. -->
 
+### Optimizing verification times
+
+#### Reducing the number of explored executions
+
+The number of explored executions in a concurrent program can increase super-exponentially in the size of the program.
+Reducing the number of explored executions is the most impactful way to improve verification times.
+
+One way to drastically improve verification performance is by bounding spinloops.
+A spinloop may loop a many times before it can finally make progress.
+If such a loop doesn't have any visible side effects, meaning it does not matter to the outcome of the program whether the loop ran once or a million time, then the loop can be limited to one iteration.
+
+If the loop has side effects, bounding it means that certain executions are not explored, but this may be worth doing to verify other parts of the program.
+
+The following code gives an example for how to replace a loop that waits for a boolean to be true.
+Since there are no side effects, replacing the loop with one iteration is safe.
+This can be done conditionally, for example by adding a feature to your `Cargo.toml` specifically for running with Miri-GenMC:
+
+```rust
+#[cfg(miri)]
+unsafe extern "Rust" {
+  // This is a special function that Miri provides.
+  // It blocks the thread calling this function if the condition is false.
+  pub unsafe fn miri_genmc_assume(condition: bool);
+}
+
+/// This functions loads an atomic boolean in a loop until it is true.
+/// GenMC will explore all executions where this does 1, 2, 3, ... loads, which can drastically increase the number of explored executions.
+fn spin_until_true(flag: &AtomicBool) {
+  while (!flag.load(Relaxed)) {
+    std::hint::spin_loop();
+  }
+}
+
+/// Bounding this loop means the only execution that is explored where there is only 1 load.
+/// Incorrect use of such assume statements can lead GenMC to miss important executions, so it is marked `unsafe`.
+///
+/// Note that such bounding is similar to what can be achieved in Loom using `skip_branch` (`https://docs.rs/loom/latest/loom/fn.skip_branch.html`)
+fn spin_until_true_bounded(flag: &AtomicBool) {
+  unsafe { miri_genmc_assume(flag.load(Relaxed)); }
+}
+```
+Such transformations can lead to an exponential reduction in verification time!
+
+<!-- FIXME: maybe write something like: Miri may be capable of applying some of these transformations automatically in the future. -->
+<!-- FIXME: update this section once Miri-GenMC supports automatic spinloop transformation. -->
+
 ## Limitations
 
 Some or all of these limitations might get removed in the future:
