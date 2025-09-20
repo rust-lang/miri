@@ -2,7 +2,7 @@
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows -Zmiri-genmc-verbose
 //@normalize-stderr-test: "Verification took .*s" -> "Verification took [TIME]s"
 
-// This test uses assume GenMC statements to bound or replace spinloops.
+// This test uses GenMC assume statements to bound or replace spinloops.
 // Three threads pass a value to each other, spinning on an atomic FLAG to wait for the previous thread.
 //
 // There are two variants, one limits the spinloop to three iterations, and one that completely replaces the spin loop.
@@ -11,7 +11,7 @@
 // FIXME(genmc): GenMC provides the `--unroll=N` option, which limits all loops to at most N iterations (at the LLVM IR level).
 // Such an option for Miri would allow a variant of this test without manual bounding, using this automatic loop bounding instead.
 
-// We use different thread orders to ensure if doesn't just pass by chance (each thread order should give the same result).
+// We use different thread orders to ensure it doesn't just pass by chance (each thread order should give the same result).
 // We use verbose output to see the number of explored vs blocked executions.
 
 #![no_main]
