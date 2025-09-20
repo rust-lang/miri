@@ -70,18 +70,26 @@ Since there are no side effects, replacing the loop with one iteration is safe.
 This can be done conditionally, for example by adding a feature to your `Cargo.toml` specifically for running with Miri-GenMC:
 
 ```rust
-#[cfg(feature = "genmc")]
+#[cfg(miri)]
 extern "Rust" {
   // This is a special function that Miri provides.
   // It blocks the thread calling this function if the condition is false.
   pub fn miri_genmc_assume(condition: bool);
 }
 
+/// This functions loads an atomic boolean in a loop until it is true.
+/// GenMC will explore all executions where this does 1, 2, 3, ... loads, which can drastically increase the number of explored executions.
 fn spin_until_true(flag: &AtomicBool) {
-  #[cfg(not(feature = "genmc"))]
-  while (!flag.load(Relaxed)) {}
+  while (!flag.load(Relaxed)) {
+    std::hint::spin_loop();
+  }
+}
 
-  #[cfg(feature = "genmc")]
+/// Bounding this loop means the only execution that is explored where there is only 1 load.
+/// Incorrect use of such assume statements can lead GenMC to miss important executions, so it is marked `unsafe`.
+///
+/// Note that such bounding is similar to what can be achieved in Loom using `skip_branch` (`https://docs.rs/loom/latest/loom/fn.skip_branch.html`)
+fn spin_until_true_bounded(flag: &AtomicBool) {
   unsafe { miri_genmc_assume(flag.load(Relaxed)); }
 }
 ```
