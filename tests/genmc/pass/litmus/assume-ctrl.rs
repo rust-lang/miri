@@ -1,6 +1,6 @@
 //@ revisions: order12 order21
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows -Zmiri-genmc-verbose
-//@normalize-stderr-test: "Verification took .*\n" -> "Verification took [TIME]\n"
+//@normalize-stderr-test: "Verification took .*s" -> "Verification took [TIME]s"
 
 // Translated from GenMC's test "litmus/assume-ctrl".
 // Shortened quote:
