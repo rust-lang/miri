@@ -71,10 +71,10 @@ This can be done conditionally, for example by adding a feature to your `Cargo.t
 
 ```rust
 #[cfg(miri)]
-extern "Rust" {
+unsafe extern "Rust" {
   // This is a special function that Miri provides.
   // It blocks the thread calling this function if the condition is false.
-  pub fn miri_genmc_assume(condition: bool);
+  pub unsafe fn miri_genmc_assume(condition: bool);
 }
 
 /// This functions loads an atomic boolean in a loop until it is true.

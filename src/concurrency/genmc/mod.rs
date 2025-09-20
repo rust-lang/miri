@@ -894,12 +894,12 @@ impl GenmcCtx {
     /// Handle a user thread getting blocked.
     /// This may happen due to an manual `assume` statement added by a user
     /// or added by some automated program transformation, e.g., for spinloops.
-    fn handle_user_block<'tcx>(&self, machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
+    fn handle_user_assume_block<'tcx>(&self, machine: &MiriMachine<'tcx>) -> InterpResult<'tcx> {
         let curr_thread = machine.threads.active_thread();
         let genmc_curr_thread =
             self.exec_state.thread_id_manager.borrow().get_genmc_tid(curr_thread);
-        debug!("GenMC: handle_user_block, blocking thread {curr_thread:?} ({genmc_curr_thread:?})");
-        self.handle.borrow_mut().pin_mut().handle_user_block(genmc_curr_thread);
+        debug!("GenMC: assume statement, blocking thread {curr_thread:?} ({genmc_curr_thread:?})");
+        self.handle.borrow_mut().pin_mut().handle_user_assume_block(genmc_curr_thread);
         interp_ok(())
     }
 }

@@ -135,7 +135,7 @@ struct MiriGenmcShim : private GenMCDriver {
     void handle_thread_kill(ThreadId thread_id);
 
     /**** Blocking instructions ****/
-    void handle_user_block(ThreadId thread_id);
+    void handle_user_assume_block(ThreadId thread_id);
 
     /***** Exploration related functionality *****/
 

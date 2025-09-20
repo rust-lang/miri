@@ -262,7 +262,7 @@ mod ffi {
         /// This includes functions with atomic properties, such as `pthread_create`.
         /// If the exact type of the terminator cannot be determined, load is a safe default `Load`.
         Load,
-        /// Anything that's not a `Load`.
+        /// Anything that's definitely not a `Load`.
         NonLoad,
     }
 
@@ -415,7 +415,7 @@ mod ffi {
         fn handle_thread_kill(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
 
         /**** Blocking instructions ****/
-        fn handle_user_block(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
+        fn handle_user_assume_block(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
 
         /***** Exploration related functionality *****/
 

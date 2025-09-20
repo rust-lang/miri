@@ -21,7 +21,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return interp_ok(());
         }
         let genmc_ctx = this.machine.data_race.as_genmc_ref().unwrap();
-        genmc_ctx.handle_user_block(&this.machine)?;
+        genmc_ctx.handle_user_assume_block(&this.machine)?;
         let condition = condition.clone();
         this.block_thread(
             BlockReason::Genmc,
