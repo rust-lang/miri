@@ -69,18 +69,17 @@ fn get_function_kind<'tcx>(
         ty::FnDef(def_id, _args) => def_id,
         _ => return interp_ok(MaybeAtomic(ActionKind::Load)), // we don't know the callee, might be pthread_join
     };
-    if ecx.tcx.is_foreign_item(*callee_def_id) {
-        // Some shims, like pthread_join, must be considered loads. So just consider them all loads,
-        // these calls are not *that* common.
-        return interp_ok(MaybeAtomic(ActionKind::Load));
-    }
-
     let Some(intrinsic_def) = ecx.tcx.intrinsic(callee_def_id) else {
+        if ecx.tcx.is_foreign_item(*callee_def_id) {
+            // Some shims, like pthread_join, must be considered loads. So just consider them all loads,
+            // these calls are not *that* common.
+            return interp_ok(MaybeAtomic(ActionKind::Load));
+        }
         // The next step is a call to a regular Rust function.
         return interp_ok(NonAtomic);
     };
-    let intrinsice_name = intrinsic_def.name.as_str();
-    let Some(suffix) = intrinsice_name.strip_prefix("atomic_") else {
+    let intrinsic_name = intrinsic_def.name.as_str();
+    let Some(suffix) = intrinsic_name.strip_prefix("atomic_") else {
         return interp_ok(NonAtomic); // Non-atomic intrinsic, so guaranteed not an atomic load
     };
     // `atomic_store`, `atomic_fence` and `atomic_singlethreadfence` are not considered loads.
