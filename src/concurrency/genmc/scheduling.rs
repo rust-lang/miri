@@ -67,7 +67,7 @@ fn get_function_kind<'tcx>(
     use NextInstrKind::*;
     let callee_def_id = match func_ty.kind() {
         ty::FnDef(def_id, _args) => def_id,
-        _ => return interp_ok(MaybeAtomic(ActionKind::Load)), // we don't know the callee, might be an intrinsic or pthread_join
+        _ => return interp_ok(MaybeAtomic(ActionKind::Load)), // we don't know the callee, might be pthread_join
     };
     if ecx.tcx.is_foreign_item(*callee_def_id) {
         // Some shims, like pthread_join, must be considered loads. So just consider them all loads,
@@ -76,15 +76,8 @@ fn get_function_kind<'tcx>(
     }
 
     let Some(intrinsic_def) = ecx.tcx.intrinsic(callee_def_id) else {
-        // FIXME(genmc): Make this work for other platforms.
-        let item_name = ecx.tcx.item_name(*callee_def_id);
-        return interp_ok(MaybeAtomic(
-            if matches!(item_name.as_str(), "pthread_join" | "WaitForSingleObject") {
-                ActionKind::Load
-            } else {
-                ActionKind::NonLoad
-            },
-        ));
+        // The next step is a call to a regular Rust function.
+        return interp_ok(NonAtomic);
     };
     let intrinsice_name = intrinsic_def.name.as_str();
     let Some(suffix) = intrinsice_name.strip_prefix("atomic_") else {

@@ -32,7 +32,7 @@
 
 /**** Blocking instructions ****/
 
-void MiriGenmcShim::handle_thread_block(ThreadId thread_id) {
+void MiriGenmcShim::handle_user_block(ThreadId thread_id) {
     GenMCDriver::handleAssume(inc_pos(thread_id), AssumeType::User);
 }
 
