@@ -24,7 +24,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         genmc_ctx.handle_user_block(&this.machine)?;
         let condition = condition.clone();
         this.block_thread(
-            BlockReason::GenmcAssume,
+            BlockReason::Genmc,
             None,
             callback!(
                 @capture<'tcx> {

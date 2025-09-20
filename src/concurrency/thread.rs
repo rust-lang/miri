@@ -110,8 +110,9 @@ pub enum BlockReason {
     Eventfd,
     /// Blocked on unnamed_socket.
     UnnamedSocket,
-    /// Blocked on a GenMC `assume` statement (GenMC mode only).
-    GenmcAssume,
+    /// Blocked for any reason related to GenMC, such as `assume` statements (GenMC mode only).
+    /// Will be implicitly unblocked when GenMC schedules this thread again.
+    Genmc,
 }
 
 /// The state of a thread.
@@ -711,26 +712,16 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             let Some(next_thread_id) = genmc_ctx.schedule_thread(this)? else {
                 return interp_ok(SchedulingAction::ExecuteStep);
             };
-            // GenMC determined that we can schedule this thread again, so we unblock it:
-            // FIXME(genmc): should we even block the threads in Miri?
-            match &this.machine.threads.threads[next_thread_id].state {
-                ThreadState::Blocked {
-                    reason: block_reason @ (BlockReason::Mutex | BlockReason::GenmcAssume),
-                    ..
-                } => {
-                    info!(
-                        "GenMC: schedule returned thread {next_thread_id:?}, which is blocked, so we unblock it now."
-                    );
-                    this.unblock_thread(next_thread_id, *block_reason)?;
-                }
-                _ => {}
+            // If a thread is blocked on GenMC, we have to implicitly unblock it when it gets scheduled again.
+            if this.machine.threads.threads[next_thread_id].state.is_blocked_on(BlockReason::Genmc)
+            {
+                info!("GenMC: scheduling blocked thread {next_thread_id:?}, so we unblock it now.");
+                this.unblock_thread(next_thread_id, BlockReason::Genmc)?;
             }
-
+            // Set the new active thread.
             let thread_manager = &mut this.machine.threads;
             thread_manager.active_thread = next_thread_id;
-
             assert!(thread_manager.threads[thread_manager.active_thread].state.is_enabled());
-
             return interp_ok(SchedulingAction::ExecuteStep);
         }
 
