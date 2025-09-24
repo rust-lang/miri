@@ -1,10 +1,11 @@
 use rustc_abi::{BackendRepr, Size};
 use rustc_middle::mir::{Mutability, RetagKind};
 use rustc_middle::ty::layout::HasTypingEnv;
-use rustc_middle::ty::{self, Ty};
+use rustc_middle::ty::{self, InstanceKind, Ty};
 
 use self::foreign_access_skipping::IdempotentForeignAccess;
 use self::tree::LocationState;
+use crate::borrow_tracker::tree_borrows::diagnostics::AccessCause;
 use crate::borrow_tracker::{GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
 use crate::*;
@@ -130,6 +131,8 @@ pub struct NewPermission {
     /// Whether this pointer is part of the arguments of a function call.
     /// `protector` is `Some(_)` for all pointers marked `noalias`.
     protector: Option<ProtectorKind>,
+    /// Whether an implicit write should be performed on retag.
+    do_a_write: bool,
 }
 
 impl<'tcx> NewPermission {
@@ -156,6 +159,23 @@ impl<'tcx> NewPermission {
             .get_tree_borrows_params()
             .start_mut_ref_on_fn_entry_as_active;
 
+        let current_function_involves_raw_pointers = 'b: {
+            let instance = cx
+                .machine
+                .threads
+                .active_thread_stack()
+                .last()
+                .expect("Current frame has no stack")
+                .instance();
+            let ty = instance.ty(*cx.tcx, cx.typing_env());
+            if !ty.is_fn() {
+                break 'b false;
+            }
+            let sig = ty.fn_sig(*cx.tcx);
+            matches!(instance.def, InstanceKind::Item(_))
+                && sig.inputs_and_output().skip_binder().iter().any(|x| x.is_raw_ptr())
+        };
+
         if matches!(ref_mutability, Some(Mutability::Mut) | None if !ty_is_unpin) {
             // Mutable reference / Box to pinning type: retagging is a NOP.
             // FIXME: with `UnsafePinned`, this should do proper per-byte tracking.
@@ -165,9 +185,6 @@ impl<'tcx> NewPermission {
         let freeze_perm = match ref_mutability {
             // Shared references are frozen.
             Some(Mutability::Not) => Permission::new_frozen(),
-            // Mutable references on fn entry are activated based on config
-            Some(Mutability::Mut) if start_mut_ref_on_fn_entry_as_active && is_protected =>
-                Permission::new_active(),
             // Mutable references and Boxes are reserved.
             _ => Permission::new_reserved_frz(),
         };
@@ -196,6 +213,10 @@ impl<'tcx> NewPermission {
                 // Weak protector for boxes
                 ProtectorKind::WeakProtector
             }),
+            do_a_write: start_mut_ref_on_fn_entry_as_active
+                && is_protected
+                && !current_function_involves_raw_pointers
+                && matches!(ref_mutability, Some(Mutability::Mut)),
         })
     }
 }
@@ -396,11 +417,28 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             base_offset,
             orig_tag,
             new_tag,
-            inside_perms,
+            inside_perms.clone(),
             new_perm.outside_perm,
             protected,
             this.machine.current_span(),
         )?;
+        if new_perm.do_a_write {
+            for (perm_range, _) in inside_perms.iter_all() {
+                // Some reborrows incur a write access to the new pointer, to make it active.
+                // Adjust range to be relative to allocation start (rather than to `place`).
+                let range_in_alloc = AllocRange {
+                    start: Size::from_bytes(perm_range.start) + base_offset,
+                    size: Size::from_bytes(perm_range.end - perm_range.start),
+                };
+                tree_borrows.perform_access(
+                    new_tag,
+                    Some((range_in_alloc, AccessKind::Write, AccessCause::Reborrow)),
+                    this.machine.borrow_tracker.as_ref().unwrap(),
+                    alloc_id,
+                    this.machine.current_span(),
+                )?;
+            }
+        }
         drop(tree_borrows);
 
         interp_ok(Some(Provenance::Concrete { alloc_id, tag: new_tag }))
@@ -600,6 +638,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             nonfreeze_access: true,
             outside_perm: Permission::new_reserved_frz(),
             protector: Some(ProtectorKind::StrongProtector),
+            do_a_write: false,
         };
         this.tb_retag_place(place, new_perm)
     }

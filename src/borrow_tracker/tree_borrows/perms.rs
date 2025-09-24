@@ -90,7 +90,7 @@ impl PartialOrd for PermissionPriv {
 impl PermissionPriv {
     /// Check if `self` can be the initial state of a pointer.
     fn is_initial(&self) -> bool {
-        matches!(self, ReservedFrz { conflicted: false } | Frozen | ReservedIM | Cell | Active)
+        matches!(self, ReservedFrz { conflicted: false } | Frozen | ReservedIM | Cell)
     }
 
     /// Reject `ReservedIM` that cannot exist in the presence of a protector.

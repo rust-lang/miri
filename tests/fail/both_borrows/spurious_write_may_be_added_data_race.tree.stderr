@@ -8,19 +8,18 @@ LL |         let _val = unsafe { *ptr.0 };
    |
    = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
-   = help: the accessed tag <TAG> is foreign to the protected tag <TAG> (i.e., it is not a child)
-   = help: this foreign read access would cause the protected tag <TAG> (currently Active) to become Disabled
-   = help: protected tags must never be Disabled
-help: the accessed tag <TAG> was created here
+   = help: the accessed tag <TAG> has state Disabled which forbids this child read access
+help: the accessed tag <TAG> was created here, in the initial state Frozen
   --> tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
    |
 LL |     let target_alias = &*target;
    |                        ^^^^^^^^
-help: the protected tag <TAG> was created here, in the initial state Active
+help: the accessed tag <TAG> later transitioned to Disabled due to a reborrow (acting as a foreign read access) at offsets [0x0..0x4]
   --> tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
    |
 LL | fn may_insert_spurious_write(_x: &mut u32, b: IdxBarrier) {
    |                              ^^
+   = help: this transition corresponds to a loss of read permissions
    = note: BACKTRACE (of the first span) on thread `unnamed-ID`:
    = note: inside closure at tests/fail/both_borrows/spurious_write_may_be_added_data_race.rs:LL:CC
 
