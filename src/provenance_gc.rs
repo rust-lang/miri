@@ -222,7 +222,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         // FIXME(genmc): In GenMC mode, we skip running the garbage collector.
         // Borrow tracking is not yet supported in GenMC mode, and allocations are never deleted.
-        if this.machine.data_race.as_genmc_ref().is_none() {
+        if this.machine.data_race.as_genmc_ref().is_some() {
             return;
         }
 
