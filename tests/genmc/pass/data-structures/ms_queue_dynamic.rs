@@ -166,7 +166,7 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
     let mut i = 0;
     unsafe {
         MyStack::init_queue(&mut QUEUE, num_threads);
-        
+
         /* Spawn threads */
         let mut thread_ids: [pthread_t; MAX_THREADS] = [0; MAX_THREADS];
         for _ in 0..readers {
