@@ -5,6 +5,7 @@ use rustc_abi::Size;
 use rustc_const_eval::interpret::{InterpResult, interp_ok};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::mir;
+use rustc_middle::mir::interpret;
 use rustc_middle::ty::ScalarInt;
 use rustc_span::Span;
 use tracing::debug;
@@ -15,7 +16,7 @@ use crate::diagnostics::EvalContextExt as _;
 use crate::intrinsics::AtomicRmwOp;
 use crate::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, BorTag, InterpCx, MiriInterpCx,
-    MiriMachine, NonHaltingDiagnostic, Pointer, Provenance, Scalar, throw_unsup_format,
+    MiriMachine, NonHaltingDiagnostic, Scalar, machine, throw_unsup_format,
 };
 
 /// Maximum size memory access in bytes that GenMC supports.
@@ -91,8 +92,9 @@ pub fn scalar_to_genmc_scalar<'tcx>(
             GenmcScalar { value, extra: 0, is_init: true }
         }
         rustc_const_eval::interpret::Scalar::Ptr(pointer, size) => {
-            let addr = Pointer::from(pointer).addr();
-            if let Provenance::Wildcard = pointer.provenance {
+            // FIXME(genmc,borrow tracking): Borrow tracking information is lost.
+            let addr = crate::Pointer::from(pointer).addr();
+            if let crate::Provenance::Wildcard = pointer.provenance {
                 throw_unsup_format!("Pointers with wildcard provenance not allowed in GenMC mode");
             }
             let (alloc_id, _size, _prov_extra) =
@@ -113,40 +115,25 @@ pub fn genmc_scalar_to_scalar<'tcx>(
     scalar: GenmcScalar,
     size: Size,
 ) -> InterpResult<'tcx, Scalar> {
-    if scalar.extra != 0 {
-        // We have a pointer!
-
-        let addr = Size::from_bytes(scalar.value);
-        let base_addr = scalar.extra;
-
-        let alloc_size = 0; // TODO GENMC: what is the correct size here? Is 0 ok?
-        let only_exposed_allocations = false;
-        let Some(alloc_id) =
-            ecx.alloc_id_from_addr(base_addr, alloc_size, only_exposed_allocations)
-        else {
-            // TODO GENMC: what is the correct error in this case? Maybe give the pointer wildcard provenance instead?
-            throw_unsup_format!(
-                "Cannot get allocation id of pointer received from GenMC (base address: 0x{base_addr:x}, pointer address: 0x{:x})",
-                addr.bytes()
-            );
-        };
-
-        // TODO GENMC: is using `size: Size` ok here? Can we ever have `size != sizeof pointer`?
-
-        // FIXME: Currently GenMC mode incompatible with aliasing model checking
-        let tag = BorTag::default();
-        let provenance = crate::machine::Provenance::Concrete { alloc_id, tag };
-        let offset = addr;
-        let ptr = rustc_middle::mir::interpret::Pointer::new(provenance, offset);
-
-        let size = size.bytes().try_into().unwrap();
-        return interp_ok(Scalar::Ptr(ptr, size));
+    // If `extra` is zero, we have a regular integer.
+    if scalar.extra == 0 {
+        // NOTE: GenMC always returns 64 bit values, and the upper bits are not yet truncated.
+        // FIXME(genmc): GenMC should be doing the truncation, not Miri.
+        let (value_scalar_int, _got_truncated) = ScalarInt::truncate_from_uint(scalar.value, size);
+        return interp_ok(Scalar::Int(value_scalar_int));
     }
-
-    // NOTE: GenMC always returns 64 bit values, and the upper bits are not yet truncated.
-    // FIXME(genmc): GenMC should be doing the truncation, not Miri.
-    let (value_scalar_int, _got_truncated) = ScalarInt::truncate_from_uint(scalar.value, size);
-    interp_ok(Scalar::Int(value_scalar_int))
+    // `extra` is non-zero, we have a pointer.
+    let alloc_id = ecx
+        .alloc_id_from_addr(
+            /* base_addr */ scalar.extra,
+            /* alloc_size */ 0,
+            /* only_exposed_allocations */ false,
+        )
+        .unwrap();
+    // FIXME(genmc,borrow tracking): Borrow tracking not yet supported.
+    let provenance = machine::Provenance::Concrete { alloc_id, tag: BorTag::default() };
+    let ptr = interpret::Pointer::new(provenance, /* offset */ Size::from_bytes(scalar.value));
+    interp_ok(Scalar::from_pointer(ptr, &ecx.tcx))
 }
 
 impl AtomicReadOrd {

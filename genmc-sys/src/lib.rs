@@ -167,6 +167,11 @@ mod ffi {
 
     /// This type corresponds to `Option<SVal>` (or `std::optional<SVal>`), where `SVal` is the type that GenMC uses for storing values.
     /// CXX doesn't support `std::optional` currently, so we need to use an extra `bool` to define whether this value is initialized or not.
+    ///
+    /// If `extra` is zero, `value` is a plain integer.
+    /// If `extra` is non-zero, it contains information about the provenance of the pointer stored in `value`.
+    /// `extra` contain the base address of the allocation that this pointer belongs to, since `AllocId` is not consistent across executions.
+    /// Operations on values in GenMC (e.g., `fetch_add`) preserve the `extra` of the left argument (`left.fetch_add(right, ...)`).
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
         value: u64,
@@ -178,6 +183,7 @@ mod ffi {
     #[derive(Debug, Clone, Copy)]
     enum ExecutionState {
         Ok,
+        Error,
         Blocked,
         Finished,
     }

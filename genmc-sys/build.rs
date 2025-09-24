@@ -227,6 +227,8 @@ fn compile_cpp_dependencies(genmc_path: &Path, always_configure: bool) {
     // These definitions are parsed into a cmake list and then printed to the config.h file, so they are ';' separated.
     let definitions = llvm_definitions.split(";");
 
+    // These are all the C++ files we need to compile, which needs to be updated if more C++ files are added to Miri.
+    // We use absolute paths since relative paths can confuse IDEs when attempting to go-to-source on a path in a compiler error.
     let cpp_files_base_path = Path::new("cpp/src/");
     let cpp_files = [
         "MiriInterface/EventHandling.cpp",

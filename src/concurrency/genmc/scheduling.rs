@@ -107,6 +107,11 @@ impl GenmcCtx {
         // Depending on the exec_state, we either schedule the given thread, or we are finished with this execution.
         match result.exec_state {
             ExecutionState::Ok => interp_ok(Some(thread_infos.get_miri_tid(result.next_thread))),
+            ExecutionState::Error => {
+                // We have an error, but we don't know what it is.
+                // We stop the execution, since we ask GenMC for errors at the end, which will catch that error.
+                throw_machine_stop!(TerminationInfo::Exit { code: 0, leak_check: false });
+            }
             ExecutionState::Blocked => throw_machine_stop!(TerminationInfo::GenmcBlockedExecution),
             ExecutionState::Finished => {
                 let exit_status = self.exec_state.exit_status.get().expect(
