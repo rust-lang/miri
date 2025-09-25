@@ -220,11 +220,6 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
     fn run_provenance_gc(&mut self) {
         let this = self.eval_context_mut();
-        // FIXME(genmc): In GenMC mode, we skip running the garbage collector.
-        // Borrow tracking is not yet supported in GenMC mode, and allocations are never deleted.
-        if this.machine.data_race.as_genmc_ref().is_some() {
-            return;
-        }
 
         // We collect all tags and AllocId from every part of the interpreter.
         let mut tags = FxHashSet::default();

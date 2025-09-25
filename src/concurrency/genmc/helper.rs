@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::sync::RwLock;
 
 use genmc_sys::{MemOrdering, RMWBinOp};
@@ -10,7 +11,7 @@ use rustc_middle::ty::ScalarInt;
 use rustc_span::Span;
 use tracing::debug;
 
-use super::GenmcScalar;
+use super::{ExposedAllocsMap, GenmcScalar};
 use crate::alloc_addresses::EvalContextExt as _;
 use crate::diagnostics::EvalContextExt as _;
 use crate::intrinsics::AtomicRmwOp;
@@ -83,6 +84,7 @@ pub fn split_access(address: Size, size: Size) -> impl Iterator<Item = (u64, u64
 /// Pointers with `Wildcard` provenance are not supported.
 pub fn scalar_to_genmc_scalar<'tcx>(
     ecx: &MiriInterpCx<'tcx>,
+    exposed_allocs_map: &RefCell<ExposedAllocsMap>,
     scalar: Scalar,
 ) -> InterpResult<'tcx, GenmcScalar> {
     interp_ok(match scalar {
@@ -101,6 +103,8 @@ pub fn scalar_to_genmc_scalar<'tcx>(
                 rustc_const_eval::interpret::Machine::ptr_get_alloc(ecx, pointer, size.into())
                     .unwrap();
             let base_addr = ecx.addr_from_alloc_id(alloc_id, None)?;
+            // Add the base_addr alloc_id pair to the map.
+            exposed_allocs_map.borrow_mut().insert(base_addr, alloc_id);
             GenmcScalar { value: addr.bytes(), extra: base_addr, is_init: true }
         }
     })
@@ -112,6 +116,7 @@ pub fn scalar_to_genmc_scalar<'tcx>(
 /// For pointers, attempt to convert the stored base address of their allocation back into an `AllocId`.
 pub fn genmc_scalar_to_scalar<'tcx>(
     ecx: &MiriInterpCx<'tcx>,
+    exposed_allocs_map: &RefCell<ExposedAllocsMap>,
     scalar: GenmcScalar,
     size: Size,
 ) -> InterpResult<'tcx, Scalar> {
@@ -123,13 +128,8 @@ pub fn genmc_scalar_to_scalar<'tcx>(
         return interp_ok(Scalar::Int(value_scalar_int));
     }
     // `extra` is non-zero, we have a pointer.
-    let alloc_id = ecx
-        .alloc_id_from_addr(
-            /* base_addr */ scalar.extra,
-            /* alloc_size */ 0,
-            /* only_exposed_allocations */ false,
-        )
-        .unwrap();
+    // When we get a pointer from GenMC, then we must have sent it to GenMC before in the same execution (since the reads-from relation is always respected).
+    let alloc_id = *exposed_allocs_map.borrow().get(&scalar.extra).unwrap();
     // FIXME(genmc,borrow tracking): Borrow tracking not yet supported.
     let provenance = machine::Provenance::Concrete { alloc_id, tag: BorTag::default() };
     let ptr = interpret::Pointer::new(provenance, /* offset */ Size::from_bytes(scalar.value));

@@ -7,6 +7,7 @@ use genmc_sys::{
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
+use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::{throw_machine_stop, throw_ub_format, throw_unsup_format};
 // FIXME(genmc,tracing): Implement some work-around for enabling debug/trace level logging (currently disabled statically in rustc).
 use tracing::{debug, info};
@@ -39,6 +40,8 @@ pub use genmc_sys::GenmcParams;
 pub use self::config::GenmcConfig;
 pub use self::intercept::EvalContextExt as GenmcEvalContextExt;
 pub use self::run::run_genmc_mode;
+
+type ExposedAllocsMap = FxHashMap<u64, AllocId>;
 
 #[derive(Debug)]
 pub enum ExecutionEndResult {
@@ -85,6 +88,9 @@ struct PerExecutionState {
     /// we cover all possible executions.
     /// `None` if no thread has called `exit` and the main thread isn't finished yet.
     exit_status: Cell<Option<ExitStatus>>,
+
+    /// Allocations in this map have been sent to GenMC, and should thus be kept around, since future loads from GenMC may return this allocation again.
+    exposed_allocs_map: RefCell<ExposedAllocsMap>,
 }
 
 impl PerExecutionState {
@@ -92,6 +98,7 @@ impl PerExecutionState {
         self.allow_data_races.replace(false);
         self.thread_id_manager.borrow_mut().reset();
         self.exit_status.set(None);
+        self.exposed_allocs_map.borrow_mut().clear();
     }
 }
 
@@ -268,13 +275,13 @@ impl GenmcCtx {
     ) -> InterpResult<'tcx, Scalar> {
         assert!(!self.get_alloc_data_races(), "atomic load with data race checking disabled.");
         let genmc_old_value = if let Some(scalar) = old_val {
-            scalar_to_genmc_scalar(ecx, scalar)?
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, scalar)?
         } else {
             GenmcScalar::UNINIT
         };
         let read_value =
             self.handle_load(&ecx.machine, address, size, ordering.to_genmc(), genmc_old_value)?;
-        genmc_scalar_to_scalar(ecx, read_value, size)
+        genmc_scalar_to_scalar(ecx, &self.exec_state.exposed_allocs_map, read_value, size)
     }
 
     /// Inform GenMC about an atomic store.
@@ -291,9 +298,9 @@ impl GenmcCtx {
         ordering: AtomicWriteOrd,
     ) -> InterpResult<'tcx, bool> {
         assert!(!self.get_alloc_data_races(), "atomic store with data race checking disabled.");
-        let genmc_value = scalar_to_genmc_scalar(ecx, value)?;
+        let genmc_value = scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, value)?;
         let genmc_old_value = if let Some(scalar) = old_value {
-            scalar_to_genmc_scalar(ecx, scalar)?
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, scalar)?
         } else {
             GenmcScalar::UNINIT
         };
@@ -345,8 +352,8 @@ impl GenmcCtx {
             size,
             ordering,
             to_genmc_rmw_op(atomic_op, is_signed),
-            scalar_to_genmc_scalar(ecx, rhs_scalar)?,
-            scalar_to_genmc_scalar(ecx, old_value)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, rhs_scalar)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, old_value)?,
         )
     }
 
@@ -368,8 +375,8 @@ impl GenmcCtx {
             size,
             ordering,
             /* genmc_rmw_op */ RMWBinOp::Xchg,
-            scalar_to_genmc_scalar(ecx, rhs_scalar)?,
-            scalar_to_genmc_scalar(ecx, old_value)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, rhs_scalar)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, old_value)?,
         )
     }
 
@@ -441,9 +448,9 @@ impl GenmcCtx {
             genmc_tid,
             address.bytes(),
             size.bytes(),
-            scalar_to_genmc_scalar(ecx, expected_old_value)?,
-            scalar_to_genmc_scalar(ecx, new_value)?,
-            scalar_to_genmc_scalar(ecx, old_value)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, expected_old_value)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, new_value)?,
+            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, old_value)?,
             upgraded_success_ordering.to_genmc(),
             fail.to_genmc(),
             can_fail_spuriously,
@@ -454,7 +461,12 @@ impl GenmcCtx {
             throw_ub_format!("{}", error.to_string_lossy());
         }
 
-        let return_scalar = genmc_scalar_to_scalar(ecx, cas_result.old_value, size)?;
+        let return_scalar = genmc_scalar_to_scalar(
+            ecx,
+            &self.exec_state.exposed_allocs_map,
+            cas_result.old_value,
+            size,
+        )?;
         debug!(
             "GenMC: atomic_compare_exchange: result: {cas_result:?}, returning scalar: {return_scalar:?}"
         );
@@ -879,10 +891,20 @@ impl GenmcCtx {
             throw_ub_format!("{}", error.to_string_lossy());
         }
 
-        let old_value_scalar = genmc_scalar_to_scalar(ecx, rmw_result.old_value, size)?;
+        let old_value_scalar = genmc_scalar_to_scalar(
+            ecx,
+            &self.exec_state.exposed_allocs_map,
+            rmw_result.old_value,
+            size,
+        )?;
 
         let new_value_scalar = if rmw_result.is_coherence_order_maximal_write {
-            Some(genmc_scalar_to_scalar(ecx, rmw_result.new_value, size)?)
+            Some(genmc_scalar_to_scalar(
+                ecx,
+                &self.exec_state.exposed_allocs_map,
+                rmw_result.new_value,
+                size,
+            )?)
         } else {
             None
         };
@@ -905,7 +927,10 @@ impl GenmcCtx {
 }
 
 impl VisitProvenance for GenmcCtx {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {
-        // We don't have any tags.
+    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+        let exposed_allocs_map = self.exec_state.exposed_allocs_map.borrow();
+        for alloc_id in exposed_allocs_map.values().cloned() {
+            visit(Some(alloc_id), None);
+        }
     }
 }
