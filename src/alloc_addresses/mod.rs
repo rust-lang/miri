@@ -207,13 +207,7 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     // Returns the `AllocId` that corresponds to the specified addr,
     // or `None` if the addr is out of bounds.
-    // Setting `only_exposed_allocations` selects whether only exposed allocations are considered.
-    fn alloc_id_from_addr(
-        &self,
-        addr: u64,
-        size: i64,
-        only_exposed_allocations: bool,
-    ) -> Option<AllocId> {
+    fn alloc_id_from_addr(&self, addr: u64, size: i64) -> Option<AllocId> {
         let this = self.eval_context_ref();
         let global_state = this.machine.alloc_addresses.borrow();
         assert!(global_state.provenance_mode != ProvenanceMode::Strict);
@@ -243,7 +237,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }?;
 
         // We only use this provenance if it has been exposed, or if the caller requested also non-exposed allocations
-        if !only_exposed_allocations || global_state.exposed.contains(&alloc_id) {
+        if global_state.exposed.contains(&alloc_id) {
             // This must still be live, since we remove allocations from `int_to_ptr_map` when they get freed.
             // In GenMC mode, we keep all allocations, so this check doesn't apply there.
             if this.machine.data_race.as_genmc_ref().is_none() {
@@ -443,8 +437,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             alloc_id
         } else {
             // A wildcard pointer.
-            let only_exposed_allocations = true;
-            this.alloc_id_from_addr(addr.bytes(), size, only_exposed_allocations)?
+            this.alloc_id_from_addr(addr.bytes(), size)?
         };
 
         // This cannot fail: since we already have a pointer with that provenance, adjust_alloc_root_pointer
