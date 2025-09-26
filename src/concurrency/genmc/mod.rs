@@ -656,7 +656,10 @@ impl GenmcCtx {
         let curr_thread = machine.threads.active_thread();
         let genmc_tid = thread_infos.get_genmc_tid(curr_thread);
 
-        self.handle.borrow_mut().pin_mut().handle_free(genmc_tid, address.bytes());
+        if self.handle.borrow_mut().pin_mut().handle_free(genmc_tid, address.bytes()) {
+            // An error was detected, so we get the error string from GenMC.
+            throw_ub_format!("{}", self.try_get_error().unwrap());
+        }
 
         interp_ok(())
     }

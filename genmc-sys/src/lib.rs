@@ -417,7 +417,8 @@ mod ffi {
             size: u64,
             alignment: u64,
         ) -> u64;
-        fn handle_free(self: Pin<&mut MiriGenmcShim>, thread_id: i32, address: u64);
+        /// Returns true if an error was found.
+        fn handle_free(self: Pin<&mut MiriGenmcShim>, thread_id: i32, address: u64) -> bool;
 
         /**** Thread management ****/
         fn handle_thread_create(self: Pin<&mut MiriGenmcShim>, thread_id: i32, parent_id: i32);

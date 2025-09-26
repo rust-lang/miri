@@ -126,7 +126,7 @@ struct MiriGenmcShim : private GenMCDriver {
 
     /**** Memory (de)allocation ****/
     auto handle_malloc(ThreadId thread_id, uint64_t size, uint64_t alignment) -> uint64_t;
-    void handle_free(ThreadId thread_id, uint64_t address);
+    auto handle_free(ThreadId thread_id, uint64_t address) -> bool;
 
     /**** Thread management ****/
     void handle_thread_create(ThreadId thread_id, ThreadId parent_id);
