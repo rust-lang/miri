@@ -168,13 +168,14 @@ mod ffi {
     /// This type corresponds to `Option<SVal>` (or `std::optional<SVal>`), where `SVal` is the type that GenMC uses for storing values.
     #[derive(Debug, Clone, Copy)]
     struct GenmcScalar {
-        /// If the `extra` field is zero, `value` represents a plain integer.
-        /// If the `extra` field is non-zero, it contains information about the provenance of the pointer stored in `value`.
+        /// The raw byte-level value (discarding provenance, if any) of this scalar.
         value: u64,
-        /// This field is either zero, or the base address of the allocation that this pointer belongs to.
+        /// This is zero for integer values. For pointers, this encodes the provenance by
+        /// storing the base address of the allocation that this pointer belongs to.
         /// Operations on `SVal` in GenMC (e.g., `fetch_add`) preserve the `extra` of the left argument (`left.fetch_add(right, ...)`).
         extra: u64,
-        /// CXX doesn't support `std::optional` currently, so we need to use an extra `bool` to define whether this value is initialized or not.
+        /// Indicates whether this value is initialized. If this is `false`, the other fields do not matter.
+        /// (Ideally we'd use `std::optional` but CXX does not support that.)
         is_init: bool,
     }
 
