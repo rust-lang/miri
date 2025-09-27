@@ -41,8 +41,6 @@ pub use self::config::GenmcConfig;
 pub use self::intercept::EvalContextExt as GenmcEvalContextExt;
 pub use self::run::run_genmc_mode;
 
-type ExposedAllocsMap = FxHashMap<u64, AllocId>;
-
 #[derive(Debug)]
 pub enum ExecutionEndResult {
     /// An error occurred at the end of the execution.
@@ -90,7 +88,7 @@ struct PerExecutionState {
     exit_status: Cell<Option<ExitStatus>>,
 
     /// Allocations in this map have been sent to GenMC, and should thus be kept around, since future loads from GenMC may return this allocation again.
-    exposed_allocs_map: RefCell<ExposedAllocsMap>,
+    genmc_shared_allocs_map: RefCell<FxHashMap<u64, AllocId>>,
 }
 
 impl PerExecutionState {
@@ -98,7 +96,7 @@ impl PerExecutionState {
         self.allow_data_races.replace(false);
         self.thread_id_manager.borrow_mut().reset();
         self.exit_status.set(None);
-        self.exposed_allocs_map.borrow_mut().clear();
+        self.genmc_shared_allocs_map.borrow_mut().clear();
     }
 }
 
@@ -275,13 +273,13 @@ impl GenmcCtx {
     ) -> InterpResult<'tcx, Scalar> {
         assert!(!self.get_alloc_data_races(), "atomic load with data race checking disabled.");
         let genmc_old_value = if let Some(scalar) = old_val {
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, scalar)?
+            scalar_to_genmc_scalar(ecx, self, scalar)?
         } else {
             GenmcScalar::UNINIT
         };
         let read_value =
             self.handle_load(&ecx.machine, address, size, ordering.to_genmc(), genmc_old_value)?;
-        genmc_scalar_to_scalar(ecx, &self.exec_state.exposed_allocs_map, read_value, size)
+        genmc_scalar_to_scalar(ecx, self, read_value, size)
     }
 
     /// Inform GenMC about an atomic store.
@@ -298,9 +296,9 @@ impl GenmcCtx {
         ordering: AtomicWriteOrd,
     ) -> InterpResult<'tcx, bool> {
         assert!(!self.get_alloc_data_races(), "atomic store with data race checking disabled.");
-        let genmc_value = scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, value)?;
+        let genmc_value = scalar_to_genmc_scalar(ecx, self, value)?;
         let genmc_old_value = if let Some(scalar) = old_value {
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, scalar)?
+            scalar_to_genmc_scalar(ecx, self, scalar)?
         } else {
             GenmcScalar::UNINIT
         };
@@ -352,8 +350,8 @@ impl GenmcCtx {
             size,
             ordering,
             to_genmc_rmw_op(atomic_op, is_signed),
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, rhs_scalar)?,
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, old_value)?,
+            scalar_to_genmc_scalar(ecx, self, rhs_scalar)?,
+            scalar_to_genmc_scalar(ecx, self, old_value)?,
         )
     }
 
@@ -375,8 +373,8 @@ impl GenmcCtx {
             size,
             ordering,
             /* genmc_rmw_op */ RMWBinOp::Xchg,
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, rhs_scalar)?,
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, old_value)?,
+            scalar_to_genmc_scalar(ecx, self, rhs_scalar)?,
+            scalar_to_genmc_scalar(ecx, self, old_value)?,
         )
     }
 
@@ -448,9 +446,9 @@ impl GenmcCtx {
             genmc_tid,
             address.bytes(),
             size.bytes(),
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, expected_old_value)?,
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, new_value)?,
-            scalar_to_genmc_scalar(ecx, &self.exec_state.exposed_allocs_map, old_value)?,
+            scalar_to_genmc_scalar(ecx, self, expected_old_value)?,
+            scalar_to_genmc_scalar(ecx, self, new_value)?,
+            scalar_to_genmc_scalar(ecx, self, old_value)?,
             upgraded_success_ordering.to_genmc(),
             fail.to_genmc(),
             can_fail_spuriously,
@@ -461,12 +459,7 @@ impl GenmcCtx {
             throw_ub_format!("{}", error.to_string_lossy());
         }
 
-        let return_scalar = genmc_scalar_to_scalar(
-            ecx,
-            &self.exec_state.exposed_allocs_map,
-            cas_result.old_value,
-            size,
-        )?;
+        let return_scalar = genmc_scalar_to_scalar(ecx, self, cas_result.old_value, size)?;
         debug!(
             "GenMC: atomic_compare_exchange: result: {cas_result:?}, returning scalar: {return_scalar:?}"
         );
@@ -894,20 +887,10 @@ impl GenmcCtx {
             throw_ub_format!("{}", error.to_string_lossy());
         }
 
-        let old_value_scalar = genmc_scalar_to_scalar(
-            ecx,
-            &self.exec_state.exposed_allocs_map,
-            rmw_result.old_value,
-            size,
-        )?;
+        let old_value_scalar = genmc_scalar_to_scalar(ecx, self, rmw_result.old_value, size)?;
 
         let new_value_scalar = if rmw_result.is_coherence_order_maximal_write {
-            Some(genmc_scalar_to_scalar(
-                ecx,
-                &self.exec_state.exposed_allocs_map,
-                rmw_result.new_value,
-                size,
-            )?)
+            Some(genmc_scalar_to_scalar(ecx, self, rmw_result.new_value, size)?)
         } else {
             None
         };
@@ -931,8 +914,8 @@ impl GenmcCtx {
 
 impl VisitProvenance for GenmcCtx {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
-        let exposed_allocs_map = self.exec_state.exposed_allocs_map.borrow();
-        for alloc_id in exposed_allocs_map.values().cloned() {
+        let genmc_shared_allocs_map = self.exec_state.genmc_shared_allocs_map.borrow();
+        for alloc_id in genmc_shared_allocs_map.values().copied() {
             visit(Some(alloc_id), None);
         }
     }

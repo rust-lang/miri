@@ -236,7 +236,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }?;
 
-        // We only use this provenance if it has been exposed, or if the caller requested also non-exposed allocations
+        // We only use this provenance if it has been exposed.
         if global_state.exposed.contains(&alloc_id) {
             // This must still be live, since we remove allocations from `int_to_ptr_map` when they get freed.
             // In GenMC mode, we keep all allocations, so this check doesn't apply there.
