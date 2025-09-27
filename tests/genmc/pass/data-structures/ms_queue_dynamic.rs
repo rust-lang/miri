@@ -9,7 +9,7 @@
 // We test different numbers of writer threads to see the scaling.
 // Implementing optimizations such as automatic spinloop-assume transformation or symmetry reduction should reduce the number of explored executions.
 // We also test variants using manual spinloop replacement, which should yield fewer executions in total compared to the unmodified code.
-// 
+//
 // FIXME(genmc): Add revisions `default_R1W3` and `spinloop_assume_R1W3` once Miri-GenMC performance is improved. These currently slow down the test suite too much.
 //
 // The test uses verbose output to see the difference between blocked and explored executions.
