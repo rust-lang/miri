@@ -18,7 +18,7 @@ static mut Y: u64 = 0;
 
 fn assert_equals<T: Eq + Copy + Debug>(a: T, b: T) {
     if a != b {
-        writeln!(MiriStderr, "{:?}, {:?}", a, b).unwrap_or_else(|_| std::process::abort());
+        writeln!(MiriStderr, "{:?}, {:?}", a, b).ok();
         std::process::abort();
     }
 }
