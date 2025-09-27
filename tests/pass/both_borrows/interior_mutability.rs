@@ -1,5 +1,6 @@
-//@revisions: stack tree
+//@revisions: stack tree tree_strong
 //@[tree]compile-flags: -Zmiri-tree-borrows
+//@[tree_strong]compile-flags: -Zmiri-tree-borrows-strong
 #![allow(dangerous_implicit_autorefs)]
 
 use std::cell::{Cell, Ref, RefCell, RefMut, UnsafeCell};
