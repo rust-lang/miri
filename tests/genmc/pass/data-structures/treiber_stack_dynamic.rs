@@ -1,12 +1,14 @@
-//@ revisions: default_R1W2 default_R2W2 default_RW2 spinloop_assume_R1W2 spinloop_assume_R2W2 spinloop_assume_RW2
+//@ revisions: default_R1W1 default_R1W2 default_R1W3 spinloop_assume_R1W1 spinloop_assume_R1W2 spinloop_assume_R1W3
 //@compile-flags: -Zmiri-ignore-leaks -Zmiri-genmc -Zmiri-disable-stacked-borrows -Zmiri-genmc-verbose
 //@normalize-stderr-test: "Verification took .*s" -> "Verification took [TIME]s"
 
 // This test is a translations of the GenMC test `treiber-stack-dynamic`, but with all code related to GenMC's hazard pointer API removed.
 // The test leaks memory, so leak checks are disabled.
 //
-// The two test variants are for unmodified code compared to manual spinloop-assume replacement.
-// GenMC can do this transformation automatically, and currently also explores fewer blocked executions than Miri-GenMC.
+// Test variant naming convention: "[VARIANT_NAME]_R[#reader_threads]_W[#writer_threads]".
+// We test different numbers of writer threads to see the scaling.
+// Implementing optimizations such as automatic spinloop-assume transformation or symmetry reduction should reduce the number of explored executions.
+// We also test variants using manual spinloop replacement, which should yield fewer executions in total compared to the unmodified code.
 //
 // The test uses verbose output to see the difference between blocked and explored executions.
 
@@ -76,7 +78,7 @@ impl MyStack {
                 break;
             }
             // We manually limit the number of iterations of this spinloop to 1.
-            #[cfg(any(spinloop_assume_R1W2, spinloop_assume_R2W2, spinloop_assume_RW2))]
+            #[cfg(any(spinloop_assume_R1W1, spinloop_assume_R1W2, spinloop_assume_R1W3))]
             utils::miri_genmc_assume(false); // GenMC will stop any execution that reaches this.
         }
     }
@@ -94,7 +96,7 @@ impl MyStack {
                 return (*top).value;
             }
             // We manually limit the number of iterations of this spinloop to 1.
-            #[cfg(any(spinloop_assume_R1W2, spinloop_assume_R2W2, spinloop_assume_RW2))]
+            #[cfg(any(spinloop_assume_R1W1, spinloop_assume_R1W2, spinloop_assume_R1W3))]
             utils::miri_genmc_assume(false); // GenMC will stop any execution that reaches this.
         }
     }
@@ -106,13 +108,13 @@ fn miri_start(_argc: isize, _argv: *const *const u8) -> isize {
     unsafe { STACK.top.store(std::ptr::null_mut(), Relaxed) };
 
     // We try multiple different parameters for the number and types of threads:
-    let (readers, writers, rdwr) = if cfg!(any(default_RW2, spinloop_assume_RW2)) {
-        (0, 0, 2)
-    } else if cfg!(any(default_R2W2, spinloop_assume_R2W2)) {
-        (2, 2, 0)
-    } else {
-        // default_R1W2, spinloop_assume_R1W2
+    let (readers, writers, rdwr) = if cfg!(any(default_R1W3, spinloop_assume_R1W3)) {
+        (1, 3, 0)
+    } else if cfg!(any(default_R1W2, spinloop_assume_R1W2)) {
         (1, 2, 0)
+    } else {
+        // default_R1W1, spinloop_assume_R1W1
+        (1, 1, 0)
     };
 
     let num_threads = readers + writers + rdwr;
