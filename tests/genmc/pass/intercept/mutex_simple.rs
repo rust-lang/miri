@@ -54,21 +54,23 @@ fn main_() {
         assert!(LOCK.try_lock().is_ok()); // Trying to lock now should *not* fail since the lock is not held.
     }
 
-    let ids = [
-        spawn_pthread_closure(|| {
-            for _ in 0..REPS {
-                let mut guard = LOCK.lock().unwrap();
-                guard[0] += 2;
-            }
-        }),
-        spawn_pthread_closure(|| {
-            for _ in 0..REPS {
-                let mut guard = LOCK.lock().unwrap();
-                guard[0] += 4;
-            }
-        }),
-    ];
-    unsafe { join_pthreads(ids) };
+    unsafe {
+        let ids = [
+            spawn_pthread_closure(|| {
+                for _ in 0..REPS {
+                    let mut guard = LOCK.lock().unwrap();
+                    guard[0] += 2;
+                }
+            }),
+            spawn_pthread_closure(|| {
+                for _ in 0..REPS {
+                    let mut guard = LOCK.lock().unwrap();
+                    guard[0] += 4;
+                }
+            }),
+        ];
+        join_pthreads(ids);
+    }
 
     let guard = LOCK.lock().unwrap();
     assert!(guard[0] == REPS * 6); // Due to locking, all increments should be visible in every execution.

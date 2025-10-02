@@ -27,7 +27,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             .expect("This function should only be called in GenMC mode.");
 
         let get_mutex_call_infos = || {
-            // assert!(!args.is_empty());
             assert_eq!(args.len(), 1);
             let arg = this.copy_fn_arg(&args[0]);
             let addr = this.read_target_usize(&arg)?;

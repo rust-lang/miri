@@ -1,7 +1,8 @@
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows
 //@error-in-other-file: unsupported operation
 
-// TODO
+// Test that we can detect a deadlock involving `std::sync::Mutex` in GenMC mode.
+// FIXME(genmc): The error message for such deadlocks is currently not good, it does not show both involved lock call locations.
 
 #![no_main]
 #![feature(abort_unwind)]
