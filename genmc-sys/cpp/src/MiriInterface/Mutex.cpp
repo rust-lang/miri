@@ -5,6 +5,9 @@
 // CXX.rs generated headers:
 #include "genmc-sys/src/lib.rs.h"
 
+#define MUTEX_UNLOCKED SVal(0)
+#define MUTEX_LOCKED SVal(1)
+
 auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint64_t size)
     -> MutexLockResult {
     // FIXME(genmc,multithreading): ensure this annotation id is unique even if Miri runs GenMC mode
@@ -17,17 +20,18 @@ auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint
     } else {
         annot_id = it->second;
     }
+    const auto size_bits = size * 8;
     const auto annot = std::move(Annotation(
         AssumeType::Spinloop,
         Annotation::ExprVP(NeExpr<AnnotID>::create(
-                               RegisterExpr<AnnotID>::create(ASize(size).getBits(), annot_id),
-                               ConcreteExpr<AnnotID>::create(ASize(size).getBits(), SVal(1))
+                               RegisterExpr<AnnotID>::create(size_bits, annot_id),
+                               ConcreteExpr<AnnotID>::create(size_bits, MUTEX_LOCKED)
         )
                                .release())
     ));
 
     // Mutex starts out unlocked, so we always say the previous value is "unlocked".
-    const auto old_val = SVal(0);
+    const auto old_val = MUTEX_UNLOCKED;
     const auto load_ret = handle_load_reset_if_none<EventLabel::EventLabelKind::LockCasRead>(
         thread_id,
         old_val,
@@ -47,8 +51,11 @@ auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint
 
     const auto* ret_val = std::get_if<SVal>(&load_ret);
     ERROR_ON(!ret_val, "Unimplemented: mutex lock returned unexpected result.");
-    ERROR_ON(*ret_val != SVal(0) && *ret_val != SVal(1), "Mutex read value was neither 0 nor 1");
-    const bool is_lock_acquired = *ret_val == SVal(0);
+    ERROR_ON(
+        *ret_val != MUTEX_UNLOCKED && *ret_val != MUTEX_LOCKED,
+        "Mutex read value was neither 0 nor 1"
+    );
+    const bool is_lock_acquired = *ret_val == MUTEX_UNLOCKED;
     if (is_lock_acquired) {
         const auto store_ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::LockCasWrite>(
             inc_pos(thread_id),
@@ -79,7 +86,7 @@ auto MiriGenmcShim::handle_mutex_try_lock(ThreadId thread_id, uint64_t address, 
     -> MutexLockResult {
     auto& currPos = threads_action_[thread_id].event;
     // Mutex starts out unlocked, so we always say the previous value is "unlocked".
-    const auto old_val = SVal(0);
+    const auto old_val = MUTEX_UNLOCKED;
     const auto load_ret = GenMCDriver::handleLoad<EventLabel::EventLabelKind::TrylockCasRead>(
         ++currPos,
         old_val,
@@ -93,8 +100,11 @@ auto MiriGenmcShim::handle_mutex_try_lock(ThreadId thread_id, uint64_t address, 
         ERROR("Unimplemented: mutex trylock load returned unexpected result.");
     }
 
-    ERROR_ON(*ret_val != SVal(0) && *ret_val != SVal(1), "Mutex read value was neither 0 nor 1");
-    const bool is_lock_acquired = *ret_val == SVal(0);
+    ERROR_ON(
+        *ret_val != MUTEX_UNLOCKED && *ret_val != MUTEX_LOCKED,
+        "Mutex read value was neither 0 nor 1"
+    );
+    const bool is_lock_acquired = *ret_val == MUTEX_UNLOCKED;
     if (!is_lock_acquired) {
         return MutexLockResultExt::ok(false); /* Lock already held. */
     }
@@ -123,12 +133,12 @@ auto MiriGenmcShim::handle_mutex_unlock(ThreadId thread_id, uint64_t address, ui
     const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::UnlockWrite>(
         pos,
         // Mutex starts out unlocked, so we always say the previous value is "unlocked".
-        /* old_val */ SVal(0),
+        /* old_val */ MUTEX_UNLOCKED,
         MemOrdering::Release,
         SAddr(address),
         ASize(size),
         AType::Signed,
-        SVal(0),
+        /* store_value */ MUTEX_UNLOCKED,
         EventDeps()
     );
     if (const auto* err = std::get_if<VerificationError>(&ret))
