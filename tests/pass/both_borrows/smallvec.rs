@@ -2,8 +2,9 @@
 //! What makes it interesting as a test is that it relies on Stacked Borrow's "quirk"
 //! in a fundamental, hard-to-fix-without-full-trees way.
 
-//@revisions: stack tree
+//@revisions: stack tree tree_strong
 //@[tree]compile-flags: -Zmiri-tree-borrows
+//@[tree_strong]compile-flags: -Zmiri-tree-borrows-strong
 
 use std::marker::PhantomData;
 use std::mem::{ManuallyDrop, MaybeUninit};
