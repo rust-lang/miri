@@ -1203,7 +1203,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         }
 
         if ecx.machine.data_race.as_genmc_ref().is_some()
-            && ecx.check_genmc_intercept_function(instance, args, dest)?
+            && ecx.genmc_intercept_function(instance, args, dest)?
         {
             ecx.return_to_block(ret)?;
             return interp_ok(None);

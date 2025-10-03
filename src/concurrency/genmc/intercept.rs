@@ -13,7 +13,7 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Given a `ty::Instance<'tcx>`, do any required special handling.
     /// Returns true if this `instance` should be skipped (i.e., no MIR should be executed for it).
-    fn check_genmc_intercept_function(
+    fn genmc_intercept_function(
         &mut self,
         instance: rustc_middle::ty::Instance<'tcx>,
         args: &[rustc_const_eval::interpret::FnArg<'tcx, crate::Provenance>],
