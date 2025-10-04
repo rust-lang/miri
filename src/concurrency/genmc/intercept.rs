@@ -33,9 +33,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // FIXME(genmc): assert that we have at least 1 byte.
             // FIXME(genmc): maybe use actual size of mutex here?.
 
-            let thread_infos = genmc_ctx.exec_state.thread_id_manager.borrow();
-            let curr_thread = this.machine.threads.active_thread();
-            let genmc_curr_thread = thread_infos.get_genmc_tid(curr_thread);
+            let genmc_curr_thread = genmc_ctx.active_thread_genmc_tid(&this.machine);
             interp_ok((genmc_curr_thread, addr, 1))
         };
 
