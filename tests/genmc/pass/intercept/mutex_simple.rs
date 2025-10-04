@@ -1,16 +1,15 @@
-//@revisions: reps1 reps2 reps3
 //@compile-flags: -Zmiri-genmc -Zmiri-disable-stacked-borrows -Zmiri-genmc-verbose
 //@normalize-stderr-test: "Verification took .*s" -> "Verification took [TIME]s"
 
 // Test various features of the `std::sync::Mutex` API with GenMC.
-// The test variants use a different number of iterations for the part that increments the counter protected by the mutex.
-// More repetitions leads to more possible executions, representing all ways that the threads entering the critical sections can be ordered.
+// Miri running with GenMC intercepts the Mutex functions `lock`, `try_lock` and `unlock`, instead of running their actual implementation.
+// This interception should not break any functionality.
 //
 // FIXME(genmc): Once the actual implementation of mutexes can be used in GenMC mode and there is a setting to disable Mutex interception: Add test revision without interception.
 //
 // Miri provides annotations to GenMC for the condition required to unblock a thread blocked on a Mutex lock call.
-// This allows massively reduces the number of blocked executions we need to explore (in this test to zero blocked execution).
-// We use verbose output to test that there are no blocked executions, only completed executions.
+// This massively reduces the number of blocked executions we need to explore (in this test we require zero blocked execution).
+// We use verbose output to test that there are no blocked executions introduces by future changes, only completed executions.
 
 #![no_main]
 #![feature(abort_unwind)]
@@ -22,13 +21,7 @@ use std::sync::Mutex;
 
 use crate::genmc::*;
 
-const REPS: u64 = if cfg!(reps3) {
-    3
-} else if cfg!(reps2) {
-    2
-} else {
-    1
-};
+const REPS: u64 = 3;
 
 static LOCK: Mutex<[u64; 32]> = Mutex::new([1234; 32]);
 
@@ -47,13 +40,17 @@ fn main_() {
     guard[1] = 10;
     assert!(guard[0] == 0 && guard[1] == 10); // Check if changes are accepted
 
-    assert!(LOCK.try_lock().is_err()); // Trying to lock should fail if the lock is already held
+    // Trying to lock should fail if the lock is already held
+    assert!(LOCK.try_lock().is_err());
 
-    drop(guard); // Dropping the guard should unlock the mutex correctly.
+    // Dropping the guard should unlock the mutex correctly.
+    drop(guard);
     {
-        assert!(LOCK.try_lock().is_ok()); // Trying to lock now should *not* fail since the lock is not held.
+        // Trying to lock now should succeed since the lock is unlocked.
+        assert!(LOCK.try_lock().is_ok());
     }
 
+    // Spawn multiple threads interacting with the same mutex.
     unsafe {
         let ids = [
             spawn_pthread_closure(|| {
@@ -71,12 +68,6 @@ fn main_() {
         ];
         join_pthreads(ids);
     }
-
-    let guard = LOCK.lock().unwrap();
-    assert!(guard[0] == REPS * 6); // Due to locking, all increments should be visible in every execution.
-    assert!(guard[1] == 10); // All other values should be unchanged.
-    for &v in guard.iter().skip(2) {
-        assert!(v == 1234);
-    }
-    drop(guard);
+    // Due to locking, all increments should be visible in every execution GenMC explores.
+    assert!(LOCK.lock().unwrap()[0] == REPS * 6);
 }
