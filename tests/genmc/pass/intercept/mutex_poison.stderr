@@ -1,0 +1,130 @@
+Running GenMC Verification...
+warning: GenMC currently does not model the failure ordering for `compare_exchange`. Due to success ordering 'Acquire', the failure ordering 'Relaxed' is treated like 'Acquire'. Miri with GenMC might miss bugs related to this memory access.
+  --> RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   |
+LL |               || self
+   |  ________________^
+LL | |                 .state
+LL | |                 .compare_exchange_weak(state, state + READ_LOCKED, Acquire, Relaxed)
+   | |____________________________________________________________________________________^ GenMC might miss possible behaviors of this code
+   |
+   = note: BACKTRACE:
+   = note: inside `std::sys::sync::PLATFORM::futex::RwLock::read` at RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   = note: inside `std::sync::RwLock::<()>::read` at RUSTLIB/std/src/sync/poison/rwlock.rs:LL:CC
+   = note: inside `std::sys::env::PLATFORM::env_read_lock` at RUSTLIB/std/src/sys/env/PLATFORM.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/sys/env/PLATFORM.rs:LL:CC
+   = note: inside `std::sys::pal::PLATFORM::small_c_string::run_with_cstr_stack::<std::option::Option<std::ffi::OsString>>` at RUSTLIB/std/src/sys/pal/PLATFORM/small_c_string.rs:LL:CC
+   = note: inside `std::sys::pal::PLATFORM::small_c_string::run_with_cstr::<std::option::Option<std::ffi::OsString>>` at RUSTLIB/std/src/sys/pal/PLATFORM/small_c_string.rs:LL:CC
+   = note: inside `std::sys::env::PLATFORM::getenv` at RUSTLIB/std/src/sys/env/PLATFORM.rs:LL:CC
+   = note: inside `std::env::_var_os` at RUSTLIB/std/src/env.rs:LL:CC
+   = note: inside `std::env::var_os::<&str>` at RUSTLIB/std/src/env.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `miri_start`
+  --> tests/genmc/pass/intercept/mutex_poison.rs:LL:CC
+   |
+LL |       let handle = std::thread::spawn(|| {
+   |  __________________^
+LL | |         let mut guard = LOCK.lock().unwrap();
+LL | |         *guard = 42;
+LL | |         panic!(); // This will poison the mutex.
+LL | |     });
+   | |______^
+
+warning: GenMC currently does not model spurious failures of `compare_exchange_weak`. Miri with GenMC might miss bugs related to spurious failures.
+  --> RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   |
+LL |               || self
+   |  ________________^
+LL | |                 .state
+LL | |                 .compare_exchange_weak(state, state + READ_LOCKED, Acquire, Relaxed)
+   | |____________________________________________________________________________________^ GenMC might miss possible behaviors of this code
+   |
+   = note: BACKTRACE:
+   = note: inside `std::sys::sync::PLATFORM::futex::RwLock::read` at RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   = note: inside `std::sync::RwLock::<()>::read` at RUSTLIB/std/src/sync/poison/rwlock.rs:LL:CC
+   = note: inside `std::sys::env::PLATFORM::env_read_lock` at RUSTLIB/std/src/sys/env/PLATFORM.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/sys/env/PLATFORM.rs:LL:CC
+   = note: inside `std::sys::pal::PLATFORM::small_c_string::run_with_cstr_stack::<std::option::Option<std::ffi::OsString>>` at RUSTLIB/std/src/sys/pal/PLATFORM/small_c_string.rs:LL:CC
+   = note: inside `std::sys::pal::PLATFORM::small_c_string::run_with_cstr::<std::option::Option<std::ffi::OsString>>` at RUSTLIB/std/src/sys/pal/PLATFORM/small_c_string.rs:LL:CC
+   = note: inside `std::sys::env::PLATFORM::getenv` at RUSTLIB/std/src/sys/env/PLATFORM.rs:LL:CC
+   = note: inside `std::env::_var_os` at RUSTLIB/std/src/env.rs:LL:CC
+   = note: inside `std::env::var_os::<&str>` at RUSTLIB/std/src/env.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `miri_start`
+  --> tests/genmc/pass/intercept/mutex_poison.rs:LL:CC
+   |
+LL |       let handle = std::thread::spawn(|| {
+   |  __________________^
+LL | |         let mut guard = LOCK.lock().unwrap();
+LL | |         *guard = 42;
+LL | |         panic!(); // This will poison the mutex.
+LL | |     });
+   | |______^
+
+warning: GenMC currently does not model the failure ordering for `compare_exchange`. Due to success ordering 'Acquire', the failure ordering 'Relaxed' is treated like 'Acquire'. Miri with GenMC might miss bugs related to this memory access.
+  --> RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   |
+LL |               || self
+   |  ________________^
+LL | |                 .state
+LL | |                 .compare_exchange_weak(state, state + READ_LOCKED, Acquire, Relaxed)
+   | |____________________________________________________________________________________^ GenMC might miss possible behaviors of this code
+   |
+   = note: BACKTRACE on thread `unnamed-ID`:
+   = note: inside `std::sys::sync::PLATFORM::futex::RwLock::read` at RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   = note: inside `std::sync::RwLock::<std::panicking::Hook>::read` at RUSTLIB/std/src/sync/poison/rwlock.rs:LL:CC
+   = note: inside `std::panicking::panic_with_hook` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::sys::backtrace::__rust_end_short_backtrace::<{closure@std::panicking::panic_handler::{closure#0}}, !>` at RUSTLIB/std/src/sys/backtrace.rs:LL:CC
+   = note: inside `std::panicking::panic_handler` at RUSTLIB/std/src/panicking.rs:LL:CC
+note: inside closure
+  --> tests/genmc/pass/intercept/mutex_poison.rs:LL:CC
+   |
+LL |         panic!(); // This will poison the mutex.
+   |         ^^^^^^^^
+
+warning: GenMC currently does not model spurious failures of `compare_exchange_weak`. Miri with GenMC might miss bugs related to spurious failures.
+  --> RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   |
+LL |               || self
+   |  ________________^
+LL | |                 .state
+LL | |                 .compare_exchange_weak(state, state + READ_LOCKED, Acquire, Relaxed)
+   | |____________________________________________________________________________________^ GenMC might miss possible behaviors of this code
+   |
+   = note: BACKTRACE on thread `unnamed-ID`:
+   = note: inside `std::sys::sync::PLATFORM::futex::RwLock::read` at RUSTLIB/std/src/sys/sync/PLATFORM/futex.rs:LL:CC
+   = note: inside `std::sync::RwLock::<std::panicking::Hook>::read` at RUSTLIB/std/src/sync/poison/rwlock.rs:LL:CC
+   = note: inside `std::panicking::panic_with_hook` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::sys::backtrace::__rust_end_short_backtrace::<{closure@std::panicking::panic_handler::{closure#0}}, !>` at RUSTLIB/std/src/sys/backtrace.rs:LL:CC
+   = note: inside `std::panicking::panic_handler` at RUSTLIB/std/src/panicking.rs:LL:CC
+note: inside closure
+  --> tests/genmc/pass/intercept/mutex_poison.rs:LL:CC
+   |
+LL |         panic!(); // This will poison the mutex.
+   |         ^^^^^^^^
+
+
+thread '<unnamed>' ($TID) panicked at tests/genmc/pass/intercept/mutex_poison.rs:LL:CC:
+explicit panic
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+note: in Miri, you may have to set `MIRIFLAGS=-Zmiri-env-forward=RUST_BACKTRACE` for the environment variable to have an effect
+warning: GenMC currently does not model the failure ordering for `compare_exchange`. Due to success ordering 'Acquire', the failure ordering 'Relaxed' is treated like 'Acquire'. Miri with GenMC might miss bugs related to this memory access.
+  --> RUSTLIB/alloc/src/sync.rs:LL:CC
+   |
+LL |         if this.inner().weak.compare_exchange(1, usize::MAX, Acquire, Relaxed).is_ok() {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ GenMC might miss possible behaviors of this code
+   |
+   = note: BACKTRACE:
+   = note: inside `std::sync::Arc::<std::thread::Packet<'_, ()>>::is_unique` at RUSTLIB/alloc/src/sync.rs:LL:CC
+   = note: inside `std::sync::Arc::<std::thread::Packet<'_, ()>>::get_mut` at RUSTLIB/alloc/src/sync.rs:LL:CC
+   = note: inside `std::thread::JoinInner::<'_, ()>::join` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+   = note: inside `std::thread::JoinHandle::<()>::join` at RUSTLIB/std/src/thread/mod.rs:LL:CC
+note: inside `miri_start`
+  --> tests/genmc/pass/intercept/mutex_poison.rs:LL:CC
+   |
+LL |     if handle.join().is_ok() {
+   |        ^^^^^^^^^^^^^
+
+Verification complete with 1 executions. No errors found.

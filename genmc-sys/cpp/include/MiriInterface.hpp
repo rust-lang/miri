@@ -12,7 +12,6 @@
 
 // GenMC headers:
 #include "ExecutionGraph/EventLabel.hpp"
-#include "Static/ModuleID.hpp"
 #include "Support/MemOrdering.hpp"
 #include "Support/RMWOps.hpp"
 #include "Verification/Config.hpp"
@@ -36,6 +35,7 @@ struct LoadResult;
 struct StoreResult;
 struct ReadModifyWriteResult;
 struct CompareExchangeResult;
+struct MutexLockResult;
 
 // GenMC uses `int` for its thread IDs.
 using ThreadId = int;
@@ -140,6 +140,12 @@ struct MiriGenmcShim : private GenMCDriver {
     /// supplied assume statements. This can become a parameter once more types of assumes are
     /// added.
     void handle_assume_block(ThreadId thread_id);
+
+    /**** Mutex handling ****/
+    auto handle_mutex_lock(ThreadId thread_id, uint64_t address, uint64_t size) -> MutexLockResult;
+    auto handle_mutex_try_lock(ThreadId thread_id, uint64_t address, uint64_t size)
+        -> MutexLockResult;
+    auto handle_mutex_unlock(ThreadId thread_id, uint64_t address, uint64_t size) -> StoreResult;
 
     /***** Exploration related functionality *****/
 
@@ -357,5 +363,16 @@ inline CompareExchangeResult from_error(std::unique_ptr<std::string> error) {
                                    .is_coherence_order_maximal_write = false };
 }
 } // namespace CompareExchangeResultExt
+
+namespace MutexLockResultExt {
+inline MutexLockResult ok(bool is_lock_acquired) {
+    return MutexLockResult { /* error: */ nullptr, is_lock_acquired };
+}
+
+inline MutexLockResult from_error(std::unique_ptr<std::string> error) {
+    return MutexLockResult { /* error: */ std::move(error),
+                             /* is_lock_acquired: */ false };
+}
+} // namespace MutexLockResultExt
 
 #endif /* GENMC_MIRI_INTERFACE_HPP */
