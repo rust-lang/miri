@@ -29,7 +29,9 @@ auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint
         )
     ));
 
-    // Mutex starts out unlocked, so we always say the previous value is "unlocked".
+    // As usual, we need to tell GenMC which value was stored at this location before this atomic
+    // access, if there previously was a non-atomic initializing access. We set the initial state of
+    // a mutex to be "unlocked".
     const auto old_val = MUTEX_UNLOCKED;
     const auto load_ret = handle_load_reset_if_none<EventLabel::EventLabelKind::LockCasRead>(
         thread_id,
@@ -84,7 +86,9 @@ auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint
 auto MiriGenmcShim::handle_mutex_try_lock(ThreadId thread_id, uint64_t address, uint64_t size)
     -> MutexLockResult {
     auto& currPos = threads_action_[thread_id].event;
-    // Mutex starts out unlocked, so we always say the previous value is "unlocked".
+    // As usual, we need to tell GenMC which value was stored at this location before this atomic
+    // access, if there previously was a non-atomic initializing access. We set the initial state of
+    // a mutex to be "unlocked".
     const auto old_val = MUTEX_UNLOCKED;
     const auto load_ret = GenMCDriver::handleLoad<EventLabel::EventLabelKind::TrylockCasRead>(
         ++currPos,
@@ -131,7 +135,9 @@ auto MiriGenmcShim::handle_mutex_unlock(ThreadId thread_id, uint64_t address, ui
     const auto pos = inc_pos(thread_id);
     const auto ret = GenMCDriver::handleStore<EventLabel::EventLabelKind::UnlockWrite>(
         pos,
-        // Mutex starts out unlocked, so we always say the previous value is "unlocked".
+        // As usual, we need to tell GenMC which value was stored at this location before this
+        // atomic access, if there previously was a non-atomic initializing access. We set the
+        // initial state of a mutex to be "unlocked".
         /* old_val */ MUTEX_UNLOCKED,
         MemOrdering::Release,
         SAddr(address),
