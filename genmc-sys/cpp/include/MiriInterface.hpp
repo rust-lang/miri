@@ -12,7 +12,6 @@
 
 // GenMC headers:
 #include "ExecutionGraph/EventLabel.hpp"
-#include "Static/ModuleID.hpp"
 #include "Support/MemOrdering.hpp"
 #include "Support/RMWOps.hpp"
 #include "Verification/Config.hpp"
@@ -40,10 +39,6 @@ struct MutexLockResult;
 
 // GenMC uses `int` for its thread IDs.
 using ThreadId = int;
-
-// Types used for GenMC annotations, e.g., in `handle_mutex_lock`.
-using AnnotID = ModuleID::ID;
-using AnnotT = SExpr<AnnotID>;
 
 /// Set the log level for GenMC.
 ///
@@ -245,14 +240,6 @@ struct MiriGenmcShim : private GenMCDriver {
      * indices, since GenMC expects us to do that.
      */
     std::vector<Action> threads_action_;
-
-    /**
-     * Map of already used annotation ids (e.g., for mutexes).
-     * FIXME(GenMC): Ensure that these are consistent with how GenMC expects them once Miri supports
-     * multithreading in GenMC mode.
-     */
-    std::unordered_map<uint64_t, ModuleID::ID> annotation_id {};
-    ModuleID::ID annotation_id_counter = 0;
 };
 
 /// Get the bit mask that GenMC expects for global memory allocations.

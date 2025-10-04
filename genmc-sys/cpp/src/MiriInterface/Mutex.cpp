@@ -2,6 +2,9 @@
 
 #include "MiriInterface.hpp"
 
+// GenMC headers:
+#include "Static/ModuleID.hpp"
+
 // CXX.rs generated headers:
 #include "genmc-sys/src/lib.rs.h"
 
@@ -10,24 +13,20 @@
 
 auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint64_t size)
     -> MutexLockResult {
-    // FIXME(genmc,multithreading): ensure this annotation id is unique even if Miri runs GenMC mode
-    // multithreaded. We cannot use the address directly, since it is 64 bits, and `ID` is an
-    // `unsigned int`.
-    ModuleID::ID annot_id;
-    auto [it, inserted] = annotation_id.try_emplace(address, annotation_id_counter);
-    if (inserted) {
-        annot_id = annotation_id_counter++;
-    } else {
-        annot_id = it->second;
-    }
+    // This annotation informs GenMC about the condition required to make this lock call succeed.
+    // It stands for `value_read_by_load != MUTEX_LOCKED`.
     const auto size_bits = size * 8;
     const auto annot = std::move(Annotation(
         AssumeType::Spinloop,
-        Annotation::ExprVP(NeExpr<AnnotID>::create(
-                               RegisterExpr<AnnotID>::create(size_bits, annot_id),
-                               ConcreteExpr<AnnotID>::create(size_bits, MUTEX_LOCKED)
+        Annotation::ExprVP(
+            NeExpr<ModuleID::ID>::create(
+                // `RegisterExpr` marks the value of the current expression, i.e., the loaded value.
+                // The id is zero, since this annotation only uses one input variable.
+                RegisterExpr<ModuleID::ID>::create(size_bits, /* id */ 0),
+                ConcreteExpr<ModuleID::ID>::create(size_bits, MUTEX_LOCKED)
+            )
+                .release()
         )
-                               .release())
     ));
 
     // Mutex starts out unlocked, so we always say the previous value is "unlocked".
