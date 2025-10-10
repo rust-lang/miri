@@ -5,7 +5,6 @@ use rustc_middle::ty::{self, InstanceKind, Ty};
 
 use self::foreign_access_skipping::IdempotentForeignAccess;
 use self::tree::LocationState;
-use crate::borrow_tracker::tree_borrows::diagnostics::AccessCause;
 use crate::borrow_tracker::{GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
 use crate::*;
@@ -131,8 +130,6 @@ pub struct NewPermission {
     /// Whether this pointer is part of the arguments of a function call.
     /// `protector` is `Some(_)` for all pointers marked `noalias`.
     protector: Option<ProtectorKind>,
-    /// Whether an implicit write should be performed on retag.
-    do_a_write: bool,
 }
 
 impl<'tcx> NewPermission {
@@ -182,13 +179,20 @@ impl<'tcx> NewPermission {
             return None;
         }
 
+        let start_as_unique = start_mut_ref_on_fn_entry_as_active
+            && is_protected
+            && !current_function_involves_raw_pointers
+            && matches!(ref_mutability, Some(Mutability::Mut));
+
         let freeze_perm = match ref_mutability {
+            _ if start_as_unique => Permission::new_unique(),
             // Shared references are frozen.
             Some(Mutability::Not) => Permission::new_frozen(),
             // Mutable references and Boxes are reserved.
             _ => Permission::new_reserved_frz(),
         };
         let nonfreeze_perm = match ref_mutability {
+            _ if start_as_unique => Permission::new_unique(),
             // Shared references are "transparent".
             Some(Mutability::Not) => Permission::new_cell(),
             // *Protected* mutable references and boxes are reserved without regarding for interior mutability.
@@ -213,10 +217,6 @@ impl<'tcx> NewPermission {
                 // Weak protector for boxes
                 ProtectorKind::WeakProtector
             }),
-            do_a_write: start_mut_ref_on_fn_entry_as_active
-                && is_protected
-                && !current_function_involves_raw_pointers
-                && matches!(ref_mutability, Some(Mutability::Mut)),
         })
     }
 }
@@ -389,9 +389,15 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     size: Size::from_bytes(perm_range.end - perm_range.start),
                 };
 
+                let access_kind = if new_perm.freeze_perm.is_unique() {
+                    AccessKind::Write
+                } else {
+                    AccessKind::Read
+                };
+
                 tree_borrows.perform_access(
                     orig_tag,
-                    Some((range_in_alloc, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    Some((range_in_alloc, access_kind, diagnostics::AccessCause::Reborrow)),
                     this.machine.borrow_tracker.as_ref().unwrap(),
                     alloc_id,
                     this.machine.current_span(),
@@ -422,23 +428,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             protected,
             this.machine.current_span(),
         )?;
-        if new_perm.do_a_write {
-            for (perm_range, _) in inside_perms.iter_all() {
-                // Some reborrows incur a write access to the new pointer, to make it active.
-                // Adjust range to be relative to allocation start (rather than to `place`).
-                let range_in_alloc = AllocRange {
-                    start: Size::from_bytes(perm_range.start) + base_offset,
-                    size: Size::from_bytes(perm_range.end - perm_range.start),
-                };
-                tree_borrows.perform_access(
-                    new_tag,
-                    Some((range_in_alloc, AccessKind::Write, AccessCause::Reborrow)),
-                    this.machine.borrow_tracker.as_ref().unwrap(),
-                    alloc_id,
-                    this.machine.current_span(),
-                )?;
-            }
-        }
         drop(tree_borrows);
 
         interp_ok(Some(Provenance::Concrete { alloc_id, tag: new_tag }))
@@ -638,7 +627,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             nonfreeze_access: true,
             outside_perm: Permission::new_reserved_frz(),
             protector: Some(ProtectorKind::StrongProtector),
-            do_a_write: false,
         };
         this.tb_retag_place(place, new_perm)
     }
