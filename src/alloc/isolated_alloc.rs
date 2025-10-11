@@ -26,6 +26,9 @@ pub struct IsolatedAlloc {
     /// Pointers to multiple-page-sized allocations. These must also be page-aligned,
     /// with their size stored as the second element of the vector.
     huge_ptrs: Vec<(NonNull<u8>, usize)>,
+    /// Addresses of pages that we don't actually manage, but which were allocated
+    /// by foreign code and where we need to track accesses.
+    forged_pages: Vec<NonNull<u8>>,
     /// The host (not emulated) page size.
     page_size: usize,
 }
@@ -37,6 +40,7 @@ impl IsolatedAlloc {
             page_ptrs: Vec::new(),
             huge_ptrs: Vec::new(),
             page_infos: Vec::new(),
+            forged_pages: Vec::new(),
             // SAFETY: `sysconf(_SC_PAGESIZE)` is always safe to call at runtime
             // See https://www.man7.org/linux/man-pages/man3/sysconf.3.html
             page_size: unsafe { libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap() },
@@ -308,8 +312,31 @@ impl IsolatedAlloc {
     /// Returns a list of page ranges managed by the allocator, given in terms of pointers
     /// and size (in bytes).
     pub fn pages(&self) -> impl Iterator<Item = (NonNull<u8>, usize)> {
-        let pages = self.page_ptrs.iter().map(|&p| (p, self.page_size));
-        pages.chain(self.huge_ptrs.iter().copied())
+        let with_pg_sz = |&p| (p, self.page_size);
+        let pages = self.page_ptrs.iter().map(with_pg_sz);
+        pages.chain(self.huge_ptrs.iter().copied()).chain(self.forged_pages.iter().map(with_pg_sz))
+    }
+
+    /// Makes the allocator also return this page address when `pages` is called.
+    pub fn forge_page(&mut self, addr: usize) {
+        assert!(addr.is_multiple_of(self.page_size), "Address is not page-aligned");
+        assert!(
+            !self.forged_pages.iter().any(|a| a.addr().get() == addr),
+            "Page already contained"
+        );
+        self.forged_pages.push(NonNull::new(std::ptr::with_exposed_provenance_mut(addr)).unwrap());
+    }
+
+    /// Deletes an entry from the list of forged pages.
+    pub fn remove_forged(&mut self, addr: usize) {
+        assert!(addr.is_multiple_of(self.page_size), "Address is not page-aligned");
+        let (index, _) = self
+            .forged_pages
+            .iter()
+            .enumerate()
+            .find(|(_, p_addr)| addr == p_addr.addr().get())
+            .expect("Page not contained");
+        self.forged_pages.remove(index);
     }
 }
 
