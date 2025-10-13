@@ -53,6 +53,7 @@ enum PermissionPriv {
 }
 use self::PermissionPriv::*;
 use super::foreign_access_skipping::IdempotentForeignAccess;
+use super::wildcard::WildcardAccessLevel;
 
 impl PartialOrd for PermissionPriv {
     /// PermissionPriv is ordered by the reflexive transitive closure of
@@ -371,6 +372,15 @@ impl Permission {
     /// See `foreign_access_skipping`
     pub fn strongest_idempotent_foreign_access(&self, prot: bool) -> IdempotentForeignAccess {
         self.inner.strongest_idempotent_foreign_access(prot)
+    }
+    /// Returns the strongest access allowed from a child to this node without
+    /// causing UB (not accounting for protectors)
+    pub fn strongest_allowed_child_access(&self) -> WildcardAccessLevel {
+        match self.inner {
+            Disabled => WildcardAccessLevel::None,
+            Frozen | ReservedFrz { conflicted: true } => WildcardAccessLevel::Read,
+            _ => WildcardAccessLevel::Write,
+        }
     }
 }
 

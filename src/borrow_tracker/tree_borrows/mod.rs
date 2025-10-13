@@ -14,6 +14,7 @@ mod foreign_access_skipping;
 mod perms;
 mod tree;
 mod unimap;
+mod wildcard;
 
 #[cfg(test)]
 mod exhaustive;
@@ -54,21 +55,25 @@ impl<'tcx> Tree {
             interpret::Pointer::new(alloc_id, range.start),
             range.size.bytes(),
         );
-        // TODO: for now we bail out on wildcard pointers. Eventually we should
-        // handle them as much as we can.
-        let tag = match prov {
-            ProvenanceExtra::Concrete(tag) => tag,
-            ProvenanceExtra::Wildcard => return interp_ok(()),
-        };
         let global = machine.borrow_tracker.as_ref().unwrap();
         let span = machine.current_user_relevant_span();
-        self.perform_access(
-            tag,
-            Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
-            global,
-            alloc_id,
-            span,
-        )
+        match prov {
+            ProvenanceExtra::Concrete(tag) =>
+                self.perform_access(
+                    tag,
+                    Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
+                    global,
+                    alloc_id,
+                    span,
+                ),
+            ProvenanceExtra::Wildcard =>
+                self.perform_wildcard_access(
+                    Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
+                    global,
+                    alloc_id,
+                    span,
+                ),
+        }
     }
 
     /// Check that this pointer has permission to deallocate this range.
@@ -82,16 +87,12 @@ impl<'tcx> Tree {
         // TODO: for now we bail out on wildcard pointers. Eventually we should
         // handle them as much as we can.
         let tag = match prov {
-            ProvenanceExtra::Concrete(tag) => tag,
-            ProvenanceExtra::Wildcard => return interp_ok(()),
+            ProvenanceExtra::Concrete(tag) => Some(tag),
+            ProvenanceExtra::Wildcard => None,
         };
         let global = machine.borrow_tracker.as_ref().unwrap();
         let span = machine.current_user_relevant_span();
         self.dealloc(tag, alloc_range(Size::ZERO, size), global, alloc_id, span)
-    }
-
-    pub fn expose_tag(&mut self, _tag: BorTag) {
-        // TODO
     }
 
     /// A tag just lost its protector.
@@ -252,10 +253,12 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
         log_creation(this, Some((alloc_id, base_offset, parent_prov)))?;
 
-        let orig_tag = match parent_prov {
-            ProvenanceExtra::Wildcard => return interp_ok(place.ptr().provenance), // TODO: handle wildcard pointers
-            ProvenanceExtra::Concrete(tag) => tag,
+        let (orig_tag, provenance) = match parent_prov {
+            ProvenanceExtra::Wildcard => (None, Provenance::Wildcard), // TODO: handle wildcard pointers
+            ProvenanceExtra::Concrete(tag) =>
+                (Some(tag), Provenance::Concrete { alloc_id, tag: new_tag }),
         };
+        let is_wildcard = orig_tag.is_none();
 
         trace!(
             "reborrow: reference {:?} derived from {:?} (pointee {}): {:?}, size {}",
@@ -266,7 +269,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ptr_size.bytes()
         );
 
-        if let Some(protect) = new_perm.protector {
+        // TODO support protecting wildcard pointers.
+        if !is_wildcard && let Some(protect) = new_perm.protector {
             // We register the protection in two different places.
             // This makes creating a protector slower, but checking whether a tag
             // is protected faster.
@@ -291,7 +295,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             assert_eq!(ptr_size, Size::ZERO); // we did the deref check above, size has to be 0 here
             // There's not actually any bytes here where accesses could even be tracked.
             // Just produce the new provenance, nothing else to do.
-            return interp_ok(Some(Provenance::Concrete { alloc_id, tag: new_tag }));
+            return interp_ok(Some(provenance));
         }
 
         let protected = new_perm.protector.is_some();
@@ -354,14 +358,30 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     start: Size::from_bytes(perm_range.start) + base_offset,
                     size: Size::from_bytes(perm_range.end - perm_range.start),
                 };
-
-                tree_borrows.perform_access(
-                    orig_tag,
-                    Some((range_in_alloc, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
-                    this.machine.borrow_tracker.as_ref().unwrap(),
-                    alloc_id,
-                    this.machine.current_user_relevant_span(),
-                )?;
+                if let Some(orig_tag) = orig_tag {
+                    tree_borrows.perform_access(
+                        orig_tag,
+                        Some((
+                            range_in_alloc,
+                            AccessKind::Read,
+                            diagnostics::AccessCause::Reborrow,
+                        )),
+                        this.machine.borrow_tracker.as_ref().unwrap(),
+                        alloc_id,
+                        this.machine.current_user_relevant_span(),
+                    )?;
+                } else {
+                    tree_borrows.perform_wildcard_access(
+                        Some((
+                            range_in_alloc,
+                            AccessKind::Read,
+                            diagnostics::AccessCause::Reborrow,
+                        )),
+                        this.machine.borrow_tracker.as_ref().unwrap(),
+                        alloc_id,
+                        this.machine.current_user_relevant_span(),
+                    )?;
+                }
 
                 // Also inform the data race model (but only if any bytes are actually affected).
                 if range_in_alloc.size.bytes() > 0 {
@@ -377,20 +397,20 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
         }
-
-        // Record the parent-child pair in the tree.
-        tree_borrows.new_child(
-            base_offset,
-            orig_tag,
-            new_tag,
-            inside_perms,
-            new_perm.outside_perm,
-            protected,
-            this.machine.current_user_relevant_span(),
-        )?;
+        if let Some(orig_tag) = orig_tag {
+            // Record the parent-child pair in the tree.
+            tree_borrows.new_child(
+                base_offset,
+                orig_tag,
+                new_tag,
+                inside_perms,
+                new_perm.outside_perm,
+                protected,
+                this.machine.current_user_relevant_span(),
+            )?;
+        }
         drop(tree_borrows);
-
-        interp_ok(Some(Provenance::Concrete { alloc_id, tag: new_tag }))
+        interp_ok(Some(provenance))
     }
 
     fn tb_retag_place(
