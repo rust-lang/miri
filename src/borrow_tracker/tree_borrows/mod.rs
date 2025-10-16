@@ -1,7 +1,7 @@
 use rustc_abi::{BackendRepr, Size};
 use rustc_middle::mir::{Mutability, RetagKind};
 use rustc_middle::ty::layout::HasTypingEnv;
-use rustc_middle::ty::{self, Ty};
+use rustc_middle::ty::{self, InstanceKind, Ty};
 
 use self::foreign_access_skipping::IdempotentForeignAccess;
 use self::tree::LocationState;
@@ -146,19 +146,53 @@ impl<'tcx> NewPermission {
         let ty_is_freeze = pointee.is_freeze(*cx.tcx, cx.typing_env());
         let is_protected = retag_kind == RetagKind::FnEntry;
 
+        let start_mut_ref_on_fn_entry_as_active = cx
+            .machine
+            .borrow_tracker
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .borrow_tracker_method
+            .get_tree_borrows_params()
+            .start_mut_ref_on_fn_entry_as_active;
+
+        let current_function_involves_raw_pointers = 'b: {
+            let instance = cx
+                .machine
+                .threads
+                .active_thread_stack()
+                .last()
+                .expect("Current frame has no stack")
+                .instance();
+            let ty = instance.ty(*cx.tcx, cx.typing_env());
+            if !ty.is_fn() {
+                break 'b false;
+            }
+            let sig = ty.fn_sig(*cx.tcx);
+            matches!(instance.def, InstanceKind::Item(_))
+                && sig.inputs_and_output().skip_binder().iter().any(|x| x.is_raw_ptr())
+        };
+
         if matches!(ref_mutability, Some(Mutability::Mut) | None if !ty_is_unpin) {
             // Mutable reference / Box to pinning type: retagging is a NOP.
             // FIXME: with `UnsafePinned`, this should do proper per-byte tracking.
             return None;
         }
 
+        let start_as_unique = start_mut_ref_on_fn_entry_as_active
+            && is_protected
+            && !current_function_involves_raw_pointers
+            && matches!(ref_mutability, Some(Mutability::Mut));
+
         let freeze_perm = match ref_mutability {
+            _ if start_as_unique => Permission::new_unique(),
             // Shared references are frozen.
             Some(Mutability::Not) => Permission::new_frozen(),
             // Mutable references and Boxes are reserved.
             _ => Permission::new_reserved_frz(),
         };
         let nonfreeze_perm = match ref_mutability {
+            _ if start_as_unique => Permission::new_unique(),
             // Shared references are "transparent".
             Some(Mutability::Not) => Permission::new_cell(),
             // *Protected* mutable references and boxes are reserved without regarding for interior mutability.
@@ -355,9 +389,15 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     size: Size::from_bytes(perm_range.end - perm_range.start),
                 };
 
+                let access_kind = if new_perm.freeze_perm.is_unique() {
+                    AccessKind::Write
+                } else {
+                    AccessKind::Read
+                };
+
                 tree_borrows.perform_access(
                     orig_tag,
-                    Some((range_in_alloc, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    Some((range_in_alloc, access_kind, diagnostics::AccessCause::Reborrow)),
                     this.machine.borrow_tracker.as_ref().unwrap(),
                     alloc_id,
                     this.machine.current_user_relevant_span(),
@@ -383,7 +423,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             base_offset,
             orig_tag,
             new_tag,
-            inside_perms,
+            inside_perms.clone(),
             new_perm.outside_perm,
             protected,
             this.machine.current_user_relevant_span(),
