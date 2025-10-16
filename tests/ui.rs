@@ -58,6 +58,7 @@ fn build_native_lib(target: &str) -> PathBuf {
             "tests/native-lib/aggregate_arguments.c",
             "tests/native-lib/ptr_read_access.c",
             "tests/native-lib/ptr_write_access.c",
+            "tests/native-lib/mapped_mem.c",
             // Ensure we notice serious problems in the C code.
             "-Wall",
             "-Wextra",
