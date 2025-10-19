@@ -1174,7 +1174,6 @@ impl<'tcx> Tree {
                     let mut entry = wildcard_accesses.entry(id);
                     let wildcard_access = entry.or_insert(Default::default());
 
-
                     let exposed_as = node.exposed_as(Some(perm.permission));
                     let Some(wildcard_relatedness) =
                         wildcard_access.access_relatedness(access_kind, exposed_as)
@@ -1189,8 +1188,11 @@ impl<'tcx> Tree {
                         ))
                         .into();
                     };
-                    if let Some(relatedness)=wildcard_relatedness.to_relatedness()
-                        && matches!(perm.skip_if_known_noop(access_kind, relatedness), ContinueTraversal::SkipSelfAndChildren)
+                    if let Some(relatedness) = wildcard_relatedness.to_relatedness()
+                        && matches!(
+                            perm.skip_if_known_noop(access_kind, relatedness),
+                            ContinueTraversal::SkipSelfAndChildren
+                        )
                     {
                         continue;
                     }
