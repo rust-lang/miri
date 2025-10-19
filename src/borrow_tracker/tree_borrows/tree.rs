@@ -690,7 +690,6 @@ impl<'tcx> Tree {
                 perms.insert(idx, perm);
             }
         }
-        // TODO: only initialize neccessary ranges
         for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
             if let Some(parent_access) = wildcard_accesses.get(parent_idx) {
                 let exposed_as =
@@ -1043,7 +1042,6 @@ impl Tree {
         let [child_idx] = node.children[..] else { return None };
 
         if node.is_exposed {
-            // TODO figure out if in some cases we want to combine exposed nodes
             return None;
         }
         // We never want to replace the root node, as it is also kept in `root_ptr_tags`.
@@ -1189,8 +1187,6 @@ impl<'tcx> Tree {
                     let mut entry = wildcard_accesses.entry(id);
                     let wildcard_access = entry.or_insert(Default::default());
 
-                    // add children to stack
-                    stack.extend(node.children.iter().copied());
 
                     let exposed_as = node.exposed_as(Some(perm.permission));
                     let Some(wildcard_relatedness) =
@@ -1206,8 +1202,17 @@ impl<'tcx> Tree {
                         ))
                         .into();
                     };
+                    if let Some(relatedness)=wildcard_relatedness.to_relatedness()
+                        && matches!(perm.skip_if_known_noop(access_kind, relatedness), ContinueTraversal::SkipSelfAndChildren)
+                    {
+                        continue;
+                    }
+
+                    // add children to stack
+                    stack.extend(node.children.iter().copied());
                     let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
-                        //if the access type is either, then we do not apply any transition
+                        // if the access type is either, then we do not apply any transition to this node,
+                        // but we still update each child
                         continue;
                     };
 
