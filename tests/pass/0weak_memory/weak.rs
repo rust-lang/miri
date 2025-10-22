@@ -226,6 +226,29 @@ fn old_release_store() {
     });
 }
 
+/// 2+2W variant https://johnwickerson.github.io/papers/memalloy.pdf §4.1
+/// 3 SC + 1 Rel is the strongest ordering to still observe x==y==1
+fn two_w_two_w() {
+    check_all_outcomes([1, 1], || {
+        let x = static_atomic(0);
+        let y = static_atomic(0);
+
+        let t1 = spawn(move || {
+            x.store(1, SeqCst);
+            y.store(2, SeqCst);
+            x.load(Relaxed)
+        });
+        let t2 = spawn(move || {
+            y.store(1, Release);
+            x.store(2, SeqCst);
+            y.load(Relaxed)
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap()
+    });
+}
+
 fn main() {
     relaxed();
     seq_cst();
@@ -235,4 +258,5 @@ fn main() {
     release_sequence();
     weaker_release_sequences();
     old_release_store();
+    two_w_two_w();
 }
