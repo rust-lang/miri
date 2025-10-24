@@ -407,7 +407,7 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
                 assert_eq!(val, "metadata");
             } else {
                 // For all other kinds of tests, we can just add our flag.
-                cmd.arg("--emit=metadata");
+                cmd.arg("--emit=metadata,link");
             }
 
             // Alter the `-o` parameter so that it does not overwrite the JSON file we stored above.
@@ -444,7 +444,6 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
     }
 
     let mut cmd = miri();
-    let mut emit_link_hack = false;
     // Arguments are treated very differently depending on whether this crate is
     // for interpretation by Miri, or for use by a build script / proc macro.
     if target_crate {
@@ -455,7 +454,7 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
         }
 
         // Forward arguments, but patched.
-        let emit_flag = "--emit";
+
         // This hack helps bootstrap run standard library tests in Miri. The issue is as follows:
         // when running `cargo miri test` on libcore, cargo builds a local copy of core and makes it
         // a dependency of the integration test crate. This copy duplicates all the lang items, so
@@ -472,29 +471,6 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
             && !runnable_crate
             && phase == RustcPhase::Build;
         while let Some(arg) = args.next() {
-            // Patch `--emit`: remove "link" from "--emit" to make this a check-only build.
-            if let Some(val) = arg.strip_prefix(emit_flag) {
-                // Patch this argument. First, extract its value.
-                let val =
-                    val.strip_prefix('=').expect("`cargo` should pass `--emit=X` as one argument");
-                let mut val: Vec<_> = val.split(',').collect();
-                // Now make sure "link" is not in there, but "metadata" is.
-                if let Some(i) = val.iter().position(|&s| s == "link") {
-                    emit_link_hack = true;
-                    val.remove(i);
-                    if !val.contains(&"metadata") {
-                        val.push("metadata");
-                    }
-                }
-                cmd.arg(format!("{emit_flag}={}", val.join(",")));
-                continue;
-            }
-            // Patch `--extern` filenames, since Cargo sometimes passes stub `.rlib` files:
-            // https://github.com/rust-lang/miri/issues/1705
-            if arg == "--extern" {
-                forward_patched_extern_arg(&mut args, &mut cmd);
-                continue;
-            }
             // If the REPLACE_LIBRS hack is enabled and we are building a `lib.rs` file, and a
             // `lib.miri.rs` file exists, then build that instead.
             if replace_librs {
@@ -541,17 +517,6 @@ pub fn phase_rustc(mut args: impl Iterator<Item = String>, phase: RustcPhase) {
     // Run it.
     if verbose > 0 {
         eprintln!("[cargo-miri rustc] target_crate={target_crate} runnable_crate={runnable_crate}");
-    }
-
-    // Create a stub .rlib file if "link" was requested by cargo.
-    // This is necessary to prevent cargo from doing rebuilds all the time.
-    if emit_link_hack {
-        for filename in out_filenames() {
-            if verbose > 0 {
-                eprintln!("[cargo-miri rustc] creating fake lib file at `{}`", filename.display());
-            }
-            File::create(filename).expect("failed to create fake lib file");
-        }
     }
 
     debug_cmd("[cargo-miri rustc]", verbose, &cmd);
