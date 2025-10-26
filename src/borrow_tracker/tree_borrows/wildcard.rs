@@ -10,7 +10,7 @@ use crate::{AccessKind, BorTag};
 /// represensts the maximum access level that is possible.
 ///
 /// Note that we derive Ord and PartialOrd, so the order in which variants are listed below matters:
-/// None < Read < Write. Do not change that order. See the `test_order` test.
+/// None < Read < Write. Do not change that order.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub enum WildcardAccessLevel {
     #[default]
