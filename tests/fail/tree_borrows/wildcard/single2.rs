@@ -25,8 +25,9 @@ pub fn main() {
     //    │            │     │           │
     //    └────────────┘     └───────────┘
 
-    *ref2 = 13; //disables ref1
+    // Disables ref1.
+    *ref2 = 13;
 
-    // tries to do a wildcard access through the only exposed ref1, which is disabled
+    // Tries to do a wildcard access through the only exposed reference ref1, which is disabled.
     let fail = unsafe { *wild }; //~ ERROR: /read access through .* is forbidden/
 }

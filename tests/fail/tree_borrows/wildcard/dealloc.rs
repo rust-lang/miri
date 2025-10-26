@@ -10,7 +10,9 @@ pub fn main() {
 
     let int = ref1 as *mut u32 as usize;
     let wild = int as *mut u32;
-
+    // Disables ref1 and therefore also wild.
     *ref2 = 14;
+
+    // tries to dealloc through a disabled wildcard reference
     unsafe { std::alloc::dealloc(wild as *mut u8, Layout::new::<u32>()) }; //~ ERROR: /deallocation through wildcard .* is forbidden/
 }

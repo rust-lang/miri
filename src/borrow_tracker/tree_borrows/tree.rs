@@ -212,11 +212,11 @@ impl fmt::Display for LocationState {
         Ok(())
     }
 }
-/// state associated with each location of the allocation
+
+/// State associated with each location of the allocation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
-    /// Maps a tag and a location to a perm, with possible lazy
-    /// initialization.
+    /// Maps a tag to a perm, with possible lazy initialization.
     ///
     /// NOTE: not all tags registered in `nodes` are necessarily in all
     /// ranges of `rperms`, because `rperms` is in part lazily initialized.
@@ -225,12 +225,13 @@ pub struct Location {
     ///
     /// We do uphold the fact that `keys(perms)` is a subset of `keys(nodes)`
     pub perms: UniValMap<LocationState>,
-    /// Maps a tag and a location to its wildcard access tracking information,
+    /// Maps a tag to its wildcard access tracking information,
     /// with possible lazy initialization.
     ///
     /// NOTE: same guarantees on entry initialisation as for `perms`
     pub wildcard_accesses: UniValMap<WildcardAccessTracking>,
 }
+
 /// Tree structure with both parents and children since we want to be
 /// able to traverse the tree efficiently in both directions.
 #[derive(Clone, Debug)]
@@ -244,7 +245,7 @@ pub struct Tree {
     pub(super) tag_mapping: UniKeyMap<BorTag>,
     /// All nodes of this tree.
     pub(super) nodes: UniValMap<Node>,
-    /// associates with each location its state and wildcard access tracking
+    /// Associates with each location its state and wildcard access tracking.
     pub(super) rperms: DedupRangeMap<Location>,
     /// The index of the root node.
     pub(super) root: UniIndex,
@@ -271,7 +272,7 @@ pub(super) struct Node {
     /// in cases where there is no location state yet. See `foreign_access_skipping.rs`,
     /// and `LocationState::idempotent_foreign_access` for more information
     default_initial_idempotent_foreign_access: IdempotentForeignAccess,
-    /// weather a wildcard access could happen through this node
+    /// Whether a wildcard access could happen through this node.
     pub is_exposed: bool,
     /// Some extra information useful only for debugging purposes
     pub debug_info: NodeDebugInfo,
@@ -532,8 +533,9 @@ impl<'tree> TreeVisitor<'tree> {
         };
         self.traverse_this_parents_children_other_raw(start, f_continue, f_propagate, err_builder)
     }
-    /// same as the non `traverse_this_parents_children_other`, but gives access to the full visitor
-    /// inside the `f_propagate` callback
+
+    /// The same as `traverse_this_parents_children_other`, but gives access to the full visitor
+    /// inside the `f_propagate` callback.
     fn traverse_this_parents_children_other_raw<InnErr, OutErr>(
         mut self,
         start: BorTag,
@@ -690,6 +692,9 @@ impl<'tcx> Tree {
                 perms.insert(idx, perm);
             }
         }
+
+        // We need to ensure the consistency of the wildcard access tracking data structure.
+        // For this, we insert the correct entry for this tag based on its parent, if it exists.
         for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
             if let Some(parent_access) = wildcard_accesses.get(parent_idx) {
                 let exposed_as =
@@ -777,8 +782,8 @@ impl<'tcx> Tree {
         {
             let start_tag = match prov {
                 ProvenanceExtra::Concrete(tag) => tag,
-                // the order in which we check if any nodes are invalidated doesnt matter,
-                // so we use the root as a default tag
+                // The order in which we check if any nodes are invalidated doesn't matter,
+                // so we use the root as a default tag.
                 ProvenanceExtra::Wildcard => self.nodes.get(self.root).unwrap().tag,
             };
             TreeVisitor {
@@ -850,10 +855,12 @@ impl<'tcx> Tree {
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
+        use std::ops::Range;
+
         let ProvenanceExtra::Concrete(tag) = prov else {
             return self.perform_wildcard_access(access_range_and_kind, global, alloc_id, span);
         };
-        use std::ops::Range;
+
         // Performs the per-node work:
         // - insert the permission if it does not exist
         // - perform the access
@@ -900,8 +907,8 @@ impl<'tcx> Tree {
                     span,
                 });
 
-                // we need to update the wildcard access tracking information,
-                // if the permission of an exposed pointer changes
+                // We need to update the wildcard access tracking information,
+                // if the permission of an exposed pointer changes.
                 if node.is_exposed {
                     let wildcard_accesses = this.wildcard_accesses.as_deref_mut().unwrap();
                     //Protected doesnt change during access.
@@ -1036,6 +1043,7 @@ impl Tree {
 
         let [child_idx] = node.children[..] else { return None };
 
+        // We need to keep track of which tags are exposed, so we cannot remove the node if it's exposed.
         if node.is_exposed {
             return None;
         }
@@ -1155,9 +1163,9 @@ impl Tree {
     }
 }
 
-/// methods for wildcard borrows
+/// Methods for wildcard borrows.
 impl<'tcx> Tree {
-    /// analogous to `perform_access`, but we do not know from which exposed reference the access happens.
+    /// Analogous to `perform_access`, but we do not know from which exposed reference the access happens.
     pub fn perform_wildcard_access(
         &mut self,
         access_range_and_kind: Option<(AllocRange, AccessKind, diagnostics::AccessCause)>,
@@ -1169,9 +1177,9 @@ impl<'tcx> Tree {
             for (perms_range, Location { perms, wildcard_accesses }) in
                 self.rperms.iter_mut(access_range.start, access_range.size)
             {
-                // we can simply iterate over the entire graph in arbitrary order
-                // as the relatedness of the access for each can be calculated with
-                // only the tracking information attached to each node
+                // We can simply iterate over the entire graph in arbitrary order, as the
+                // relatedness of the access for each node can be calculated with only
+                // the tracking information attached to each node.
                 let mut stack = vec![self.root];
                 while let Some(id) = stack.pop() {
                     let node = self.nodes.get_mut(id).unwrap();
@@ -1186,9 +1194,9 @@ impl<'tcx> Tree {
                     let Some(wildcard_relatedness) =
                         wildcard_access.access_relatedness(access_kind, exposed_as)
                     else {
-                        // there doenst exist a valid exposed reference for this access
-                        // to happen through
-                        // if this fails for one id, then it fails for all ids
+                        // There doesn't exist a valid exposed reference for this access
+                        // to happen through.
+                        // If this fails for one id, then it fails for all ids.
                         return Err(no_valid_exposed_references_error(
                             alloc_id,
                             perms_range.start,
@@ -1205,15 +1213,15 @@ impl<'tcx> Tree {
                         continue;
                     }
 
-                    // add children to stack
+                    // Add children to stack.
                     stack.extend(node.children.iter().copied());
                     let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
-                        // if the access type is either, then we do not apply any transition to this node,
-                        // but we still update each child
+                        // If the access type is either, then we do not apply any transition to this node,
+                        // but we still update each child.
                         continue;
                     };
 
-                    //update idempototent foreign access data
+                    // Update idempototent foreign access data.
                     if matches!(
                         perm.skip_if_known_noop(access_kind, relatedness),
                         ContinueTraversal::Recurse
@@ -1225,7 +1233,7 @@ impl<'tcx> Tree {
                     let transition = perm
                         .perform_access(access_kind, relatedness, protected)
                         .map_err(|trans| {
-                            // if another pointer undergoes an invalid transformation
+                            // If another pointer undergoes an invalid transformation, return an error.
                             TbError {
                                 conflicting_info: &node.debug_info,
                                 access_cause,
@@ -1236,7 +1244,7 @@ impl<'tcx> Tree {
                             }
                             .build()
                         })?;
-                    // Record the event as part of the history
+                    // Record the event as part of the history.
                     if !transition.is_noop() {
                         node.debug_info.history.push(diagnostics::Event {
                             transition,
@@ -1247,8 +1255,8 @@ impl<'tcx> Tree {
                             span,
                         });
 
-                        // we need to update the wildcard access tracking information,
-                        // if the permission of an exposed pointer changes
+                        // We need to update the wildcard access tracking information,
+                        // if the permission of an exposed pointer changes.
                         if node.is_exposed {
                             // Protected value doesnt change during access.
                             let old_access_type =
@@ -1294,8 +1302,8 @@ impl Node {
             self.default_initial_idempotent_foreign_access,
         )
     }
-    /// returns at which access level a wildcard access through this reference
-    /// could happen through this node
+    /// Returns, at which access level, a wildcard access through this reference
+    /// could happen through this node.
     pub fn exposed_as(&self, perm: Option<Permission>, protected: bool) -> WildcardAccessLevel {
         if self.is_exposed {
             let perm = perm.unwrap_or_else(|| self.default_location_state().permission());
@@ -1329,9 +1337,9 @@ pub enum AccessRelatedness {
     /// The accessed pointer is neither of the above.
     // It's a cousin/uncle/etc., something in a side branch.
     CousinAccess,
-    /// We do not know the accessed pointer, but we know that it is a child of this pointer
+    /// We do not know the accessed pointer, but we know that it is a child of this pointer.
     WildcardChildAccess,
-    /// We do not know the accessed pointer, but we know that it is foreign to this pointer
+    /// We do not know the accessed pointer, but we know that it is foreign to this pointer.
     WildcardForeignAccess,
 }
 

@@ -97,8 +97,8 @@ impl<'tcx> Tree {
         // `None` makes it the magic on-protector-end operation
         self.perform_access(ProvenanceExtra::Concrete(tag), None, global, alloc_id, span)?;
 
-        // changing the protector status of a pointer can change which child accesses are allowed to it
-        // so we need to update the wildcard tracking info with the new strongest allowed child access
+        // Changing the protector status of a pointer can change which child accesses are
+        // allowed to it so we need to update the wildcard tracking info with the new strongest allowed child access.
         let idx = self.tag_mapping.get(&tag).unwrap();
         if self.nodes.get(idx).unwrap().is_exposed {
             for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {

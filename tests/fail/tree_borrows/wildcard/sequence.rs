@@ -12,7 +12,7 @@ pub fn main() {
     let ref3 = &mut *ref2;
     let int3 = ref3 as *mut u32 as usize;
 
-    //write through ref3 so that they all are active
+    // Write through ref3 so that all references are active.
     *ref3 = 43;
 
     let wild = int1 as *mut u32;
@@ -42,20 +42,20 @@ pub fn main() {
     //     │            │
     //     └────────────┘
 
-    // writes through either ref1 or ref3, which is either a child or foreign access to ref2.
+    // Writes through either ref1 or ref3, which is either a child or foreign access to ref2.
     unsafe { wild.write(42) };
 
-    //reading from ref2 still works since the previous access could have been through its child
-    //this also freezes ref3
+    // Reading from ref2 still works, since the previous access could have been through its child.
+    // This also freezes ref3.
     let x = *ref2;
 
-    // we can still write through wild, as there is still the exposed ref1 with write permissions
-    // under proper exposed provenance this would be UB as the only tag wild can assume to not
-    // invalidate ref2 is ref3, which we just invalidated
+    // We can still write through wild, as there is still the exposed ref1 with write permissions
+    // under proper exposed provenance, this would be UB as the only tag wild can assume to not
+    // invalidate ref2 is ref3, which we just invalidated.
     //
-    // disables ref2,ref3
+    // This disables ref2, ref3.
     unsafe { wild.write(43) };
 
-    // fails because ref2 is disabled
+    // Fails because ref2 is disabled.
     let fail = *ref2; //~ ERROR: /read access through .* is forbidden/
 }

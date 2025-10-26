@@ -375,7 +375,7 @@ impl Permission {
     }
 
     /// Returns the strongest access allowed from a child to this node without
-    /// causing UB (not accounting for protectors)
+    /// causing UB (only considers possible transitions to this permission).
     pub fn strongest_allowed_child_access(&self, protected: bool) -> WildcardAccessLevel {
         match self.inner {
             // everything except disabled can be accessed by read access

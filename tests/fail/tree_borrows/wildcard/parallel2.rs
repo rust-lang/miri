@@ -9,7 +9,7 @@ pub fn main() {
     let ref2 = unsafe { &mut *ptr_base };
     let ref3 = unsafe { &mut *ptr_base };
 
-    // both references get exposed
+    // Both references get exposed.
     let int1 = ref1 as *mut u32 as usize;
     let int2 = ref2 as *mut u32 as usize;
 
@@ -29,9 +29,9 @@ pub fn main() {
     //    │            │       │            │       │           │
     //    └────────────┘       └────────────┘       └───────────┘
 
-    // disables ref3 as both exposed pointers are foreign to it
+    // Disables ref3 as both exposed pointers are foreign to it.
     unsafe { wild.write(13) };
 
-    // fails because ref3 is disabled
+    // Fails because ref3 is disabled.
     let fail = *ref3; //~ ERROR: /read access through .* is forbidden/
 }

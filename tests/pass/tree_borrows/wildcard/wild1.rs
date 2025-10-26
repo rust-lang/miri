@@ -3,7 +3,7 @@
 pub fn main() {
     wildcard_parallel();
     wildcard_sequence();
-    destructor();
+    dealloc();
     protector();
     protector_conflicted_release();
     returned_mut_is_usable();
@@ -16,7 +16,7 @@ pub fn wildcard_parallel() {
     let ref1 = unsafe { &mut *ptr_base };
     let ref2 = unsafe { &mut *ptr_base };
 
-    // both references get exposed
+    // Both references get exposed.
     let int1 = ref1 as *mut u32 as usize;
     let int2 = ref2 as *mut u32 as usize;
 
@@ -39,11 +39,11 @@ pub fn wildcard_parallel() {
     //   │            │     │            │
     //   └────────────┘     └────────────┘
 
-    // writes through either of the exposed references
-    // we do not know which so we cannot disable the other
+    // Writes through either of the two exposed references.
+    // We do not know which so we cannot disable the other.
     unsafe { wild.write(13) };
 
-    // reading through either of these references should be valid
+    // Reading through either of these references should be valid.
     assert_eq!(*ref2, 13);
 }
 
@@ -86,23 +86,24 @@ pub fn wildcard_sequence() {
     //     │            │
     //     └────────────┘
 
-    // writes through either ref1 or ref3, which is either a child or foreign access to ref2.
+    // This writes either through ref1 or ref3, which is either a child or foreign access to ref2.
     unsafe { wild.write(42) };
 
-    //reading from ref2 still works since the previous access could have been through its child
-    //this also freezes ref3
+    // Reading from ref2 still works, since the previous access could have been through its child.
+    // This also freezes ref3.
     let x = *ref2;
 
-    // we can still write through wild, as there is still the exposed ref1 with write permissions
+    // We can still write through wild, as there is still the exposed ref1 with write permissions.
     unsafe { wild.write(43) };
 }
 
-fn destructor() {
+fn dealloc() {
     use std::alloc::Layout;
     let x = unsafe { std::alloc::alloc_zeroed(Layout::new::<u32>()) as *mut u32 };
     let ref1 = unsafe { &mut *x };
     let int = ref1 as *mut u32 as usize;
     let wild = int as *mut u32;
+
     unsafe { std::alloc::dealloc(wild as *mut u8, Layout::new::<u32>()) };
 }
 
@@ -129,24 +130,25 @@ fn protector_conflicted_release() {
     let ref2 = unsafe { &mut *ptr_base };
 
     let protect = |arg: &mut u32| {
-        // expose arg
+        // Expose arg.
         let int = arg as *mut u32 as usize;
         let wild = int as *mut u32;
 
-        // foreign read to arg marks it as conflicted making child_writes UB while its protected
+        // Do a foreign read to arg marking it as conflicted and making child_writes UB while its protected.
         let _x = *ref2;
 
         return wild;
     };
 
     let wild = protect(ref1);
-    // protector got released so writes through arg should work again
+
+    // The protector on arg got released so writes through arg should work again.
     unsafe { *wild = 4 };
 }
 
-// analogous to same test in `../tree-borrows.rs` but with a protected wildcard pointer
+// Analogous to same test in `../tree-borrows.rs` but with a protected wildcard pointer.
 fn returned_mut_is_usable() {
-    // NOTE: currently we ignore protectors on wildcard references
+    // NOTE: Currently we ignore protectors on wildcard references.
     fn reborrow(x: &mut u8) -> &mut u8 {
         let y = &mut *x;
         // Activate the reference so that it is vulnerable to foreign reads.
@@ -159,6 +161,8 @@ fn returned_mut_is_usable() {
     let int = ref1 as *mut u8 as usize;
     let wild = int as *mut u8;
     let wild_ref = unsafe { &mut *wild };
+
     let y = reborrow(wild_ref);
+
     *y = 1;
 }

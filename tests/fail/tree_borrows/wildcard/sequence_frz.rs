@@ -39,10 +39,10 @@ pub fn main() {
     //     │            │
     //     └────────────┘
 
-    // writes through ref1. we cannot write through ref3 as its frozen
-    // disables ref2, ref3
+    // Writes through ref1 as we cannot write through ref3 since it's frozen.
+    // Disables ref2, ref3.
     unsafe { wild.write(42) };
 
-    // ref2 is disabled
+    // ref2 is disabled.
     let fail = *ref2; //~ ERROR: /read access through .* is forbidden/
 }
