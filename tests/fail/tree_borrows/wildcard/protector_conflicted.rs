@@ -9,14 +9,14 @@ pub fn main() {
     let ref2 = unsafe { &mut *ptr_base };
 
     let protect = |arg: &mut u32| {
-        // expose arg
+        // Expose arg.
         let int = arg as *mut u32 as usize;
         let wild = int as *mut u32;
 
-        // foreign read to arg marks it as conflicted making child_writes UB while its protected
+        // Does a foreign read to arg marking it as conflicted and making child_writes UB while it's protected.
         let _x = *ref2;
 
-        // UB because it tries to write through arg
+        // UB because it tries to write through arg.
         unsafe { *wild = 4 }; //~ ERROR: /write access through wildcard at .* is forbidden/
     };
 

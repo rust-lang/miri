@@ -368,7 +368,7 @@ impl TbError<'_> {
     }
 }
 /// Cannot access this allocation with wildcard provenance, as there are no
-/// Valid exposed references for this access kind.
+/// valid exposed references for this access kind.
 pub fn no_valid_exposed_references_error<'tcx>(
     alloc_id: AllocId,
     offset: u64,

@@ -28,8 +28,8 @@ pub fn main() {
     //    │            │     │           │
     //    └────────────┘     └───────────┘
 
-    // write thourgh the wildcard to the only exposed reference ref1
-    // disabling ref2
+    // Write thourgh the wildcard to the only exposed reference ref1,
+    // disabling ref2.
     unsafe { wild.write(13) };
 
     let fail = *ref2; //~ ERROR: /read access through .* is forbidden/
