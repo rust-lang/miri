@@ -373,12 +373,20 @@ impl Permission {
     pub fn strongest_idempotent_foreign_access(&self, prot: bool) -> IdempotentForeignAccess {
         self.inner.strongest_idempotent_foreign_access(prot)
     }
+
     /// Returns the strongest access allowed from a child to this node without
     /// causing UB (not accounting for protectors)
-    pub fn strongest_allowed_child_access(&self) -> WildcardAccessLevel {
+    pub fn strongest_allowed_child_access(&self, protected: bool) -> WildcardAccessLevel {
         match self.inner {
+            // everything except disabled can be accessed by read access
             Disabled => WildcardAccessLevel::None,
-            Frozen | ReservedFrz { conflicted: true } => WildcardAccessLevel::Read,
+            // frozen references cannot be written to by a child
+            Frozen => WildcardAccessLevel::Read,
+            // If the `conflicted` flag is set, then there was a foreign read during
+            // the function call that is still ongoing (still `protected`),
+            // this is UB (`noalias` violation).
+            ReservedFrz { conflicted: true } if protected => WildcardAccessLevel::Read,
+            // everything else allows writes
             _ => WildcardAccessLevel::Write,
         }
     }

@@ -5,6 +5,7 @@ pub fn main() {
     wildcard_sequence();
     destructor();
     protector();
+    protector_conflicted_release();
     returned_mut_is_usable();
 }
 #[allow(unused_variables)]
@@ -118,6 +119,29 @@ fn protector() {
     protect(wild_ref);
 
     assert_eq!(*ref1, 4);
+}
+
+fn protector_conflicted_release() {
+    let mut x: u32 = 42;
+
+    let ptr_base = &mut x as *mut u32;
+    let ref1 = unsafe { &mut *ptr_base };
+    let ref2 = unsafe { &mut *ptr_base };
+
+    let protect = |arg: &mut u32| {
+        // expose arg
+        let int = arg as *mut u32 as usize;
+        let wild = int as *mut u32;
+
+        // foreign read to arg marks it as conflicted making child_writes UB while its protected
+        let _x = *ref2;
+
+        return wild;
+    };
+
+    let wild = protect(ref1);
+    // protector got released so writes through arg should work again
+    unsafe { *wild = 4 };
 }
 
 // analogous to same test in `../tree-borrows.rs` but with a protected wildcard pointer
