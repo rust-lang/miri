@@ -4,7 +4,8 @@ use rustc_middle::ty::layout::HasTypingEnv;
 use rustc_middle::ty::{self, Ty};
 
 use self::foreign_access_skipping::IdempotentForeignAccess;
-use self::tree::LocationState;
+use self::tree::{Location, LocationState};
+use self::wildcard::WildcardAccessTracking;
 use crate::borrow_tracker::{AccessKind, GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
 use crate::*;
@@ -110,7 +111,31 @@ impl<'tcx> Tree {
     ) -> InterpResult<'tcx> {
         let span = machine.current_user_relevant_span();
         // `None` makes it the magic on-protector-end operation
-        self.perform_access(tag, None, global, alloc_id, span)
+        self.perform_access(tag, None, global, alloc_id, span)?;
+
+        // changing the protector status of a pointer can change which child accesses are allowed to it
+        // so we need to update the wildcard tracking info with the new strongest allowed child access
+        let idx = self.tag_mapping.get(&tag).unwrap();
+        if self.nodes.get(idx).unwrap().is_exposed {
+            for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
+                if let Some(p) = perms.get(idx)
+                    && wildcard_accesses.get(idx).is_some()
+                {
+                    let old_access_type = p.permission().strongest_allowed_child_access(true);
+                    let access_type = p.permission().strongest_allowed_child_access(false);
+                    WildcardAccessTracking::update_exposure(
+                        idx,
+                        old_access_type,
+                        access_type,
+                        &self.nodes,
+                        perms,
+                        wildcard_accesses,
+                        &global.borrow().protected_tags,
+                    );
+                }
+            }
+        }
+        interp_ok(())
     }
 }
 
@@ -619,6 +644,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // This is okay because accessing them is UB anyway, no need for any Tree Borrows checks.
         // NOT using `get_alloc_extra_mut` since this might be a read-only allocation!
         let kind = this.get_alloc_info(alloc_id).kind;
+
         match kind {
             AllocKind::LiveData => {
                 // This should have alloc_extra data, but `get_alloc_extra` can still fail
@@ -626,7 +652,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // uncovers a non-supported `extern static`.
                 let alloc_extra = this.get_alloc_extra(alloc_id)?;
                 trace!("Tree Borrows tag {tag:?} exposed in {alloc_id:?}");
-                alloc_extra.borrow_tracker_tb().borrow_mut().expose_tag(tag);
+                let global = this.machine.borrow_tracker.as_ref().unwrap();
+                alloc_extra.borrow_tracker_tb().borrow_mut().expose_tag(tag, global);
             }
             AllocKind::Function | AllocKind::VTable | AllocKind::TypeId | AllocKind::Dead => {
                 // No tree borrows on these allocations.

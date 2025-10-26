@@ -680,7 +680,7 @@ impl<'tcx> Tree {
         for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
             if let Some(parent_access) = wildcard_accesses.get(parent_idx) {
                 let exposed_as =
-                    parent_node.exposed_as(perms.get(parent_idx).map(|p| p.permission));
+                    parent_node.exposed_as(perms.get(parent_idx).map(|p| p.permission), protected);
                 wildcard_accesses.insert(idx, parent_access.get_new_child(exposed_as));
             }
         }
@@ -900,8 +900,9 @@ impl<'tcx> Tree {
                 // if the permission of an exposed pointer changes
                 if node.is_exposed {
                     let wildcard_accesses = args.wildcard_accesses.as_deref_mut().unwrap();
-                    let old_access_type = old_permission.strongest_allowed_child_access();
-                    let access_type = state.permission.strongest_allowed_child_access();
+                    //Protected doesnt change during access.
+                    let old_access_type = old_permission.strongest_allowed_child_access(protected);
+                    let access_type = state.permission.strongest_allowed_child_access(protected);
                     WildcardAccessTracking::update_exposure(
                         args.idx,
                         old_access_type,
@@ -909,6 +910,7 @@ impl<'tcx> Tree {
                         &args.nodes,
                         &args.perms,
                         wildcard_accesses,
+                        &global.borrow().protected_tags,
                     );
                 }
             }
@@ -1174,7 +1176,7 @@ impl<'tcx> Tree {
                     let mut entry = wildcard_accesses.entry(id);
                     let wildcard_access = entry.or_insert(Default::default());
 
-                    let exposed_as = node.exposed_as(Some(perm.permission));
+                    let exposed_as = node.exposed_as(Some(perm.permission), protected);
                     let Some(wildcard_relatedness) =
                         wildcard_access.access_relatedness(access_kind, exposed_as)
                     else {
@@ -1242,8 +1244,11 @@ impl<'tcx> Tree {
                         // we need to update the wildcard access tracking information,
                         // if the permission of an exposed pointer changes
                         if node.is_exposed {
-                            let old_access_type = old_permission.strongest_allowed_child_access();
-                            let access_type = perm.permission.strongest_allowed_child_access();
+                            // Protected value doesnt change during access.
+                            let old_access_type =
+                                old_permission.strongest_allowed_child_access(protected);
+                            let access_type =
+                                perm.permission.strongest_allowed_child_access(protected);
                             WildcardAccessTracking::update_exposure(
                                 id,
                                 old_access_type,
@@ -1251,6 +1256,7 @@ impl<'tcx> Tree {
                                 &self.nodes,
                                 perms,
                                 wildcard_accesses,
+                                &global.borrow().protected_tags,
                             );
                         }
                     }
@@ -1284,10 +1290,10 @@ impl Node {
     }
     /// returns at which access level a wildcard access through this reference
     /// could happen through this node
-    pub fn exposed_as(&self, perm: Option<Permission>) -> WildcardAccessLevel {
+    pub fn exposed_as(&self, perm: Option<Permission>, protected: bool) -> WildcardAccessLevel {
         if self.is_exposed {
             let perm = perm.unwrap_or_else(|| self.default_location_state().permission());
-            perm.strongest_allowed_child_access()
+            perm.strongest_allowed_child_access(protected)
         } else {
             WildcardAccessLevel::None
         }
