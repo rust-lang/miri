@@ -759,37 +759,27 @@ impl<'tcx> Tree {
     /// - the absence of Strong Protectors anywhere in the allocation
     pub fn dealloc(
         &mut self,
-        tag: Option<BorTag>,
+        prov: ProvenanceExtra,
         access_range: AllocRange,
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
-        if let Some(tag) = tag {
-            self.perform_access(
-                tag,
-                Some((access_range, AccessKind::Write, diagnostics::AccessCause::Dealloc)),
-                global,
-                alloc_id,
-                span,
-            )?;
-        } else {
-            self.perform_wildcard_access(
-                Some((access_range, AccessKind::Write, diagnostics::AccessCause::Dealloc)),
-                global,
-                alloc_id,
-                span,
-            )?;
-        }
+        self.perform_access(
+            prov,
+            Some((access_range, AccessKind::Write, diagnostics::AccessCause::Dealloc)),
+            global,
+            alloc_id,
+            span,
+        )?;
         for (perms_range, Location { perms, .. }) in
             self.rperms.iter_mut(access_range.start, access_range.size)
         {
-            let tag = if let Some(tag) = tag {
-                tag
-            } else {
+            let start_tag = match prov {
+                ProvenanceExtra::Concrete(tag) => tag,
                 // the order in which we check if any nodes are invalidated doesnt matter,
                 // so we use the root as a default tag
-                self.nodes.get(self.root).unwrap().tag
+                ProvenanceExtra::Wildcard => self.nodes.get(self.root).unwrap().tag,
             };
             TreeVisitor {
                 nodes: &mut self.nodes,
@@ -798,7 +788,7 @@ impl<'tcx> Tree {
                 wildcard_accesses: None,
             }
             .traverse_this_parents_children_other(
-                tag,
+                start_tag,
                 // visit all children, skipping none
                 |_| ContinueTraversal::Recurse,
                 |args: NodeAppArgs<'_>| -> Result<(), TransitionError> {
@@ -854,12 +844,15 @@ impl<'tcx> Tree {
     /// - recording the history.
     pub fn perform_access(
         &mut self,
-        tag: BorTag,
+        prov: ProvenanceExtra,
         access_range_and_kind: Option<(AllocRange, AccessKind, diagnostics::AccessCause)>,
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
+        let ProvenanceExtra::Concrete(tag) = prov else {
+            return self.perform_wildcard_access(access_range_and_kind, global, alloc_id, span);
+        };
         use std::ops::Range;
         // Performs the per-node work:
         // - insert the permission if it does not exist

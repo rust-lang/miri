@@ -58,23 +58,13 @@ impl<'tcx> Tree {
         );
         let global = machine.borrow_tracker.as_ref().unwrap();
         let span = machine.current_user_relevant_span();
-        match prov {
-            ProvenanceExtra::Concrete(tag) =>
-                self.perform_access(
-                    tag,
-                    Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
-                    global,
-                    alloc_id,
-                    span,
-                ),
-            ProvenanceExtra::Wildcard =>
-                self.perform_wildcard_access(
-                    Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
-                    global,
-                    alloc_id,
-                    span,
-                ),
-        }
+        self.perform_access(
+            prov,
+            Some((range, access_kind, diagnostics::AccessCause::Explicit(access_kind))),
+            global,
+            alloc_id,
+            span,
+        )
     }
 
     /// Check that this pointer has permission to deallocate this range.
@@ -85,15 +75,9 @@ impl<'tcx> Tree {
         size: Size,
         machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
-        // TODO: for now we bail out on wildcard pointers. Eventually we should
-        // handle them as much as we can.
-        let tag = match prov {
-            ProvenanceExtra::Concrete(tag) => Some(tag),
-            ProvenanceExtra::Wildcard => None,
-        };
         let global = machine.borrow_tracker.as_ref().unwrap();
         let span = machine.current_user_relevant_span();
-        self.dealloc(tag, alloc_range(Size::ZERO, size), global, alloc_id, span)
+        self.dealloc(prov, alloc_range(Size::ZERO, size), global, alloc_id, span)
     }
 
     /// A tag just lost its protector.
@@ -111,7 +95,7 @@ impl<'tcx> Tree {
     ) -> InterpResult<'tcx> {
         let span = machine.current_user_relevant_span();
         // `None` makes it the magic on-protector-end operation
-        self.perform_access(tag, None, global, alloc_id, span)?;
+        self.perform_access(ProvenanceExtra::Concrete(tag), None, global, alloc_id, span)?;
 
         // changing the protector status of a pointer can change which child accesses are allowed to it
         // so we need to update the wildcard tracking info with the new strongest allowed child access
@@ -261,34 +245,49 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // After all, the pointer may be lazily initialized outside this initial range.
                 data
             }
-            Err(_) => {
+            _ => {
                 assert_eq!(ptr_size, Size::ZERO); // we did the deref check above, size has to be 0 here
                 // This pointer doesn't come with an AllocId, so there's no
                 // memory to do retagging in.
+                let new_prov = place.ptr().provenance;
                 trace!(
                     "reborrow of size 0: reference {:?} derived from {:?} (pointee {})",
-                    new_tag,
+                    new_prov,
                     place.ptr(),
                     place.layout.ty,
                 );
                 log_creation(this, None)?;
                 // Keep original provenance.
-                return interp_ok(place.ptr().provenance);
+                return interp_ok(new_prov);
             }
         };
+
+        let is_wildcard = matches!(parent_prov, ProvenanceExtra::Wildcard);
+
+        if is_wildcard && ptr_size == Size::ZERO {
+            let new_prov = Provenance::Wildcard;
+            trace!(
+                "reborrow of size 0: reference {:?} derived from {:?} (pointee {})",
+                new_prov,
+                place.ptr(),
+                place.layout.ty,
+            );
+            log_creation(this, None)?;
+            // Keep original provenance.
+            return interp_ok(Some(new_prov));
+        }
+
         log_creation(this, Some((alloc_id, base_offset, parent_prov)))?;
 
-        let (orig_tag, provenance) = match parent_prov {
-            ProvenanceExtra::Wildcard => (None, Provenance::Wildcard), // TODO: handle wildcard pointers
-            ProvenanceExtra::Concrete(tag) =>
-                (Some(tag), Provenance::Concrete { alloc_id, tag: new_tag }),
+        let new_prov = match parent_prov {
+            ProvenanceExtra::Wildcard => Provenance::Wildcard, // TODO: handle retagging wildcard pointers
+            ProvenanceExtra::Concrete(_) => Provenance::Concrete { alloc_id, tag: new_tag },
         };
-        let is_wildcard = orig_tag.is_none();
 
         trace!(
             "reborrow: reference {:?} derived from {:?} (pointee {}): {:?}, size {}",
             new_tag,
-            orig_tag,
+            parent_prov,
             place.layout.ty,
             interpret::Pointer::new(alloc_id, base_offset),
             ptr_size.bytes()
@@ -320,7 +319,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             assert_eq!(ptr_size, Size::ZERO); // we did the deref check above, size has to be 0 here
             // There's not actually any bytes here where accesses could even be tracked.
             // Just produce the new provenance, nothing else to do.
-            return interp_ok(Some(provenance));
+            return interp_ok(Some(new_prov));
         }
 
         let protected = new_perm.protector.is_some();
@@ -383,30 +382,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     start: Size::from_bytes(perm_range.start) + base_offset,
                     size: Size::from_bytes(perm_range.end - perm_range.start),
                 };
-                if let Some(orig_tag) = orig_tag {
-                    tree_borrows.perform_access(
-                        orig_tag,
-                        Some((
-                            range_in_alloc,
-                            AccessKind::Read,
-                            diagnostics::AccessCause::Reborrow,
-                        )),
-                        this.machine.borrow_tracker.as_ref().unwrap(),
-                        alloc_id,
-                        this.machine.current_user_relevant_span(),
-                    )?;
-                } else {
-                    tree_borrows.perform_wildcard_access(
-                        Some((
-                            range_in_alloc,
-                            AccessKind::Read,
-                            diagnostics::AccessCause::Reborrow,
-                        )),
-                        this.machine.borrow_tracker.as_ref().unwrap(),
-                        alloc_id,
-                        this.machine.current_user_relevant_span(),
-                    )?;
-                }
+                tree_borrows.perform_access(
+                    parent_prov,
+                    Some((range_in_alloc, AccessKind::Read, diagnostics::AccessCause::Reborrow)),
+                    this.machine.borrow_tracker.as_ref().unwrap(),
+                    alloc_id,
+                    this.machine.current_user_relevant_span(),
+                )?;
 
                 // Also inform the data race model (but only if any bytes are actually affected).
                 if range_in_alloc.size.bytes() > 0 {
@@ -422,7 +404,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
         }
-        if let Some(orig_tag) = orig_tag {
+        if let ProvenanceExtra::Concrete(orig_tag) = parent_prov {
             // Record the parent-child pair in the tree.
             tree_borrows.new_child(
                 base_offset,
@@ -435,7 +417,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             )?;
         }
         drop(tree_borrows);
-        interp_ok(Some(provenance))
+
+        interp_ok(Some(new_prov))
     }
 
     fn tb_retag_place(

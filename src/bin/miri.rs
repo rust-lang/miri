@@ -719,12 +719,6 @@ fn main() {
             rustc_args.push(arg);
         }
     }
-    // Tree Borrows implies strict provenance, and is not compatible with native calls.
-    if matches!(miri_config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows { .. }))
-        && !miri_config.native_lib.is_empty()
-    {
-        fatal_error!("Tree Borrows is not compatible with calling native functions");
-    }
 
     // Native calls and strict provenance are not compatible.
     if !miri_config.native_lib.is_empty() && miri_config.provenance_mode == ProvenanceMode::Strict {
