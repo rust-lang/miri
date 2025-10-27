@@ -385,14 +385,14 @@ where
         // be handled differently here compared to the further parents
         // of `accesssed_node`.
         {
-            self.propagate_at(this, accessed_node, AccessRelatedness::This)?;
+            self.propagate_at(this, accessed_node, AccessRelatedness::LocalAccess)?;
             if matches!(visit_children, ChildrenVisitMode::VisitChildrenOfAccessed) {
                 let accessed_node = this.nodes.get(accessed_node).unwrap();
                 // We `rev()` here because we reverse the entire stack later.
                 for &child in accessed_node.children.iter().rev() {
                     self.stack.push((
                         child,
-                        AccessRelatedness::AncestorAccess,
+                        AccessRelatedness::ForeignAccess,
                         RecursionState::BeforeChildren,
                     ));
                 }
@@ -403,7 +403,7 @@ where
         // not the subtree that contains the accessed node.
         let mut last_node = accessed_node;
         while let Some(current) = this.nodes.get(last_node).unwrap().parent {
-            self.propagate_at(this, current, AccessRelatedness::StrictChildAccess)?;
+            self.propagate_at(this, current, AccessRelatedness::LocalAccess)?;
             let node = this.nodes.get(current).unwrap();
             // We `rev()` here because we reverse the entire stack later.
             for &child in node.children.iter().rev() {
@@ -412,7 +412,7 @@ where
                 }
                 self.stack.push((
                     child,
-                    AccessRelatedness::CousinAccess,
+                    AccessRelatedness::ForeignAccess,
                     RecursionState::BeforeChildren,
                 ));
             }
@@ -1080,24 +1080,18 @@ impl VisitProvenance for Tree {
 /// Relative position of the access
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccessRelatedness {
-    /// The accessed pointer is the current one
-    This,
-    /// The accessed pointer is a (transitive) child of the current one.
-    // Current pointer is excluded (unlike in some other places of this module
-    // where "child" is inclusive).
-    StrictChildAccess,
-    /// The accessed pointer is a (transitive) parent of the current one.
-    // Current pointer is excluded.
-    AncestorAccess,
-    /// The accessed pointer is neither of the above.
-    // It's a cousin/uncle/etc., something in a side branch.
-    CousinAccess,
+    /// The access happened either through the node itself or one of
+    /// its transitive children.
+    LocalAccess,
+    /// The access happened through this nodes ancestor or through
+    /// a sibling/cousin/uncle/etc.
+    ForeignAccess,
 }
 
 impl AccessRelatedness {
     /// Check that access is either Ancestor or Distant, i.e. not
     /// a transitive child (initial pointer included).
     pub fn is_foreign(self) -> bool {
-        matches!(self, AccessRelatedness::AncestorAccess | AccessRelatedness::CousinAccess)
+        matches!(self, AccessRelatedness::ForeignAccess)
     }
 }
