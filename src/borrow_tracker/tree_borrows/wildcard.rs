@@ -340,7 +340,7 @@ impl WildcardAccessTracking {
         }
 
         #[cfg(feature = "expensive-consistency-checks")]
-        Self::verify_consistency(id, nodes, perms, wildcard_accesses,protected_tags);
+        Self::verify_consistency(id, nodes, perms, wildcard_accesses, protected_tags);
     }
 
     /// Verifies that the access tracking state is consistent.
@@ -376,9 +376,9 @@ impl WildcardAccessTracking {
                 let parent_node = nodes.get(parent).unwrap();
                 let parent_perm = perms.get(parent).map(LocationState::permission);
                 let parent_access = wildcard_accesses.get(parent).unwrap();
-                let parent_protected=protected_tags.contains_key(&parent_node.tag);
+                let parent_protected = protected_tags.contains_key(&parent_node.tag);
 
-                let max_other_children = parent_node
+                let max_sibling_access = parent_node
                     .children
                     .iter()
                     .copied()
@@ -387,11 +387,12 @@ impl WildcardAccessTracking {
                         let node = nodes.get(child).unwrap();
                         let perm = perms.get(child).map(LocationState::permission);
                         let access = wildcard_accesses.get(child).unwrap();
-                        let protected=protected_tags.contains_key(&node.tag);
+                        let protected = protected_tags.contains_key(&node.tag);
                         access.max_child_access(node.exposed_as(perm, protected))
                     })
                     .fold(WildcardAccessLevel::None, max);
-                max_other_children
+
+                max_sibling_access
                     .max(parent_access.max_foreign_access)
                     .max(parent_node.exposed_as(parent_perm, parent_protected))
             } else {
@@ -402,7 +403,7 @@ impl WildcardAccessTracking {
                 let node = nodes.get(child).unwrap();
                 let perm = perms.get(child).map(LocationState::permission);
                 let access = wildcard_accesses.get(child).unwrap();
-                let protected=protected_tags.contains_key(&node.tag);
+                let protected = protected_tags.contains_key(&node.tag);
                 access.max_child_access(node.exposed_as(perm, protected))
             });
             let expected_child_reads =
@@ -410,11 +411,23 @@ impl WildcardAccessTracking {
             let expected_child_writes =
                 child_accesses.filter(|a| *a >= WildcardAccessLevel::Write).count();
 
-            assert_eq!(expected_max_foreign_access, access.max_foreign_access);
+            assert_eq!(
+                expected_max_foreign_access, access.max_foreign_access,
+                "expected {:?}'s max_foreign_access to be {:?} instead of {:?}",
+                node.tag, expected_max_foreign_access, access.max_foreign_access
+            );
             let child_reads: usize = access.child_reads.into();
-            assert_eq!(expected_child_reads, child_reads);
+            assert_eq!(
+                expected_child_reads, child_reads,
+                "expected {:?}'s child_reads to be {} instead of {}",
+                node.tag, expected_child_reads, child_reads
+            );
             let child_writes: usize = access.child_writes.into();
-            assert_eq!(expected_child_writes, child_writes);
+            assert_eq!(
+                expected_child_writes, child_writes,
+                "expected {:?}'s child_writes to be {} instead of {}",
+                node.tag, expected_child_writes, child_writes
+            );
         }
     }
 }
