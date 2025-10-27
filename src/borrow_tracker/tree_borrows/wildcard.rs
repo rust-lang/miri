@@ -340,7 +340,7 @@ impl WildcardAccessTracking {
         }
 
         #[cfg(feature = "expensive-consistency-checks")]
-        Self::verify_consistency(id, nodes, perms, wildcard_accesses)
+        Self::verify_consistency(id, nodes, perms, wildcard_accesses,protected_tags);
     }
 
     /// Verifies that the access tracking state is consistent.
@@ -352,6 +352,7 @@ impl WildcardAccessTracking {
         nodes: &UniValMap<Node>,
         perms: &UniValMap<LocationState>,
         wildcard_accesses: &UniValMap<WildcardAccessTracking>,
+        protected_tags: &FxHashMap<BorTag, ProtectorKind>,
     ) {
         // Find the root node.
         let mut root = id;
@@ -359,10 +360,11 @@ impl WildcardAccessTracking {
             root = parent;
         }
 
-        // TODO valid if map is empty
-        if !wildcard_accesses.contains_idx(root) {
+        // Checks if accesses is empty.
+        if wildcard_accesses == &UniValMap::default() {
             return;
         }
+
         let mut stack = vec![root];
         while let Some(id) = stack.pop() {
             let node = nodes.get(id).unwrap();
@@ -374,6 +376,7 @@ impl WildcardAccessTracking {
                 let parent_node = nodes.get(parent).unwrap();
                 let parent_perm = perms.get(parent).map(LocationState::permission);
                 let parent_access = wildcard_accesses.get(parent).unwrap();
+                let parent_protected=protected_tags.contains_key(&parent_node.tag);
 
                 let max_other_children = parent_node
                     .children
@@ -384,12 +387,13 @@ impl WildcardAccessTracking {
                         let node = nodes.get(child).unwrap();
                         let perm = perms.get(child).map(LocationState::permission);
                         let access = wildcard_accesses.get(child).unwrap();
-                        access.max_child_access(node.exposed_as(perm))
+                        let protected=protected_tags.contains_key(&node.tag);
+                        access.max_child_access(node.exposed_as(perm, protected))
                     })
                     .fold(WildcardAccessLevel::None, max);
                 max_other_children
                     .max(parent_access.max_foreign_access)
-                    .max(parent_node.exposed_as(parent_perm))
+                    .max(parent_node.exposed_as(parent_perm, parent_protected))
             } else {
                 WildcardAccessLevel::None
             };
@@ -398,7 +402,8 @@ impl WildcardAccessTracking {
                 let node = nodes.get(child).unwrap();
                 let perm = perms.get(child).map(LocationState::permission);
                 let access = wildcard_accesses.get(child).unwrap();
-                access.max_child_access(node.exposed_as(perm))
+                let protected=protected_tags.contains_key(&node.tag);
+                access.max_child_access(node.exposed_as(perm, protected))
             });
             let expected_child_reads =
                 child_accesses.clone().filter(|a| *a >= WildcardAccessLevel::Read).count();
