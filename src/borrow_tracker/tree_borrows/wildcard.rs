@@ -57,14 +57,16 @@ pub struct WildcardAccessTracking {
     /// This is calculated as the `max()` of parents `max_foreign_access`,
     /// `exposed_as` and its siblings `max_child_access`.
     max_foreign_access: WildcardAccessLevel,
+    /// At what access level this node itself is exposed.
+    exposed_as: WildcardAccessLevel,
 }
 impl WildcardAccessTracking {
     /// The maximum access level that could happen from an exposed
     /// pointer that is a child of this pointer.
-    pub fn max_child_access(&self, exposed_as: WildcardAccessLevel) -> WildcardAccessLevel {
+    pub fn max_child_access(&self) -> WildcardAccessLevel {
         use WildcardAccessLevel::*;
         max(
-            exposed_as,
+            self.exposed_as,
             if self.child_writes > 0 {
                 Write
             } else if self.child_reads > 0 {
@@ -79,21 +81,19 @@ impl WildcardAccessTracking {
     pub fn access_relatedness(
         &self,
         kind: AccessKind,
-        exposed_as: WildcardAccessLevel,
     ) -> Option<WildcardAccessRelatedness> {
         match kind {
-            AccessKind::Read => self.read_access_relatedness(exposed_as),
-            AccessKind::Write => self.write_access_relatedness(exposed_as),
+            AccessKind::Read => self.read_access_relatedness(),
+            AccessKind::Write => self.write_access_relatedness(),
         }
     }
 
     /// From where relative to this pointer, a read access could happen.
     pub fn read_access_relatedness(
         &self,
-        exposed_as: WildcardAccessLevel,
     ) -> Option<WildcardAccessRelatedness> {
         let has_foreign = self.max_foreign_access >= WildcardAccessLevel::Read;
-        let has_child = self.child_reads > 0 || exposed_as >= WildcardAccessLevel::Read;
+        let has_child = self.max_child_access() >= WildcardAccessLevel::Read;
         use WildcardAccessRelatedness as E;
         match (has_foreign, has_child) {
             (true, true) => Some(E::EitherAccess),
@@ -106,10 +106,9 @@ impl WildcardAccessTracking {
     /// From where relative to this pointer, a write access could happen.
     pub fn write_access_relatedness(
         &self,
-        exposed_as: WildcardAccessLevel,
     ) -> Option<WildcardAccessRelatedness> {
         let has_foreign = self.max_foreign_access == WildcardAccessLevel::Write;
-        let has_child = self.child_writes > 0 || exposed_as == WildcardAccessLevel::Write;
+        let has_child = self.max_child_access() == WildcardAccessLevel::Write;
         use WildcardAccessRelatedness as E;
         match (has_foreign, has_child) {
             (true, true) => Some(E::EitherAccess),
@@ -122,11 +121,10 @@ impl WildcardAccessTracking {
     /// Gets the access tracking information for a new child node.
     /// The new node doesn't have any child reads/writes, but calculates max_foreign_access
     /// from its parent.
-    pub fn get_new_child(&self, exposed_as: WildcardAccessLevel) -> Self {
+    pub fn get_new_child(&self) -> Self {
         Self {
-            max_foreign_access: max(self.max_foreign_access, self.max_child_access(exposed_as)),
-            child_reads: 0,
-            child_writes: 0,
+            max_foreign_access: max(self.max_foreign_access, self.max_child_access()),
+            ..Default::default()
         }
     }
 
@@ -156,10 +154,7 @@ impl WildcardAccessTracking {
         child_writes: u16,
         children: impl Iterator<Item = UniIndex>,
 
-        nodes: &UniValMap<Node>,
-        perms: &UniValMap<LocationState>,
         wildcard_accesses: &UniValMap<WildcardAccessTracking>,
-        protected_tags: &FxHashMap<BorTag, ProtectorKind>,
     ) {
         use WildcardAccessLevel::*;
 
@@ -224,12 +219,8 @@ impl WildcardAccessTracking {
         );
 
         stack.extend(children.filter_map(|child| {
-            let access = wildcard_accesses.get(child).cloned().unwrap_or_default();
-
-            let node = nodes.get(child).unwrap();
-            let protected = protected_tags.contains_key(&node.tag);
-            let exposed_as = node.exposed_as(perms.get(child).map(|p| p.permission()), protected);
-            let max_child_access = access.max_child_access(exposed_as);
+            let state = wildcard_accesses.get(child).cloned().unwrap_or_default();
+            let max_child_access = state.max_child_access();
 
             let new_foreign_access = match max_child_access {
                 Write => write_foreign_access,
@@ -237,7 +228,7 @@ impl WildcardAccessTracking {
                 None => none_foreign_access,
             };
 
-            if new_foreign_access != access.max_foreign_access {
+            if new_foreign_access != state.max_foreign_access {
                 Some((child, new_foreign_access))
             } else {
                 Option::None
@@ -252,25 +243,28 @@ impl WildcardAccessTracking {
     /// time the access level of an exposed reference changes, to keep the state in sync.
     pub fn update_exposure(
         id: UniIndex,
-        old_exposed_as: WildcardAccessLevel,
         new_exposed_as: WildcardAccessLevel,
         nodes: &UniValMap<Node>,
-        perms: &UniValMap<LocationState>,
         wildcard_accesses: &mut UniValMap<WildcardAccessTracking>,
-        protected_tags: &FxHashMap<BorTag, ProtectorKind>,
     ) {
+
+        let mut entry = wildcard_accesses.entry(id);
+        let src_state = entry.or_insert(Default::default());
+        let old_exposed_as=src_state.exposed_as;
+
         // If the exposure doesn't change, then we don't need to update anything.
         if old_exposed_as == new_exposed_as {
             return;
         }
-
-        let mut entry = wildcard_accesses.entry(id);
-        let src_state = entry.or_insert(Default::default());
-        let src_old_max_child_access = src_state.max_child_access(old_exposed_as);
-        let src_new_max_child_access = src_state.max_child_access(new_exposed_as);
-
         // Whether we are upgrading or downgrading the allowed access rights.
         let is_upgrade = old_exposed_as < new_exposed_as;
+
+        let src_old_max_child_access = src_state.max_child_access();
+
+        src_state.exposed_as=new_exposed_as;
+
+        let src_new_max_child_access = src_state.max_child_access();
+
 
         // Stack of references for which the max_foreign_access field needs to be updated.
         let mut stack: Vec<(UniIndex, WildcardAccessLevel)> = Vec::new();
@@ -285,10 +279,7 @@ impl WildcardAccessTracking {
                 src_state.child_reads,
                 src_state.child_writes,
                 node.children.iter().copied(),
-                nodes,
-                perms,
                 wildcard_accesses,
-                protected_tags,
             );
         }
         // We need to propagate the tracking info up the tree, for this we traverse up the parents.
@@ -302,7 +293,6 @@ impl WildcardAccessTracking {
             let mut new_child_access = src_new_max_child_access;
             while let Some(parent_id) = nodes.get(child).unwrap().parent {
                 let parent_node = nodes.get(parent_id).unwrap();
-                let protected = protected_tags.contains_key(&parent_node.tag);
                 let mut entry = wildcard_accesses.entry(parent_id);
                 let parent_state = entry.or_insert(Default::default());
 
@@ -332,11 +322,9 @@ impl WildcardAccessTracking {
                         parent_state.child_reads -= 1;
                     }
                 }
-                let exposed_as =
-                    parent_node.exposed_as(perms.get(parent_id).map(|p| p.permission()), protected);
 
-                let old_parent_child_access = old_parent_state.max_child_access(exposed_as);
-                let new_parent_child_access = parent_state.max_child_access(exposed_as);
+                let old_parent_child_access = old_parent_state.max_child_access();
+                let new_parent_child_access = parent_state.max_child_access();
 
                 {
                     // We need to update the `max_foreign_access` of `child`'s siblings.
@@ -346,11 +334,13 @@ impl WildcardAccessTracking {
                     // `max_child_access()` is foreign to all of its siblings we can pass
                     // it as part of the foreign access.
 
+                    // it doesnt matter wether we read these from old or new
+                    let constant_factors = max(parent_state.exposed_as, parent_state.max_foreign_access);
+
                     // `state` contains the correct child_writes/reads counts for just the
                     // siblings excluding `child`.
                     let state = if is_upgrade { &old_parent_state } else { parent_state };
 
-                    let constant_factors = max(exposed_as, old_parent_state.max_foreign_access);
                     Self::push_relevant_children(
                         &mut stack,
                         max(constant_factors, new_child_access),
@@ -358,10 +348,7 @@ impl WildcardAccessTracking {
                         state.child_reads,
                         state.child_writes,
                         parent_node.children.iter().copied().filter(|id| child != *id),
-                        nodes,
-                        perms,
                         wildcard_accesses,
-                        protected_tags,
                     );
                 }
                 if old_parent_child_access == new_parent_child_access {
@@ -377,43 +364,36 @@ impl WildcardAccessTracking {
         // Traverses up the tree to update max_foreign_access fields of children and cousins who need to be updated.
         while let Some((id, new_access)) = stack.pop() {
             let node = nodes.get(id).unwrap();
-            let protected = protected_tags.contains_key(&node.tag);
             let mut entry = wildcard_accesses.entry(id);
             let state = entry.or_insert(Default::default());
 
             let old_access = state.max_foreign_access;
             state.max_foreign_access = new_access;
 
-            let exposed_as = node.exposed_as(perms.get(id).map(|p| p.permission()), protected);
-
             Self::push_relevant_children(
                 &mut stack,
-                max(exposed_as, new_access),
-                max(exposed_as, old_access),
+                max(state.exposed_as, new_access),
+                max(state.exposed_as, old_access),
                 state.child_reads,
                 state.child_writes,
                 node.children.iter().copied(),
-                nodes,
-                perms,
                 wildcard_accesses,
-                protected_tags,
             );
         }
 
+        // Calling `update_exposure()` should always result in an intenally consistent state.
         #[cfg(feature = "expensive-consistency-checks")]
-        Self::verify_consistency(id, nodes, perms, wildcard_accesses, protected_tags);
+        Self::verify_internal_consistency(id, nodes, wildcard_accesses);
     }
 
-    /// Verifies that the access tracking state is consistent.
+    /// Verifies that the access tracking state is self consistent.
     ///
     /// Panics if invalid.
     #[cfg(feature = "expensive-consistency-checks")]
-    pub fn verify_consistency(
+    pub fn verify_internal_consistency(
         id: UniIndex,
         nodes: &UniValMap<Node>,
-        perms: &UniValMap<LocationState>,
         wildcard_accesses: &UniValMap<WildcardAccessTracking>,
-        protected_tags: &FxHashMap<BorTag, ProtectorKind>,
     ) {
         // Find the root node.
         let mut root = id;
@@ -435,9 +415,7 @@ impl WildcardAccessTracking {
 
             let expected_max_foreign_access = if let Some(parent) = node.parent {
                 let parent_node = nodes.get(parent).unwrap();
-                let parent_perm = perms.get(parent).map(LocationState::permission);
-                let parent_access = wildcard_accesses.get(parent).unwrap();
-                let parent_protected = protected_tags.contains_key(&parent_node.tag);
+                let parent_state = wildcard_accesses.get(parent).unwrap();
 
                 let max_sibling_access = parent_node
                     .children
@@ -445,27 +423,21 @@ impl WildcardAccessTracking {
                     .copied()
                     .filter(|child| *child != id)
                     .map(|child| {
-                        let node = nodes.get(child).unwrap();
-                        let perm = perms.get(child).map(LocationState::permission);
-                        let access = wildcard_accesses.get(child).unwrap();
-                        let protected = protected_tags.contains_key(&node.tag);
-                        access.max_child_access(node.exposed_as(perm, protected))
+                        let state = wildcard_accesses.get(child).unwrap();
+                        state.max_child_access()
                     })
                     .fold(WildcardAccessLevel::None, max);
 
                 max_sibling_access
-                    .max(parent_access.max_foreign_access)
-                    .max(parent_node.exposed_as(parent_perm, parent_protected))
+                    .max(parent_state.max_foreign_access)
+                    .max(parent_state.exposed_as)
             } else {
                 WildcardAccessLevel::None
             };
 
             let child_accesses = node.children.iter().copied().map(|child| {
-                let node = nodes.get(child).unwrap();
-                let perm = perms.get(child).map(LocationState::permission);
-                let access = wildcard_accesses.get(child).unwrap();
-                let protected = protected_tags.contains_key(&node.tag);
-                access.max_child_access(node.exposed_as(perm, protected))
+                let state = wildcard_accesses.get(child).unwrap();
+                state.max_child_access()
             });
             let expected_child_reads =
                 child_accesses.clone().filter(|a| *a >= WildcardAccessLevel::Read).count();
@@ -491,6 +463,40 @@ impl WildcardAccessTracking {
             );
         }
     }
+
+    /// Ensures that the access tracking state is consistent with the rest of the tree.
+    /// This means that for every node the `exposed_as` field is equal to the strongest
+    /// possible access through that node.
+    #[cfg(feature = "expensive-consistency-checks")]
+    pub fn verify_external_consistency(
+        id: UniIndex,
+        nodes:&UniValMap<Node>,
+        perms:&UniValMap<LocationState>,
+        wildcard_accesses: &UniValMap<WildcardAccessTracking>,
+        protected_tags: &FxHashMap<BorTag,ProtectorKind>
+    ){
+        // Find the root node.
+        let mut root = id;
+        while let Some(parent) = nodes.get(root).unwrap().parent {
+            root = parent;
+        }
+
+        let mut stack=vec![root];
+        while let Some(id)=stack.pop(){
+            let node=nodes.get(id).unwrap();
+            if node.is_exposed{
+                let state=wildcard_accesses.get(id).unwrap();
+                let perm=perms.get(id).unwrap();
+                let access_level=perm.permission().strongest_allowed_child_access(protected_tags.contains_key(&node.tag));
+                assert_eq!(
+                    access_level,state.exposed_as,
+                    "tag {:?} should be exposed as {access_level:?} but is exposed as {:?}",
+                    node.tag, state.exposed_as
+                );
+            }
+            stack.extend(&node.children);
+        }
+    }
 }
 
 impl Tree {
@@ -510,13 +516,20 @@ impl Tree {
             let access_type = perm.permission().strongest_allowed_child_access(protected);
             WildcardAccessTracking::update_exposure(
                 id,
-                WildcardAccessLevel::None,
                 access_type,
                 &self.nodes,
-                perms,
                 wildcard_accesses,
-                protected_tags,
             );
+        }
+    }
+    /// Checks that the wildcard tracking datastructure is internally consistent and has
+    /// the correct `exposed_as` values.
+    #[cfg(feature = "expensive-consistency-checks")]
+    pub fn verify_wildcard_consistency(&self, global: &GlobalState){
+        for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_all() {
+            WildcardAccessTracking::verify_internal_consistency(self.root, &self.nodes, wildcard_accesses);
+
+            WildcardAccessTracking::verify_external_consistency(self.root, &self.nodes, perms, wildcard_accesses,&global.borrow().protected_tags);
         }
     }
 }
