@@ -291,7 +291,7 @@ pub(super) struct TbError<'node> {
     pub conflicting_info: &'node NodeDebugInfo,
     // What kind of access caused this error (read, write, reborrow, deallocation)
     pub access_cause: AccessCause,
-    /// Which tag if any the access that caused this error was made through, i.e.
+    /// Which tag, if any, the access that caused this error was made through, i.e.
     /// which tag was used to read/write/deallocate.
     /// Not set on wildcard accesses.
     pub accessed_info: Option<&'node NodeDebugInfo>,
