@@ -12,6 +12,7 @@
 
 #![allow(dead_code)]
 
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
 
@@ -20,9 +21,14 @@ use rustc_data_structures::fx::FxHashMap;
 use crate::helpers::ToUsize;
 
 /// Intermediate key between a UniKeyMap and a UniValMap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct UniIndex {
     idx: u32,
+}
+impl Debug for UniIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.idx.fmt(f)
+    }
 }
 
 /// From K to UniIndex
