@@ -18,7 +18,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
-use super::wildcard::{WildcardAccessLevel, WildcardAccessTracking};
+use super::wildcard::WildcardAccessTracking;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError, no_valid_exposed_references_error,
@@ -917,7 +917,13 @@ impl<'tcx> Tree {
                         wildcard_accesses,
                     );
                     #[cfg(feature = "expensive-consistency-checks")]
-                    WildcardAccessTracking::verify_external_consistency(idx, this.nodes, this.perms, wildcard_accesses, &global.borrow().protected_tags);
+                    WildcardAccessTracking::verify_external_consistency(
+                        idx,
+                        this.nodes,
+                        this.perms,
+                        wildcard_accesses,
+                        &global.borrow().protected_tags,
+                    );
                 }
             }
             Ok(())
@@ -1260,7 +1266,13 @@ impl<'tcx> Tree {
                                 wildcard_accesses,
                             );
                             #[cfg(feature = "expensive-consistency-checks")]
-                            WildcardAccessTracking::verify_external_consistency(id, &self.nodes, perms, wildcard_accesses, &global.borrow().protected_tags);
+                            WildcardAccessTracking::verify_external_consistency(
+                                id,
+                                &self.nodes,
+                                perms,
+                                wildcard_accesses,
+                                &global.borrow().protected_tags,
+                            );
                         }
                     }
                 }

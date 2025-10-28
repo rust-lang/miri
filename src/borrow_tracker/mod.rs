@@ -408,7 +408,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if matches!(kind, AllocKind::LiveData) {
                 let alloc_extra = this.get_alloc_extra(*alloc_id)?;
                 let alloc_borrow_tracker = &alloc_extra.borrow_tracker.as_ref().unwrap();
-                if let AllocState::TreeBorrows(tb)=alloc_borrow_tracker{
+                if let AllocState::TreeBorrows(tb) = alloc_borrow_tracker {
                     tb.borrow().verify_wildcard_consistency(borrow_tracker);
                 }
             }

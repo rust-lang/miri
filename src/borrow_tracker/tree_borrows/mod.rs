@@ -110,7 +110,7 @@ impl<'tcx> Tree {
                     // `release_protector` got called on all the relevant tags.
                     //
                     // This is also why we dont call  `WildcardAccessTracking::verify_external_consistency` here.
-                    let access_level=p.permission().strongest_allowed_child_access(false);
+                    let access_level = p.permission().strongest_allowed_child_access(false);
                     WildcardAccessTracking::update_exposure(
                         idx,
                         access_level,
