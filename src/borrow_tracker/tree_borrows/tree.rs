@@ -677,11 +677,12 @@ impl<'tcx> Tree {
                 perms.insert(idx, perm);
             }
         }
+
+        // We need to ensure the consistency of the wildcard access tracking data structure.
+        // For this, we insert the correct entry for this tag based on its parent, if it exists.
         for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
             if let Some(parent_access) = wildcard_accesses.get(parent_idx) {
-                let exposed_as =
-                    parent_node.exposed_as(perms.get(parent_idx).map(|p| p.permission), protected);
-                wildcard_accesses.insert(idx, parent_access.get_new_child(exposed_as));
+                wildcard_accesses.insert(idx, parent_access.get_new_child());
             }
         }
 
@@ -870,7 +871,6 @@ impl<'tcx> Tree {
             let mut perm = args.perms.entry(args.idx);
 
             let state = perm.or_insert(node.default_location_state());
-            let old_permission = state.permission;
             // Call this function now, which ensures it is only called when
             // `skip_if_known_noop` returns `Recurse`, due to the contract of
             // `traverse_this_parents_children_other`.
@@ -894,17 +894,15 @@ impl<'tcx> Tree {
                 if node.is_exposed {
                     let wildcard_accesses = args.wildcard_accesses.as_deref_mut().unwrap();
                     //Protected doesnt change during access.
-                    let old_access_type = old_permission.strongest_allowed_child_access(protected);
                     let access_type = state.permission.strongest_allowed_child_access(protected);
                     WildcardAccessTracking::update_exposure(
                         args.idx,
-                        old_access_type,
                         access_type,
                         &args.nodes,
-                        &args.perms,
                         wildcard_accesses,
-                        &global.borrow().protected_tags,
                     );
+                    #[cfg(feature = "expensive-consistency-checks")]
+                    WildcardAccessTracking::verify_external_consistency(idx, this.nodes, this.perms, wildcard_accesses, &global.borrow().protected_tags);
                 }
             }
             Ok(())
@@ -1169,9 +1167,8 @@ impl<'tcx> Tree {
                     let mut entry = wildcard_accesses.entry(id);
                     let wildcard_access = entry.or_insert(Default::default());
 
-                    let exposed_as = node.exposed_as(Some(perm.permission), protected);
                     let Some(wildcard_relatedness) =
-                        wildcard_access.access_relatedness(access_kind, exposed_as)
+                        wildcard_access.access_relatedness(access_kind)
                     else {
                         // there doenst exist a valid exposed reference for this access
                         // to happen through
@@ -1208,7 +1205,6 @@ impl<'tcx> Tree {
                         perm.record_new_access(access_kind, relatedness);
                     }
 
-                    let old_permission = perm.permission;
                     let transition = perm
                         .perform_access(access_kind, relatedness, protected)
                         .map_err(|trans| {
@@ -1237,20 +1233,16 @@ impl<'tcx> Tree {
                         // we need to update the wildcard access tracking information,
                         // if the permission of an exposed pointer changes
                         if node.is_exposed {
-                            // Protected value doesnt change during access.
-                            let old_access_type =
-                                old_permission.strongest_allowed_child_access(protected);
                             let access_type =
                                 perm.permission.strongest_allowed_child_access(protected);
                             WildcardAccessTracking::update_exposure(
                                 id,
-                                old_access_type,
                                 access_type,
                                 &self.nodes,
-                                perms,
                                 wildcard_accesses,
-                                &global.borrow().protected_tags,
                             );
+                            #[cfg(feature = "expensive-consistency-checks")]
+                            WildcardAccessTracking::verify_external_consistency(id, &self.nodes, perms, wildcard_accesses, &global.borrow().protected_tags);
                         }
                     }
                 }
@@ -1280,16 +1272,6 @@ impl Node {
             self.default_initial_perm,
             self.default_initial_idempotent_foreign_access,
         )
-    }
-    /// returns at which access level a wildcard access through this reference
-    /// could happen through this node
-    pub fn exposed_as(&self, perm: Option<Permission>, protected: bool) -> WildcardAccessLevel {
-        if self.is_exposed {
-            let perm = perm.unwrap_or_else(|| self.default_location_state().permission());
-            perm.strongest_allowed_child_access(protected)
-        } else {
-            WildcardAccessLevel::None
-        }
     }
 }
 

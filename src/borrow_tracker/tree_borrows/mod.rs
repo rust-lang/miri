@@ -105,16 +105,17 @@ impl<'tcx> Tree {
                 if let Some(p) = perms.get(idx)
                     && wildcard_accesses.get(idx).is_some()
                 {
-                    let old_access_type = p.permission().strongest_allowed_child_access(true);
-                    let access_type = p.permission().strongest_allowed_child_access(false);
+                    // This temporarily desyncs the wildcard datastructure from the actual permissions represented in the tree.
+                    // This happens because the protected_tags map still contains all protected_tags, they only get removed after
+                    // `release_protector` got called on all the relevant tags.
+                    //
+                    // This is also why we dont call  `WildcardAccessTracking::verify_external_consistency` here.
+                    let access_level=p.permission().strongest_allowed_child_access(false);
                     WildcardAccessTracking::update_exposure(
                         idx,
-                        old_access_type,
-                        access_type,
+                        access_level,
                         &self.nodes,
-                        perms,
                         wildcard_accesses,
-                        &global.borrow().protected_tags,
                     );
                 }
             }
