@@ -8,7 +8,7 @@ use {
 };
 
 use super::Tree;
-use super::tree::{AccessRelatedness, Location, Node};
+use super::tree::{AccessRelatedness, Node};
 use super::unimap::{UniIndex, UniValMap};
 use crate::borrow_tracker::GlobalState;
 use crate::{AccessKind, BorTag, VisitWith};
@@ -51,7 +51,7 @@ impl WildcardAccessRelatedness {
 /// Designed to be completely determined by its parent, siblings and
 /// direct children's max_local_access/max_foreign_access.
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct WildcardAccessTracking {
+pub struct WildcardState {
     /// How many of this node's direct children have `max_local_access()==Write`.
     child_writes: u16,
     /// How many of this node's direct children have `max_local_access()>=Read`.
@@ -65,16 +65,16 @@ pub struct WildcardAccessTracking {
     /// At what access level this node itself is exposed.
     exposed_as: WildcardAccessLevel,
 }
-impl Debug for WildcardAccessTracking {
+impl Debug for WildcardState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WildcardAccessTracking")
+        f.debug_struct("WildcardState")
             .field("child_r/w", &(self.child_reads, self.child_writes))
             .field("foreign", &self.max_foreign_access)
             .field("exposed_as", &self.exposed_as)
             .finish()
     }
 }
-impl WildcardAccessTracking {
+impl WildcardState {
     /// The maximum access level that could happen from an exposed
     /// node that is a local to this node.
     pub fn max_local_access(&self) -> WildcardAccessLevel {
@@ -162,7 +162,7 @@ impl WildcardAccessTracking {
         child_writes: u16,
         children: impl Iterator<Item = UniIndex>,
 
-        wildcard_accesses: &UniValMap<WildcardAccessTracking>,
+        wildcard_accesses: &UniValMap<WildcardState>,
     ) {
         use WildcardAccessLevel::*;
 
@@ -253,7 +253,7 @@ impl WildcardAccessTracking {
         id: UniIndex,
         new_exposed_as: WildcardAccessLevel,
         nodes: &UniValMap<Node>,
-        wildcard_accesses: &mut UniValMap<WildcardAccessTracking>,
+        wildcard_accesses: &mut UniValMap<WildcardState>,
     ) {
         let mut entry = wildcard_accesses.entry(id);
         let src_state = entry.or_insert(Default::default());
@@ -405,27 +405,27 @@ impl Tree {
         let protected_tags = &global.borrow().protected_tags;
         let protected = protected_tags.contains_key(&tag);
         // TODO: Only initialize neccessary ranges.
-        for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
-            let perm = *perms.entry(id).or_insert(node.default_location_state());
+        for (_, loc) in self.locations.iter_mut_all() {
+            let perm = *loc.perms.entry(id).or_insert(node.default_location_state());
 
             let access_type = perm.permission().strongest_allowed_child_access(protected);
-            WildcardAccessTracking::update_exposure(
+            WildcardState::update_exposure(
                 id,
                 access_type,
                 &self.nodes,
-                wildcard_accesses,
+                &mut loc.wildcard_accesses,
             );
         }
     }
     pub(super) fn visit_wildcards(&self, visit: &mut VisitWith<'_>) {
-        for (_, Location { perms, .. }) in self.rperms.iter_all() {
+        for (_, loc) in self.locations.iter_all() {
             let mut stack = vec![self.root];
             let mut has_exposed = false;
             while let Some(id) = stack.pop() {
                 let node = self.nodes.get(id).unwrap();
 
                 if node.is_exposed
-                    && let Some(perm) = perms.get(id)
+                    && let Some(perm) = loc.perms.get(id)
                 {
                     // If the node is already protected, then it gets already visited
                     // through the protector. So we can assume `protected=false`.
@@ -451,18 +451,18 @@ impl Tree {
     /// Checks that the wildcard tracking datastructure is internally consistent and has
     /// the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
-        for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_all() {
-            WildcardAccessTracking::verify_internal_consistency(
+        for (_, loc) in self.locations.iter_all() {
+            WildcardState::verify_internal_consistency(
                 self.root,
                 &self.nodes,
-                wildcard_accesses,
+                &loc.wildcard_accesses,
             );
 
-            WildcardAccessTracking::verify_external_consistency(
+            WildcardState::verify_external_consistency(
                 self.root,
                 &self.nodes,
-                perms,
-                wildcard_accesses,
+                &loc.perms,
+                &loc.wildcard_accesses,
                 &global.borrow().protected_tags,
             );
         }
@@ -470,14 +470,14 @@ impl Tree {
 }
 
 #[cfg(feature = "expensive-consistency-checks")]
-impl WildcardAccessTracking {
+impl WildcardState {
     /// Verifies that the access tracking state is self consistent.
     ///
     /// Panics if invalid.
     pub fn verify_internal_consistency(
         id: UniIndex,
         nodes: &UniValMap<Node>,
-        wildcard_accesses: &UniValMap<WildcardAccessTracking>,
+        wildcard_accesses: &UniValMap<WildcardState>,
     ) {
         // Find the root node.
         let mut root = id;
@@ -553,7 +553,7 @@ impl WildcardAccessTracking {
         id: UniIndex,
         nodes: &UniValMap<Node>,
         perms: &UniValMap<LocationState>,
-        wildcard_accesses: &UniValMap<WildcardAccessTracking>,
+        wildcard_accesses: &UniValMap<WildcardState>,
         protected_tags: &FxHashMap<BorTag, ProtectorKind>,
     ) {
         // Find the root node.
