@@ -1291,7 +1291,11 @@ impl VisitProvenance for Tree {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
         // To ensure that the root never gets removed, we visit it
         // (the `root` node of `Tree` is not an `Option<_>`)
-        visit(None, Some(self.nodes.get(self.root).unwrap().tag))
+        visit(None, Some(self.nodes.get(self.root).unwrap().tag));
+
+        // We also need to keep around any exposed tags through which
+        // an access could still happen.
+        self.visit_wildcards(visit);
     }
 }
 

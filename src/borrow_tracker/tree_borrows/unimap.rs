@@ -207,6 +207,12 @@ impl<V> UniValMap<V> {
         mem::swap(&mut res, &mut self.data[idx.idx.to_usize()]);
         res
     }
+
+    /// Weather the datastructure has been allocated.
+    /// Does not mean the map contains any values.
+    pub fn is_initialized(&self) -> bool {
+        self.data.capacity() != 0
+    }
 }
 
 /// An access to a single value of the map.
