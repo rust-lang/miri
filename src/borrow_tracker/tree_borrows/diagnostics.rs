@@ -643,7 +643,7 @@ impl DisplayRepr {
             } else {
                 // We take this node
                 let rperm = tree
-                    .rperms
+                    .locations
                     .iter_all()
                     .map(move |(_offset, loc)| {
                         let perm = loc.perms.get(idx);
@@ -808,7 +808,7 @@ impl<'tcx> Tree {
         show_unnamed: bool,
     ) -> InterpResult<'tcx> {
         let mut indenter = DisplayIndent::new();
-        let ranges = self.rperms.iter_all().map(|(range, _perms)| range).collect::<Vec<_>>();
+        let ranges = self.locations.iter_all().map(|(range, _loc)| range).collect::<Vec<_>>();
         if let Some(repr) = DisplayRepr::from(self, show_unnamed) {
             repr.print(
                 &DEFAULT_FORMATTER,

@@ -18,7 +18,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
-use super::wildcard::WildcardAccessTracking;
+use super::wildcard::WildcardState;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError, no_valid_exposed_references_error,
@@ -214,9 +214,8 @@ impl fmt::Display for LocationState {
 }
 /// state associated with each location of the allocation
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Location {
-    /// Maps a tag and a location to a perm, with possible lazy
-    /// initialization.
+pub struct LocationTree {
+    /// Maps a tag to a perm, with possible lazy initialization.
     ///
     /// NOTE: not all tags registered in `nodes` are necessarily in all
     /// ranges of `rperms`, because `rperms` is in part lazily initialized.
@@ -228,8 +227,11 @@ pub struct Location {
     /// Maps a tag and a location to its wildcard access tracking information,
     /// with possible lazy initialization.
     ///
+    /// If this allocation doesn't have any exposed nodes, then this map doesn't get
+    /// initialized. This way we only need to allocate the map if we need it.
+    ///
     /// NOTE: same guarantees on entry initialisation as for `perms`
-    pub wildcard_accesses: UniValMap<WildcardAccessTracking>,
+    pub wildcard_accesses: UniValMap<WildcardState>,
 }
 /// Tree structure with both parents and children since we want to be
 /// able to traverse the tree efficiently in both directions.
@@ -244,8 +246,8 @@ pub struct Tree {
     pub(super) tag_mapping: UniKeyMap<BorTag>,
     /// All nodes of this tree.
     pub(super) nodes: UniValMap<Node>,
-    /// associates with each location its state and wildcard access tracking
-    pub(super) rperms: DedupRangeMap<Location>,
+    /// Associates with each location its state and wildcard access tracking.
+    pub(super) locations: DedupRangeMap<LocationTree>,
     /// The index of the root node.
     pub(super) root: UniIndex,
 }
@@ -287,7 +289,7 @@ struct NodeAppArgs<'visit> {
     nodes: &'visit mut UniValMap<Node>,
     /// The permissions map of this tree.
     perms: &'visit mut UniValMap<LocationState>,
-    wildcard_accesses: Option<&'visit mut UniValMap<WildcardAccessTracking>>
+    wildcard_accesses: Option<&'visit mut UniValMap<WildcardState>>
 }
 /// Data given to the error handler
 struct ErrHandlerArgs<'node, InErr> {
@@ -308,7 +310,7 @@ struct TreeVisitor<'tree> {
     tag_mapping: &'tree UniKeyMap<BorTag>,
     nodes: &'tree mut UniValMap<Node>,
     perms: &'tree mut UniValMap<LocationState>,
-    wildcard_accesses: Option<&'tree mut UniValMap<WildcardAccessTracking>>,
+    wildcard_accesses: Option<&'tree mut UniValMap<WildcardState>>,
 }
 
 /// Whether to continue exploring the children recursively or not.
@@ -612,9 +614,9 @@ impl Tree {
                 ),
             );
             let wildcard_accesses = UniValMap::default();
-            DedupRangeMap::new(size, Location { perms, wildcard_accesses })
+            DedupRangeMap::new(size, LocationTree { perms, wildcard_accesses })
         };
-        Self { root: root_idx, nodes, rperms, tag_mapping }
+        Self { root: root_idx, nodes, locations: rperms, tag_mapping }
     }
 }
 
@@ -670,19 +672,19 @@ impl<'tcx> Tree {
             );
 
             min_sifa = cmp::min(min_sifa, perm.idempotent_foreign_access);
-            for (_perms_range, Location { perms, .. }) in self
-                .rperms
+            for (_, loc) in self
+                .locations
                 .iter_mut(Size::from_bytes(start) + base_offset, Size::from_bytes(end - start))
             {
-                perms.insert(idx, perm);
+                loc.perms.insert(idx, perm);
             }
         }
 
         // We need to ensure the consistency of the wildcard access tracking data structure.
         // For this, we insert the correct entry for this tag based on its parent, if it exists.
-        for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
-            if let Some(parent_access) = wildcard_accesses.get(parent_idx) {
-                wildcard_accesses.insert(idx, parent_access.get_new_child());
+        for (_, loc) in self.locations.iter_mut_all() {
+            if let Some(parent_access) = loc.wildcard_accesses.get(parent_idx) {
+                loc.wildcard_accesses.insert(idx, parent_access.get_new_child());
             }
         }
 
@@ -716,9 +718,9 @@ impl<'tcx> Tree {
             // as the default SIFA for not-yet-initialized locations.
             // Record whether we did any change; if not, the invariant is restored and we can stop the traversal.
             let mut any_change = false;
-            for (_, Location { perms, .. }) in self.rperms.iter_mut_all() {
+            for (_, loc) in self.locations.iter_mut_all() {
                 // Check if this node has a state for this location (or range of locations).
-                if let Some(perm) = perms.get_mut(current) {
+                if let Some(perm) = loc.perms.get_mut(current) {
                     // Update the per-location SIFA, recording if it changed.
                     any_change |=
                         perm.idempotent_foreign_access.ensure_no_stronger_than(strongest_allowed);
@@ -760,9 +762,7 @@ impl<'tcx> Tree {
             alloc_id,
             span,
         )?;
-        for (perms_range, Location { perms, .. }) in
-            self.rperms.iter_mut(access_range.start, access_range.size)
-        {
+        for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
             let start_tag = match prov {
                 ProvenanceExtra::Concrete(tag) => tag,
                 // the order in which we check if any nodes are invalidated doesnt matter,
@@ -772,7 +772,7 @@ impl<'tcx> Tree {
             TreeVisitor {
                 nodes: &mut self.nodes,
                 tag_mapping: &self.tag_mapping,
-                perms,
+                perms: &mut loc.perms,
                 wildcard_accesses: None,
             }
             .traverse_this_parents_children_other(
@@ -804,7 +804,7 @@ impl<'tcx> Tree {
                         conflicting_info,
                         access_cause: diagnostics::AccessCause::Dealloc,
                         alloc_id,
-                        error_offset: perms_range.start,
+                        error_offset: loc_range.start,
                         error_kind,
                         accessed_info: Some(accessed_info),
                     }
@@ -895,14 +895,14 @@ impl<'tcx> Tree {
                     let wildcard_accesses = args.wildcard_accesses.as_deref_mut().unwrap();
                     //Protected doesnt change during access.
                     let access_type = state.permission.strongest_allowed_child_access(protected);
-                    WildcardAccessTracking::update_exposure(
+                    WildcardState::update_exposure(
                         args.idx,
                         access_type,
                         &args.nodes,
                         wildcard_accesses,
                     );
                     #[cfg(feature = "expensive-consistency-checks")]
-                    WildcardAccessTracking::verify_external_consistency(
+                    WildcardState::verify_external_consistency(
                         idx,
                         this.nodes,
                         this.perms,
@@ -935,22 +935,20 @@ impl<'tcx> Tree {
         if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
-            for (perms_range, Location { perms, wildcard_accesses }) in
-                self.rperms.iter_mut(access_range.start, access_range.size)
-            {
+            for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
                 TreeVisitor {
                     nodes: &mut self.nodes,
                     tag_mapping: &self.tag_mapping,
-                    perms,
-                    wildcard_accesses: Some(wildcard_accesses),
+                    perms: &mut loc.perms,
+                    wildcard_accesses: Some(&mut loc.wildcard_accesses),
                 }
                 .traverse_this_parents_children_other(
                     tag,
                     |args| node_skipper(access_kind, args),
                     |args| {
-                        node_app(perms_range.clone(), access_kind, access_cause, args)
+                        node_app(loc_range.clone(), access_kind, access_cause, args)
                     },
-                    |args| err_handler(perms_range.clone(), access_cause, args),
+                    |args| err_handler(loc_range.clone(), access_cause, args),
                 )?;
             }
         } else {
@@ -963,10 +961,10 @@ impl<'tcx> Tree {
             // See the test case `returned_mut_is_usable` from
             // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
             // why this is important.
-            for (perms_range, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
+            for (loc_range, loc) in self.locations.iter_mut_all() {
                 let idx = self.tag_mapping.get(&tag).unwrap();
                 // Only visit accessed permissions
-                if let Some(p) = perms.get(idx)
+                if let Some(p) = loc.perms.get(idx)
                     && let Some(access_kind) = p.permission.protector_end_access()
                     && p.accessed
                 {
@@ -974,21 +972,21 @@ impl<'tcx> Tree {
                     TreeVisitor {
                         nodes: &mut self.nodes,
                         tag_mapping: &self.tag_mapping,
-                        perms,
-                        wildcard_accesses: Some(wildcard_accesses),
+                        perms: &mut loc.perms,
+                        wildcard_accesses: Some(&mut loc.wildcard_accesses),
                     }
                     .traverse_nonchildren(
                         tag,
                         |args| node_skipper(access_kind, args),
                         |args| {
                             node_app(
-                                perms_range.clone(),
+                                loc_range.clone(),
                                 access_kind,
                                 access_cause,
                                 args
                             )
                         },
-                        |args| err_handler(perms_range.clone(), access_cause, args),
+                        |args| err_handler(loc_range.clone(), access_cause, args),
                     )?;
                 }
             }
@@ -1005,7 +1003,7 @@ impl Tree {
         // merge some adjacent ranges that were made equal by the removal of some
         // tags (this does not necessarily mean that they have identical internal representations,
         // see the `PartialEq` impl for `UniValMap`)
-        self.rperms.merge_adjacent_thorough();
+        self.locations.merge_adjacent_thorough();
     }
 
     /// Checks if a node is useless and should be GC'ed.
@@ -1027,9 +1025,6 @@ impl Tree {
 
         let [child_idx] = node.children[..] else { return None };
 
-        if node.is_exposed {
-            return None;
-        }
         // We never want to replace the root node, as it is also kept in `root_ptr_tags`.
         if live.contains(&node.tag) || node.parent.is_none() {
             return None;
@@ -1040,10 +1035,14 @@ impl Tree {
         let child = self.nodes.get(child_idx).unwrap();
         // Check that for that one child, `can_be_replaced_by_child` holds for the permission
         // on all locations.
-        for (_, Location { perms, .. }) in self.rperms.iter_all() {
-            let parent_perm =
-                perms.get(idx).map(|x| x.permission).unwrap_or_else(|| node.default_initial_perm);
-            let child_perm = perms
+        for (_, loc) in self.locations.iter_all() {
+            let parent_perm = loc
+                .perms
+                .get(idx)
+                .map(|x| x.permission)
+                .unwrap_or_else(|| node.default_initial_perm);
+            let child_perm = loc
+                .perms
                 .get(child_idx)
                 .map(|x| x.permission)
                 .unwrap_or_else(|| child.default_initial_perm);
@@ -1067,9 +1066,9 @@ impl Tree {
         // before we can safely apply `UniKeyMap::remove` to truly remove
         // this tag from the `tag_mapping`.
         let node = self.nodes.remove(this).unwrap();
-        for (_perms_range, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
-            perms.remove(this);
-            wildcard_accesses.remove(this);
+        for (_, loc) in self.locations.iter_mut_all() {
+            loc.perms.remove(this);
+            loc.wildcard_accesses.remove(this);
         }
         self.tag_mapping.remove(&node.tag);
     }
@@ -1157,20 +1156,18 @@ impl<'tcx> Tree {
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
         if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
-            for (perms_range, Location { perms, wildcard_accesses }) in
-                self.rperms.iter_mut(access_range.start, access_range.size)
-            {
-                // we can simply iterate over the entire graph in arbitrary order
-                // as the relatedness of the access for each can be calculated with
-                // only the tracking information attached to each node
+            for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
+                // We can simply iterate over the entire graph in arbitrary order, as the
+                // relatedness of the access for each node can be calculated with only
+                // the tracking information attached to each node.
                 let mut stack = vec![self.root];
                 while let Some(id) = stack.pop() {
                     let node = self.nodes.get_mut(id).unwrap();
-                    let mut entry = perms.entry(id);
+                    let mut entry = loc.perms.entry(id);
                     let perm = entry.or_insert(node.default_location_state());
                     // TODO narrowing based on protector
                     let protected = global.borrow().protected_tags.contains_key(&node.tag);
-                    let mut entry = wildcard_accesses.entry(id);
+                    let mut entry = loc.wildcard_accesses.entry(id);
                     let wildcard_access = entry.or_insert(Default::default());
 
                     let Some(wildcard_relatedness) =
@@ -1181,7 +1178,7 @@ impl<'tcx> Tree {
                         // if this fails for one id, then it fails for all ids
                         return Err(no_valid_exposed_references_error(
                             alloc_id,
-                            perms_range.start,
+                            loc_range.start,
                             access_cause,
                         ))
                         .into();
@@ -1219,7 +1216,7 @@ impl<'tcx> Tree {
                                 conflicting_info: &node.debug_info,
                                 access_cause,
                                 alloc_id,
-                                error_offset: perms_range.start,
+                                error_offset: loc_range.start,
                                 error_kind: trans,
                                 accessed_info: None,
                             }
@@ -1232,7 +1229,7 @@ impl<'tcx> Tree {
                             is_foreign: relatedness.is_foreign(),
                             access_cause,
                             access_range: access_range_and_kind.map(|x| x.0),
-                            transition_range: perms_range.clone(),
+                            transition_range: loc_range.clone(),
                             span,
                         });
 
@@ -1241,18 +1238,18 @@ impl<'tcx> Tree {
                         if node.is_exposed {
                             let access_type =
                                 perm.permission.strongest_allowed_child_access(protected);
-                            WildcardAccessTracking::update_exposure(
+                            WildcardState::update_exposure(
                                 id,
                                 access_type,
                                 &self.nodes,
-                                wildcard_accesses,
+                                &mut loc.wildcard_accesses,
                             );
                             #[cfg(feature = "expensive-consistency-checks")]
-                            WildcardAccessTracking::verify_external_consistency(
+                            WildcardState::verify_external_consistency(
                                 id,
                                 &self.nodes,
-                                perms,
-                                wildcard_accesses,
+                                &loc.perms,
+                                &loc.wildcard_accesses,
                                 &global.borrow().protected_tags,
                             );
                         }

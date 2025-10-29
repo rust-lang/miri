@@ -4,8 +4,8 @@ use rustc_middle::ty::layout::HasTypingEnv;
 use rustc_middle::ty::{self, Ty};
 
 use self::foreign_access_skipping::IdempotentForeignAccess;
-use self::tree::{Location, LocationState};
-use self::wildcard::WildcardAccessTracking;
+use self::tree::{LocationTree, LocationState};
+use self::wildcard::WildcardState;
 use crate::borrow_tracker::{AccessKind, GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
 use crate::*;
@@ -101,21 +101,21 @@ impl<'tcx> Tree {
         // allowed to it so we need to update the wildcard tracking info with the new strongest allowed child access.
         let idx = self.tag_mapping.get(&tag).unwrap();
         if self.nodes.get(idx).unwrap().is_exposed {
-            for (_, Location { perms, wildcard_accesses }) in self.rperms.iter_mut_all() {
-                if let Some(p) = perms.get(idx)
-                    && wildcard_accesses.get(idx).is_some()
+            for (_, loc) in self.locations.iter_mut_all() {
+                if let Some(p) = loc.perms.get(idx)
+                    && loc.wildcard_accesses.get(idx).is_some()
                 {
                     // This temporarily desyncs the wildcard datastructure from the actual permissions represented in the tree.
                     // This happens because the protected_tags map still contains all protected_tags, they only get removed after
                     // `release_protector` got called on all the relevant tags.
                     //
-                    // This is also why we dont call  `WildcardAccessTracking::verify_external_consistency` here.
+                    // This is also why we dont call  `WildcardState::verify_external_consistency` here.
                     let access_level = p.permission().strongest_allowed_child_access(false);
-                    WildcardAccessTracking::update_exposure(
+                    WildcardState::update_exposure(
                         idx,
                         access_level,
                         &self.nodes,
-                        wildcard_accesses,
+                        &mut loc.wildcard_accesses,
                     );
                 }
             }
