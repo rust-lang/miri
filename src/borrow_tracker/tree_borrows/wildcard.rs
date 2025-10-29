@@ -1,10 +1,17 @@
 use std::cmp::max;
+use std::fmt::Debug;
+
+#[cfg(feature = "expensive-consistency-checks")]
+use {
+    super::LocationState, crate::borrow_tracker::ProtectorKind,
+    rustc_data_structures::fx::FxHashMap,
+};
 
 use super::Tree;
 use super::tree::{AccessRelatedness, Location, Node};
 use super::unimap::{UniIndex, UniValMap};
 use crate::borrow_tracker::GlobalState;
-use crate::{AccessKind, BorTag};
+use crate::{AccessKind, BorTag, VisitWith};
 
 /// Represensts the maximum access level that is possible.
 ///
@@ -43,7 +50,7 @@ impl WildcardAccessRelatedness {
 ///
 /// Designed to be completely determined by its parent, siblings and
 /// direct children's max_local_access/max_foreign_access.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct WildcardAccessTracking {
     /// How many of this node's direct children have `max_local_access()==Write`.
     child_writes: u16,
@@ -57,6 +64,15 @@ pub struct WildcardAccessTracking {
     max_foreign_access: WildcardAccessLevel,
     /// At what access level this node itself is exposed.
     exposed_as: WildcardAccessLevel,
+}
+impl Debug for WildcardAccessTracking {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WildcardAccessTracking")
+            .field("child_r/w", &(self.child_reads, self.child_writes))
+            .field("foreign", &self.max_foreign_access)
+            .field("exposed_as", &self.exposed_as)
+            .finish()
+    }
 }
 impl WildcardAccessTracking {
     /// The maximum access level that could happen from an exposed
@@ -401,6 +417,33 @@ impl Tree {
             );
         }
     }
+    pub(super) fn visit_wildcards(&self, visit: &mut VisitWith<'_>) {
+        for (_, Location { perms, .. }) in self.rperms.iter_all() {
+            let mut stack = vec![self.root];
+            let mut has_exposed = false;
+            while let Some(id) = stack.pop() {
+                let node = self.nodes.get(id).unwrap();
+
+                if node.is_exposed
+                    && let Some(perm) = perms.get(id)
+                {
+                    // If the node is already protected, then it gets already visited
+                    // through the protector. So we can assume `protected=false`.
+                    let access_level = perm.permission().strongest_allowed_child_access(false);
+                    if access_level != WildcardAccessLevel::None {
+                        visit(None, Some(node.tag))
+                    }
+                }
+                has_exposed |= node.is_exposed;
+                stack.extend(&node.children);
+            }
+            // If there are no exposed nodes, then we don't need to check other
+            // locations of this allocation.
+            if !has_exposed {
+                break;
+            }
+        }
+    }
 }
 
 #[cfg(feature = "expensive-consistency-checks")]
@@ -427,11 +470,6 @@ impl Tree {
 }
 
 #[cfg(feature = "expensive-consistency-checks")]
-use {
-    super::LocationState, crate::borrow_tracker::ProtectorKind,
-    rustc_data_structures::fx::FxHashMap,
-};
-#[cfg(feature = "expensive-consistency-checks")]
 impl WildcardAccessTracking {
     /// Verifies that the access tracking state is self consistent.
     ///
@@ -448,7 +486,7 @@ impl WildcardAccessTracking {
         }
 
         // Checks if accesses is empty.
-        if wildcard_accesses == &UniValMap::default() {
+        if !wildcard_accesses.is_initialized() {
             return;
         }
 
@@ -490,19 +528,19 @@ impl WildcardAccessTracking {
 
             assert_eq!(
                 expected_max_foreign_access, access.max_foreign_access,
-                "expected {:?}'s max_foreign_access to be {:?} instead of {:?}",
+                "expected {:?}'s (id:{id:?}) max_foreign_access to be {:?} instead of {:?}",
                 node.tag, expected_max_foreign_access, access.max_foreign_access
             );
             let child_reads: usize = access.child_reads.into();
             assert_eq!(
                 expected_child_reads, child_reads,
-                "expected {:?}'s child_reads to be {} instead of {}",
+                "expected {:?}'s (id:{id:?}) child_reads to be {} instead of {}",
                 node.tag, expected_child_reads, child_reads
             );
             let child_writes: usize = access.child_writes.into();
             assert_eq!(
                 expected_child_writes, child_writes,
-                "expected {:?}'s child_writes to be {} instead of {}",
+                "expected {:?}'s (id:{id:?}) child_writes to be {} instead of {}",
                 node.tag, expected_child_writes, child_writes
             );
         }
@@ -535,9 +573,18 @@ impl WildcardAccessTracking {
                     .strongest_allowed_child_access(protected_tags.contains_key(&node.tag));
                 assert_eq!(
                     access_level, state.exposed_as,
-                    "tag {:?} should be exposed as {access_level:?} but is exposed as {:?}",
+                    "tag {:?} (id:{id:?}) should be exposed as {access_level:?} but is exposed as {:?}",
                     node.tag, state.exposed_as
                 );
+            } else {
+                if let Some(state) = wildcard_accesses.get(id)
+                    && state.exposed_as != WildcardAccessLevel::None
+                {
+                    panic!(
+                        "tag {:?} (id:{id:?}) should be exposed as None but is exposed as {:?}",
+                        node.tag, state.exposed_as
+                    )
+                }
             }
             stack.extend(&node.children);
         }
