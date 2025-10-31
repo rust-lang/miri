@@ -346,7 +346,7 @@ where
 {
     fn should_continue_at(
         &self,
-        this: &'_ mut TreeVisitor<'_>,
+        this: &mut TreeVisitor<'_>,
         idx: UniIndex,
         rel_pos: AccessRelatedness,
     ) -> ContinueTraversal {
@@ -815,10 +815,9 @@ impl<'tcx> Tree {
         let node_skipper = |access_kind: AccessKind, args: &NodeAppArgs<'_>| -> ContinueTraversal {
             let node = args.nodes.get(args.idx).unwrap();
             let perm = args.perms.get(args.idx);
-            let rel_pos = args.rel_pos;
 
             let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
-            old_state.skip_if_known_noop(access_kind, rel_pos)
+            old_state.skip_if_known_noop(access_kind, args.rel_pos)
         };
         let node_app = |perms_range: Range<u64>,
                         access_kind: AccessKind,
@@ -827,17 +826,16 @@ impl<'tcx> Tree {
          -> Result<(), TransitionError> {
             let node = args.nodes.get_mut(args.idx).unwrap();
             let mut perm = args.perms.entry(args.idx);
-            let rel_pos = args.rel_pos;
 
             let old_state = perm.or_insert(node.default_location_state());
 
             // Call this function now, which ensures it is only called when
             // `skip_if_known_noop` returns `Recurse`, due to the contract of
             // `traverse_this_parents_children_other`.
-            old_state.record_new_access(access_kind, rel_pos);
+            old_state.record_new_access(access_kind, args.rel_pos);
 
             let protected = global.borrow().protected_tags.contains_key(&node.tag);
-            let transition = old_state.perform_access(access_kind, rel_pos, protected)?;
+            let transition = old_state.perform_access(access_kind, args.rel_pos, protected)?;
             // Record the event as part of the history
             if !transition.is_noop() {
                 node.debug_info.history.push(diagnostics::Event {
