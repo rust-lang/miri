@@ -840,7 +840,7 @@ impl<'tcx> Tree {
             if !transition.is_noop() {
                 node.debug_info.history.push(diagnostics::Event {
                     transition,
-                    is_foreign: rel_pos.is_foreign(),
+                    is_foreign: args.rel_pos.is_foreign(),
                     access_cause,
                     access_range: access_range_and_kind.map(|x| x.0),
                     transition_range: perms_range,
