@@ -90,7 +90,7 @@ impl PartialOrd for PermissionPriv {
 impl PermissionPriv {
     /// Check if `self` can be the initial state of a pointer.
     fn is_initial(&self) -> bool {
-        matches!(self, ReservedFrz { conflicted: false } | Frozen | ReservedIM | Cell)
+        matches!(self, ReservedFrz { conflicted: false } | Frozen | ReservedIM | Cell | Unique)
     }
 
     /// Reject `ReservedIM` that cannot exist in the presence of a protector.
@@ -257,6 +257,10 @@ impl Permission {
     /// Check if `self` is the never-allow-writes-again state of a pointer (is `Frozen`).
     pub fn is_frozen(&self) -> bool {
         self.inner == Frozen
+    }
+    /// Check if `self` is the allow-child-access-reject-foreign-access state of a pointer (is `Unique`).
+    pub fn is_unique(&self) -> bool {
+        self.inner == Unique
     }
 
     /// Check if `self` is the shared-reference-to-interior-mutable-data state of a pointer.
