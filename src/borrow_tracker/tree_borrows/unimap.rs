@@ -12,6 +12,7 @@
 
 #![allow(dead_code)]
 
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
 
@@ -20,9 +21,14 @@ use rustc_data_structures::fx::FxHashMap;
 use crate::helpers::ToUsize;
 
 /// Intermediate key between a UniKeyMap and a UniValMap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct UniIndex {
     idx: u32,
+}
+impl Debug for UniIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.idx.fmt(f)
+    }
 }
 
 /// From K to UniIndex
@@ -200,6 +206,12 @@ impl<V> UniValMap<V> {
         let mut res = None;
         mem::swap(&mut res, &mut self.data[idx.idx.to_usize()]);
         res
+    }
+
+    /// Weather the datastructure has been allocated.
+    /// Does not mean the map contains any values.
+    pub fn is_initialized(&self) -> bool {
+        self.data.capacity() != 0
     }
 }
 

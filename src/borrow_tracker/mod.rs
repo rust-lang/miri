@@ -365,6 +365,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let borrow_tracker = this.machine.borrow_tracker.as_ref().unwrap();
         // The body of this loop needs `borrow_tracker` immutably
         // so we can't move this code inside the following `end_call`.
+
         for (alloc_id, tag) in &frame
             .extra
             .borrow_tracker
@@ -391,6 +392,28 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
         borrow_tracker.borrow_mut().end_call(&frame.extra);
+
+        // We do a consistency check after the protected_tags get released in `end_call()`.
+        // Before this point the wildcard tracking datastructure might not be consistent with
+        // the trees actual permissions.
+        #[cfg(feature = "expensive-consistency-checks")]
+        for (alloc_id, _) in &frame
+            .extra
+            .borrow_tracker
+            .as_ref()
+            .expect("we should have borrow tracking data")
+            .protected_tags
+        {
+            let kind = this.get_alloc_info(*alloc_id).kind;
+            if matches!(kind, AllocKind::LiveData) {
+                let alloc_extra = this.get_alloc_extra(*alloc_id)?;
+                let alloc_borrow_tracker = &alloc_extra.borrow_tracker.as_ref().unwrap();
+                if let AllocState::TreeBorrows(tb) = alloc_borrow_tracker {
+                    tb.borrow().verify_wildcard_consistency(borrow_tracker);
+                }
+            }
+        }
+
         interp_ok(())
     }
 }
