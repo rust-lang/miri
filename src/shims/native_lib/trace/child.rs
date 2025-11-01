@@ -55,6 +55,17 @@ impl Supervisor {
         Ok(())
     }
 
+    unsafe fn protect_pages_ignore_errs(
+        pages: impl Iterator<Item = (NonNull<u8>, usize)>,
+        prot: mman::ProtFlags,
+    ) {
+        for (pg, sz) in pages {
+            unsafe {
+                let _ = mman::mprotect(pg.cast(), sz, prot);
+            };
+        }
+    }
+
     /// Performs an arbitrary FFI call, enabling tracing from the supervisor.
     /// As this locks the supervisor via a mutex, no other threads may enter FFI
     /// until this function returns.
@@ -113,11 +124,12 @@ impl Supervisor {
 
             // SAFETY: We set memory back to normal, so this is safe.
             unsafe {
-                Self::protect_pages(
+                // Use the error-ignoring variant here, since it's possible that
+                // foreign code may have unmapped a page of ours.
+                Self::protect_pages_ignore_errs(
                     alloc.pages(),
                     mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
-                )
-                .unwrap();
+                );
             }
 
             // Signal the supervisor that we are done. Will block until the supervisor continues us.

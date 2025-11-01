@@ -30,11 +30,27 @@ use self::ffi::OwnedArg;
 use crate::*;
 
 /// The final results of an FFI trace, containing every relevant event detected
-/// by the tracer.
+/// by the tracer. Events are ordered sequentially by the real time they occurred.
+pub type MemEvents = Vec<SingleEvent>;
+
+/// Singular event occurring in an FFI call.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MemEvents {
-    /// An list of memory accesses that occurred, in the order they occurred in.
-    pub acc_events: Vec<AccessEvent>,
+pub enum SingleEvent {
+    Acc(AccessEvent),
+    Map(MapEvent),
+}
+
+/// A single page in the address space being modified. Addresses must always be a
+/// multiple of the system page size, and the event is assumed to span from the
+/// address to `addr + page_size`.
+///
+/// TODO: Support pages that are not (just) RW.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum MapEvent {
+    /// A page was mapped with this base address.
+    Mmap(usize),
+    /// The page at this address was unmapped.
+    Munmap(usize),
 }
 
 /// A single memory access.
@@ -221,60 +237,104 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     /// Applies the `events` to Miri's internal state. The event vector must be
-    /// ordered sequentially by when the accesses happened, and the sizes are
-    /// assumed to be exact.
-    fn tracing_apply_accesses(&mut self, events: MemEvents) -> InterpResult<'tcx> {
+    /// ordered sequentially by when they occurred.
+    fn tracing_apply(&mut self, events: MemEvents) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+        for evt in events {
+            match evt {
+                SingleEvent::Acc(acc) => this.tracing_apply_access(acc)?,
+                SingleEvent::Map(map) => this.tracing_apply_mapping(map)?,
+            }
+        }
+        interp_ok(())
+    }
+
+    /// Applies the possible effects of a single memory access. Sizes are assumed
+    /// to be exact.
+    fn tracing_apply_access(&mut self, acc: AccessEvent) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        for evt in events.acc_events {
-            let evt_rg = evt.get_range();
-            // LLVM at least permits vectorising accesses to adjacent allocations,
-            // so we cannot assume 1 access = 1 allocation. :(
-            let mut rg = evt_rg.addr..evt_rg.end();
-            while let Some(curr) = rg.next() {
-                let Some(alloc_id) =
-                    this.alloc_id_from_addr(curr.to_u64(), rg.len().try_into().unwrap())
-                else {
-                    throw_ub_format!("Foreign code did an out-of-bounds access!")
-                };
-                let alloc = this.get_alloc_raw(alloc_id)?;
-                // The logical and physical address of the allocation coincide, so we can use
-                // this instead of `addr_from_alloc_id`.
-                let alloc_addr = alloc.get_bytes_unchecked_raw().addr();
+        let acc_rg = acc.get_range();
+        // LLVM at least permits vectorising accesses to adjacent allocations,
+        // so we cannot assume 1 access = 1 allocation. :(
+        let mut rg = acc_rg.addr..acc_rg.end();
+        while let Some(curr) = rg.next() {
+            let Some(alloc_id) =
+                this.alloc_id_from_addr(curr.to_u64(), rg.len().try_into().unwrap())
+            else {
+                throw_ub_format!("Foreign code did an out-of-bounds access!")
+            };
+            let alloc = this.get_alloc_raw(alloc_id)?;
+            // The logical and physical address of the allocation coincide, so we can use
+            // this instead of `addr_from_alloc_id`.
+            let alloc_addr = alloc.get_bytes_unchecked_raw().addr();
 
-                // Determine the range inside the allocation that this access covers. This range is
-                // in terms of offsets from the start of `alloc`. The start of the overlap range
-                // will be `curr`; the end will be the minimum of the end of the allocation and the
-                // end of the access' range.
-                let overlap = curr.strict_sub(alloc_addr)
-                    ..std::cmp::min(alloc.len(), rg.end.strict_sub(alloc_addr));
-                // Skip forward however many bytes of the access are contained in the current
-                // allocation, subtracting 1 since the overlap range includes the current addr
-                // that was already popped off of the range.
-                rg.advance_by(overlap.len().strict_sub(1)).unwrap();
+            // Determine the range inside the allocation that this access covers. This range is
+            // in terms of offsets from the start of `alloc`. The start of the overlap range
+            // will be `curr`; the end will be the minimum of the end of the allocation and the
+            // end of the access' range.
+            let overlap = curr.strict_sub(alloc_addr)
+                ..std::cmp::min(alloc.len(), rg.end.strict_sub(alloc_addr));
+            // Skip forward however many bytes of the access are contained in the current
+            // allocation, subtracting 1 since the overlap range includes the current addr
+            // that was already popped off of the range.
+            rg.advance_by(overlap.len().strict_sub(1)).unwrap();
 
-                match evt {
-                    AccessEvent::Read(_) => {
-                        // If a provenance was read by the foreign code, expose it.
-                        for prov in alloc.provenance().get_range(this, overlap.into()) {
-                            this.expose_provenance(prov)?;
-                        }
-                    }
-                    AccessEvent::Write(_, certain) => {
-                        // Sometimes we aren't certain if a write happened, in which case we
-                        // only initialise that data if the allocation is mutable.
-                        if certain || alloc.mutability.is_mut() {
-                            let (alloc, cx) = this.get_alloc_raw_mut(alloc_id)?;
-                            alloc.process_native_write(
-                                &cx.tcx,
-                                Some(AllocRange {
-                                    start: Size::from_bytes(overlap.start),
-                                    size: Size::from_bytes(overlap.len()),
-                                }),
-                            )
-                        }
+            match acc {
+                AccessEvent::Read(_) => {
+                    // If a provenance was read by the foreign code, expose it.
+                    for prov in alloc.provenance().get_range(this, overlap.into()) {
+                        this.expose_provenance(prov)?;
                     }
                 }
+                AccessEvent::Write(_, certain) => {
+                    // Sometimes we aren't certain if a write happened, in which case we
+                    // only initialise that data if the allocation is mutable.
+                    if certain || alloc.mutability.is_mut() {
+                        let (alloc, cx) = this.get_alloc_raw_mut(alloc_id)?;
+                        alloc.process_native_write(
+                            &cx.tcx,
+                            Some(AllocRange {
+                                start: Size::from_bytes(overlap.start),
+                                size: Size::from_bytes(overlap.len()),
+                            }),
+                        )
+                    }
+                }
+            }
+        }
+
+        interp_ok(())
+    }
+
+    /// Forges an allocation corresponding to a page mapping.
+    fn tracing_apply_mapping(&mut self, map: MapEvent) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+        let kind = MemoryKind::Machine(MiriMemoryKind::Mmap);
+
+        match map {
+            MapEvent::Mmap(addr) => {
+                let page_size = this.machine.page_size;
+                // Pretend an allocation was created at this address, and register
+                // it with the machine's allocator so it can track it.
+                let forged = Allocation::new(
+                    Size::from_bytes(page_size),
+                    rustc_abi::Align::from_bytes(page_size).unwrap(),
+                    AllocInit::Zero,
+                    crate::alloc::MiriAllocParams::Forged(addr),
+                );
+                let ptr = this.insert_allocation(forged, kind)?;
+                this.expose_provenance(ptr.provenance)?;
+                // Also make sure accesses on this page are intercepted.
+                this.machine.allocator.as_mut().unwrap().borrow_mut().forge_page(addr);
+            }
+            MapEvent::Munmap(addr) => {
+                let ptr = this.ptr_from_addr_cast(addr.to_u64())?;
+                // This will call `munmap` on already-unmapped memory; that's fine,
+                // since we intentionally ignore the returned error from `munmap`
+                // to allow this without more invasive changes.
+                this.deallocate_ptr(ptr, None, kind)?;
+                this.machine.allocator.as_mut().unwrap().borrow_mut().remove_forged(addr);
             }
         }
 
@@ -526,7 +586,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.call_native_with_args(link_name, dest, code_ptr, &mut libffi_args)?;
 
         if tracing {
-            this.tracing_apply_accesses(maybe_memevents.unwrap())?;
+            this.tracing_apply(maybe_memevents.unwrap())?;
         }
 
         this.write_immediate(*ret, dest)?;
