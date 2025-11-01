@@ -40,6 +40,11 @@ def normalize_stdout(str):
     str = re.sub("\\b\\d+\\.\\d+s\\b", "$TIME", str) # the time keeps changing, obviously
     return str
 
+def normalize_stderr(str):
+    # the order of reported crate types is non-deterministic and the target differs between platforms
+    str = re.sub("warning: dropping unsupported crate type.*", "UNSUPPORTED CRATE TYPE", str)
+    return str
+
 def check_output(actual, path, name):
     if ARGS.bless:
         # Write the output only if bless is set
@@ -71,7 +76,7 @@ def test(name, cmd, stdout_ref, stderr_ref, stdin=b'', env=None):
     )
     (stdout, stderr) = p.communicate(input=stdin)
     stdout = normalize_stdout(stdout.decode("UTF-8"))
-    stderr = stderr.decode("UTF-8")
+    stderr = normalize_stderr(stderr.decode("UTF-8"))
 
     stdout_matches = check_output(stdout, stdout_ref, "stdout")
     stderr_matches = check_output(stderr, stderr_ref, "stderr")
@@ -144,30 +149,30 @@ def test_cargo_miri_run():
 def test_cargo_miri_test():
     test("`cargo miri test`",
         cargo_miri("test"),
-        "test.default.stdout.ref", "test.empty.ref",
+        "test.default.stdout.ref", "test.default.stderr.ref",
         env={'MIRIFLAGS': "-Zmiri-seed=4242"},
     )
     test("`cargo miri test` (no isolation, no doctests)",
         cargo_miri("test") + ["--bins", "--tests"], # no `--lib`, we disabled that in `Cargo.toml`
-        "test.no-doc.stdout.ref", "test.empty.ref",
+        "test.no-doc.stdout.ref", "test.no-doc.stderr.ref",
         env={'MIRIFLAGS': "-Zmiri-disable-isolation"},
     )
     test("`cargo miri test` (with filter)",
         cargo_miri("test") + ["--", "--format=pretty", "pl"],
-        "test.filter.stdout.ref", "test.empty.ref",
+        "test.filter.stdout.ref", "test.filter.stderr.ref",
     )
     test("`cargo miri test` (test target)",
         cargo_miri("test") + ["--test", "test", "--", "--format=pretty"],
-        "test.test-target.stdout.ref", "test.empty.ref",
+        "test.test-target.stdout.ref", "test.test-target.stderr.ref",
     )
     test("`cargo miri test` (bin target)",
         cargo_miri("test") + ["--bin", "cargo-miri-test", "--", "--format=pretty"],
-        "test.bin-target.stdout.ref", "test.empty.ref",
+        "test.bin-target.stdout.ref", "test.bin-target.stderr.ref",
     )
     test("`cargo miri t` (subcrate, no isolation)",
         cargo_miri("t") + ["-p", "subcrate"],
         "test.subcrate.stdout.ref",
-        "test.empty.ref",
+        "test.subcrate.stderr.ref",
         env={'MIRIFLAGS': "-Zmiri-disable-isolation"},
     )
     test("`cargo miri test` (proc-macro crate)",
@@ -176,12 +181,12 @@ def test_cargo_miri_test():
     )
     test("`cargo miri test` (custom target dir)",
         cargo_miri("test") + ["--target-dir=custom-test"],
-        "test.default.stdout.ref", "test.empty.ref",
+        "test.default.stdout.ref", "test.default.stderr.ref",
     )
     del os.environ["CARGO_TARGET_DIR"] # this overrides `build.target-dir` passed by `--config`, so unset it
     test("`cargo miri test` (config-cli)",
         cargo_miri("test") + ["--config=build.target-dir=\"config-cli\""],
-        "test.default.stdout.ref", "test.empty.ref",
+        "test.default.stdout.ref", "test.default.stderr.ref",
     )
     if ARGS.multi_target:
         test_cargo_miri_multi_target()
@@ -190,7 +195,7 @@ def test_cargo_miri_test():
 def test_cargo_miri_multi_target():
     test("`cargo miri test` (multiple targets)",
         cargo_miri("test", targets = ["aarch64-unknown-linux-gnu", "s390x-unknown-linux-gnu"]),
-        "test.multiple_targets.stdout.ref", "test.empty.ref",
+        "test.multiple_targets.stdout.ref", "test.multiple_targets.stderr.ref",
     )
 
 args_parser = argparse.ArgumentParser(description='`cargo miri` testing')
