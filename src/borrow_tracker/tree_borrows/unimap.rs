@@ -210,8 +210,8 @@ impl<V> UniValMap<V> {
 
     /// Weather the datastructure has been allocated.
     /// Does not mean the map contains any values.
-    pub fn is_initialized(&self) -> bool {
-        self.data.capacity() != 0
+    pub fn is_empty(&self) -> bool {
+        self.data.len() == 0 || self.data.iter().all(|v| v.is_none())
     }
 }
 

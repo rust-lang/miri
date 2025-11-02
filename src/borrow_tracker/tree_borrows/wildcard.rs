@@ -25,7 +25,7 @@ pub enum WildcardAccessLevel {
     Write,
 }
 
-/// Were relative to the node the access happened from.
+/// Where the access happened relative to the current node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WildcardAccessRelatedness {
     /// The access definitively happened through a local node.
@@ -59,8 +59,8 @@ pub struct WildcardState {
     /// The maximum access level that could happen from an exposed node
     /// that is foreign to this node.
     ///
-    /// This is calculated as the `max()` of parents `max_foreign_access`,
-    /// `exposed_as` and its siblings `max_local_access()`.
+    /// This is calculated as the `max()` of the parent's `max_foreign_access`,
+    /// `exposed_as` and the siblings' `max_local_access()`.
     max_foreign_access: WildcardAccessLevel,
     /// At what access level this node itself is exposed.
     exposed_as: WildcardAccessLevel,
@@ -76,8 +76,8 @@ impl Debug for WildcardState {
 }
 impl WildcardState {
     /// The maximum access level that could happen from an exposed
-    /// node that is a local to this node.
-    pub fn max_local_access(&self) -> WildcardAccessLevel {
+    /// node that is local to this node.
+    fn max_local_access(&self) -> WildcardAccessLevel {
         use WildcardAccessLevel::*;
         max(
             self.exposed_as,
@@ -100,7 +100,7 @@ impl WildcardState {
     }
 
     /// From where relative to the node with this wildcard info a read access could happen.
-    pub fn read_access_relatedness(&self) -> Option<WildcardAccessRelatedness> {
+    fn read_access_relatedness(&self) -> Option<WildcardAccessRelatedness> {
         let has_foreign = self.max_foreign_access >= WildcardAccessLevel::Read;
         let has_local = self.max_local_access() >= WildcardAccessLevel::Read;
         use WildcardAccessRelatedness as E;
@@ -113,7 +113,7 @@ impl WildcardState {
     }
 
     /// From where relative to the node with this wildcard info a write access could happen.
-    pub fn write_access_relatedness(&self) -> Option<WildcardAccessRelatedness> {
+    fn write_access_relatedness(&self) -> Option<WildcardAccessRelatedness> {
         let has_foreign = self.max_foreign_access == WildcardAccessLevel::Write;
         let has_local = self.max_local_access() == WildcardAccessLevel::Write;
         use WildcardAccessRelatedness as E;
@@ -129,7 +129,7 @@ impl WildcardState {
     /// wildcard info.
     /// The new node doesn't have any child reads/writes, but calculates max_foreign_access
     /// from its parent.
-    pub fn get_new_child(&self) -> Self {
+    pub fn for_new_child(&self) -> Self {
         Self {
             max_foreign_access: max(self.max_foreign_access, self.max_local_access()),
             ..Default::default()
@@ -147,9 +147,10 @@ impl WildcardState {
     ///   of at least `read`/`write`
     ///
     /// * `new_foreign_access`, `old_foreign_access`:
-    ///   The max possible access level, that is foreign to all `children`.
+    ///   The max possible access level that is foreign to all `children`
+    ///   (i.e., it is not local to *any* of them).
     ///   This can be calculated as the max of the parent's `exposed_as()`, `max_foreign_access`
-    ///   and of all `max_local_access()` of any nodes with the same parent, that are
+    ///   and of all `max_local_access()` of any nodes with the same parent that are
     ///   not listed in `children`.
     ///
     ///   This access level changed from `old` to `new`, which is why we need to
@@ -172,9 +173,9 @@ impl WildcardState {
         }
 
         // We need to consider that the children's `max_local_access()` affect each
-        // others `max_foreign_access`, but do not affect their own `max_foreign_access`.
+        // other's `max_foreign_access`, but do not affect their own `max_foreign_access`.
 
-        // The new `max_foreign_acces` for children with `max_locala_access()==Write`.
+        // The new `max_foreign_acces` for children with `max_local_access()==Write`.
         let write_foreign_access = max(
             new_foreign_access,
             if child_writes > 1 {
@@ -263,8 +264,6 @@ impl WildcardState {
         if old_exposed_as == new_exposed_as {
             return;
         }
-        // Whether we are upgrading or downgrading the allowed access rights.
-        let is_upgrade = old_exposed_as < new_exposed_as;
 
         let src_old_local_access = src_state.max_local_access();
 
@@ -273,15 +272,20 @@ impl WildcardState {
         let src_new_local_access = src_state.max_local_access();
 
         // Stack of nodes for which the max_foreign_access field needs to be updated.
+        // Will be filled with the children of this node and its parents children before
+        // we begin downwards traversal.
         let mut stack: Vec<(UniIndex, WildcardAccessLevel)> = Vec::new();
 
-        // Update the direct children of this node.
+        // Add the direct children of this node to the stack.
         {
             let node = nodes.get(id).unwrap();
             Self::push_relevant_children(
                 &mut stack,
+                // new_foreign_access
                 max(src_state.max_foreign_access, new_exposed_as),
+                // old_foreign_access
                 max(src_state.max_foreign_access, old_exposed_as),
+                // Consider all children.
                 src_state.child_reads,
                 src_state.child_writes,
                 node.children.iter().copied(),
@@ -291,7 +295,7 @@ impl WildcardState {
         // We need to propagate the tracking info up the tree, for this we traverse up the parents.
         // We can skip propagating info to the parent and siblings of a node if its access didn't change.
         {
-            // The child from which we came from.
+            // The child from which we came.
             let mut child = id;
             // This is the `max_local_access()` of the child we came from, before this update...
             let mut old_child_access = src_old_local_access;
@@ -305,28 +309,15 @@ impl WildcardState {
                 let old_parent_state = parent_state.clone();
                 use WildcardAccessLevel::*;
                 // Updating this node's tracking state for its children.
-                if is_upgrade {
-                    if new_child_access == Write {
-                        // None -> Write
-                        // Read -> Write
-                        parent_state.child_writes += 1;
-                    }
-                    if old_child_access == None {
-                        // None -> Read
-                        // None -> Write
-                        parent_state.child_reads += 1;
-                    }
-                } else {
-                    if old_child_access == Write {
-                        // Write -> None
-                        // Write -> Read
-                        parent_state.child_writes -= 1;
-                    }
-                    if new_child_access == None {
-                        // Read  -> None
-                        // Write -> None
-                        parent_state.child_reads -= 1;
-                    }
+                match (old_child_access, new_child_access) {
+                    (None | Read, Write) => parent_state.child_writes += 1,
+                    (Write, None | Read) => parent_state.child_writes -= 1,
+                    _ => {}
+                }
+                match (old_child_access, new_child_access) {
+                    (None, Read | Write) => parent_state.child_reads += 1,
+                    (Read | Write, None) => parent_state.child_reads -= 1,
+                    _ => {}
                 }
 
                 let old_parent_local_access = old_parent_state.max_local_access();
@@ -341,19 +332,22 @@ impl WildcardState {
                     // it as part of the foreign access.
 
                     // it doesnt matter wether we read these from old or new
-                    let constant_factors =
+                    let parent_access =
                         max(parent_state.exposed_as, parent_state.max_foreign_access);
 
-                    // `state` contains the correct child_writes/reads counts for just the
-                    // siblings excluding `child`.
-                    let state = if is_upgrade { &old_parent_state } else { parent_state };
-
+                    let sibling_reads =
+                        parent_state.child_reads - if new_child_access >= Read { 1 } else { 0 };
+                    let sibling_writes =
+                        parent_state.child_writes - if new_child_access == Write { 1 } else { 0 };
                     Self::push_relevant_children(
                         &mut stack,
-                        max(constant_factors, new_child_access),
-                        max(constant_factors, old_child_access),
-                        state.child_reads,
-                        state.child_writes,
+                        // new_foreign_access
+                        max(parent_access, new_child_access),
+                        // old_foreign_access
+                        max(parent_access, old_child_access),
+                        // Consider only siblings of child.
+                        sibling_reads,
+                        sibling_writes,
                         parent_node.children.iter().copied().filter(|id| child != *id),
                         wildcard_accesses,
                     );
@@ -368,7 +362,7 @@ impl WildcardState {
                 child = parent_id;
             }
         }
-        // Traverses up the tree to update max_foreign_access fields of children and cousins who need to be updated.
+        // Traverses down the tree to update max_foreign_access fields of children and cousins who need to be updated.
         while let Some((id, new_access)) = stack.pop() {
             let node = nodes.get(id).unwrap();
             let mut entry = wildcard_accesses.entry(id);
@@ -379,8 +373,11 @@ impl WildcardState {
 
             Self::push_relevant_children(
                 &mut stack,
+                // new_foreign_access
                 max(state.exposed_as, new_access),
+                // old_foreign_access
                 max(state.exposed_as, old_access),
+                // Consider all children.
                 state.child_reads,
                 state.child_writes,
                 node.children.iter().copied(),
@@ -406,9 +403,13 @@ impl Tree {
         let protected = protected_tags.contains_key(&tag);
         // TODO: Only initialize neccessary ranges.
         for (_, loc) in self.locations.iter_mut_all() {
-            let perm = *loc.perms.entry(id).or_insert(node.default_location_state());
+            let perm = loc
+                .perms
+                .get(id)
+                .map(|p| p.permission())
+                .unwrap_or_else(|| node.default_location_state().permission());
 
-            let access_type = perm.permission().strongest_allowed_child_access(protected);
+            let access_type = perm.strongest_allowed_child_access(protected);
             WildcardState::update_exposure(
                 id,
                 access_type,
@@ -417,7 +418,9 @@ impl Tree {
             );
         }
     }
-    pub(super) fn visit_wildcards(&self, visit: &mut VisitWith<'_>) {
+    /// Visit all tags through which a wilcard access could happen.
+    /// Used for GC.
+    pub(super) fn gc_visit_wildcards(&self, visit: &mut VisitWith<'_>) {
         for (_, loc) in self.locations.iter_all() {
             let mut stack = vec![self.root];
             let mut has_exposed = false;
@@ -427,8 +430,7 @@ impl Tree {
                 if node.is_exposed
                     && let Some(perm) = loc.perms.get(id)
                 {
-                    // If the node is already protected, then it gets already visited
-                    // through the protector. So we can assume `protected=false`.
+                    // The protector doesn't matter for this check, as it never reduces access level to None.
                     let access_level = perm.permission().strongest_allowed_child_access(false);
                     if access_level != WildcardAccessLevel::None {
                         visit(None, Some(node.tag))
@@ -486,7 +488,7 @@ impl WildcardState {
         }
 
         // Checks if accesses is empty.
-        if !wildcard_accesses.is_initialized() {
+        if wildcard_accesses.is_empty() {
             return;
         }
 
@@ -497,6 +499,8 @@ impl WildcardState {
 
             let access = wildcard_accesses.get(id).unwrap();
 
+            // The foreign wildcard accesses possible at a node are determined by which accesses
+            // can originate from their siblings, their parent, and from above their parent.
             let expected_max_foreign_access = if let Some(parent) = node.parent {
                 let parent_node = nodes.get(parent).unwrap();
                 let parent_state = wildcard_accesses.get(parent).unwrap();
@@ -517,6 +521,8 @@ impl WildcardState {
                 WildcardAccessLevel::None
             };
 
+            // Count how many children can be the source of wildcard reads or writes
+            // (either directly, or via their children).
             let child_accesses = node.children.iter().copied().map(|child| {
                 let state = wildcard_accesses.get(child).unwrap();
                 state.max_local_access()

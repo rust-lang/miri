@@ -109,7 +109,8 @@ impl<'tcx> Tree {
                     // This happens because the protected_tags map still contains all protected_tags, they only get removed after
                     // `release_protector` got called on all the relevant tags.
                     //
-                    // This is also why we dont call  `WildcardState::verify_external_consistency` here.
+                    // This is also why we dont call  `WildcardState::verify_external_consistency` here. Instead we call it
+                    // in `on_stack_pop` after the permission map gets updated.
                     let access_level = p.permission().strongest_allowed_child_access(false);
                     WildcardState::update_exposure(
                         idx,

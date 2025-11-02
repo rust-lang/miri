@@ -683,7 +683,7 @@ impl<'tcx> Tree {
         // For this, we insert the correct entry for this tag based on its parent, if it exists.
         for (_, loc) in self.locations.iter_mut_all() {
             if let Some(parent_access) = loc.wildcard_accesses.get(parent_idx) {
-                loc.wildcard_accesses.insert(idx, parent_access.get_new_child());
+                loc.wildcard_accesses.insert(idx, parent_access.for_new_child());
             }
         }
 
@@ -897,7 +897,7 @@ impl<'tcx> Tree {
                     #[cfg(feature = "expensive-consistency-checks")]
                     WildcardState::verify_external_consistency(
                         args.idx,
-                        &args.nodes,
+                        args.nodes,
                         &args.loc.perms,
                         &args.loc.wildcard_accesses,
                         &global.borrow().protected_tags,
@@ -1266,7 +1266,7 @@ impl VisitProvenance for Tree {
 
         // We also need to keep around any exposed tags through which
         // an access could still happen.
-        self.visit_wildcards(visit);
+        self.gc_visit_wildcards(visit);
     }
 }
 
