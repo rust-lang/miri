@@ -288,8 +288,7 @@ struct NodeAppArgs<'visit> {
     /// The node map of this tree.
     nodes: &'visit mut UniValMap<Node>,
     /// The permissions map of this tree.
-    perms: &'visit mut UniValMap<LocationState>,
-    wildcard_accesses: Option<&'visit mut UniValMap<WildcardState>>
+    loc: &'visit mut LocationTree,
 }
 /// Data given to the error handler
 struct ErrHandlerArgs<'node, InErr> {
@@ -309,8 +308,7 @@ struct ErrHandlerArgs<'node, InErr> {
 struct TreeVisitor<'tree> {
     tag_mapping: &'tree UniKeyMap<BorTag>,
     nodes: &'tree mut UniValMap<Node>,
-    perms: &'tree mut UniValMap<LocationState>,
-    wildcard_accesses: Option<&'tree mut UniValMap<WildcardState>>,
+    loc: &'tree mut LocationTree,
 }
 
 /// Whether to continue exploring the children recursively or not.
@@ -367,7 +365,7 @@ where
         idx: UniIndex,
         rel_pos: AccessRelatedness,
     ) -> ContinueTraversal {
-        let args = NodeAppArgs { idx, rel_pos, nodes: this.nodes, perms: this.perms, wildcard_accesses: this.wildcard_accesses.as_deref_mut() };
+        let args = NodeAppArgs { idx, rel_pos, nodes: this.nodes, loc: this.loc };
         (self.f_continue)(&args)
     }
 
@@ -377,14 +375,15 @@ where
         idx: UniIndex,
         rel_pos: AccessRelatedness,
     ) -> Result<(), OutErr> {
-        (self.f_propagate)(NodeAppArgs { idx, rel_pos, nodes: this.nodes, perms: this.perms, wildcard_accesses: this.wildcard_accesses.as_deref_mut() })
-            .map_err(|error_kind| {
+        (self.f_propagate)(NodeAppArgs { idx, rel_pos, nodes: this.nodes, loc: this.loc }).map_err(
+            |error_kind| {
                 (self.err_builder)(ErrHandlerArgs {
                     error_kind,
                     conflicting_info: &this.nodes.get(idx).unwrap().debug_info,
                     accessed_info: &this.nodes.get(self.initial).unwrap().debug_info,
                 })
-            })
+            },
+        )
     }
 
     fn go_upwards_from_accessed(
@@ -769,48 +768,43 @@ impl<'tcx> Tree {
                 // so we use the root as a default tag
                 ProvenanceExtra::Wildcard => self.nodes.get(self.root).unwrap().tag,
             };
-            TreeVisitor {
-                nodes: &mut self.nodes,
-                tag_mapping: &self.tag_mapping,
-                perms: &mut loc.perms,
-                wildcard_accesses: None,
-            }
-            .traverse_this_parents_children_other(
-                start_tag,
-                // visit all children, skipping none
-                |_| ContinueTraversal::Recurse,
-                |args: NodeAppArgs<'_>| -> Result<(), TransitionError> {
-                    let node = args.nodes.get(args.idx).unwrap();
-                    let perm = args.perms.entry(args.idx);
+            TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, loc }
+                .traverse_this_parents_children_other(
+                    start_tag,
+                    // visit all children, skipping none
+                    |_| ContinueTraversal::Recurse,
+                    |args: NodeAppArgs<'_>| -> Result<(), TransitionError> {
+                        let node = args.nodes.get(args.idx).unwrap();
+                        let perm = args.loc.perms.entry(args.idx);
 
-                    let perm =
-                        perm.get().copied().unwrap_or_else(|| node.default_location_state());
-                    if global.borrow().protected_tags.get(&node.tag)
+                        let perm =
+                            perm.get().copied().unwrap_or_else(|| node.default_location_state());
+                        if global.borrow().protected_tags.get(&node.tag)
                             == Some(&ProtectorKind::StrongProtector)
                             // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
                             // Related to https://github.com/rust-lang/rust/issues/55005.
                             && !perm.permission.is_cell()
                             // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
                             && perm.accessed
-                    {
-                        Err(TransitionError::ProtectedDealloc)
-                    } else {
-                        Ok(())
-                    }
-                },
-                |args: ErrHandlerArgs<'_, TransitionError>| -> InterpErrorKind<'tcx> {
-                    let ErrHandlerArgs { error_kind, conflicting_info, accessed_info } = args;
-                    TbError {
-                        conflicting_info,
-                        access_cause: diagnostics::AccessCause::Dealloc,
-                        alloc_id,
-                        error_offset: loc_range.start,
-                        error_kind,
-                        accessed_info: Some(accessed_info),
-                    }
-                    .build()
-                },
-            )?;
+                        {
+                            Err(TransitionError::ProtectedDealloc)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |args: ErrHandlerArgs<'_, TransitionError>| -> InterpErrorKind<'tcx> {
+                        let ErrHandlerArgs { error_kind, conflicting_info, accessed_info } = args;
+                        TbError {
+                            conflicting_info,
+                            access_cause: diagnostics::AccessCause::Dealloc,
+                            alloc_id,
+                            error_offset: loc_range.start,
+                            error_kind,
+                            accessed_info: Some(accessed_info),
+                        }
+                        .build()
+                    },
+                )?;
         }
         interp_ok(())
     }
@@ -857,7 +851,7 @@ impl<'tcx> Tree {
         // the `RangeMap` on which we are currently working).
         let node_skipper = |access_kind: AccessKind, args: &NodeAppArgs<'_>| -> ContinueTraversal {
             let node = args.nodes.get(args.idx).unwrap();
-            let perm = args.perms.get(args.idx);
+            let perm = args.loc.perms.get(args.idx);
 
             let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
             old_state.skip_if_known_noop(access_kind, args.rel_pos)
@@ -865,10 +859,10 @@ impl<'tcx> Tree {
         let node_app = |perms_range: Range<u64>,
                         access_kind: AccessKind,
                         access_cause: diagnostics::AccessCause,
-                        mut args: NodeAppArgs<'_>|
+                        args: NodeAppArgs<'_>|
          -> Result<(), TransitionError> {
             let node = args.nodes.get_mut(args.idx).unwrap();
-            let mut perm = args.perms.entry(args.idx);
+            let mut perm = args.loc.perms.entry(args.idx);
 
             let state = perm.or_insert(node.default_location_state());
             // Call this function now, which ensures it is only called when
@@ -892,21 +886,20 @@ impl<'tcx> Tree {
                 // we need to update the wildcard access tracking information,
                 // if the permission of an exposed pointer changes
                 if node.is_exposed {
-                    let wildcard_accesses = args.wildcard_accesses.as_deref_mut().unwrap();
                     //Protected doesnt change during access.
                     let access_type = state.permission.strongest_allowed_child_access(protected);
                     WildcardState::update_exposure(
                         args.idx,
                         access_type,
-                        &args.nodes,
-                        wildcard_accesses,
+                        args.nodes,
+                        &mut args.loc.wildcard_accesses,
                     );
                     #[cfg(feature = "expensive-consistency-checks")]
                     WildcardState::verify_external_consistency(
-                        idx,
-                        this.nodes,
-                        this.perms,
-                        wildcard_accesses,
+                        args.idx,
+                        &args.nodes,
+                        &args.loc.perms,
+                        &args.loc.wildcard_accesses,
                         &global.borrow().protected_tags,
                     );
                 }
@@ -936,20 +929,13 @@ impl<'tcx> Tree {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
-                TreeVisitor {
-                    nodes: &mut self.nodes,
-                    tag_mapping: &self.tag_mapping,
-                    perms: &mut loc.perms,
-                    wildcard_accesses: Some(&mut loc.wildcard_accesses),
-                }
-                .traverse_this_parents_children_other(
-                    tag,
-                    |args| node_skipper(access_kind, args),
-                    |args| {
-                        node_app(loc_range.clone(), access_kind, access_cause, args)
-                    },
-                    |args| err_handler(loc_range.clone(), access_cause, args),
-                )?;
+                TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, loc }
+                    .traverse_this_parents_children_other(
+                        tag,
+                        |args| node_skipper(access_kind, args),
+                        |args| node_app(loc_range.clone(), access_kind, access_cause, args),
+                        |args| err_handler(loc_range.clone(), access_cause, args),
+                    )?;
             }
         } else {
             // This is a special access through the entire allocation.
@@ -969,25 +955,13 @@ impl<'tcx> Tree {
                     && p.accessed
                 {
                     let access_cause = diagnostics::AccessCause::FnExit(access_kind);
-                    TreeVisitor {
-                        nodes: &mut self.nodes,
-                        tag_mapping: &self.tag_mapping,
-                        perms: &mut loc.perms,
-                        wildcard_accesses: Some(&mut loc.wildcard_accesses),
-                    }
-                    .traverse_nonchildren(
-                        tag,
-                        |args| node_skipper(access_kind, args),
-                        |args| {
-                            node_app(
-                                loc_range.clone(),
-                                access_kind,
-                                access_cause,
-                                args
-                            )
-                        },
-                        |args| err_handler(loc_range.clone(), access_cause, args),
-                    )?;
+                    TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, loc }
+                        .traverse_nonchildren(
+                            tag,
+                            |args| node_skipper(access_kind, args),
+                            |args| node_app(loc_range.clone(), access_kind, access_cause, args),
+                            |args| err_handler(loc_range.clone(), access_cause, args),
+                        )?;
                 }
             }
         }
