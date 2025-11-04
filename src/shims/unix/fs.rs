@@ -6,7 +6,6 @@ use std::fs::{
     remove_file, rename,
 };
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -1241,7 +1240,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if file.writable {
             let current_size = match file.file.metadata() {
-                Ok(metadata) => metadata.size(),
+                Ok(metadata) => metadata.len(),
                 Err(err) => return this.io_error_to_errnum(err),
             };
             let new_size = match offset.checked_add(len) {
