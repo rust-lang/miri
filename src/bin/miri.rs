@@ -272,17 +272,11 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
     }
 }
 
-struct MiriBeRustCompilerCalls {
-    target_crate: bool,
-}
+struct MiriBeRustCompilerCalls;
 
 impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
     #[allow(rustc::potential_query_instability)] // rustc_codegen_ssa (where this code is copied from) also allows this lint
     fn config(&mut self, config: &mut Config) {
-        if !self.target_crate {
-            // For a host crate, we fully behave like rustc.
-            return;
-        }
         // For a target crate, we emit an rlib that Miri can later consume.
         config.make_codegen_backend = Some(Box::new(make_miri_codegen_backend));
 
@@ -367,16 +361,15 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
         _: &rustc_interface::interface::Compiler,
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
-        if self.target_crate {
-            // cargo-miri has patched the compiler flags to make these into check-only builds,
-            // but we are still emulating regular rustc builds, which would perform post-mono
-            // const-eval during collection. So let's also do that here, even if we might be
-            // running with `--emit=metadata`. In particular this is needed to make
-            // `compile_fail` doc tests trigger post-mono errors.
-            // In general `collect_and_partition_mono_items` is not safe to call in check-only
-            // builds, but we are setting `-Zalways-encode-mir` which avoids those issues.
-            let _ = tcx.collect_and_partition_mono_items(());
-        }
+        // cargo-miri has patched the compiler flags to make these into check-only builds,
+        // but we are still emulating regular rustc builds, which would perform post-mono
+        // const-eval during collection. So let's also do that here, even if we might be
+        // running with `--emit=metadata`. In particular this is needed to make
+        // `compile_fail` doc tests trigger post-mono errors.
+        // In general `collect_and_partition_mono_items` is not safe to call in check-only
+        // builds, but we are setting `-Zalways-encode-mir` which avoids those issues.
+        let _ = tcx.collect_and_partition_mono_items(());
+
         Compilation::Continue
     }
 }
@@ -457,32 +450,24 @@ fn main() {
 
     // If the environment asks us to actually be rustc, then do that.
     if let Some(crate_kind) = env::var_os("MIRI_BE_RUSTC") {
+        if crate_kind == "host" {
+            rustc_driver::main();
+        } else if crate_kind != "target" {
+            panic!("invalid `MIRI_BE_RUSTC` value: {crate_kind:?}")
+        };
+
         // Earliest rustc setup.
         rustc_driver::install_ice_hook(rustc_driver::DEFAULT_BUG_REPORT_URL, |_| ());
         rustc_driver::init_rustc_env_logger(&early_dcx);
 
-        let target_crate = if crate_kind == "target" {
-            true
-        } else if crate_kind == "host" {
-            false
-        } else {
-            panic!("invalid `MIRI_BE_RUSTC` value: {crate_kind:?}")
-        };
-
         let mut args = args;
-        // Don't insert `MIRI_DEFAULT_ARGS`, in particular, `--cfg=miri`, if we are building
-        // a "host" crate. That may cause procedural macros (and probably build scripts) to
-        // depend on Miri-only symbols, such as `miri_resolve_frame`:
-        // https://github.com/rust-lang/miri/issues/1760
-        if target_crate {
-            // Splice in the default arguments after the program name.
-            // Some options have different defaults in Miri than in plain rustc; apply those by making
-            // them the first arguments after the binary name (but later arguments can overwrite them).
-            args.splice(1..1, miri::MIRI_DEFAULT_ARGS.iter().map(ToString::to_string));
-        }
+        // Splice in the default arguments after the program name.
+        // Some options have different defaults in Miri than in plain rustc; apply those by making
+        // them the first arguments after the binary name (but later arguments can overwrite them).
+        args.splice(1..1, miri::MIRI_DEFAULT_ARGS.iter().map(ToString::to_string));
 
         // We cannot use `rustc_driver::main` as we want it to use `args` as the CLI arguments.
-        run_compiler_and_exit(&args, &mut MiriBeRustCompilerCalls { target_crate })
+        run_compiler_and_exit(&args, &mut MiriBeRustCompilerCalls)
     }
 
     // Add an ICE bug report hook.
