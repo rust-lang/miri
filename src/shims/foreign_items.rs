@@ -43,6 +43,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// is delegated to another function.
     fn emulate_foreign_item(
         &mut self,
+        instance: Option<Instance<'tcx>>,
         link_name: Symbol,
         abi: &FnAbi<'tcx, Ty<'tcx>>,
         args: &[OpTy<'tcx>],
@@ -73,7 +74,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let dest = this.force_allocation(dest)?;
 
         // The rest either implements the logic, or falls back to `lookup_exported_symbol`.
-        match this.emulate_foreign_item_inner(link_name, abi, args, &dest)? {
+        match this.emulate_foreign_item_inner(instance, link_name, abi, args, &dest)? {
             EmulateItemResult::NeedsReturn => {
                 trace!("{:?}", this.dump_place(&dest.clone().into()));
                 this.return_to_block(ret)?;
@@ -118,7 +119,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         ret: Option<mir::BasicBlock>,
         unwind: mir::UnwindAction,
     ) -> InterpResult<'tcx> {
-        let res = self.emulate_foreign_item(sym.0, abi, args, dest, ret, unwind)?;
+        let res = self.emulate_foreign_item(None, sym.0, abi, args, dest, ret, unwind)?;
         assert!(res.is_none(), "DynSyms that delegate are not supported");
         interp_ok(())
     }
@@ -248,6 +249,7 @@ impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn emulate_foreign_item_inner(
         &mut self,
+        instance: Option<Instance<'tcx>>,
         link_name: Symbol,
         abi: &FnAbi<'tcx, Ty<'tcx>>,
         args: &[OpTy<'tcx>],
@@ -848,7 +850,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         ),
                     "wasi" =>
                         shims::wasi::foreign_items::EvalContextExt::emulate_foreign_item_inner(
-                            this, link_name, abi, args, dest,
+                            this, instance, link_name, abi, args, dest,
                         ),
                     "windows" =>
                         shims::windows::foreign_items::EvalContextExt::emulate_foreign_item_inner(

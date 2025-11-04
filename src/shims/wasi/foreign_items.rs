@@ -1,5 +1,5 @@
 use rustc_abi::CanonAbi;
-use rustc_middle::ty::Ty;
+use rustc_middle::ty::{Instance, Ty};
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
 
@@ -14,6 +14,7 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn emulate_foreign_item_inner(
         &mut self,
+        instance: Option<Instance<'tcx>>,
         link_name: Symbol,
         abi: &FnAbi<'tcx, Ty<'tcx>>,
         args: &[OpTy<'tcx>],
@@ -21,20 +22,30 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
 
-        let (interface, name) = if let Some((module, name)) = link_name.as_str().split_once("$$$") {
+        let (interface, name) = if let Some(instance) = instance
+            && let Some(module) =
+                this.tcx.wasm_import_module_map(instance.def_id().krate).get(&instance.def_id())
+        {
+            // Adapted from https://github.com/rust-lang/rust/blob/90b65889799733f21ebdf59d96411aa531c5900a/compiler/rustc_codegen_llvm/src/attributes.rs#L549-L562
+            let codegen_fn_attrs = this.tcx.codegen_instance_attrs(instance.def);
+            let name = codegen_fn_attrs
+                .symbol_name
+                .unwrap_or_else(|| this.tcx.item_name(instance.def_id()));
+
             // According to the component model, the version should be matched as semver, but for
             // simplicity we strip the version entirely for now. Once we support wasm-wasip3 it may
             // become actually important to match on the version, but for now it shouldn't matter.
-            let (module, _version) = module
+            let (interface, _version) = module
                 .split_once('@')
                 .ok_or_else(|| err_unsup_format!("module name {module} must contain a version"))?;
-            (Some(module), name)
+
+            (Some(interface), name)
         } else {
             // This item is provided by wasi-libc, not imported from the wasi runtime
-            (None, link_name.as_str())
+            (None, link_name)
         };
 
-        match (interface, name) {
+        match (interface, name.as_str()) {
             // Allocation
             (None, "posix_memalign") => {
                 let [memptr, align, size] =
