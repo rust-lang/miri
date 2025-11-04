@@ -1243,7 +1243,23 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             // foreign function
             // Any needed call to `goto_block` will be performed by `emulate_foreign_item`.
             let args = ecx.copy_fn_args(args); // FIXME: Should `InPlace` arguments be reset to uninit?
-            let link_name = Symbol::intern(ecx.tcx.symbol_name(instance).name);
+
+            let link_name = if ecx.tcx.sess.target.is_like_wasm
+                && let Some(module) =
+                    ecx.tcx.wasm_import_module_map(instance.def_id().krate).get(&instance.def_id())
+            {
+                // Adapted from https://github.com/rust-lang/rust/blob/90b65889799733f21ebdf59d96411aa531c5900a/compiler/rustc_codegen_llvm/src/attributes.rs#L549-L562
+                let codegen_fn_attrs = ecx.tcx.codegen_instance_attrs(instance.def);
+                let name = codegen_fn_attrs
+                    .symbol_name
+                    .unwrap_or_else(|| ecx.tcx.item_name(instance.def_id()));
+                // $$$ is unlikely to occur in either the import module name or item name, so use it
+                // as a separator here. It will be split again in emulate_foreign_item_inner for wasi.
+                Symbol::intern(&format!("{}$$${}", module, name))
+            } else {
+                Symbol::intern(ecx.tcx.symbol_name(instance).name)
+            };
+
             return ecx.emulate_foreign_item(link_name, abi, &args, dest, ret, unwind);
         }
 
