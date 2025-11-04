@@ -487,6 +487,41 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // fadvise is only informational, we can ignore it.
                 this.write_null(dest)?;
             }
+
+            // only macos doesn't support `posix_fallocate`
+            "posix_fallocate" if &*this.tcx.sess.target.os != "macos" => {
+                let [fd, offset, len] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, libc::off_t, libc::off_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+
+                let fd = this.read_scalar(fd)?.to_i32()?;
+                let offset = this.read_scalar(offset)?.to_int(offset.layout.size)?;
+                let len = this.read_scalar(len)?.to_int(len.layout.size)?;
+
+                let result = this.posix_fallocate(fd, offset, len)?;
+                this.write_scalar(result, dest)?;
+            }
+
+            // only macos doesn't support `posix_fallocate`
+            "posix_fallocate64" if &*this.tcx.sess.target.os != "macos" => {
+                let [fd, offset, len] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, libc::off64_t, libc::off64_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+
+                let fd = this.read_scalar(fd)?.to_i32()?;
+                let offset = this.read_scalar(offset)?.to_int(offset.layout.size)?;
+                let len = this.read_scalar(len)?.to_int(len.layout.size)?;
+
+                let result = this.posix_fallocate(fd, offset, len)?;
+                this.write_scalar(result, dest)?;
+            }
+
             "realpath" => {
                 let [path, resolved_path] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*const _, *mut _) -> *mut _),

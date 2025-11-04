@@ -6,6 +6,7 @@ use std::fs::{
     remove_file, rename,
 };
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -1199,6 +1200,65 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         } else {
             // The file is not writable
             this.set_last_error_and_return_i32(LibcError("EINVAL"))
+        }
+    }
+
+    fn posix_fallocate(
+        &mut self,
+        fd_num: i32,
+        offset: i128,
+        len: i128,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        // According to the man page of `possix_fallocate`, it returns the error code instead
+        // of setting `errno`.
+        let ebadf = Scalar::from_i32(this.eval_libc_i32("EBADF"));
+        let einval = Scalar::from_i32(this.eval_libc_i32("EINVAL"));
+        let enodev = Scalar::from_i32(this.eval_libc_i32("ENODEV"));
+
+        // Reject if isolation is enabled.
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`posix_fallocate`", reject_with)?;
+            // Set error code as "EBADF" (bad fd)
+            return interp_ok(ebadf);
+        }
+
+        let Some(fd) = this.machine.fds.get(fd_num) else {
+            return interp_ok(ebadf);
+        };
+
+        let file = match fd.downcast::<FileHandle>() {
+            Some(file_handle) => file_handle,
+            // Man page specifies to return ENODEV if `fd` is not a regular file.
+            None => return interp_ok(enodev),
+        };
+
+        // EINVAL is returned when: "offset was less than 0, or len was less than or equal to 0".
+        if offset < 0 || len <= 0 {
+            return interp_ok(einval);
+        }
+
+        if file.writable {
+            let current_size = match file.file.metadata() {
+                Ok(metadata) => metadata.size(),
+                Err(err) => return this.io_error_to_errnum(err),
+            };
+            let new_size = match offset.checked_add(len) {
+                Some(size) => size.try_into().unwrap(), // We just checked negative `offset` and `len`.
+                None => return interp_ok(einval),
+            };
+            // `posix_fallocate` only specifies increasing the file size.
+            if current_size < new_size {
+                let result = file.file.set_len(new_size);
+                let result = this.try_unwrap_io_result(result.map(|_| 0i32))?;
+                interp_ok(Scalar::from_i32(result))
+            } else {
+                interp_ok(Scalar::from_i32(0))
+            }
+        } else {
+            // The file is not writable.
+            interp_ok(ebadf)
         }
     }
 
