@@ -1,17 +1,11 @@
 use std::cmp::max;
 use std::fmt::Debug;
 
-#[cfg(feature = "expensive-consistency-checks")]
-use {
-    super::LocationState, crate::borrow_tracker::ProtectorKind,
-    rustc_data_structures::fx::FxHashMap,
-};
-
 use super::Tree;
 use super::tree::{AccessRelatedness, Node};
 use super::unimap::{UniIndex, UniValMap};
-use crate::borrow_tracker::{AccessKind, GlobalState};
-use crate::{BorTag, VisitWith};
+use crate::borrow_tracker::AccessKind;
+use crate::BorTag;
 
 /// Represensts the maximum access level that is possible.
 ///
@@ -416,7 +410,7 @@ impl Tree {
         }
     }
     // This updates the wildcard tracking datastructure to reflect the realease of the protector on `tag`.
-    pub(super) fn release_protector_wildcard(&mut self,tag: BorTag){
+    pub(super) fn release_protector_wildcard(&mut self, tag: BorTag) {
         let idx = self.tag_mapping.get(&tag).unwrap();
 
         // We check if the node is already exposed, as we dont want to expose any nodes which aren't already exposed.
@@ -432,24 +426,22 @@ impl Tree {
     /// Checks that the wildcard tracking datastructure is internally consistent and has
     /// the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
-        let protected_tags=&global.borrow().protected_tags;
+        let protected_tags = &global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
-            let wildcard_accesses=&loc.wildcard_accesses;
-            let perms=&loc.perms;
+            let wildcard_accesses = &loc.wildcard_accesses;
+            let perms = &loc.perms;
             // Checks if accesses is empty.
             if wildcard_accesses.is_empty() {
                 return;
             }
-            for (id,node) in self.nodes.iter(){
+            for (id, node) in self.nodes.iter() {
                 let state = wildcard_accesses.get(id).unwrap();
 
                 let expected_exposed_as = if node.is_exposed {
                     let perm = perms.get(id).unwrap();
-                    let access_level = perm
-                        .permission()
-                        .strongest_allowed_child_access(protected_tags.contains_key(&node.tag));
 
-                    access_level
+                    perm.permission()
+                        .strongest_allowed_child_access(protected_tags.contains_key(&node.tag))
                 } else {
                     WildcardAccessLevel::None
                 };
