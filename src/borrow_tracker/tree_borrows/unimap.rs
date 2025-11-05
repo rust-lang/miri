@@ -211,7 +211,15 @@ impl<V> UniValMap<V> {
     /// Weather the datastructure has been allocated.
     /// Does not mean the map contains any values.
     pub fn is_empty(&self) -> bool {
-        self.data.len() == 0 || self.data.iter().all(|v| v.is_none())
+        self.data.iter().all(|v| v.is_none())
+    }
+
+    /// Iterates over all key-value pairs in the map.
+    pub fn iter(&self) -> impl Iterator<Item = (UniIndex, &V)> {
+        self.data
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| v.as_ref().map(|r| (UniIndex { idx: i as u32 }, r)))
     }
 }
 

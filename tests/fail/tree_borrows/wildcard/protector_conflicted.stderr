@@ -6,7 +6,7 @@ LL |         unsafe { *wild = 4 };
    |
    = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
-   = help: there are no exposed references who have write access permissions to this location
+   = help: there are no exposed tags who may perform this access here
    = note: BACKTRACE:
    = note: inside closure at tests/fail/tree_borrows/wildcard/protector_conflicted.rs:LL:CC
 note: inside `main`

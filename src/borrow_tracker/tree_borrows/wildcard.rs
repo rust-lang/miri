@@ -331,14 +331,15 @@ impl WildcardState {
                     // `max_local_access()` is foreign to all of its siblings we can pass
                     // it as part of the foreign access.
 
-                    // it doesnt matter wether we read these from old or new
+                    // It doesnt matter wether we read these from old or new.
                     let parent_access =
                         max(parent_state.exposed_as, parent_state.max_foreign_access);
-
+                    // This is how many of `child`'s siblings have read/write local access.
+                    // If `child` itself has access, then we need to subtract its access from the count.
                     let sibling_reads =
                         parent_state.child_reads - if new_child_access >= Read { 1 } else { 0 };
                     let sibling_writes =
-                        parent_state.child_writes - if new_child_access == Write { 1 } else { 0 };
+                        parent_state.child_writes - if new_child_access >= Write { 1 } else { 0 };
                     Self::push_relevant_children(
                         &mut stack,
                         // new_foreign_access
@@ -384,24 +385,20 @@ impl WildcardState {
                 wildcard_accesses,
             );
         }
-
-        // Calling `update_exposure()` should always result in an internally consistent state.
-        #[cfg(feature = "expensive-consistency-checks")]
-        Self::verify_internal_consistency(id, nodes, wildcard_accesses);
     }
 }
 
 impl Tree {
     /// Marks the tag as exposed & updates the wildcard tracking data structure
     /// to represent its access level.
-    pub fn expose_tag(&mut self, tag: BorTag, global: &GlobalState) {
+    pub fn expose_tag(&mut self, tag: BorTag, protected: bool) {
         let id = self.tag_mapping.get(&tag).unwrap();
         let node = self.nodes.get_mut(id).unwrap();
         node.is_exposed = true;
         let node = self.nodes.get(id).unwrap();
-        let protected_tags = &global.borrow().protected_tags;
-        let protected = protected_tags.contains_key(&tag);
-        // TODO: Only initialize neccessary ranges.
+
+        // When the first tag gets exposed then we initialize the
+        // wildcard state for every node and location in the tree.
         for (_, loc) in self.locations.iter_mut_all() {
             let perm = loc
                 .perms
@@ -418,32 +415,14 @@ impl Tree {
             );
         }
     }
-    /// Visit all tags through which a wilcard access could happen.
-    /// Used for GC.
-    pub(super) fn gc_visit_wildcards(&self, visit: &mut VisitWith<'_>) {
-        for (_, loc) in self.locations.iter_all() {
-            let mut stack = vec![self.root];
-            let mut has_exposed = false;
-            while let Some(id) = stack.pop() {
-                let node = self.nodes.get(id).unwrap();
+    // This updates the wildcard tracking datastructure to reflect the realease of the protector on `tag`.
+    pub(super) fn release_protector_wildcard(&mut self,tag: BorTag){
+        let idx = self.tag_mapping.get(&tag).unwrap();
 
-                if node.is_exposed
-                    && let Some(perm) = loc.perms.get(id)
-                {
-                    // The protector doesn't matter for this check, as it never reduces access level to None.
-                    let access_level = perm.permission().strongest_allowed_child_access(false);
-                    if access_level != WildcardAccessLevel::None {
-                        visit(None, Some(node.tag))
-                    }
-                }
-                has_exposed |= node.is_exposed;
-                stack.extend(&node.children);
-            }
-            // If there are no exposed nodes, then we don't need to check other
-            // locations of this allocation.
-            if !has_exposed {
-                break;
-            }
+        // We check if the node is already exposed, as we dont want to expose any nodes which aren't already exposed.
+        if self.nodes.get(idx).unwrap().is_exposed {
+            // Updates the exposure to the new permisson on every location.
+            self.expose_tag(tag, /* protected */ false);
         }
     }
 }
@@ -453,146 +432,86 @@ impl Tree {
     /// Checks that the wildcard tracking datastructure is internally consistent and has
     /// the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
+        let protected_tags=&global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
-            WildcardState::verify_internal_consistency(
-                self.root,
-                &self.nodes,
-                &loc.wildcard_accesses,
-            );
-
-            WildcardState::verify_external_consistency(
-                self.root,
-                &self.nodes,
-                &loc.perms,
-                &loc.wildcard_accesses,
-                &global.borrow().protected_tags,
-            );
-        }
-    }
-}
-
-#[cfg(feature = "expensive-consistency-checks")]
-impl WildcardState {
-    /// Verifies that the access tracking state is self consistent.
-    ///
-    /// Panics if invalid.
-    pub fn verify_internal_consistency(
-        id: UniIndex,
-        nodes: &UniValMap<Node>,
-        wildcard_accesses: &UniValMap<WildcardState>,
-    ) {
-        // Find the root node.
-        let mut root = id;
-        while let Some(parent) = nodes.get(root).unwrap().parent {
-            root = parent;
-        }
-
-        // Checks if accesses is empty.
-        if wildcard_accesses.is_empty() {
-            return;
-        }
-
-        let mut stack = vec![root];
-        while let Some(id) = stack.pop() {
-            let node = nodes.get(id).unwrap();
-            stack.extend(node.children.iter());
-
-            let access = wildcard_accesses.get(id).unwrap();
-
-            // The foreign wildcard accesses possible at a node are determined by which accesses
-            // can originate from their siblings, their parent, and from above their parent.
-            let expected_max_foreign_access = if let Some(parent) = node.parent {
-                let parent_node = nodes.get(parent).unwrap();
-                let parent_state = wildcard_accesses.get(parent).unwrap();
-
-                let max_sibling_access = parent_node
-                    .children
-                    .iter()
-                    .copied()
-                    .filter(|child| *child != id)
-                    .map(|child| {
-                        let state = wildcard_accesses.get(child).unwrap();
-                        state.max_local_access()
-                    })
-                    .fold(WildcardAccessLevel::None, max);
-
-                max_sibling_access.max(parent_state.max_foreign_access).max(parent_state.exposed_as)
-            } else {
-                WildcardAccessLevel::None
-            };
-
-            // Count how many children can be the source of wildcard reads or writes
-            // (either directly, or via their children).
-            let child_accesses = node.children.iter().copied().map(|child| {
-                let state = wildcard_accesses.get(child).unwrap();
-                state.max_local_access()
-            });
-            let expected_child_reads =
-                child_accesses.clone().filter(|a| *a >= WildcardAccessLevel::Read).count();
-            let expected_child_writes =
-                child_accesses.filter(|a| *a >= WildcardAccessLevel::Write).count();
-
-            assert_eq!(
-                expected_max_foreign_access, access.max_foreign_access,
-                "expected {:?}'s (id:{id:?}) max_foreign_access to be {:?} instead of {:?}",
-                node.tag, expected_max_foreign_access, access.max_foreign_access
-            );
-            let child_reads: usize = access.child_reads.into();
-            assert_eq!(
-                expected_child_reads, child_reads,
-                "expected {:?}'s (id:{id:?}) child_reads to be {} instead of {}",
-                node.tag, expected_child_reads, child_reads
-            );
-            let child_writes: usize = access.child_writes.into();
-            assert_eq!(
-                expected_child_writes, child_writes,
-                "expected {:?}'s (id:{id:?}) child_writes to be {} instead of {}",
-                node.tag, expected_child_writes, child_writes
-            );
-        }
-    }
-
-    /// Ensures that the access tracking state is consistent with the rest of the tree.
-    /// This means that for every node the `exposed_as` field is equal to the strongest
-    /// possible access through that node.
-    pub fn verify_external_consistency(
-        id: UniIndex,
-        nodes: &UniValMap<Node>,
-        perms: &UniValMap<LocationState>,
-        wildcard_accesses: &UniValMap<WildcardState>,
-        protected_tags: &FxHashMap<BorTag, ProtectorKind>,
-    ) {
-        // Find the root node.
-        let mut root = id;
-        while let Some(parent) = nodes.get(root).unwrap().parent {
-            root = parent;
-        }
-
-        let mut stack = vec![root];
-        while let Some(id) = stack.pop() {
-            let node = nodes.get(id).unwrap();
-            if node.is_exposed {
+            let wildcard_accesses=&loc.wildcard_accesses;
+            let perms=&loc.perms;
+            // Checks if accesses is empty.
+            if wildcard_accesses.is_empty() {
+                return;
+            }
+            for (id,node) in self.nodes.iter(){
                 let state = wildcard_accesses.get(id).unwrap();
-                let perm = perms.get(id).unwrap();
-                let access_level = perm
-                    .permission()
-                    .strongest_allowed_child_access(protected_tags.contains_key(&node.tag));
+
+                let expected_exposed_as = if node.is_exposed {
+                    let perm = perms.get(id).unwrap();
+                    let access_level = perm
+                        .permission()
+                        .strongest_allowed_child_access(protected_tags.contains_key(&node.tag));
+
+                    access_level
+                } else {
+                    WildcardAccessLevel::None
+                };
+
+                // The foreign wildcard accesses possible at a node are determined by which accesses
+                // can originate from their siblings, their parent, and from above their parent.
+                let expected_max_foreign_access = if let Some(parent) = node.parent {
+                    let parent_node = self.nodes.get(parent).unwrap();
+                    let parent_state = wildcard_accesses.get(parent).unwrap();
+
+                    let max_sibling_access = parent_node
+                        .children
+                        .iter()
+                        .copied()
+                        .filter(|child| *child != id)
+                        .map(|child| {
+                            let state = wildcard_accesses.get(child).unwrap();
+                            state.max_local_access()
+                        })
+                        .fold(WildcardAccessLevel::None, max);
+
+                    max_sibling_access
+                        .max(parent_state.max_foreign_access)
+                        .max(parent_state.exposed_as)
+                } else {
+                    WildcardAccessLevel::None
+                };
+
+                // Count how many children can be the source of wildcard reads or writes
+                // (either directly, or via their children).
+                let child_accesses = node.children.iter().copied().map(|child| {
+                    let state = wildcard_accesses.get(child).unwrap();
+                    state.max_local_access()
+                });
+                let expected_child_reads =
+                    child_accesses.clone().filter(|a| *a >= WildcardAccessLevel::Read).count();
+                let expected_child_writes =
+                    child_accesses.filter(|a| *a >= WildcardAccessLevel::Write).count();
+
                 assert_eq!(
-                    access_level, state.exposed_as,
-                    "tag {:?} (id:{id:?}) should be exposed as {access_level:?} but is exposed as {:?}",
+                    expected_exposed_as, state.exposed_as,
+                    "tag {:?} (id:{id:?}) should be exposed as {expected_exposed_as:?} but is exposed as {:?}",
                     node.tag, state.exposed_as
                 );
-            } else {
-                if let Some(state) = wildcard_accesses.get(id)
-                    && state.exposed_as != WildcardAccessLevel::None
-                {
-                    panic!(
-                        "tag {:?} (id:{id:?}) should be exposed as None but is exposed as {:?}",
-                        node.tag, state.exposed_as
-                    )
-                }
+                assert_eq!(
+                    expected_max_foreign_access, state.max_foreign_access,
+                    "expected {:?}'s (id:{id:?}) max_foreign_access to be {:?} instead of {:?}",
+                    node.tag, expected_max_foreign_access, state.max_foreign_access
+                );
+                let child_reads: usize = state.child_reads.into();
+                assert_eq!(
+                    expected_child_reads, child_reads,
+                    "expected {:?}'s (id:{id:?}) child_reads to be {} instead of {}",
+                    node.tag, expected_child_reads, child_reads
+                );
+                let child_writes: usize = state.child_writes.into();
+                assert_eq!(
+                    expected_child_writes, child_writes,
+                    "expected {:?}'s (id:{id:?}) child_writes to be {} instead of {}",
+                    node.tag, expected_child_writes, child_writes
+                );
             }
-            stack.extend(&node.children);
         }
     }
 }

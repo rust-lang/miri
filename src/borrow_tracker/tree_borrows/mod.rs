@@ -97,30 +97,8 @@ impl<'tcx> Tree {
         // `None` makes it the magic on-protector-end operation
         self.perform_access(ProvenanceExtra::Concrete(tag), None, global, alloc_id, span)?;
 
-        // Changing the protector status of a pointer can change which child accesses are
-        // allowed to it so we need to update the wildcard tracking info with the new strongest allowed child access.
-        let idx = self.tag_mapping.get(&tag).unwrap();
-        if self.nodes.get(idx).unwrap().is_exposed {
-            for (_, loc) in self.locations.iter_mut_all() {
-                if let Some(p) = loc.perms.get(idx)
-                    && loc.wildcard_accesses.get(idx).is_some()
-                {
-                    // This temporarily desyncs the wildcard datastructure from the actual permissions represented in the tree.
-                    // This happens because the protected_tags map still contains all protected_tags, they only get removed after
-                    // `release_protector` got called on all the relevant tags.
-                    //
-                    // This is also why we dont call  `WildcardState::verify_external_consistency` here. Instead we call it
-                    // in `on_stack_pop` after the permission map gets updated.
-                    let access_level = p.permission().strongest_allowed_child_access(false);
-                    WildcardState::update_exposure(
-                        idx,
-                        access_level,
-                        &self.nodes,
-                        &mut loc.wildcard_accesses,
-                    );
-                }
-            }
-        }
+        self.release_protector_wildcard(tag);
+
         interp_ok(())
     }
 }
@@ -247,14 +225,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // After all, the pointer may be lazily initialized outside this initial range.
                 data
             }
-            _ => {
+            Err(_) => {
                 assert_eq!(ptr_size, Size::ZERO); // we did the deref check above, size has to be 0 here
                 // This pointer doesn't come with an AllocId, so there's no
                 // memory to do retagging in.
                 let new_prov = place.ptr().provenance;
                 trace!(
-                    "reborrow of size 0: reference {:?} derived from {:?} (pointee {})",
-                    new_prov,
+                    "reborrow of size 0: reusing {:?} (pointee {})",
                     place.ptr(),
                     place.layout.ty,
                 );
@@ -629,7 +606,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // This is okay because accessing them is UB anyway, no need for any Tree Borrows checks.
         // NOT using `get_alloc_extra_mut` since this might be a read-only allocation!
         let kind = this.get_alloc_info(alloc_id).kind;
-
         match kind {
             AllocKind::LiveData => {
                 // This should have alloc_extra data, but `get_alloc_extra` can still fail
@@ -637,8 +613,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // uncovers a non-supported `extern static`.
                 let alloc_extra = this.get_alloc_extra(alloc_id)?;
                 trace!("Tree Borrows tag {tag:?} exposed in {alloc_id:?}");
+
                 let global = this.machine.borrow_tracker.as_ref().unwrap();
-                alloc_extra.borrow_tracker_tb().borrow_mut().expose_tag(tag, global);
+                let protected_tags = &global.borrow().protected_tags;
+                let protected = protected_tags.contains_key(&tag);
+                alloc_extra.borrow_tracker_tb().borrow_mut().expose_tag(tag, protected);
             }
             AllocKind::Function | AllocKind::VTable | AllocKind::TypeId | AllocKind::Dead => {
                 // No tree borrows on these allocations.

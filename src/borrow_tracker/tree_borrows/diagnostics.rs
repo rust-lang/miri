@@ -304,9 +304,12 @@ impl TbError<'_> {
         let cause = self.access_cause;
         let accessed = self.accessed_info;
         let accessed_str =
-            self.accessed_info.map(|v| format!("{v}")).unwrap_or_else(|| "wildcard".into());
+            self.accessed_info.map(|v| format!("{v}")).unwrap_or_else(|| "<wildcard>".into());
         let conflicting = self.conflicting_info;
-        let accessed_is_conflicting = accessed.map(|a| a.tag == conflicting.tag).unwrap_or(false);
+        // An access is considered conflicting if it happened through a different tag, then the one who caused UB.
+        // Under a wildcard access (where `accessed` is `None`) we only ever perform an access if there are exposed_tags
+        // with the correct permissions so we can assume that `conflicting` is a different tag.
+        let accessed_is_conflicting = accessed.map(|a| a.tag) == Some(conflicting.tag);
         let title = format!(
             "{cause} through {accessed_str} at {alloc_id:?}[{offset:#x}] is forbidden",
             alloc_id = self.alloc_id,
@@ -367,6 +370,7 @@ impl TbError<'_> {
         err_machine_stop!(TerminationInfo::TreeBorrowsUb { title, details, history })
     }
 }
+
 /// Cannot access this allocation with wildcard provenance, as there are no
 /// valid exposed references for this access kind.
 pub fn no_valid_exposed_references_error<'tcx>(
@@ -377,7 +381,7 @@ pub fn no_valid_exposed_references_error<'tcx>(
     let title =
         format!("{access_cause} through wildcard at {alloc_id:?}[{offset:#x}] is forbidden");
     let details = vec![format!(
-        "there are no exposed references who have {access_cause} permissions to this location"
+        "there are no exposed tags who may perform this access here"
     )];
     let history = HistoryData::default();
     err_machine_stop!(TerminationInfo::TreeBorrowsUb { title, details, history })
