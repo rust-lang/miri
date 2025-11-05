@@ -219,7 +219,7 @@ impl<V> UniValMap<V> {
         self.data
             .iter()
             .enumerate()
-            .filter_map(|(i, v)| v.as_ref().map(|r| (UniIndex { idx: i as u32 }, r)))
+            .filter_map(|(i, v)| v.as_ref().map(|r| (UniIndex { idx: i.try_into().unwrap() }, r)))
     }
 }
 
