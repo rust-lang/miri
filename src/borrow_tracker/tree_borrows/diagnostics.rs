@@ -306,9 +306,14 @@ impl TbError<'_> {
         let accessed_str =
             self.accessed_info.map(|v| format!("{v}")).unwrap_or_else(|| "<wildcard>".into());
         let conflicting = self.conflicting_info;
-        // An access is considered conflicting if it happened through a different tag, then the one who caused UB.
-        // Under a wildcard access (where `accessed` is `None`) we only ever perform an access if there are exposed_tags
-        // with the correct permissions so we can assume that `conflicting` is a different tag.
+        // An access is considered conflicting if it happened through a
+        // different tag, then the one who caused UB.
+        // When doing a wildcard access (where `accessed` is `None`) we
+        // do not know which precise tag the accessed happened from,
+        // however we can be certain that it did not come from the
+        // conflicting tag.
+        // This is because the wildcard data structure already removes
+        // all tags through which an access would cause UB.
         let accessed_is_conflicting = accessed.map(|a| a.tag) == Some(conflicting.tag);
         let title = format!(
             "{cause} through {accessed_str} at {alloc_id:?}[{offset:#x}] is forbidden",

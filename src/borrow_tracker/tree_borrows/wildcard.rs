@@ -9,7 +9,7 @@ use crate::borrow_tracker::AccessKind;
 #[cfg(feature = "expensive-consistency-checks")]
 use crate::borrow_tracker::GlobalState;
 
-/// Represensts the maximum access level that is possible.
+/// Represents the maximum access level that is possible.
 ///
 /// Note that we derive Ord and PartialOrd, so the order in which variants are listed below matters:
 /// None < Read < Write. Do not change that order.
@@ -123,7 +123,7 @@ impl WildcardState {
 
     /// Gets the access tracking information for a new child node of a parent with this
     /// wildcard info.
-    /// The new node doesn't have any child reads/writes, but calculates max_foreign_access
+    /// The new node doesn't have any child reads/writes, but calculates `max_foreign_access`
     /// from its parent.
     pub fn for_new_child(&self) -> Self {
         Self {
@@ -163,7 +163,7 @@ impl WildcardState {
     ) {
         use WildcardAccessLevel::*;
 
-        // Nothing changed so we dont need to update anything.
+        // Nothing changed so we don't need to update anything.
         if new_foreign_access == old_foreign_access {
             return;
         }
@@ -288,12 +288,15 @@ impl WildcardState {
                 wildcard_accesses,
             );
         }
-        // We need to propagate the tracking info up the tree, for this we traverse up the parents.
-        // We can skip propagating info to the parent and siblings of a node if its access didn't change.
+        // We need to propagate the tracking info up the tree, for this we traverse
+        // up the parents.
+        // We can skip propagating info to the parent and siblings of a node if its
+        // access didn't change.
         {
             // The child from which we came.
             let mut child = id;
-            // This is the `max_local_access()` of the child we came from, before this update...
+            // This is the `max_local_access()` of the child we came from, before
+            // this update...
             let mut old_child_access = src_old_local_access;
             // and after this update.
             let mut new_child_access = src_new_local_access;
@@ -302,7 +305,7 @@ impl WildcardState {
                 let mut entry = wildcard_accesses.entry(parent_id);
                 let parent_state = entry.or_insert(Default::default());
 
-                let old_parent_state = parent_state.clone();
+                let old_parent_local_access = parent_state.max_local_access();
                 use WildcardAccessLevel::*;
                 // Updating this node's tracking state for its children.
                 match (old_child_access, new_child_access) {
@@ -316,18 +319,17 @@ impl WildcardState {
                     _ => {}
                 }
 
-                let old_parent_local_access = old_parent_state.max_local_access();
                 let new_parent_local_access = parent_state.max_local_access();
 
                 {
-                    // We need to update the `max_foreign_access` of `child`'s siblings.
-                    // For this we can reuse the `push_relevant_children` function.
+                    // We need to update the `max_foreign_access` of `child`'s
+                    // siblings. For this we can reuse the `push_relevant_children`
+                    // function.
                     //
-                    // We pass it just the siblings without child itself. Since `child`'s
-                    // `max_local_access()` is foreign to all of its siblings we can pass
-                    // it as part of the foreign access.
+                    // We pass it just the siblings without child itself. Since
+                    // `child`'s `max_local_access()` is foreign to all of its
+                    // siblings we can pass it as part of the foreign access.
 
-                    // It doesnt matter wether we read these from old or new.
                     let parent_access =
                         max(parent_state.exposed_as, parent_state.max_foreign_access);
                     // This is how many of `child`'s siblings have read/write local access.
@@ -411,13 +413,16 @@ impl Tree {
             );
         }
     }
-    // This updates the wildcard tracking datastructure to reflect the realease of the protector on `tag`.
+    /// This updates the wildcard tracking data structure to reflect the release of
+    /// the protector on `tag`.
     pub(super) fn release_protector_wildcard(&mut self, tag: BorTag) {
         let idx = self.tag_mapping.get(&tag).unwrap();
 
-        // We check if the node is already exposed, as we dont want to expose any nodes which aren't already exposed.
+        // We check if the node is already exposed, as we don't want to expose any
+        // nodes which aren't already exposed.
+
         if self.nodes.get(idx).unwrap().is_exposed {
-            // Updates the exposure to the new permisson on every location.
+            // Updates the exposure to the new permission on every location.
             self.expose_tag(tag, /* protected */ false);
         }
     }
@@ -425,8 +430,8 @@ impl Tree {
 
 #[cfg(feature = "expensive-consistency-checks")]
 impl Tree {
-    /// Checks that the wildcard tracking datastructure is internally consistent and has
-    /// the correct `exposed_as` values.
+    /// Checks that the wildcard tracking data structure is internally consistent and
+    /// has the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
         let protected_tags = &global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
@@ -448,8 +453,9 @@ impl Tree {
                     WildcardAccessLevel::None
                 };
 
-                // The foreign wildcard accesses possible at a node are determined by which accesses
-                // can originate from their siblings, their parent, and from above their parent.
+                // The foreign wildcard accesses possible at a node are determined by which
+                // accesses can originate from their siblings, their parent, and from above
+                // their parent.
                 let expected_max_foreign_access = if let Some(parent) = node.parent {
                     let parent_node = self.nodes.get(parent).unwrap();
                     let parent_state = wildcard_accesses.get(parent).unwrap();

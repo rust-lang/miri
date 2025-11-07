@@ -378,15 +378,15 @@ impl Permission {
     /// causing UB (only considers possible transitions to this permission).
     pub fn strongest_allowed_child_access(&self, protected: bool) -> WildcardAccessLevel {
         match self.inner {
-            // everything except disabled can be accessed by read access
+            // Everything except disabled can be accessed by read access.
             Disabled => WildcardAccessLevel::None,
-            // frozen references cannot be written to by a child
+            // Frozen references cannot be written to by a child.
             Frozen => WildcardAccessLevel::Read,
-            // If the `conflicted` flag is set, then there was a foreign read during
-            // the function call that is still ongoing (still `protected`),
+            // If the `conflicted` flag is set, then there was a foreign read
+            // during the function call that is still ongoing (still `protected`),
             // this is UB (`noalias` violation).
             ReservedFrz { conflicted: true } if protected => WildcardAccessLevel::Read,
-            // everything else allows writes
+            // Everything else allows writes.
             _ => WildcardAccessLevel::Write,
         }
     }

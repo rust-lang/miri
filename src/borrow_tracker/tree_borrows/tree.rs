@@ -231,7 +231,7 @@ pub struct LocationTree {
     /// If this allocation doesn't have any exposed nodes, then this map doesn't get
     /// initialized. This way we only need to allocate the map if we need it.
     ///
-    /// NOTE: same guarantees on entry initialisation as for `perms`
+    /// NOTE: same guarantees on entry initialization as for `perms`.
     pub wildcard_accesses: UniValMap<WildcardState>,
 }
 /// Tree structure with both parents and children since we want to be
@@ -275,9 +275,9 @@ pub(super) struct Node {
     /// in cases where there is no location state yet. See `foreign_access_skipping.rs`,
     /// and `LocationState::idempotent_foreign_access` for more information
     default_initial_idempotent_foreign_access: IdempotentForeignAccess,
-    /// weather a wildcard access could happen through this node
+    /// Weather a wildcard access could happen through this node.
     pub is_exposed: bool,
-    /// Some extra information useful only for debugging purposes
+    /// Some extra information useful only for debugging purposes.
     pub debug_info: NodeDebugInfo,
 }
 
@@ -764,11 +764,11 @@ impl<'tcx> Tree {
             span,
         )?;
 
-        // Check if this breaks any strong protector. (Weak protectors are already handled
-        // by `perform_access`.)
+        // Check if this breaks any strong protector.
+        // (Weak protectors are already handled by `perform_access`.)
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
-            // The order in which we check if any nodes are invalidated only matters to diagnostics.
-            // So we use the root as a default tag.
+            // The order in which we check if any nodes are invalidated only
+            // matters to diagnostics, so we use the root as a default tag.
             let start_tag = match prov {
                 ProvenanceExtra::Concrete(tag) => tag,
                 ProvenanceExtra::Wildcard => self.nodes.get(self.root).unwrap().tag,
@@ -776,7 +776,7 @@ impl<'tcx> Tree {
             TreeVisitor { nodes: &mut self.nodes, tag_mapping: &self.tag_mapping, loc }
                 .traverse_this_parents_children_other(
                     start_tag,
-                    // visit all children, skipping none
+                    // Visit all children, skipping none.
                     |_| ContinueTraversal::Recurse,
                     |args: NodeAppArgs<'_>| -> Result<(), TransitionError> {
                         let node = args.nodes.get(args.idx).unwrap();
@@ -1115,9 +1115,10 @@ impl Tree {
     }
 }
 
-/// methods for wildcard borrows
+/// Methods for wildcard accesses.
 impl<'tcx> Tree {
-    /// analogous to `perform_access`, but we do not know from which exposed reference the access happens.
+    /// Analogous to `perform_access`, but we do not know from which exposed
+    /// reference the access happens.
     pub fn perform_wildcard_access(
         &mut self,
         access_range_and_kind: Option<(AllocRange, AccessKind, diagnostics::AccessCause)>,
@@ -1131,9 +1132,11 @@ impl<'tcx> Tree {
         if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
                 let root_tag = self.nodes.get(self.root).unwrap().tag;
-                // This does a traversal starting from the root through the tree updating the permissions of each node.
-                // the difference to `perform_access` is, that we take the access relatedness from the
-                // wildcard tracking state of the node instead of from the visitor itself.
+                // This does a traversal starting from the root through the tree updating
+                // the permissions of each node.
+                // The difference to `perform_access` is, that we take the access
+                // relatedness from the wildcard tracking state of the node instead of
+                // from the visitor itself.
                 TreeVisitor { loc, nodes: &mut self.nodes, tag_mapping: &self.tag_mapping }
                     .traverse_this_parents_children_other(
                         root_tag,
@@ -1174,9 +1177,9 @@ impl<'tcx> Tree {
                                 .get(args.idx)
                                 .and_then(|s| s.access_relatedness(access_kind))
                             else {
-                                // there doenst exist a valid exposed reference for this access
-                                // to happen through
-                                // if this fails for one id, then it fails for all ids
+                                // There doesn't exist a valid exposed reference for this access to
+                                // happen through.
+                                // If this fails for one id, then it fails for all ids.
                                 return Err(no_valid_exposed_references_error(
                                     alloc_id,
                                     loc_range.start,
@@ -1185,20 +1188,19 @@ impl<'tcx> Tree {
                             };
 
                             let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
-                                // if the access type is either, then we do not apply any transition to this node,
-                                // but we still update each child
+                                // If the access type is Either, then we do not apply any transition
+                                // to this node, but we still update each of its children.
                                 return Ok(());
                             };
 
-                            // Call this function now (i.e. only if we know `relatedness`), which ensures it is only called when
-                            // `skip_if_known_noop` returns `Recurse`, due to the contract of
-                            // `traverse_this_parents_children_other`.
+                            // Call this function now (i.e. only if we know `relatedness`), which
+                            // ensures it is only called when `skip_if_known_noop` returns
+                            // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
                             perm.record_new_access(access_kind, relatedness);
 
                             let transition = perm
                                 .perform_access(access_kind, relatedness, protected)
                                 .map_err(|trans| {
-                                    // if another pointer undergoes an invalid transformation
                                     TbError {
                                         conflicting_info: &node.debug_info,
                                         access_cause,
@@ -1210,7 +1212,7 @@ impl<'tcx> Tree {
                                     .build()
                                 })?;
                             if !transition.is_noop() {
-                                // Record the event as part of the history
+                                // Record the event as part of the history.
                                 node.debug_info.history.push(diagnostics::Event {
                                     transition,
                                     is_foreign: relatedness.is_foreign(),
@@ -1220,8 +1222,8 @@ impl<'tcx> Tree {
                                     span,
                                 });
 
-                                // we need to update the wildcard access tracking information,
-                                // if the permission of an exposed pointer changes
+                                // We need to update the wildcard state, if the permission
+                                // of an exposed pointer changes.
                                 if node.is_exposed {
                                     let access_type =
                                         perm.permission.strongest_allowed_child_access(protected);
