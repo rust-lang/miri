@@ -4,8 +4,10 @@ use std::fmt::Debug;
 use super::Tree;
 use super::tree::{AccessRelatedness, Node};
 use super::unimap::{UniIndex, UniValMap};
-use crate::borrow_tracker::AccessKind;
 use crate::BorTag;
+use crate::borrow_tracker::AccessKind;
+#[cfg(feature = "expensive-consistency-checks")]
+use crate::borrow_tracker::GlobalState;
 
 /// Represensts the maximum access level that is possible.
 ///
