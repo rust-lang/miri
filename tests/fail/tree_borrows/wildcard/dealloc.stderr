@@ -1,4 +1,4 @@
-error: Undefined Behavior: deallocation through wildcard at ALLOC[0x0] is forbidden
+error: Undefined Behavior: deallocation through <wildcard> at ALLOC[0x0] is forbidden
   --> tests/fail/tree_borrows/wildcard/dealloc.rs:LL:CC
    |
 LL |     unsafe { std::alloc::dealloc(wild as *mut u8, Layout::new::<u32>()) };

@@ -1,6 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-#[allow(unused_variables)]
+/// Checks that with only one exposed reference, that if this reference gets
+/// disabled no wildcard accesses are possible.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -28,6 +29,7 @@ pub fn main() {
     // Disables ref1.
     *ref2 = 13;
 
-    // Tries to do a wildcard access through the only exposed reference ref1, which is disabled.
-    let fail = unsafe { *wild }; //~ ERROR: /read access through .* is forbidden/
+    // Tries to do a wildcard access through the only exposed reference ref1,
+    // which is disabled.
+    let _fail = unsafe { *wild }; //~ ERROR: /read access through .* is forbidden/
 }

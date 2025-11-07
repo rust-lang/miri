@@ -379,7 +379,7 @@ pub fn no_valid_exposed_references_error<'tcx>(
     access_cause: AccessCause,
 ) -> InterpErrorKind<'tcx> {
     let title =
-        format!("{access_cause} through wildcard at {alloc_id:?}[{offset:#x}] is forbidden");
+        format!("{access_cause} through <wildcard> at {alloc_id:?}[{offset:#x}] is forbidden");
     let details = vec![format!("there are no exposed tags who may perform this access here")];
     let history = HistoryData::default();
     err_machine_stop!(TerminationInfo::TreeBorrowsUb { title, details, history })

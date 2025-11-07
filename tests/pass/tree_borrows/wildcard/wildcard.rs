@@ -1,15 +1,18 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
 pub fn main() {
-    wildcard_parallel();
-    wildcard_sequence();
+    multiple_exposed_siblings();
+    multiple_exposed_child();
     dealloc();
     protector();
     protector_conflicted_release();
     returned_mut_is_usable();
 }
-#[allow(unused_variables)]
-pub fn wildcard_parallel() {
+
+// Checks that an access through a wildcard reference
+// doesn't disable any exposed references.
+// It tests this with exposed references that are siblings of each other.
+pub fn multiple_exposed_siblings() {
     let mut x: u32 = 42;
 
     let ptr_base = &mut x as *mut u32;
@@ -18,7 +21,7 @@ pub fn wildcard_parallel() {
 
     // Both references get exposed.
     let int1 = ref1 as *mut u32 as usize;
-    let int2 = ref2 as *mut u32 as usize;
+    let _int2 = ref2 as *mut u32 as usize;
 
     let wild = int1 as *mut u32;
 
@@ -47,8 +50,10 @@ pub fn wildcard_parallel() {
     assert_eq!(*ref2, 13);
 }
 
-#[allow(unused_variables)]
-pub fn wildcard_sequence() {
+// Checks that an access through a wildcard reference
+// doesn't disable any exposed references.
+// It tests this with exposed references where one is the ancestor of the other.
+pub fn multiple_exposed_child() {
     let mut x: u32 = 42;
 
     let ref1 = &mut x;
@@ -57,7 +62,7 @@ pub fn wildcard_sequence() {
     let ref2 = &mut *ref1;
 
     let ref3 = &mut *ref2;
-    let int3 = ref3 as *mut u32 as usize;
+    let _int3 = ref3 as *mut u32 as usize;
 
     let wild = int1 as *mut u32;
 
@@ -91,12 +96,13 @@ pub fn wildcard_sequence() {
 
     // Reading from ref2 still works, since the previous access could have been through its child.
     // This also freezes ref3.
-    let x = *ref2;
+    let _x = *ref2;
 
     // We can still write through wild, as there is still the exposed ref1 with write permissions.
     unsafe { wild.write(43) };
 }
 
+/// Checks that we can deallocate through a wildcard reference.
 fn dealloc() {
     use std::alloc::Layout;
     let x = unsafe { std::alloc::alloc_zeroed(Layout::new::<u32>()) as *mut u32 };
@@ -107,6 +113,7 @@ fn dealloc() {
     unsafe { std::alloc::dealloc(wild as *mut u8, Layout::new::<u32>()) };
 }
 
+/// Checks that we can pass a wildcard reference to a function.
 fn protector() {
     fn protect(arg: &mut u32) {
         *arg = 4;
@@ -122,6 +129,8 @@ fn protector() {
     assert_eq!(*ref1, 4);
 }
 
+/// Checks whether we correctly handle the protector being released on
+/// a conflicted exposed reference.
 fn protector_conflicted_release() {
     let mut x: u32 = 42;
 
@@ -146,7 +155,7 @@ fn protector_conflicted_release() {
     unsafe { *wild = 4 };
 }
 
-// Analogous to same test in `../tree-borrows.rs` but with a protected wildcard pointer.
+/// Analogous to same test in `../tree-borrows.rs` but with a protected wildcard reference.
 fn returned_mut_is_usable() {
     // NOTE: Currently we ignore protectors on wildcard references.
     fn reborrow(x: &mut u8) -> &mut u8 {

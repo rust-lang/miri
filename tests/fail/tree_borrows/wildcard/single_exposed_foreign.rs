@@ -1,6 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-#[allow(unused_variables)]
+/// Checks that with only one exposed reference, wildcard accesses
+/// correctly cause foreign accesses.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -11,9 +12,6 @@ pub fn main() {
     let int1 = ref1 as *mut u32 as usize;
     let wild = int1 as *mut u32;
 
-    // graph TD
-    // ptr_base --> ref1(Res)* & ref2(Res)
-    //
     //    ┌────────────┐
     //    │            │
     //    │  ptr_base  ├───────────┐
@@ -28,9 +26,9 @@ pub fn main() {
     //    │            │     │           │
     //    └────────────┘     └───────────┘
 
-    // Write thourgh the wildcard to the only exposed reference ref1,
+    // Write through the wildcard to the only exposed reference ref1,
     // disabling ref2.
     unsafe { wild.write(13) };
 
-    let fail = *ref2; //~ ERROR: /read access through .* is forbidden/
+    let _fail = *ref2; //~ ERROR: /read access through .* is forbidden/
 }

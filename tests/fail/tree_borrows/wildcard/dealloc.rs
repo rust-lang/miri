@@ -1,6 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-#[allow(unused_variables)]
+/// Checks that deallocation through a wildcard ref fails,
+/// if all exposed references are disabled.
 pub fn main() {
     use std::alloc::Layout;
     let x = unsafe { std::alloc::alloc_zeroed(Layout::new::<u32>()) as *mut u32 };
@@ -13,6 +14,8 @@ pub fn main() {
     // Disables ref1 and therefore also wild.
     *ref2 = 14;
 
-    // tries to dealloc through a disabled wildcard reference
-    unsafe { std::alloc::dealloc(wild as *mut u8, Layout::new::<u32>()) }; //~ ERROR: /deallocation through wildcard .* is forbidden/
+    // Tries to dealloc through a wildcard reference even though all exposed
+    // references are disabled.
+
+    unsafe { std::alloc::dealloc(wild as *mut u8, Layout::new::<u32>()) }; //~ ERROR: /deallocation through <wildcard> .* is forbidden/
 }

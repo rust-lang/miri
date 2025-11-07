@@ -1,6 +1,7 @@
-//@compile-flags: -Zmiri-tree-borrows
+//@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-#[allow(unused_variables)]
+/// Checks that if for a node all exposed references are foreign,
+/// that a wildcard access gets treated as foreign to it.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -11,7 +12,7 @@ pub fn main() {
 
     // Both references get exposed.
     let int1 = ref1 as *mut u32 as usize;
-    let int2 = ref2 as *mut u32 as usize;
+    let _int2 = ref2 as *mut u32 as usize;
 
     let wild = int1 as *mut u32;
 
@@ -33,5 +34,5 @@ pub fn main() {
     unsafe { wild.write(13) };
 
     // Fails because ref3 is disabled.
-    let fail = *ref3; //~ ERROR: /read access through .* is forbidden/
+    let _fail = *ref3; //~ ERROR: /read access through .* is forbidden/
 }

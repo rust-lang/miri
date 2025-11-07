@@ -1,6 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-#[allow(unused_variables)]
+/// Checks with multiple exposed nodes, that if they are all disabled
+/// then no wildcard accesses are possible.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -9,9 +10,9 @@ pub fn main() {
     let ref2 = unsafe { &mut *ptr_base };
     let ref3 = unsafe { &mut *ptr_base };
 
-    // both references get exposed
+    // Both references get exposed.
     let int1 = ref1 as *mut u32 as usize;
-    let int2 = ref2 as *mut u32 as usize;
+    let _int2 = ref2 as *mut u32 as usize;
 
     let wild = int1 as *mut u32;
 
@@ -29,9 +30,9 @@ pub fn main() {
     //    │            │       │            │       │           │
     //    └────────────┘       └────────────┘       └───────────┘
 
-    // disables ref1,ref2
+    // Disables ref1,ref2.
     *ref3 = 13;
 
-    // both exposed pointers are disabled so this fails
-    let fail = unsafe { *wild }; //~ ERROR: /read access through .* is forbidden/
+    // Both exposed references are disabled so this fails.
+    let _fail = unsafe { *wild }; //~ ERROR: /read access through .* is forbidden/
 }

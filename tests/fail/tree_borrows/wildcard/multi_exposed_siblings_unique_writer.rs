@@ -1,6 +1,8 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-#[allow(unused_variables)]
+/// Checks if we correctly determine the correct exposed reference a write
+/// access could happen through, if there are also exposed reference
+/// through which only a read access could happen.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -10,7 +12,7 @@ pub fn main() {
 
     // Both references get exposed.
     let int1 = ref1 as *mut u32 as usize;
-    let int2 = ref2 as *const u32 as usize;
+    let _int2 = ref2 as *const u32 as usize;
 
     let wild = int1 as *mut u32;
 
@@ -32,5 +34,5 @@ pub fn main() {
     unsafe { wild.write(13) };
 
     // Fails because ref2 is disabled.
-    let fail = *ref2; //~ ERROR: /read access through .* is forbidden/
+    let _fail = *ref2; //~ ERROR: /read access through .* is forbidden/
 }

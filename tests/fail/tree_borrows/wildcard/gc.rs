@@ -3,18 +3,18 @@
 #[path = "../../../utils/mod.rs"]
 mod utils;
 
-#[allow(unused_variables, unused_assignments)]
+/// Checks that the garbage collector doesn't remove any exposed tags.
 fn main() {
-    let mut x: u32 = 4;
+    let mut _x: u32 = 4;
     let int = {
-        let y = &x;
+        let y = &_x;
         y as *const u32 as usize
     };
     // If y wasn't exposed, this would gc it.
     utils::run_provenance_gc();
     // This should disable y.
-    x = 5;
+    _x = 5;
     let wild = int as *const u32;
 
-    let fail = unsafe { *wild }; //~ ERROR: /read access through wildcard at .* is forbidden/
+    let _fail = unsafe { *wild }; //~ ERROR: /read access through <wildcard> at .* is forbidden/
 }
