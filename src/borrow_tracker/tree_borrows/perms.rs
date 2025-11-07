@@ -790,4 +790,32 @@ mod propagation_optimization_checks {
             );
         }
     }
+
+    /// Checks that  `strongest_allowed_child_access` correctly
+    /// represents which transitions are possible.
+    #[test]
+    fn strongest_allowed_child_access() {
+        for (permission, protected) in <(Permission, bool)>::exhaustive() {
+            let strongest_child_access = permission.strongest_allowed_child_access(protected);
+
+            let is_read_valid = Permission::perform_access(
+                AccessKind::Read,
+                AccessRelatedness::LocalAccess,
+                permission,
+                protected,
+            )
+            .is_some();
+
+            let is_write_valid = Permission::perform_access(
+                AccessKind::Write,
+                AccessRelatedness::LocalAccess,
+                permission,
+                protected,
+            )
+            .is_some();
+
+            assert_eq!(is_read_valid, strongest_child_access >= WildcardAccessLevel::Read);
+            assert_eq!(is_write_valid, strongest_child_access >= WildcardAccessLevel::Write);
+        }
+    }
 }
