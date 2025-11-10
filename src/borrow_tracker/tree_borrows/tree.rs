@@ -18,6 +18,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
+use super::diagnostics::AccessCause;
 use super::wildcard::WildcardState;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
@@ -80,6 +81,47 @@ impl LocationState {
 
     pub fn permission(&self) -> Permission {
         self.permission
+    }
+
+    fn perform_transition(
+        &mut self,
+        idx: UniIndex,
+        nodes: &mut UniValMap<Node>,
+        wildcard_accesses: &mut UniValMap<WildcardState>,
+        access_kind: AccessKind,
+        access_cause: AccessCause,
+        access_range: Option<AllocRange>,
+        relatedness: AccessRelatedness,
+        span: Span,
+        location_range: Range<u64>,
+        protected: bool,
+    ) -> Result<(), TransitionError> {
+        // Call this function now (i.e. only if we know `relatedness`), which
+        // ensures it is only called when `skip_if_known_noop` returns
+        // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
+        self.record_new_access(access_kind, relatedness);
+
+        let transition = self.perform_access(access_kind, relatedness, protected)?;
+        if !transition.is_noop() {
+            let node = nodes.get_mut(idx).unwrap();
+            // Record the event as part of the history.
+            node.debug_info.history.push(diagnostics::Event {
+                transition,
+                is_foreign: relatedness.is_foreign(),
+                access_cause,
+                access_range,
+                transition_range: location_range,
+                span,
+            });
+
+            // We need to update the wildcard state, if the permission
+            // of an exposed pointer changes.
+            if node.is_exposed {
+                let access_type = self.permission.strongest_allowed_child_access(protected);
+                WildcardState::update_exposure(idx, access_type, nodes, wildcard_accesses);
+            }
+        }
+        Ok(())
     }
 
     /// Apply the effect of an access to one location, including
@@ -870,37 +912,20 @@ impl<'tcx> Tree {
             let mut perm = args.loc.perms.entry(args.idx);
 
             let state = perm.or_insert(node.default_location_state());
-            // Call this function now, which ensures it is only called when
-            // `skip_if_known_noop` returns `Recurse`, due to the contract of
-            // `traverse_this_parents_children_other`.
-            state.record_new_access(access_kind, args.rel_pos);
 
             let protected = global.borrow().protected_tags.contains_key(&node.tag);
-            let transition = state.perform_access(access_kind, args.rel_pos, protected)?;
-            // Record the event as part of the history
-            if !transition.is_noop() {
-                node.debug_info.history.push(diagnostics::Event {
-                    transition,
-                    is_foreign: args.rel_pos.is_foreign(),
-                    access_cause,
-                    access_range: access_range_and_kind.map(|x| x.0),
-                    transition_range: perms_range,
-                    span,
-                });
-
-                // We need to update the wildcard access tracking information,
-                // if the permission of an exposed pointer changes
-                if node.is_exposed {
-                    let access_type = state.permission.strongest_allowed_child_access(protected);
-                    WildcardState::update_exposure(
-                        args.idx,
-                        access_type,
-                        args.nodes,
-                        &mut args.loc.wildcard_accesses,
-                    );
-                }
-            }
-            Ok(())
+            state.perform_transition(
+                args.idx,
+                args.nodes,
+                &mut args.loc.wildcard_accesses,
+                access_kind,
+                access_cause,
+                /* access_range */ access_range_and_kind.map(|x| x.0),
+                args.rel_pos,
+                span,
+                perms_range,
+                protected,
+            )
         };
 
         // Error handler in case `node_app` goes wrong.
@@ -1180,6 +1205,7 @@ impl<'tcx> Tree {
                                 // There doesn't exist a valid exposed reference for this access to
                                 // happen through.
                                 // If this fails for one id, then it fails for all ids.
+                                assert_eq!(self.root, args.idx);
                                 return Err(no_valid_exposed_references_error(
                                     alloc_id,
                                     loc_range.start,
@@ -1192,50 +1218,30 @@ impl<'tcx> Tree {
                                 // to this node, but we still update each of its children.
                                 return Ok(());
                             };
-
-                            // Call this function now (i.e. only if we know `relatedness`), which
-                            // ensures it is only called when `skip_if_known_noop` returns
-                            // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
-                            perm.record_new_access(access_kind, relatedness);
-
-                            let transition = perm
-                                .perform_access(access_kind, relatedness, protected)
-                                .map_err(|trans| {
-                                    TbError {
-                                        conflicting_info: &node.debug_info,
-                                        access_cause,
-                                        alloc_id,
-                                        error_offset: loc_range.start,
-                                        error_kind: trans,
-                                        accessed_info: None,
-                                    }
-                                    .build()
-                                })?;
-                            if !transition.is_noop() {
-                                // Record the event as part of the history.
-                                node.debug_info.history.push(diagnostics::Event {
-                                    transition,
-                                    is_foreign: relatedness.is_foreign(),
+                            perm.perform_transition(
+                                args.idx,
+                                args.nodes,
+                                &mut args.loc.wildcard_accesses,
+                                access_kind,
+                                access_cause,
+                                Some(access_range),
+                                relatedness,
+                                span,
+                                loc_range.clone(),
+                                protected,
+                            )
+                            .map_err(|trans| {
+                                let node = args.nodes.get(args.idx).unwrap();
+                                TbError {
+                                    conflicting_info: &node.debug_info,
                                     access_cause,
-                                    access_range: access_range_and_kind.map(|x| x.0),
-                                    transition_range: loc_range.clone(),
-                                    span,
-                                });
-
-                                // We need to update the wildcard state, if the permission
-                                // of an exposed pointer changes.
-                                if node.is_exposed {
-                                    let access_type =
-                                        perm.permission.strongest_allowed_child_access(protected);
-                                    WildcardState::update_exposure(
-                                        args.idx,
-                                        access_type,
-                                        args.nodes,
-                                        &mut args.loc.wildcard_accesses,
-                                    );
+                                    alloc_id,
+                                    error_offset: loc_range.start,
+                                    error_kind: trans,
+                                    accessed_info: None,
                                 }
-                            }
-                            Ok(())
+                                .build()
+                            })
                         },
                         |err| err.error_kind,
                     )?;
