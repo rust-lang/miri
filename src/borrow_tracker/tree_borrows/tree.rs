@@ -10,6 +10,7 @@
 //!   and the relative position of the access;
 //! - idempotency properties asserted in `perms.rs` (for optimizations)
 
+use std::cell::OnceCell;
 use std::ops::Range;
 use std::{cmp, fmt, mem};
 
@@ -19,7 +20,7 @@ use rustc_span::Span;
 use smallvec::SmallVec;
 
 use super::diagnostics::AccessCause;
-use super::wildcard::WildcardState;
+use super::wildcard::{WildcardAccessRelatedness, WildcardState};
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError, no_valid_exposed_references_error,
@@ -296,6 +297,7 @@ pub struct Tree {
     pub(super) locations: DedupRangeMap<LocationTree>,
     /// The index of the root node.
     pub(super) root: UniIndex,
+    pub(super) wildcard_roots: Vec<UniIndex>,
 }
 
 /// A node in the borrow tree. Each node is uniquely identified by a tag via
@@ -625,7 +627,7 @@ impl Tree {
             let wildcard_accesses = UniValMap::default();
             DedupRangeMap::new(size, LocationTree { perms, wildcard_accesses })
         };
-        Self { root: root_idx, nodes, locations, tag_mapping }
+        Self { root: root_idx, nodes, wildcard_roots: Vec::new(), locations, tag_mapping }
     }
 }
 
@@ -639,7 +641,7 @@ impl<'tcx> Tree {
     pub(super) fn new_child(
         &mut self,
         base_offset: Size,
-        parent_tag: BorTag,
+        parent_prov: ProvenanceExtra,
         new_tag: BorTag,
         inside_perms: DedupRangeMap<LocationState>,
         outside_perm: Permission,
@@ -647,7 +649,12 @@ impl<'tcx> Tree {
         span: Span,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
-        let parent_idx = self.tag_mapping.get(&parent_tag).unwrap();
+
+        let parent_idx = match parent_prov {
+            ProvenanceExtra::Concrete(parent_tag) =>
+                Some(self.tag_mapping.get(&parent_tag).unwrap()),
+            ProvenanceExtra::Wildcard => None,
+        };
         assert!(outside_perm.is_initial());
 
         let default_strongest_idempotent =
@@ -657,7 +664,7 @@ impl<'tcx> Tree {
             idx,
             Node {
                 tag: new_tag,
-                parent: Some(parent_idx),
+                parent: parent_idx,
                 children: SmallVec::default(),
                 default_initial_perm: outside_perm,
                 default_initial_idempotent_foreign_access: default_strongest_idempotent,
@@ -665,9 +672,11 @@ impl<'tcx> Tree {
                 debug_info: NodeDebugInfo::new(new_tag, outside_perm, span),
             },
         );
-        let parent_node = self.nodes.get_mut(parent_idx).unwrap();
-        // Register new_tag as a child of parent_tag
-        parent_node.children.push(idx);
+        if let Some(parent_idx) = parent_idx {
+            let parent_node = self.nodes.get_mut(parent_idx).unwrap();
+            // Register new_tag as a child of parent_tag
+            parent_node.children.push(idx);
+        }
 
         // We need to know the weakest SIFA for `update_idempotent_foreign_access_after_retag`.
         let mut min_sifa = default_strongest_idempotent;
@@ -692,18 +701,24 @@ impl<'tcx> Tree {
         // We need to ensure the consistency of the wildcard access tracking data structure.
         // For this, we insert the correct entry for this tag based on its parent, if it exists.
         for (_range, loc) in self.locations.iter_mut_all() {
-            if let Some(parent_access) = loc.wildcard_accesses.get(parent_idx) {
-                loc.wildcard_accesses.insert(idx, parent_access.for_new_child());
+            if let Some(parent_idx) = parent_idx {
+                if let Some(parent_access) = loc.wildcard_accesses.get(parent_idx) {
+                    loc.wildcard_accesses.insert(idx, parent_access.for_new_child());
+                }
+            } else {
+                loc.wildcard_accesses.insert(idx, WildcardState::for_wildcard_root());
             }
         }
-
-        // Inserting the new perms might have broken the SIFA invariant (see
-        // `foreign_access_skipping.rs`) if the SIFA we inserted is weaker than that of some parent.
-        // We now weaken the recorded SIFA for our parents, until the invariant is restored. We
-        // could weaken them all to `None`, but it is more efficient to compute the SIFA for the new
-        // permission statically, and use that. For this we need the *minimum* SIFA (`None` needs
-        // more fixup than `Write`).
-        self.update_idempotent_foreign_access_after_retag(parent_idx, min_sifa);
+        //if the parent is a wildcard pointer, then it doesnt track SIFA and doesnt need to be updated
+        if let Some(parent_idx) = parent_idx {
+            // Inserting the new perms might have broken the SIFA invariant (see
+            // `foreign_access_skipping.rs`) if the SIFA we inserted is weaker than that of some parent.
+            // We now weaken the recorded SIFA for our parents, until the invariant is restored. We
+            // could weaken them all to `None`, but it is more efficient to compute the SIFA for the new
+            // permission statically, and use that. For this we need the *minimum* SIFA (`None` needs
+            // more fixup than `Write`).
+            self.update_idempotent_foreign_access_after_retag(parent_idx, min_sifa);
+        }
 
         interp_ok(())
     }
@@ -861,8 +876,8 @@ impl<'tcx> Tree {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
-                loc.perform_access(
                     self.root,
+                    self.wildcard_roots.iter().copied(),
                     &mut self.nodes,
                     source_idx,
                     loc_range,
@@ -885,6 +900,9 @@ impl<'tcx> Tree {
             // See the test case `returned_mut_is_usable` from
             // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
             // why this is important.
+            let ProvenanceExtra::Concrete(tag) = prov else {
+                unreachable!();
+            };
 
             // Wildcard references are never protected. So this can never be
             // called with a wildcard reference.
@@ -899,6 +917,7 @@ impl<'tcx> Tree {
                     let access_cause = diagnostics::AccessCause::FnExit(access_kind);
                     loc.perform_access(
                         self.root,
+                        self.wildcard_roots.iter().copied(),
                         &mut self.nodes,
                         Some(source_idx),
                         loc_range,
@@ -1074,6 +1093,7 @@ impl<'tcx> LocationTree {
     fn perform_access(
         &mut self,
         root: UniIndex,
+        wildcard_roots: impl Iterator<Item = UniIndex>,
         nodes: &mut UniValMap<Node>,
         access_source: Option<UniIndex>,
         loc_range: Range<u64>,
@@ -1085,8 +1105,8 @@ impl<'tcx> LocationTree {
         span: Span,        // diagnostics
         visit_children: ChildrenVisitMode,
     ) -> InterpResult<'tcx> {
-        if let Some(idx) = access_source {
-            self.perform_normal_access(
+        let accessed_root = if let Some(idx) = access_source {
+            Some(self.perform_normal_access(
                 idx,
                 nodes,
                 loc_range.clone(),
@@ -1097,13 +1117,12 @@ impl<'tcx> LocationTree {
                 alloc_id,
                 span,
                 visit_children,
-            )
+            )?)
         } else {
-            // `SkipChildrenOfAccessed` only gets set on protector release.
-            // Since a wildcard reference are never protected this assert shouldn't fail.
             assert!(matches!(visit_children, ChildrenVisitMode::VisitChildrenOfAccessed));
             self.perform_wildcard_access(
                 root,
+                /*only_foreign*/ false,
                 nodes,
                 loc_range.clone(),
                 access_range,
@@ -1112,8 +1131,34 @@ impl<'tcx> LocationTree {
                 global,
                 alloc_id,
                 span,
-            )
+            )?;
+            None
+        };
+
+        let mut after_current = Some(root) == accessed_root;
+        for wild_root in wildcard_roots {
+            if Some(wild_root) == accessed_root {
+                after_current = true;
+                if matches!(visit_children, ChildrenVisitMode::SkipChildrenOfAccessed) {
+                    break;
+                } else {
+                    continue;
+                }
+            }
+            self.perform_wildcard_access(
+                wild_root,
+                /*only_foreign*/ after_current,
+                nodes,
+                loc_range.clone(),
+                access_range,
+                access_kind,
+                access_cause,
+                global,
+                alloc_id,
+                span,
+            )?;
         }
+        interp_ok(())
     }
 
     /// Performs a normal access on the tree containing `access_source`.
@@ -1132,7 +1177,8 @@ impl<'tcx> LocationTree {
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
         visit_children: ChildrenVisitMode,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, UniIndex> {
+        let root = OnceCell::new();
         // Performs the per-node work:
         // - insert the permission if it does not exist
         // - perform the access
@@ -1150,8 +1196,11 @@ impl<'tcx> LocationTree {
             let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
             old_state.skip_if_known_noop(access_kind, args.rel_pos)
         };
-        let node_app = |args: NodeAppArgs<'_>| -> Result<(), _> {
+        let node_app = |args: NodeAppArgs<'_>| {
             let node = args.nodes.get_mut(args.idx).unwrap();
+            if node.parent.is_none() {
+                root.set(args.idx).unwrap();
+            }
             let mut perm = args.loc.perms.entry(args.idx);
 
             let state = perm.or_insert(node.default_location_state());
@@ -1164,7 +1213,7 @@ impl<'tcx> LocationTree {
                     &mut args.loc.wildcard_accesses,
                     access_kind,
                     access_cause,
-                    /* access_range */ access_range,
+                    access_range,
                     args.rel_pos,
                     span,
                     loc_range.clone(),
@@ -1197,6 +1246,7 @@ impl<'tcx> LocationTree {
     fn perform_wildcard_access(
         &mut self,
         root: UniIndex,
+        only_foreign: bool,
         nodes: &mut UniValMap<Node>,
         loc_range: Range<u64>,
         access_range: Option<AllocRange>,
@@ -1210,7 +1260,8 @@ impl<'tcx> LocationTree {
             |idx: UniIndex, nodes: &UniValMap<Node>, loc: &LocationTree| -> ContinueTraversal {
                 let node = nodes.get(idx).unwrap();
                 let perm = loc.perms.get(idx);
-                let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
+                let wildcard_state =
+                    loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
 
                 let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
@@ -1259,13 +1310,25 @@ impl<'tcx> LocationTree {
                         ));
                     };
 
-                    let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
-                        // If the access type is Either, then we do not apply any transition
-                        // to this node, but we still update each of its children.
-                        // This is an imprecision! In the future, maybe we can still do some sort
-                        // of best-effort update here.
-                        return Ok(());
+                    let relatedness = if only_foreign {
+                        assert!(matches!(
+                            wildcard_relatedness,
+                            WildcardAccessRelatedness::ForeignAccess
+                                | WildcardAccessRelatedness::EitherAccess,
+                        ));
+                        AccessRelatedness::ForeignAccess
+                    } else {
+                        if let Some(relatedness) = wildcard_relatedness.to_relatedness() {
+                            relatedness
+                        } else {
+                            // If the access type is Either, then we do not apply any transition
+                            // to this node, but we still update each of its children.
+                            // This is an imprecision! In the future, maybe we can still do some sort
+                            // of best-effort update here.
+                            return Ok(());
+                        }
                     };
+
                     // We know the exact relatedness, so we can actually do precise checks.
                     perm.perform_transition(
                         args.idx,
@@ -1313,6 +1376,9 @@ impl VisitProvenance for Tree {
         // (the `root` node of `Tree` is not an `Option<_>`)
         visit(None, Some(self.nodes.get(self.root).unwrap().tag));
 
+        for id in self.wildcard_roots.iter().copied() {
+            visit(None, Some(self.nodes.get(id).unwrap().tag));
+        }
         // We also need to keep around any exposed tags through which
         // an access could still happen.
         for (_id, node) in self.nodes.iter() {

@@ -131,6 +131,9 @@ impl WildcardState {
             ..Default::default()
         }
     }
+    pub fn for_wildcard_root() -> Self {
+        Self { max_foreign_access: WildcardAccessLevel::Write, ..Default::default() }
+    }
 
     /// Pushes the nodes of `children` onto the stack who's `max_foreign_access`
     /// needs to be updated.
@@ -477,7 +480,11 @@ impl Tree {
                         .max(parent_state.max_foreign_access)
                         .max(parent_state.exposed_as)
                 } else {
-                    WildcardAccessLevel::None
+                    if self.root == id {
+                        WildcardAccessLevel::None
+                    } else {
+                        WildcardAccessLevel::Write
+                    }
                 };
 
                 // Count how many children can be the source of wildcard reads or writes
