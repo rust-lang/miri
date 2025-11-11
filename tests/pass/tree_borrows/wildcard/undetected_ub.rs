@@ -4,7 +4,6 @@
 pub fn main() {
     uncertain_provenance();
     protected_exposed();
-    protected_wildcard();
 }
 
 /// Currently, if we do not know for a tag if an access is local or foreign,
@@ -103,43 +102,4 @@ pub fn protected_exposed() {
 
     // ref2 is disabled, so this read causes UB, but we currently don't protect this.
     let _fail = *ref2;
-}
-
-/// Currently, we do not assign protectors to wildcard references.
-/// This test has UB because it does a foreign write to a protected reference.
-/// However, that reference is a wildcard, so this doesn't get detected.
-#[allow(unused_variables)]
-pub fn protected_wildcard() {
-    let mut x: u32 = 32;
-    let ref1 = &mut x;
-    let ref2 = &mut *ref1;
-
-    let int = ref2 as *mut u32 as usize;
-    let wild = int as *mut u32;
-    let wild_ref = unsafe { &mut *wild };
-
-    let mut protect = |arg: &mut u32| {
-        // arg is a protected pointer with wildcard provenance.
-
-        //    ┌────────────┐
-        //    │            │
-        //    │ ref1(Res)  │
-        //    │            │
-        //    └──────┬─────┘
-        //           │
-        //           │
-        //           ▼
-        //    ┌────────────┐
-        //    │            │
-        //    │ ref2(Res)* │
-        //    │            │
-        //    └────────────┘
-
-        // Writes to ref1, disabling ref2, i.e. disabling all exposed references.
-        // Since a wildcard reference is protected, this is UB. But we currently don't detect this.
-        *ref1 = 13;
-    };
-
-    // We pass a pointer with wildcard provenance to the function.
-    protect(wild_ref);
 }
