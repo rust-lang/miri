@@ -71,6 +71,7 @@ pub fn protected_exposed() {
 
     fn protect(ref3: &mut u32) {
         let int3 = ref3 as *mut u32 as usize;
+
         //    ┌────────────┐
         //    │            │
         //    │  ptr_base  ├──────────────┐

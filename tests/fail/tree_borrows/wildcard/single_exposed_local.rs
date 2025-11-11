@@ -1,7 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-// Checks if a local access gets correctly triggered during wildcard access,
-// if we know that the only exposed reference is local to the node.
+/// Checks if a local access gets correctly triggered during wildcard access,
+/// if we know that the only exposed reference is local to the node.
 pub fn main() {
     let mut x: u32 = 0;
 

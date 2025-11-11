@@ -9,9 +9,9 @@ pub fn main() {
     returned_mut_is_usable();
 }
 
-// Checks that an access through a wildcard reference
-// doesn't disable any exposed references.
-// It tests this with exposed references that are siblings of each other.
+/// Checks that an access through a wildcard reference
+/// doesn't disable any exposed references.
+/// It tests this with exposed references that are siblings of each other.
 pub fn multiple_exposed_siblings() {
     let mut x: u32 = 42;
 
@@ -25,9 +25,6 @@ pub fn multiple_exposed_siblings() {
 
     let wild = int1 as *mut u32;
 
-    // graph TD
-    // ptr_base --> ref1(Res)* & ref2(Res)*
-    //
     //   ┌────────────┐
     //   │            │
     //   │  ptr_base  ├────────────┐
@@ -50,9 +47,9 @@ pub fn multiple_exposed_siblings() {
     assert_eq!(*ref2, 13);
 }
 
-// Checks that an access through a wildcard reference
-// doesn't disable any exposed references.
-// It tests this with exposed references where one is the ancestor of the other.
+/// Checks that an access through a wildcard reference
+/// doesn't disable any exposed references.
+/// It tests this with exposed references where one is the ancestor of the other.
 pub fn multiple_exposed_child() {
     let mut x: u32 = 42;
 
@@ -66,9 +63,6 @@ pub fn multiple_exposed_child() {
 
     let wild = int1 as *mut u32;
 
-    // graph TD
-    // ref1(Res)* --> ref2(Res) --> ref3(Res)*
-    //
     //     ┌────────────┐
     //     │            │
     //     │ ref1(Res)* │

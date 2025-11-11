@@ -18,7 +18,6 @@ pub fn main() {
     // Activates ptr_base.
     unsafe { wild.write(41) };
 
-    //
     //    ┌─────────────┐
     //    │             │
     //    │    x (Act)  │
