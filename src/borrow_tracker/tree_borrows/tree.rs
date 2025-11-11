@@ -1120,6 +1120,11 @@ impl<'tcx> LocationTree {
             )?)
         } else {
             assert!(matches!(visit_children, ChildrenVisitMode::VisitChildrenOfAccessed));
+            None
+        };
+        if let Some(accessed_root) = accessed_root
+            && accessed_root != root
+        {
             self.perform_wildcard_access(
                 root,
                 /*only_foreign*/ false,
@@ -1132,8 +1137,7 @@ impl<'tcx> LocationTree {
                 alloc_id,
                 span,
             )?;
-            None
-        };
+        }
 
         let mut after_current = Some(root) == accessed_root;
         for wild_root in wildcard_roots {
