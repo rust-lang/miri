@@ -83,8 +83,8 @@ impl LocationState {
         self.permission
     }
 
-    // Performs an access on this index and updates node,
-    // perm and wildcard_state to reflect the transition.
+    /// Performs an access on this index and updates node,
+    /// perm and wildcard_state to reflect the transition.
     fn perform_transition(
         &mut self,
         idx: UniIndex,
