@@ -96,7 +96,7 @@ impl<'tcx> Tree {
         // `None` makes it the magic on-protector-end operation
         self.perform_access(ProvenanceExtra::Concrete(tag), None, global, alloc_id, span)?;
 
-        self.release_protector_wildcard(tag);
+        self.update_exposure_for_protector_release(tag);
 
         interp_ok(())
     }

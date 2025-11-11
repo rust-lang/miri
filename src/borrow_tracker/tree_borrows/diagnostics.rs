@@ -307,7 +307,7 @@ impl TbError<'_> {
             self.accessed_info.map(|v| format!("{v}")).unwrap_or_else(|| "<wildcard>".into());
         let conflicting = self.conflicting_info;
         // An access is considered conflicting if it happened through a
-        // different tag, then the one who caused UB.
+        // different tag than the one who caused UB.
         // When doing a wildcard access (where `accessed` is `None`) we
         // do not know which precise tag the accessed happened from,
         // however we can be certain that it did not come from the

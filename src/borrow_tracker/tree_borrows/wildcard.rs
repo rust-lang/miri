@@ -389,6 +389,7 @@ impl WildcardState {
 impl Tree {
     /// Marks the tag as exposed & updates the wildcard tracking data structure
     /// to represent its access level.
+    /// Also takes as an argument whether the tag is protected or not.
     pub fn expose_tag(&mut self, tag: BorTag, protected: bool) {
         let id = self.tag_mapping.get(&tag).unwrap();
         let node = self.nodes.get_mut(id).unwrap();
@@ -413,9 +414,10 @@ impl Tree {
             );
         }
     }
+
     /// This updates the wildcard tracking data structure to reflect the release of
     /// the protector on `tag`.
-    pub(super) fn release_protector_wildcard(&mut self, tag: BorTag) {
+    pub(super) fn update_exposure_for_protector_release(&mut self, tag: BorTag) {
         let idx = self.tag_mapping.get(&tag).unwrap();
 
         // We check if the node is already exposed, as we don't want to expose any

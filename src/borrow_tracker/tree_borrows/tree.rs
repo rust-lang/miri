@@ -83,6 +83,8 @@ impl LocationState {
         self.permission
     }
 
+    // Performs an access on this index and updates node,
+    // perm and wildcard_state to reflect the transition.
     fn perform_transition(
         &mut self,
         idx: UniIndex,
@@ -317,7 +319,7 @@ pub(super) struct Node {
     /// in cases where there is no location state yet. See `foreign_access_skipping.rs`,
     /// and `LocationState::idempotent_foreign_access` for more information
     default_initial_idempotent_foreign_access: IdempotentForeignAccess,
-    /// Weather a wildcard access could happen through this node.
+    /// Whether a wildcard access could happen through this node.
     pub is_exposed: bool,
     /// Some extra information useful only for debugging purposes.
     pub debug_info: NodeDebugInfo,
@@ -1155,13 +1157,13 @@ impl<'tcx> Tree {
         self.verify_wildcard_consistency(global);
 
         if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
+            // This does a traversal starting from the root through the tree updating
+            // the permissions of each node.
+            // The difference to `perform_access` is that we take the access
+            // relatedness from the wildcard tracking state of the node instead of
+            // from the visitor itself.
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
                 let root_tag = self.nodes.get(self.root).unwrap().tag;
-                // This does a traversal starting from the root through the tree updating
-                // the permissions of each node.
-                // The difference to `perform_access` is, that we take the access
-                // relatedness from the wildcard tracking state of the node instead of
-                // from the visitor itself.
                 TreeVisitor { loc, nodes: &mut self.nodes, tag_mapping: &self.tag_mapping }
                     .traverse_this_parents_children_other(
                         root_tag,
@@ -1178,12 +1180,12 @@ impl<'tcx> Tree {
                             let old_state =
                                 perm.copied().unwrap_or_else(|| node.default_location_state());
                             // If we know where, relative to this node, the wildcard access occurs,
-                            // then check if we can skip the entire subtree because the access might not
-                            // change any permissions here anyway.
+                            // then check if we can skip the entire subtree.
                             if let Some(relatedness) =
                                 wildcard_state.access_relatedness(access_kind)
                                 && let Some(relatedness) = relatedness.to_relatedness()
                             {
+                                // We can use the usual SIFA machinery to skip nodes.
                                 old_state.skip_if_known_noop(access_kind, relatedness)
                             } else {
                                 ContinueTraversal::Recurse
@@ -1204,7 +1206,9 @@ impl<'tcx> Tree {
                             else {
                                 // There doesn't exist a valid exposed reference for this access to
                                 // happen through.
-                                // If this fails for one id, then it fails for all ids.
+                                // If this fails for one id, then it fails for all ids so this.
+                                // Since we always check the root first, this means it should always
+                                // fail on the root.
                                 assert_eq!(self.root, args.idx);
                                 return Err(no_valid_exposed_references_error(
                                     alloc_id,
@@ -1216,8 +1220,11 @@ impl<'tcx> Tree {
                             let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
                                 // If the access type is Either, then we do not apply any transition
                                 // to this node, but we still update each of its children.
+                                // This is an imprecision! In the future, maybe we can still do some sort
+                                // of best-effort update here.
                                 return Ok(());
                             };
+                            // We know the exact relatedness, so we can actually do precise checks.
                             perm.perform_transition(
                                 args.idx,
                                 args.nodes,
