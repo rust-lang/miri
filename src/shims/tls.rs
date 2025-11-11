@@ -253,6 +253,7 @@ impl<'tcx> TlsDtorsState<'tcx> {
                         }
                         _ => {
                             // No TLS dtor support.
+                            // FIXME: should we do something on wasi?
                             break 'new_state Done;
                         }
                     }
