@@ -20,7 +20,7 @@ use rustc_span::Span;
 use smallvec::SmallVec;
 
 use super::diagnostics::AccessCause;
-use super::wildcard::{WildcardAccessRelatedness, WildcardState};
+use super::wildcard::WildcardState;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
     self, NodeDebugInfo, TbError, TransitionError, no_valid_exposed_references_error,
@@ -347,12 +347,13 @@ struct TreeVisitor<'tree> {
 }
 
 /// Whether to continue exploring the children recursively or not.
+#[derive(Debug)]
 enum ContinueTraversal {
     Recurse,
     SkipSelfAndChildren,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ChildrenVisitMode {
     VisitChildrenOfAccessed,
     SkipChildrenOfAccessed,
@@ -676,6 +677,8 @@ impl<'tcx> Tree {
             let parent_node = self.nodes.get_mut(parent_idx).unwrap();
             // Register new_tag as a child of parent_tag
             parent_node.children.push(idx);
+        } else {
+            self.wildcard_roots.push(idx);
         }
 
         // We need to know the weakest SIFA for `update_idempotent_foreign_access_after_retag`.
@@ -876,6 +879,7 @@ impl<'tcx> Tree {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
+                loc.perform_access(
                     self.root,
                     self.wildcard_roots.iter().copied(),
                     &mut self.nodes,
@@ -1122,9 +1126,7 @@ impl<'tcx> LocationTree {
             assert!(matches!(visit_children, ChildrenVisitMode::VisitChildrenOfAccessed));
             None
         };
-        if let Some(accessed_root) = accessed_root
-            && accessed_root != root
-        {
+        if accessed_root != Some(root) {
             self.perform_wildcard_access(
                 root,
                 /*only_foreign*/ false,
@@ -1264,14 +1266,13 @@ impl<'tcx> LocationTree {
             |idx: UniIndex, nodes: &UniValMap<Node>, loc: &LocationTree| -> ContinueTraversal {
                 let node = nodes.get(idx).unwrap();
                 let perm = loc.perms.get(idx);
-                let wildcard_state =
-                    loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
+                let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
 
                 let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
                 if let Some(relatedness) = wildcard_state.access_relatedness(access_kind)
-                    && let Some(relatedness) = relatedness.to_relatedness()
+                    && let Some(relatedness) = relatedness.to_relatedness(only_foreign)
                 {
                     // We can use the usual SIFA machinery to skip nodes.
                     old_state.skip_if_known_noop(access_kind, relatedness)
@@ -1314,24 +1315,22 @@ impl<'tcx> LocationTree {
                         ));
                     };
 
-                    let relatedness = if only_foreign {
-                        assert!(matches!(
-                            wildcard_relatedness,
-                            WildcardAccessRelatedness::ForeignAccess
-                                | WildcardAccessRelatedness::EitherAccess,
-                        ));
-                        AccessRelatedness::ForeignAccess
-                    } else {
-                        if let Some(relatedness) = wildcard_relatedness.to_relatedness() {
-                            relatedness
-                        } else {
-                            // If the access type is Either, then we do not apply any transition
-                            // to this node, but we still update each of its children.
-                            // This is an imprecision! In the future, maybe we can still do some sort
-                            // of best-effort update here.
-                            return Ok(());
-                        }
+                    let Some(relatedness) = wildcard_relatedness.to_relatedness(only_foreign)
+                    else {
+                        // If the access type is Either, then we do not apply any transition
+                        // to this node, but we still update each of its children.
+                        // This is an imprecision! In the future, maybe we can still do some sort
+                        // of best-effort update here.
+                        return Ok(());
                     };
+                    if args.idx == root
+                        && matches!(
+                            perm.skip_if_known_noop(access_kind, relatedness),
+                            ContinueTraversal::SkipSelfAndChildren
+                        )
+                    {
+                        return Ok(());
+                    }
 
                     // We know the exact relatedness, so we can actually do precise checks.
                     perm.perform_transition(

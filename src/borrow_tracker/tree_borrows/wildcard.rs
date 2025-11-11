@@ -32,11 +32,19 @@ pub enum WildcardAccessRelatedness {
     EitherAccess,
 }
 impl WildcardAccessRelatedness {
-    pub fn to_relatedness(self) -> Option<AccessRelatedness> {
-        match self {
-            Self::LocalAccess => Some(AccessRelatedness::LocalAccess),
-            Self::ForeignAccess => Some(AccessRelatedness::ForeignAccess),
-            Self::EitherAccess => None,
+    pub fn to_relatedness(self, only_foreign: bool) -> Option<AccessRelatedness> {
+        if only_foreign {
+            match self {
+                Self::LocalAccess => None,
+                Self::ForeignAccess => Some(AccessRelatedness::ForeignAccess),
+                Self::EitherAccess => Some(AccessRelatedness::ForeignAccess),
+            }
+        } else {
+            match self {
+                Self::LocalAccess => Some(AccessRelatedness::LocalAccess),
+                Self::ForeignAccess => Some(AccessRelatedness::ForeignAccess),
+                Self::EitherAccess => None,
+            }
         }
     }
 }
