@@ -36,7 +36,9 @@ fn main() {
     test_posix_realpath_errors();
     #[cfg(target_os = "linux")]
     test_posix_fadvise();
+    #[cfg(not(target_os = "macos"))]
     test_posix_fallocate::<libc::off_t>(libc::posix_fallocate);
+    #[cfg(not(target_os = "macos"))]
     test_posix_fallocate::<libc::off64_t>(libc::posix_fallocate64);
     #[cfg(target_os = "linux")]
     test_sync_file_range();
@@ -337,6 +339,7 @@ fn test_posix_fadvise() {
     assert_eq!(result, 0);
 }
 
+#[cfg(not(target_os = "macos"))]
 fn test_posix_fallocate<T: From<i32>>(
     posix_fallocate: unsafe extern "C" fn(fd: libc::c_int, offset: T, len: T) -> libc::c_int,
 ) {
