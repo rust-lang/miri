@@ -849,7 +849,13 @@ impl<'tcx> Tree {
                             alloc_id,
                             error_offset: loc_range.start,
                             error_kind,
-                            accessed_info: Some(accessed_info),
+                            accessed_info: match prov {
+                                ProvenanceExtra::Concrete(_) => Some(accessed_info),
+                                // `accessed_info` contains the info of `start_tag`.
+                                // On a wildcard access this is not the info of the accessed tag
+                                // (as we don't know the accessed tag).
+                                ProvenanceExtra::Wildcard => None,
+                            },
                         }
                         .build()
                     },
