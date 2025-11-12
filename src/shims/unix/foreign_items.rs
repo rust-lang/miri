@@ -491,7 +491,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "posix_fallocate" => {
                 // posix_fallocate is not supported by macos.
                 this.check_target_os(
-                    &["linux", "freebsd", "solaris", "illumos", "android"],
+                    &[Os::Linux, Os::FreeBsd, Os::Solaris, Os::Illumos, Os::Android],
                     link_name,
                 )?;
                 let [fd, offset, len] = this.check_shim_sig(
@@ -512,7 +512,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "posix_fallocate64" => {
                 // posix_fallocate is not supported by macos.
                 this.check_target_os(
-                    &["linux", "freebsd", "solaris", "illumos", "android"],
+                    &[Os::Linux, Os::FreeBsd, Os::Solaris, Os::Illumos, Os::Android],
                     link_name,
                 )?;
                 let [fd, offset, len] = this.check_shim_sig(
