@@ -36,9 +36,7 @@ fn main() {
     test_posix_realpath_errors();
     #[cfg(target_os = "linux")]
     test_posix_fadvise();
-    #[cfg(target_os = "linux")]
     test_posix_fallocate::<libc::off_t>(libc::posix_fallocate);
-    #[cfg(target_os = "linux")]
     test_posix_fallocate::<libc::off64_t>(libc::posix_fallocate64);
     #[cfg(target_os = "linux")]
     test_sync_file_range();
@@ -339,7 +337,6 @@ fn test_posix_fadvise() {
     assert_eq!(result, 0);
 }
 
-#[cfg(target_os = "linux")]
 fn test_posix_fallocate<T: From<i32>>(
     posix_fallocate: unsafe extern "C" fn(fd: libc::c_int, offset: T, len: T) -> libc::c_int,
 ) {
@@ -351,7 +348,7 @@ fn test_posix_fallocate<T: From<i32>>(
         let ret = unsafe { posix_fallocate(42, T::from(0), T::from(10)) };
         assert_eq!(ret, libc::EBADF);
 
-        let path = utils::prepare("miri_test_libc_possix_fallocate_errors.txt");
+        let path = utils::prepare("miri_test_libc_posix_fallocate_errors.txt");
         let file = File::create(&path).unwrap();
 
         // invalid offset
@@ -371,7 +368,7 @@ fn test_posix_fallocate<T: From<i32>>(
 
     let test = || {
         let bytes = b"hello";
-        let path = utils::prepare("miri_test_libc_fs_ftruncate.txt");
+        let path = utils::prepare("miri_test_libc_posix_fallocate.txt");
         let mut file = File::create(&path).unwrap();
         file.write_all(bytes).unwrap();
         file.sync_all().unwrap();

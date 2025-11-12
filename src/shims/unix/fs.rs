@@ -1202,6 +1202,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    /// NOTE: According to the man page of `possix_fallocate`, it returns the error code instead
+    /// of setting `errno`.
     fn posix_fallocate(
         &mut self,
         fd_num: i32,
@@ -1210,54 +1212,56 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        // According to the man page of `possix_fallocate`, it returns the error code instead
-        // of setting `errno`.
-        let ebadf = Scalar::from_i32(this.eval_libc_i32("EBADF"));
-        let einval = Scalar::from_i32(this.eval_libc_i32("EINVAL"));
-        let enodev = Scalar::from_i32(this.eval_libc_i32("ENODEV"));
-
         // Reject if isolation is enabled.
         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
             this.reject_in_isolation("`posix_fallocate`", reject_with)?;
-            // Set error code as "EBADF" (bad fd)
-            return interp_ok(ebadf);
+            // Return error code "EBADF" (bad fd).
+            return interp_ok(this.eval_libc("EBADF"));
         }
 
         let Some(fd) = this.machine.fds.get(fd_num) else {
-            return interp_ok(ebadf);
+            return interp_ok(this.eval_libc("EBADF"));
         };
 
         let file = match fd.downcast::<FileHandle>() {
             Some(file_handle) => file_handle,
             // Man page specifies to return ENODEV if `fd` is not a regular file.
-            None => return interp_ok(enodev),
+            None => return interp_ok(this.eval_libc("ENODEV")),
         };
 
         // EINVAL is returned when: "offset was less than 0, or len was less than or equal to 0".
         if offset < 0 || len <= 0 {
-            return interp_ok(einval);
+            return interp_ok(this.eval_libc("EINVAL"));
         }
 
-        if file.writable {
-            let current_size = match file.file.metadata() {
-                Ok(metadata) => metadata.len(),
-                Err(err) => return this.io_error_to_errnum(err),
-            };
-            let new_size = match offset.checked_add(len) {
-                Some(size) => size.try_into().unwrap(), // We just checked negative `offset` and `len`.
-                None => return interp_ok(einval),
-            };
-            // `posix_fallocate` only specifies increasing the file size.
-            if current_size < new_size {
-                let result = file.file.set_len(new_size);
-                let result = this.try_unwrap_io_result(result.map(|_| 0i32))?;
-                interp_ok(Scalar::from_i32(result))
-            } else {
-                interp_ok(Scalar::from_i32(0))
-            }
-        } else {
+        if !file.writable {
             // The file is not writable.
-            interp_ok(ebadf)
+            return interp_ok(this.eval_libc("EBADF"));
+        }
+
+        let current_size = match file.file.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(err) => return this.io_error_to_errnum(err),
+        };
+        let new_size = match offset.checked_add(len) {
+            // u64::from(i128) can fail if:
+            //  - the value is negative, but we checed this above with `offset < 0 || len <= 0`
+            //  - the value is too big/small to fit in u64, this should not happen since the callers
+            //    check if the value is a `i32` or `i64`.
+            // So this unwrap is safe to do.
+            Some(size) => u64::try_from(size).unwrap(),
+            None => return interp_ok(this.eval_libc("EFBIG")), // Size to big
+        };
+        // `posix_fallocate` only specifies increasing the file size.
+        if current_size < new_size {
+            let result = match file.file.set_len(new_size) {
+                Ok(()) => Scalar::from_i32(0),
+                Err(e) => this.io_error_to_errnum(e)?,
+            };
+
+            interp_ok(result)
+        } else {
+            interp_ok(Scalar::from_i32(0))
         }
     }
 
