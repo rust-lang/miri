@@ -790,32 +790,27 @@ impl<'tcx> Tree {
             span,
         )?;
 
-        // The order in which we check if any nodes are invalidated only
-        // matters to diagnostics, so we use the root as a default tag.
         let start_idx = match prov {
-            ProvenanceExtra::Concrete(tag) => self.tag_mapping.get(&tag).unwrap(),
-            ProvenanceExtra::Wildcard => self.root,
+            ProvenanceExtra::Concrete(tag) => Some(self.tag_mapping.get(&tag).unwrap()),
+            ProvenanceExtra::Wildcard => None,
         };
 
         // Check if this breaks any strong protector.
         // (Weak protectors are already handled by `perform_access`.)
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
-            TreeVisitor { nodes: &mut self.nodes, loc }.traverse_this_parents_children_other(
-                start_idx,
-                // Visit all children, skipping none.
-                |_| ContinueTraversal::Recurse,
-                |args: NodeAppArgs<'_>| {
-                    let node = args.nodes.get(args.idx).unwrap();
-                    let perm = args.loc.perms.entry(args.idx);
+            let check_strong_protector =
+                |idx, nodes: &UniValMap<Node>, perms: &UniValMap<LocationState>| {
+                    let node = nodes.get(idx).unwrap();
 
-                    let perm = perm.get().copied().unwrap_or_else(|| node.default_location_state());
+                    let perm =
+                        perms.get(idx).copied().unwrap_or_else(|| node.default_location_state());
                     if global.borrow().protected_tags.get(&node.tag)
-                            == Some(&ProtectorKind::StrongProtector)
-                            // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
-                            // Related to https://github.com/rust-lang/rust/issues/55005.
-                            && !perm.permission.is_cell()
-                            // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
-                            && perm.accessed
+                        == Some(&ProtectorKind::StrongProtector)
+                        // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
+                        // Related to https://github.com/rust-lang/rust/issues/55005.
+                        && !perm.permission.is_cell()
+                        // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
+                        && perm.accessed
                     {
                         Err(TbError {
                             conflicting_info: &node.debug_info,
@@ -823,19 +818,25 @@ impl<'tcx> Tree {
                             alloc_id,
                             error_offset: loc_range.start,
                             error_kind: TransitionError::ProtectedDealloc,
-                            accessed_info: match prov {
-                                ProvenanceExtra::Concrete(_) =>
-                                    Some(&args.nodes.get(start_idx).unwrap().debug_info),
-                                // We don't know from where the access came during a wildcard access.
-                                ProvenanceExtra::Wildcard => None,
-                            },
+                            accessed_info: start_idx.map(|idx| &nodes.get(idx).unwrap().debug_info),
                         }
                         .build())
                     } else {
                         Ok(())
                     }
-                },
-            )?;
+                };
+            if let Some(start_idx) = start_idx {
+                TreeVisitor { nodes: &mut self.nodes, loc }.traverse_this_parents_children_other(
+                    start_idx,
+                    // Visit all children, skipping none.
+                    |_| ContinueTraversal::Recurse,
+                    |args| check_strong_protector(args.idx, args.nodes, &args.loc.perms),
+                )?;
+            }
+
+            for (idx, _) in self.nodes.iter() {
+                check_strong_protector(idx, &self.nodes, &loc.perms)?;
+            }
         }
         interp_ok(())
     }
@@ -1240,11 +1241,15 @@ impl<'tcx> LocationTree {
         let visitor = TreeVisitor { nodes, loc: self };
         match visit_children {
             ChildrenVisitMode::VisitChildrenOfAccessed =>
-                visitor.traverse_this_parents_children_other(access_source, node_skipper, node_app),
+                visitor.traverse_this_parents_children_other(
+                    access_source,
+                    node_skipper,
+                    node_app,
+                )?,
             ChildrenVisitMode::SkipChildrenOfAccessed =>
-                visitor.traverse_nonchildren(access_source, node_skipper, node_app),
+                visitor.traverse_nonchildren(access_source, node_skipper, node_app)?,
         }
-        .into()
+        interp_ok(root.into_inner().unwrap())
     }
     /// Performs a wildcard access on the tree with root `root`. Takes the `access_relatedness`
     /// for each node from the `WildcardState` datastructure.
