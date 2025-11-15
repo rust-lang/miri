@@ -868,7 +868,7 @@ impl<'tcx> Tree {
             .filter_map(|root| DisplayRepr::from(self, *root, show_unnamed))
             .collect::<Vec<_>>();
 
-        if main_tree.is_none() && wildcard_subtrees.is_empty(){
+        if main_tree.is_none() && wildcard_subtrees.is_empty() {
             eprintln!(
                 "This allocation does not contain named tags. Use `miri_print_borrow_state(_, true)` to also print unnamed tags."
             );

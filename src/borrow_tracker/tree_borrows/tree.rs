@@ -871,11 +871,11 @@ impl<'tcx> Tree {
         if matches!(prov, ProvenanceExtra::Wildcard) {
             self.verify_wildcard_consistency(global);
         }
+
         let source_idx = match prov {
             ProvenanceExtra::Concrete(tag) => Some(self.tag_mapping.get(&tag).unwrap()),
             ProvenanceExtra::Wildcard => None,
         };
-
         if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
@@ -905,9 +905,6 @@ impl<'tcx> Tree {
             // See the test case `returned_mut_is_usable` from
             // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
             // why this is important.
-            let ProvenanceExtra::Concrete(tag) = prov else {
-                unreachable!();
-            };
 
             // Wildcard references are never protected. So this can never be
             // called with a wildcard reference.
@@ -1127,10 +1124,11 @@ impl<'tcx> LocationTree {
             assert!(matches!(visit_children, ChildrenVisitMode::VisitChildrenOfAccessed));
             None
         };
+        let accessed_root_tag = accessed_root.map(|idx| nodes.get(idx).unwrap().tag);
         if accessed_root != Some(root) {
             self.perform_wildcard_access(
                 root,
-                /*only_foreign*/ false,
+                /*max_child_tag*/ accessed_root_tag,
                 nodes,
                 loc_range.clone(),
                 access_range,
@@ -1154,7 +1152,7 @@ impl<'tcx> LocationTree {
             }
             self.perform_wildcard_access(
                 wild_root,
-                /*only_foreign*/ after_current,
+                /*max_child_tag*/ accessed_root_tag,
                 nodes,
                 loc_range.clone(),
                 access_range,
@@ -1257,7 +1255,7 @@ impl<'tcx> LocationTree {
     fn perform_wildcard_access(
         &mut self,
         root: UniIndex,
-        only_foreign: bool,
+        max_child_tag: Option<BorTag>,
         nodes: &mut UniValMap<Node>,
         loc_range: Range<u64>,
         access_range: Option<AllocRange>,
@@ -1274,10 +1272,13 @@ impl<'tcx> LocationTree {
                 let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
 
                 let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
+                let only_foreign =
+                    max_child_tag.map(|max_child_tag| max_child_tag < node.tag).unwrap_or(false);
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
-                if let Some(relatedness) = wildcard_state.access_relatedness(access_kind)
-                    && let Some(relatedness) = relatedness.to_relatedness(only_foreign)
+                if let Some(relatedness) =
+                    wildcard_state.access_relatedness(access_kind, only_foreign)
+                    && let Some(relatedness) = relatedness.to_relatedness()
                 {
                     // We can use the usual SIFA machinery to skip nodes.
                     old_state.skip_if_known_noop(access_kind, relatedness)
@@ -1301,18 +1302,21 @@ impl<'tcx> LocationTree {
 
                     let protected = global.borrow().protected_tags.contains_key(&node.tag);
 
+                    let only_foreign = max_child_tag
+                        .map(|max_child_tag| max_child_tag < node.tag)
+                        .unwrap_or(false);
+
                     let Some(wildcard_relatedness) = args
                         .loc
                         .wildcard_accesses
                         .get(args.idx)
-                        .and_then(|s| s.access_relatedness(access_kind))
+                        .and_then(|s| s.access_relatedness(access_kind, only_foreign))
                     else {
                         // There doesn't exist a valid exposed reference for this access to
                         // happen through.
                         // If this fails for one id, then it fails for all ids so this.
                         // Since we always check the root first, this means it should always
                         // fail on the root.
-                        assert_eq!(root, args.idx);
                         return Err(no_valid_exposed_references_error(
                             alloc_id,
                             loc_range.start,
@@ -1320,8 +1324,7 @@ impl<'tcx> LocationTree {
                         ));
                     };
 
-                    let Some(relatedness) = wildcard_relatedness.to_relatedness(only_foreign)
-                    else {
+                    let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
                         // If the access type is Either, then we do not apply any transition
                         // to this node, but we still update each of its children.
                         // This is an imprecision! In the future, maybe we can still do some sort

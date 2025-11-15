@@ -32,19 +32,11 @@ pub enum WildcardAccessRelatedness {
     EitherAccess,
 }
 impl WildcardAccessRelatedness {
-    pub fn to_relatedness(self, only_foreign: bool) -> Option<AccessRelatedness> {
-        if only_foreign {
-            match self {
-                Self::LocalAccess => None,
-                Self::ForeignAccess => Some(AccessRelatedness::ForeignAccess),
-                Self::EitherAccess => Some(AccessRelatedness::ForeignAccess),
-            }
-        } else {
-            match self {
-                Self::LocalAccess => Some(AccessRelatedness::LocalAccess),
-                Self::ForeignAccess => Some(AccessRelatedness::ForeignAccess),
-                Self::EitherAccess => None,
-            }
+    pub fn to_relatedness(self) -> Option<AccessRelatedness> {
+        match self {
+            Self::LocalAccess => Some(AccessRelatedness::LocalAccess),
+            Self::ForeignAccess => Some(AccessRelatedness::ForeignAccess),
+            Self::EitherAccess => None,
         }
     }
 }
@@ -96,10 +88,23 @@ impl WildcardState {
     }
 
     /// From where relative to the node with this wildcard info a read or write access could happen.
-    pub fn access_relatedness(&self, kind: AccessKind) -> Option<WildcardAccessRelatedness> {
-        match kind {
+    pub fn access_relatedness(
+        &self,
+        kind: AccessKind,
+        only_foreign: bool,
+    ) -> Option<WildcardAccessRelatedness> {
+        use WildcardAccessRelatedness as E;
+        let rel = match kind {
             AccessKind::Read => self.read_access_relatedness(),
             AccessKind::Write => self.write_access_relatedness(),
+        };
+        if only_foreign {
+            match rel {
+                Some(E::EitherAccess | E::ForeignAccess) => Some(E::ForeignAccess),
+                Some(E::LocalAccess) | None => None,
+            }
+        } else {
+            rel
         }
     }
 
@@ -446,6 +451,8 @@ impl Tree {
     /// Checks that the wildcard tracking data structure is internally consistent and
     /// has the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
+        assert!(self.wildcard_roots.is_sorted());
+
         let protected_tags = &global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
             let wildcard_accesses = &loc.wildcard_accesses;
