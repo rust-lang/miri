@@ -4,6 +4,7 @@ pub fn main() {
     multiple_exposed_siblings1();
     multiple_exposed_siblings2();
     reborrow3();
+    protector_release();
 }
 
 fn multiple_exposed_siblings1() {
@@ -117,4 +118,20 @@ fn reborrow3() {
     *reb2 = 1;
     *ref1 = 2;
     *reb1 = 3;
+}
+
+fn protector_release() {
+    let mut x: u32 = 32;
+    let ref1 = &mut x;
+
+    let y = protect(ref1);
+    fn protect(arg: &mut u32) -> &mut u32 {
+        let int = arg as *mut u32 as usize;
+        let wild = int as *mut u32;
+        *arg = 41;
+        let ref2 = unsafe { &mut *wild };
+
+        return ref2;
+    }
+    *y = 4;
 }

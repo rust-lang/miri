@@ -1089,6 +1089,23 @@ impl Tree {
 }
 
 impl<'tcx> LocationTree {
+    pub fn get_min_exposed_child(root: UniIndex, nodes: &UniValMap<Node>) -> Option<BorTag> {
+        let mut stack = vec![root];
+        let mut min_tag = None;
+        while let Some(idx) = stack.pop() {
+            let node = nodes.get(idx).unwrap();
+            stack.extend_from_slice(node.children.as_slice());
+
+            if node.is_exposed {
+                min_tag = match min_tag {
+                    Some(prev) if prev < node.tag => Some(prev),
+                    _ => Some(node.tag),
+                };
+            }
+        }
+        min_tag
+    }
+
     /// Performs an access on this location.
     /// * `access_source`: The index, if any, where the access came from.
     /// * `visit_children`: Whether to skip updating the children of `access_source`.
@@ -1139,16 +1156,20 @@ impl<'tcx> LocationTree {
                 span,
             )?;
         }
-
-        let mut after_current = Some(root) == accessed_root;
+        let min_exposed_child = match visit_children {
+            ChildrenVisitMode::SkipChildrenOfAccessed =>
+                Self::get_min_exposed_child(access_source.unwrap(), nodes),
+            _ => None,
+        };
         for wild_root in wildcard_roots {
-            if Some(wild_root) == accessed_root {
-                after_current = true;
-                if matches!(visit_children, ChildrenVisitMode::SkipChildrenOfAccessed) {
+            let tag = nodes.get(wild_root).unwrap().tag;
+            if let Some(min_exposed_child) = min_exposed_child {
+                if tag > min_exposed_child {
                     break;
-                } else {
-                    continue;
                 }
+            }
+            if Some(wild_root) == accessed_root {
+                continue;
             }
             self.perform_wildcard_access(
                 wild_root,
