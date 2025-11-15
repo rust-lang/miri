@@ -126,7 +126,7 @@ fn count_until_true_genmc(flag: &AtomicBool) -> u64 {
 Some or all of these limitations might get removed in the future:
 
 - Borrow tracking is currently incompatible (stacked/tree borrows).
-- Only Linux is supported for now.
+- Only Linux and MacOS are supported for now.
 - No support for 32-bit or big-endian targets.
 - No cross-target interpretation.
 
