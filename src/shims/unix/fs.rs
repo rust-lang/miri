@@ -1202,6 +1202,69 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    /// NOTE: According to the man page of `possix_fallocate`, it returns the error code instead
+    /// of setting `errno`.
+    fn posix_fallocate(
+        &mut self,
+        fd_num: i32,
+        offset: i128,
+        len: i128,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        // Reject if isolation is enabled.
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`posix_fallocate`", reject_with)?;
+            // Return error code "EBADF" (bad fd).
+            return interp_ok(this.eval_libc("EBADF"));
+        }
+
+        let Some(fd) = this.machine.fds.get(fd_num) else {
+            return interp_ok(this.eval_libc("EBADF"));
+        };
+
+        let file = match fd.downcast::<FileHandle>() {
+            Some(file_handle) => file_handle,
+            // Man page specifies to return ENODEV if `fd` is not a regular file.
+            None => return interp_ok(this.eval_libc("ENODEV")),
+        };
+
+        // EINVAL is returned when: "offset was less than 0, or len was less than or equal to 0".
+        if offset < 0 || len <= 0 {
+            return interp_ok(this.eval_libc("EINVAL"));
+        }
+
+        if !file.writable {
+            // The file is not writable.
+            return interp_ok(this.eval_libc("EBADF"));
+        }
+
+        let current_size = match file.file.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(err) => return this.io_error_to_errnum(err),
+        };
+        let new_size = match offset.checked_add(len) {
+            // u64::from(i128) can fail if:
+            //  - the value is negative, but we checed this above with `offset < 0 || len <= 0`
+            //  - the value is too big/small to fit in u64, this should not happen since the callers
+            //    check if the value is a `i32` or `i64`.
+            // So this unwrap is safe to do.
+            Some(size) => u64::try_from(size).unwrap(),
+            None => return interp_ok(this.eval_libc("EFBIG")), // Size to big
+        };
+        // `posix_fallocate` only specifies increasing the file size.
+        if current_size < new_size {
+            let result = match file.file.set_len(new_size) {
+                Ok(()) => Scalar::from_i32(0),
+                Err(e) => this.io_error_to_errnum(e)?,
+            };
+
+            interp_ok(result)
+        } else {
+            interp_ok(Scalar::from_i32(0))
+        }
+    }
+
     fn fsync(&mut self, fd_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         // On macOS, `fsync` (unlike `fcntl(F_FULLFSYNC)`) does not wait for the
         // underlying disk to finish writing. In the interest of host compatibility,
