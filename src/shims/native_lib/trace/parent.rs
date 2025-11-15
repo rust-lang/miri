@@ -6,7 +6,7 @@ use nix::unistd;
 
 use super::CALLBACK_STACK_SIZE;
 use super::messages::{Confirmation, StartFfiInfo, TraceRequest};
-use crate::shims::native_lib::{AccessEvent, AccessRange, MemEvents};
+use crate::shims::native_lib::{AccessEvent, AccessRange, MapEvent, MemEvents, SingleEvent};
 
 /// The flags to use when calling `waitid()`.
 const WAIT_FLAGS: wait::WaitPidFlag =
@@ -39,6 +39,15 @@ static PAGE_COUNT: AtomicUsize = AtomicUsize::new(1);
 trait ArchIndependentRegs {
     /// Gets the address of the instruction pointer.
     fn ip(&self) -> usize;
+    /// Gets the syscall number from the registers (if entering one).
+    /// Since we compare these to the `libc` values, keep it as `c_long`.
+    fn syscall_nr(&self) -> libc::c_long;
+    // Gets the first register-sized argument passed to a function.
+    fn arg1(&self) -> usize;
+    // Gets the first register-sized argument passed to a function.
+    fn arg2(&self) -> usize;
+    // Gets the register-sized return value of a function call.
+    fn retval(&self) -> usize;
     /// Set the instruction pointer; remember to also set the stack pointer, or
     /// else the stack might get messed up!
     fn set_ip(&mut self, ip: usize);
@@ -54,6 +63,14 @@ impl ArchIndependentRegs for libc::user_regs_struct {
     #[inline]
     fn ip(&self) -> usize { self.rip.try_into().unwrap() }
     #[inline]
+    fn syscall_nr(&self) -> libc::c_long { self.orig_rax.cast_signed() }
+    #[inline]
+    fn arg1(&self) -> usize { self.rdi.try_into().unwrap() }
+    #[inline]
+    fn arg2(&self) -> usize { self.rsi.try_into().unwrap() }
+    #[inline]
+    fn retval(&self) -> usize { self.rax.try_into().unwrap() }
+    #[inline]
     fn set_ip(&mut self, ip: usize) { self.rip = ip.try_into().unwrap() }
     #[inline]
     fn set_sp(&mut self, sp: usize) { self.rsp = sp.try_into().unwrap() }
@@ -65,6 +82,14 @@ impl ArchIndependentRegs for libc::user_regs_struct {
     #[inline]
     fn ip(&self) -> usize { self.eip.cast_unsigned().try_into().unwrap() }
     #[inline]
+    fn syscall_nr(&self) -> libc::c_long { self.orig_eax }
+    #[inline]
+    fn arg1(&self) -> usize { self.ebx.cast_unsigned().try_into().unwrap() }
+    #[inline]
+    fn arg2(&self) -> usize { self.ecx.cast_unsigned().try_into().unwrap() }
+    #[inline]
+    fn retval(&self) -> usize { self.eax.cast_unsigned().try_into().unwrap() }
+    #[inline]
     fn set_ip(&mut self, ip: usize) { self.eip = ip.cast_signed().try_into().unwrap() }
     #[inline]
     fn set_sp(&mut self, sp: usize) { self.esp = sp.cast_signed().try_into().unwrap() }
@@ -73,6 +98,7 @@ impl ArchIndependentRegs for libc::user_regs_struct {
 /// A unified event representing something happening on the child process. Wraps
 /// `nix`'s `WaitStatus` and our custom signals so it can all be done with one
 /// `match` statement.
+#[derive(Debug)]
 pub enum ExecEvent {
     /// Child process requests that we begin monitoring it.
     Start(StartFfiInfo),
@@ -188,7 +214,13 @@ impl Iterator for ChildListener {
 #[derive(Debug)]
 pub struct ExecEnd(pub Option<i32>);
 
-/// Whether to call `ptrace::cont()` immediately. Used exclusively by `wait_for_signal`.
+/// What to wait for. Used exclusively by `wait_for`.
+enum WaitFor {
+    Signal(signal::Signal),
+    Syscall,
+}
+
+/// Whether to call `ptrace::syscall()` immediately. Used exclusively by `wait_for`.
 enum InitialCont {
     Yes,
     No,
@@ -208,7 +240,7 @@ pub fn sv_loop(
     assert_ne!(page_size, 0);
 
     // Things that we return to the child process.
-    let mut acc_events = Vec::new();
+    let mut events = Vec::new();
 
     // Memory allocated for the MiriMachine.
     let mut ch_pages = Vec::new();
@@ -222,7 +254,7 @@ pub fn sv_loop(
     let mut curr_pid = init_pid;
 
     // There's an initial sigstop we need to deal with.
-    wait_for_signal(Some(curr_pid), signal::SIGSTOP, InitialCont::No)?;
+    wait_for(Some(curr_pid), WaitFor::Signal(signal::SIGSTOP), InitialCont::No)?;
     ptrace::cont(curr_pid, None).unwrap();
 
     for evt in listener {
@@ -241,16 +273,17 @@ pub fn sv_loop(
                 confirm_tx.send(Confirmation).unwrap();
                 // We can't trust simply calling `Pid::this()` in the child process to give the right
                 // PID for us, so we get it this way.
-                curr_pid = wait_for_signal(None, signal::SIGSTOP, InitialCont::No).unwrap();
+                curr_pid =
+                    wait_for(None, WaitFor::Signal(signal::SIGSTOP), InitialCont::No).unwrap();
                 // Continue until next syscall.
                 ptrace::syscall(curr_pid, None).unwrap();
             }
             // Child wants to end tracing.
             ExecEvent::End => {
                 // Hand over the access info we traced.
-                event_tx.send(MemEvents { acc_events }).unwrap();
+                event_tx.send(events).unwrap();
                 // And reset our values.
-                acc_events = Vec::new();
+                events = Vec::new();
                 ch_stack = None;
 
                 // No need to monitor syscalls anymore, they'd just be ignored.
@@ -262,14 +295,11 @@ pub fn sv_loop(
                     // If it was a segfault, check if it was an artificial one
                     // caused by it trying to access the MiriMachine memory.
                     signal::SIGSEGV =>
-                        handle_segfault(
-                            pid,
-                            &ch_pages,
-                            ch_stack.unwrap(),
-                            page_size,
-                            &cs,
-                            &mut acc_events,
-                        )?,
+                        events.extend(
+                            handle_segfault(pid, &ch_pages, ch_stack.unwrap(), page_size, &cs)?
+                                .into_iter()
+                                .map(SingleEvent::Acc),
+                        ),
                     // Something weird happened.
                     _ => {
                         eprintln!("Process unexpectedly got {signal}; continuing...");
@@ -281,8 +311,20 @@ pub fn sv_loop(
                         }
                     }
                 },
-            // Child entered or exited a syscall. For now we ignore this and just continue.
+            // Child entered or exited a syscall.
             ExecEvent::Syscall(pid) => {
+                let regs = ptrace::getregs(pid).unwrap();
+                let evts = match regs.syscall_nr() {
+                    #[cfg(not(target_arch = "x86"))]
+                    libc::SYS_mmap => handle_mmap(pid, page_size)?,
+                    // x86 also has mmap2 which is for our purposes identical.
+                    #[cfg(target_arch = "x86")]
+                    libc::SYS_mmap | libc::SYS_mmap2 => handle_mmap(pid, page_size)?,
+                    libc::SYS_munmap => handle_munmap(pid, page_size)?,
+                    // TODO: Handle sbrk (or not, if you use that you probably deserve UB).
+                    _ => vec![],
+                };
+                events.extend(evts.into_iter().map(SingleEvent::Map));
                 ptrace::syscall(pid, None).unwrap();
             }
             ExecEvent::Died(code) => {
@@ -310,17 +352,17 @@ fn get_disasm() -> capstone::Capstone {
     .unwrap()
 }
 
-/// Waits for `wait_signal`. If `init_cont`, it will first do a `ptrace::cont`.
+/// Waits for `wait`. If `init_cont`, it will first do a `ptrace::syscall`.
 /// We want to avoid that in some cases, like at the beginning of FFI.
 ///
 /// If `pid` is `None`, only one wait will be done and `init_cont` should be false.
-fn wait_for_signal(
+fn wait_for(
     pid: Option<unistd::Pid>,
-    wait_signal: signal::Signal,
+    wait: WaitFor,
     init_cont: InitialCont,
 ) -> Result<unistd::Pid, ExecEnd> {
     if matches!(init_cont, InitialCont::Yes) {
-        ptrace::cont(pid.unwrap(), None).unwrap();
+        ptrace::syscall(pid.unwrap(), None).unwrap();
     }
     // Repeatedly call `waitid` until we get the signal we want, or the process dies.
     loop {
@@ -329,26 +371,31 @@ fn wait_for_signal(
             None => wait::Id::All,
         };
         let stat = wait::waitid(wait_id, WAIT_FLAGS).map_err(|_| ExecEnd(None))?;
-        let (signal, pid) = match stat {
+        match stat {
             // Report the cause of death, if we know it.
             wait::WaitStatus::Exited(_, code) => {
                 return Err(ExecEnd(Some(code)));
             }
             wait::WaitStatus::Signaled(_, _, _) => return Err(ExecEnd(None)),
             wait::WaitStatus::Stopped(pid, signal)
-            | wait::WaitStatus::PtraceEvent(pid, signal, _) => (signal, pid),
-            // This covers PtraceSyscall and variants that are impossible with
-            // the flags set (e.g. WaitStatus::StillAlive).
-            _ => {
-                ptrace::cont(pid.unwrap(), None).unwrap();
-                continue;
-            }
+            | wait::WaitStatus::PtraceEvent(pid, signal, _) =>
+                if let WaitFor::Signal(wait_signal) = wait
+                    && signal == wait_signal
+                {
+                    return Ok(pid);
+                } else {
+                    ptrace::syscall(pid, signal).map_err(|_| ExecEnd(None))?;
+                },
+            wait::WaitStatus::PtraceSyscall(pid) =>
+                if matches!(wait, WaitFor::Syscall) {
+                    return Ok(pid);
+                } else {
+                    ptrace::syscall(pid, None).map_err(|_| ExecEnd(None))?;
+                },
+            // This covers variants that are impossible with the flags set
+            // (e.g. WaitStatus::StillAlive).
+            _ => unreachable!(),
         };
-        if signal == wait_signal {
-            return Ok(pid);
-        } else {
-            ptrace::cont(pid, signal).map_err(|_| ExecEnd(None))?;
-        }
     }
 }
 
@@ -407,8 +454,7 @@ fn capstone_disassemble(
     instr: &[u8],
     addr: usize,
     cs: &capstone::Capstone,
-    acc_events: &mut Vec<AccessEvent>,
-) -> capstone::CsResult<()> {
+) -> capstone::CsResult<Vec<AccessEvent>> {
     // The arch_detail is what we care about, but it relies on these temporaries
     // that we can't drop. 0x1000 is the default base address for Captsone, and
     // we're expecting 1 instruction.
@@ -417,9 +463,9 @@ fn capstone_disassemble(
     let arch_detail = ins_detail.arch_detail();
 
     let mut found_mem_op = false;
-
+    let mut acc_events = Vec::new();
     for op in arch_detail.operands() {
-        if capstone_find_events(addr, &op, acc_events) {
+        if capstone_find_events(addr, &op, &mut acc_events) {
             if found_mem_op {
                 panic!("more than one memory operand found; we don't know which one accessed what");
             }
@@ -427,7 +473,50 @@ fn capstone_disassemble(
         }
     }
 
-    Ok(())
+    Ok(acc_events)
+}
+
+// Intercepts a call to mmap, making sure we log down which page(s) were allocated.
+fn handle_mmap(pid: unistd::Pid, page_size: usize) -> Result<Vec<MapEvent>, ExecEnd> {
+    // We only care how large the mapping is for now.
+    // TODO: Also track the flags passed and make sure when we intercept accesses
+    // on this page we correctly restore them.
+    let len = ptrace::getregs(pid).unwrap().arg2().next_multiple_of(page_size);
+    wait_for(Some(pid), WaitFor::Syscall, InitialCont::Yes)?;
+    let addr = ptrace::getregs(pid).unwrap().retval();
+    assert!(
+        addr.is_multiple_of(page_size),
+        "got bad mmap address: {addr:#0x} does not divide by page size"
+    );
+    // Save this mapping if the call succeeded.
+    if addr != 0 && addr != (-1isize).cast_unsigned() {
+        // Log each page individually.
+        Ok((addr.strict_div(page_size)..addr.strict_add(len).strict_div(page_size))
+            .map(|a| MapEvent::Mmap(a.strict_mul(page_size)))
+            .collect::<Vec<_>>())
+    } else {
+        Ok(vec![])
+    }
+}
+
+/// Same as `handle_mmap`, but for unmappings.
+fn handle_munmap(pid: unistd::Pid, page_size: usize) -> Result<Vec<MapEvent>, ExecEnd> {
+    let regs = ptrace::getregs(pid).unwrap();
+    let addr = regs.arg1();
+    let len = regs.arg2();
+    wait_for(Some(pid), WaitFor::Syscall, InitialCont::Yes)?;
+    let status = ptrace::getregs(pid).unwrap().retval();
+    // Apply the result of this mapping if the call succeeded.
+    if status == 0 {
+        // Get the base page address for this unmapping. We don't do this in
+        // handle_mmap since there addresses are guaranteed to be page-aligned.
+        let addr_base = addr.strict_div(page_size).strict_mul(page_size);
+        Ok((addr_base.strict_div(page_size)..addr.strict_add(len).strict_div(page_size))
+            .map(|a| MapEvent::Munmap(a.strict_mul(page_size)))
+            .collect::<Vec<_>>())
+    } else {
+        Ok(vec![])
+    }
 }
 
 /// Grabs the access that caused a segfault and logs it down if it's to our memory,
@@ -438,8 +527,7 @@ fn handle_segfault(
     ch_stack: usize,
     page_size: usize,
     cs: &capstone::Capstone,
-    acc_events: &mut Vec<AccessEvent>,
-) -> Result<(), ExecEnd> {
+) -> Result<Vec<AccessEvent>, ExecEnd> {
     // Get information on what caused the segfault. This contains the address
     // that triggered it.
     let siginfo = ptrace::getsiginfo(pid).unwrap();
@@ -497,7 +585,8 @@ fn handle_segfault(
         .collect::<Vec<_>>();
 
     // Now figure out the size + type of access and log it down.
-    capstone_disassemble(&instr, addr, cs, acc_events).expect("Failed to disassemble instruction");
+    let acc_events =
+        capstone_disassemble(&instr, addr, cs).expect("Failed to disassemble instruction");
 
     // Move the instr ptr into the deprotection code.
     #[expect(clippy::as_conversions)]
@@ -522,13 +611,13 @@ fn handle_segfault(
     ptrace::setregs(pid, new_regs).unwrap();
 
     // Our mempr_* functions end with a raise(SIGSTOP).
-    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes)?;
+    wait_for(Some(pid), WaitFor::Signal(signal::SIGSTOP), InitialCont::Yes)?;
 
     // Step 1 instruction.
     ptrace::setregs(pid, regs_bak).unwrap();
     ptrace::step(pid, None).unwrap();
-    // Don't use wait_for_signal here since 1 instruction doesn't give room
-    // for any uncertainty + we don't want it `cont()`ing randomly by accident
+    // Don't use wait_for here since 1 instruction doesn't give room for any
+    // uncertainty + we don't want it `cont()`ing randomly by accident.
     // Also, don't let it continue with unprotected memory if something errors!
     let stat = wait::waitid(wait::Id::Pid(pid), WAIT_FLAGS).map_err(|_| ExecEnd(None))?;
     match stat {
@@ -556,11 +645,11 @@ fn handle_segfault(
     new_regs.set_ip(mempr_on as *const () as usize);
     new_regs.set_sp(stack_ptr);
     ptrace::setregs(pid, new_regs).unwrap();
-    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes)?;
+    wait_for(Some(pid), WaitFor::Signal(signal::SIGSTOP), InitialCont::Yes)?;
 
     ptrace::setregs(pid, regs_bak).unwrap();
     ptrace::syscall(pid, None).unwrap();
-    Ok(())
+    Ok(acc_events)
 }
 
 // We only get dropped into these functions via offsetting the instr pointer
