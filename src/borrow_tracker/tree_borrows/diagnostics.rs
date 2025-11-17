@@ -488,7 +488,7 @@ struct DisplayFmtPadding {
     indent_middle: S,
     /// Indentation for the last child.
     indent_last: S,
-    /// Replaces `join_last` for a wildcard root
+    /// Replaces `join_last` for a wildcard root.
     wildcard_root: S,
 }
 /// How to show whether a location has been accessed
@@ -563,6 +563,8 @@ impl DisplayFmt {
             })
             .unwrap_or("")
     }
+
+    /// Print extra text if the tag is exposed.
     fn print_exposed(&self, exposed: bool) -> S {
         if exposed { " Exposed" } else { "" }
     }
@@ -823,8 +825,8 @@ impl DisplayRepr {
                     fmt,
                     indent,
                     protected_tags,
-                    i + 1 == nb_children,
-                    false,
+                    /* is_last_child */ i + 1 == nb_children,
+                    /* is_wildcard_root */ false,
                     acc,
                 );
                 indent.decrement(fmt);

@@ -88,6 +88,9 @@ impl WildcardState {
     }
 
     /// From where relative to the node with this wildcard info a read or write access could happen.
+    /// If `only_foreign` is true then we treat `LocalAccess` as impossible. This means we return
+    /// `None` if only a `LocalAccess` is possible, and we treat `EitherAccess` as a
+    /// `ForeignAccess`.
     pub fn access_relatedness(
         &self,
         kind: AccessKind,
@@ -144,6 +147,9 @@ impl WildcardState {
             ..Default::default()
         }
     }
+    /// Crates the initial `WildcardState` for a wildcard root.
+    /// This has `max_foreign_access==Write` as any access that isn't from a child of
+    /// this tag is foreign.
     pub fn for_wildcard_root() -> Self {
         Self { max_foreign_access: WildcardAccessLevel::Write, ..Default::default() }
     }
@@ -451,7 +457,8 @@ impl Tree {
     /// Checks that the wildcard tracking data structure is internally consistent and
     /// has the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
-        assert!(self.wildcard_roots.is_sorted_by_key(|idx|self.nodes.get(*idx).unwrap().tag));
+        // We rely on the fact that wildcard_roots is ordered according to tag from low to high.
+        assert!(self.wildcard_roots.is_sorted_by_key(|idx| self.nodes.get(*idx).unwrap().tag));
 
         let protected_tags = &global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
@@ -465,7 +472,8 @@ impl Tree {
                 let state = wildcard_accesses.get(id).unwrap();
 
                 let expected_exposed_as = if node.is_exposed {
-                    let perm = perms.get(id).copied().unwrap_or_else(||node.default_location_state());
+                    let perm =
+                        perms.get(id).copied().unwrap_or_else(|| node.default_location_state());
 
                     perm.permission()
                         .strongest_allowed_child_access(protected_tags.contains_key(&node.tag))
@@ -496,8 +504,13 @@ impl Tree {
                         .max(parent_state.exposed_as)
                 } else {
                     if self.root == id {
+                        // There can never be a foreign access to the root of the allocation.
+                        // So its foreign access level is always `None`.
                         WildcardAccessLevel::None
                     } else {
+                        // For wildcard roots any access on a different subtree can be foreign
+                        // to it. So a wildcard root has the maximum possible foreign access
+                        // level.
                         WildcardAccessLevel::Write
                     }
                 };

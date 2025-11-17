@@ -6,29 +6,29 @@
 mod utils;
 
 fn main() {
-    unsafe{
+    unsafe {
         let x = &0u8;
         name!(x);
-        let xa =&*x;
+        let xa = &*x;
         name!(xa);
-        let xb =&*x;
+        let xb = &*x;
         name!(xb);
         let wild = xb as *const u8 as usize as *const u8;
 
-        let y=&*wild;
+        let y = &*wild;
         name!(y);
-        let ya =&*y;
+        let ya = &*y;
         name!(ya);
-        let yb =&*y;
+        let yb = &*y;
         name!(yb);
         let _int = ya as *const u8 as usize;
 
-        let z=&*wild;
+        let z = &*wild;
         name!(z);
 
-        let u=&*wild;
+        let u = &*wild;
         name!(u);
-        let ua=&*u;
+        let ua = &*u;
         name!(ua);
         let alloc_id = alloc_id!(x);
         print_state!(alloc_id);
