@@ -1,14 +1,10 @@
-//@ignore-target: windows
+//@ignore-target: windows # No libc
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::ffi::CStr;
 
-#[path = "../../utils/mod.rs"]
-mod utils;
-
 fn test_getenv() {
-    // PATH should exist and not be null
-    let s = unsafe { libc::getenv(b"PATH\0".as_ptr().cast()) };
+    let s = unsafe { libc::getenv(b"MIRI_ENV_VAR_TEST\0".as_ptr().cast()) };
     assert!(!s.is_null());
 
     // Get a non-existing environment variable
