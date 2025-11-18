@@ -295,11 +295,9 @@ pub struct Tree {
     pub(super) nodes: UniValMap<Node>,
     /// Associates with each location its state and wildcard access tracking.
     pub(super) locations: DedupRangeMap<LocationTree>,
-    /// The index of the root node.
-    pub(super) root: UniIndex,
-    /// The index of tags whose parent had wildcard provenance.
-    /// Sorted according to `BorTag` from low to high.
-    pub(super) wildcard_roots: Vec<UniIndex>,
+    /// Contains both the root of the main tree as well as the roots of the wildcard subtrees.
+    /// Sorted according to `BorTag` from low to high. This also means the main root is `root[0]`.
+    pub(super) roots: SmallVec<[UniIndex;2]>,
 }
 
 /// A node in the borrow tree. Each node is uniquely identified by a tag via
@@ -630,7 +628,7 @@ impl Tree {
             let wildcard_accesses = UniValMap::default();
             DedupRangeMap::new(size, LocationTree { perms, wildcard_accesses })
         };
-        Self { root: root_idx, nodes, wildcard_roots: Vec::new(), locations, tag_mapping }
+        Self { roots: SmallVec::from_slice(&[root_idx]), nodes, locations, tag_mapping }
     }
 }
 
@@ -681,8 +679,8 @@ impl<'tcx> Tree {
             parent_node.children.push(idx);
         } else {
             // If the parent had wildcard provenance, then register the idx
-            // as a wildcard_root.
-            self.wildcard_roots.push(idx);
+            // as a new wildcard root.
+            self.roots.push(idx);
         }
 
         // We need to know the weakest SIFA for `update_idempotent_foreign_access_after_retag`.
@@ -886,13 +884,12 @@ impl<'tcx> Tree {
             ProvenanceExtra::Concrete(tag) => Some(self.tag_mapping.get(&tag).unwrap()),
             ProvenanceExtra::Wildcard => None,
         };
-        let roots = Some(self.root).into_iter().chain(self.wildcard_roots.iter().copied());
         if let Some((access_range, access_kind, access_cause)) = access_range_and_kind {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
                 loc.perform_access(
-                    roots.clone(),
+                    self.roots.iter().copied(),
                     &mut self.nodes,
                     source_idx,
                     loc_range,
@@ -928,7 +925,7 @@ impl<'tcx> Tree {
                 {
                     let access_cause = diagnostics::AccessCause::FnExit(access_kind);
                     loc.perform_access(
-                        roots.clone(),
+                        self.roots.iter().copied(),
                         &mut self.nodes,
                         Some(source_idx),
                         loc_range,
@@ -950,10 +947,7 @@ impl<'tcx> Tree {
 /// Integration with the BorTag garbage collector
 impl Tree {
     pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
-        self.remove_useless_children(self.root, live_tags);
-
-        let wildcard_roots = self.wildcard_roots.clone();
-        for root in wildcard_roots.iter() {
+        for root in self.roots.clone().iter() {
             self.remove_useless_children(*root, live_tags);
         }
         // Right after the GC runs is a good moment to check if we can
@@ -1436,12 +1430,8 @@ impl Node {
 
 impl VisitProvenance for Tree {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
-        // To ensure that the root never gets removed, we visit it
-        // (the `root` node of `Tree` is not an `Option<_>`)
-        visit(None, Some(self.nodes.get(self.root).unwrap().tag));
-
-        // Also track the wildcard roots.
-        for id in self.wildcard_roots.iter().copied() {
+        // To ensure that the roots never get removed, we visit them.
+        for id in self.roots.iter().copied() {
             visit(None, Some(self.nodes.get(id).unwrap().tag));
         }
         // We also need to keep around any exposed tags through which

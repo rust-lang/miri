@@ -458,7 +458,8 @@ impl Tree {
     /// has the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
         // We rely on the fact that wildcard_roots is ordered according to tag from low to high.
-        assert!(self.wildcard_roots.is_sorted_by_key(|idx| self.nodes.get(*idx).unwrap().tag));
+        assert!(self.roots.is_sorted_by_key(|idx| self.nodes.get(*idx).unwrap().tag));
+        let main_root_idx=self.roots[0];
 
         let protected_tags = &global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
@@ -503,7 +504,7 @@ impl Tree {
                         .max(parent_state.max_foreign_access)
                         .max(parent_state.exposed_as)
                 } else {
-                    if self.root == id {
+                    if main_root_idx == id {
                         // There can never be a foreign access to the root of the allocation.
                         // So its foreign access level is always `None`.
                         WildcardAccessLevel::None

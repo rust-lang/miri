@@ -863,9 +863,9 @@ impl<'tcx> Tree {
     ) -> InterpResult<'tcx> {
         let mut indenter = DisplayIndent::new();
         let ranges = self.locations.iter_all().map(|(range, _loc)| range).collect::<Vec<_>>();
-        let main_tree = DisplayRepr::from(self, self.root, show_unnamed);
+        let main_tree = DisplayRepr::from(self, self.roots[0], show_unnamed);
         let wildcard_subtrees = self
-            .wildcard_roots
+            .roots[1..]
             .iter()
             .filter_map(|root| DisplayRepr::from(self, *root, show_unnamed))
             .collect::<Vec<_>>();
