@@ -297,7 +297,7 @@ pub struct Tree {
     pub(super) locations: DedupRangeMap<LocationTree>,
     /// Contains both the root of the main tree as well as the roots of the wildcard subtrees.
     /// Sorted according to `BorTag` from low to high. This also means the main root is `root[0]`.
-    pub(super) roots: SmallVec<[UniIndex;2]>,
+    pub(super) roots: SmallVec<[UniIndex; 2]>,
 }
 
 /// A node in the borrow tree. Each node is uniquely identified by a tag via

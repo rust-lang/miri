@@ -459,7 +459,7 @@ impl Tree {
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
         // We rely on the fact that wildcard_roots is ordered according to tag from low to high.
         assert!(self.roots.is_sorted_by_key(|idx| self.nodes.get(*idx).unwrap().tag));
-        let main_root_idx=self.roots[0];
+        let main_root_idx = self.roots[0];
 
         let protected_tags = &global.borrow().protected_tags;
         for (_, loc) in self.locations.iter_all() {
