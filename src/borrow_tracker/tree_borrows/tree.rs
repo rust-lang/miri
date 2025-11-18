@@ -1249,6 +1249,7 @@ impl<'tcx> LocationTree {
         };
         let node_app = |args: NodeAppArgs<'_>| {
             let node = args.nodes.get_mut(args.idx).unwrap();
+            // When we reach the root we store it so we can return it from the function.
             if node.parent.is_none() {
                 root.set(args.idx).unwrap();
             }
@@ -1320,9 +1321,9 @@ impl<'tcx> LocationTree {
                 let perm = loc.perms.get(idx);
                 let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
 
-                let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 let only_foreign =
                     max_local_tag.map(|max_local_tag| max_local_tag < node.tag).unwrap_or(false);
+                let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
                 if let Some(relatedness) =
@@ -1367,9 +1368,6 @@ impl<'tcx> LocationTree {
                     else {
                         // There doesn't exist a valid exposed reference for this access to
                         // happen through.
-                        // If this fails for one id, then it fails for all ids so this.
-                        // Since we always check the root first, this means it should always
-                        // fail on the root.
                         return Err(no_valid_exposed_references_error(
                             alloc_id,
                             loc_range.start,
