@@ -1190,6 +1190,7 @@ impl<'tcx> LocationTree {
             }
             self.perform_wildcard_access(
                 root,
+                access_source,
                 /*max_local_tag*/ accessed_root_tag,
                 nodes,
                 loc_range.clone(),
@@ -1295,10 +1296,14 @@ impl<'tcx> LocationTree {
     /// Performs a wildcard access on the tree with root `root`. Takes the `access_relatedness`
     /// for each node from the `WildcardState` datastructure.
     /// * `root`: Root of the tree being accessed.
-    /// * `max_local_tag`: For any tag larger than this we do not perform local accesses. If no foreign access to a node with a larger tag is possible then we return an access error.
+    /// * `access_source`: the index of the accessed tag, if any.
+    ///   This is only used for printing the correct tag on errors.
+    /// * `max_local_tag`: For any tag larger than this we do not perform local accesses. If no
+    ///   foreign access to a node with a larger tag is possible then we return an access error.
     fn perform_wildcard_access(
         &mut self,
         root: UniIndex,
+        access_source: Option<UniIndex>,
         max_local_tag: Option<BorTag>,
         nodes: &mut UniValMap<Node>,
         loc_range: Range<u64>,
@@ -1408,8 +1413,8 @@ impl<'tcx> LocationTree {
                             alloc_id,
                             error_offset: loc_range.start,
                             error_kind: trans,
-                            // We don't know from where the access came during a wildcard access.
-                            accessed_info: None,
+                            accessed_info: access_source
+                                .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
                         }
                         .build()
                     })
