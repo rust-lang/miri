@@ -38,6 +38,8 @@ fn main() {
     test_posix_fadvise();
     #[cfg(target_os = "linux")]
     test_sync_file_range();
+    #[cfg(target_os = "linux")]
+    test_fstat();
     test_isatty();
     test_read_and_uninit();
     test_nofollow_not_symlink();
@@ -378,6 +380,25 @@ fn test_sync_file_range() {
     remove_file(&path).unwrap();
     assert_eq!(result_1, 0);
     assert_eq!(result_2, 0);
+}
+
+#[cfg(target_os = "linux")]
+fn test_fstat() {
+    use std::mem::MaybeUninit;
+    use std::os::unix::io::AsRawFd;
+
+    let path = utils::prepare_with_content("miri_test_libc_fstat.txt", b"hello");
+    let file = File::open(&path).unwrap();
+    let fd = file.as_raw_fd();
+
+    let mut stat: libc::stat = unsafe { MaybeUninit::zeroed().assume_init() };
+    let res = unsafe { libc::fstat(fd, &mut stat) };
+    assert_eq!(res, 0);
+
+    assert_eq!(stat.st_size, 5);
+    assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFREG);
+
+    remove_file(&path).unwrap();
 }
 
 fn test_isatty() {
