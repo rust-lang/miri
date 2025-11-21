@@ -245,22 +245,6 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 shift_simd_by_scalar(this, left, right, which, dest)?;
             }
-            // Used to implement the _mm{,256}_{sllv,srlv,srav}_epi{32,64} functions
-            // (except _mm{,256}_srav_epi64, which are not available in AVX2).
-            "psllv.d" | "psllv.d.256" | "psllv.q" | "psllv.q.256" | "psrlv.d" | "psrlv.d.256"
-            | "psrlv.q" | "psrlv.q.256" | "psrav.d" | "psrav.d.256" => {
-                let [left, right] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-
-                let which = match unprefixed_name {
-                    "psllv.d" | "psllv.d.256" | "psllv.q" | "psllv.q.256" => ShiftOp::Left,
-                    "psrlv.d" | "psrlv.d.256" | "psrlv.q" | "psrlv.q.256" => ShiftOp::RightLogic,
-                    "psrav.d" | "psrav.d.256" => ShiftOp::RightArith,
-                    _ => unreachable!(),
-                };
-
-                shift_simd_by_simd(this, left, right, which, dest)?;
-            }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
