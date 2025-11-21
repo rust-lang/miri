@@ -108,27 +108,6 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 pmaddbw(this, left, right, dest)?;
             }
-            // Used to implement the _mm_maskload_epi32, _mm_maskload_epi64,
-            // _mm256_maskload_epi32 and _mm256_maskload_epi64 functions.
-            // For the element `i`, if the high bit of the `i`-th element of `mask`
-            // is one, it is loaded from `ptr.wrapping_add(i)`, otherwise zero is
-            // loaded.
-            "maskload.d" | "maskload.q" | "maskload.d.256" | "maskload.q.256" => {
-                let [ptr, mask] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-
-                mask_load(this, ptr, mask, dest)?;
-            }
-            // Used to implement the _mm_maskstore_epi32, _mm_maskstore_epi64,
-            // _mm256_maskstore_epi32 and _mm256_maskstore_epi64 functions.
-            // For the element `i`, if the high bit of the element `i`-th of `mask`
-            // is one, it is stored into `ptr.wapping_add(i)`.
-            // Unlike SSE2's _mm_maskmoveu_si128, these are not non-temporal stores.
-            "maskstore.d" | "maskstore.q" | "maskstore.d.256" | "maskstore.q.256" => {
-                let [ptr, mask, value] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-
-                mask_store(this, ptr, mask, value)?;
-            }
             // Used to implement the _mm256_mpsadbw_epu8 function.
             // Compute the sum of absolute differences of quadruplets of unsigned
             // 8-bit integers in `left` and `right`, and store the 16-bit results
