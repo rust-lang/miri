@@ -5,8 +5,8 @@ use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
 
 use super::{
-    ShiftOp, horizontal_bin_op, mask_load, mask_store, mpsadbw, packssdw, packsswb, packusdw,
-    packuswb, permute, pmaddbw, pmulhrsw, psadbw, psign, shift_simd_by_scalar, shift_simd_by_simd,
+    ShiftOp, horizontal_bin_op, mpsadbw, packssdw, packsswb, packusdw, packuswb, permute, pmaddbw,
+    pmulhrsw, psadbw, psign, shift_simd_by_scalar,
 };
 use crate::*;
 

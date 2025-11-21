@@ -6,7 +6,7 @@ use rustc_target::callconv::FnAbi;
 
 use super::{
     FloatBinOp, FloatUnaryOp, bin_op_simd_float_all, conditional_dot_product, convert_float_to_int,
-    mask_load, mask_store, round_all, test_bits_masked, test_high_bits_masked, unary_op_ps,
+    round_all, test_bits_masked, test_high_bits_masked, unary_op_ps,
 };
 use crate::*;
 
