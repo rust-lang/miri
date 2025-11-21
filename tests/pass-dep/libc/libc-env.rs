@@ -6,6 +6,8 @@ use std::ffi::CStr;
 fn test_getenv() {
     let s = unsafe { libc::getenv(b"MIRI_ENV_VAR_TEST\0".as_ptr().cast()) };
     assert!(!s.is_null());
+    let value = unsafe { CStr::from_ptr(s).to_str().unwrap() };
+    assert_eq!(value, "0");
 
     // Get a non-existing environment variable
     let s = unsafe { libc::getenv(b"MIRI_TEST_NONEXISTENT_VAR\0".as_ptr().cast()) };
