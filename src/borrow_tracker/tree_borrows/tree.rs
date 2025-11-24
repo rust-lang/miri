@@ -10,7 +10,6 @@
 //!   and the relative position of the access;
 //! - idempotency properties asserted in `perms.rs` (for optimizations)
 
-use std::cell::OnceCell;
 use std::ops::Range;
 use std::{cmp, fmt, mem};
 
@@ -387,7 +386,7 @@ struct TreeVisitorStack<NodeContinue, NodeApp> {
 impl<NodeContinue, NodeApp, Err> TreeVisitorStack<NodeContinue, NodeApp>
 where
     NodeContinue: Fn(&NodeAppArgs<'_>) -> ContinueTraversal,
-    NodeApp: Fn(NodeAppArgs<'_>) -> Result<(), Err>,
+    NodeApp: FnMut(NodeAppArgs<'_>) -> Result<(), Err>,
 {
     fn should_continue_at(
         &self,
@@ -413,7 +412,7 @@ where
         this: &mut TreeVisitor<'_>,
         accessed_node: UniIndex,
         visit_children: ChildrenVisitMode,
-    ) -> Result<(), Err> {
+    ) -> Result<UniIndex, Err> {
         // We want to visit the accessed node's children first.
         // However, we will below walk up our parents and push their children (our cousins)
         // onto the stack. To ensure correct iteration order, this method thus finishes
@@ -458,7 +457,7 @@ where
         }
         // Reverse the stack, as discussed above.
         self.stack.reverse();
-        Ok(())
+        Ok(last_node)
     }
 
     fn finish_foreign_accesses(&mut self, this: &mut TreeVisitor<'_>) -> Result<(), Err> {
@@ -539,18 +538,20 @@ impl<'tree> TreeVisitor<'tree> {
     /// Finally, remember that the iteration order is not relevant for UB, it only affects
     /// diagnostics. It also affects tree traversal optimizations built on top of this, so
     /// those need to be reviewed carefully as well whenever this changes.
+    ///
+    /// Returns the index of the root of the accessed tree.
     fn traverse_this_parents_children_other<Err>(
         mut self,
         start_idx: UniIndex,
         f_continue: impl Fn(&NodeAppArgs<'_>) -> ContinueTraversal,
-        f_propagate: impl Fn(NodeAppArgs<'_>) -> Result<(), Err>,
-    ) -> Result<(), Err> {
+        f_propagate: impl FnMut(NodeAppArgs<'_>) -> Result<(), Err>,
+    ) -> Result<UniIndex, Err> {
         let mut stack = TreeVisitorStack::new(f_continue, f_propagate);
         // Visits the accessed node itself, and all its parents, i.e. all nodes
         // undergoing a child access. Also pushes the children and the other
         // cousin nodes (i.e. all nodes undergoing a foreign access) to the stack
         // to be processed later.
-        stack.go_upwards_from_accessed(
+        let root = stack.go_upwards_from_accessed(
             &mut self,
             start_idx,
             ChildrenVisitMode::VisitChildrenOfAccessed,
@@ -558,21 +559,24 @@ impl<'tree> TreeVisitor<'tree> {
         // Now visit all the foreign nodes we remembered earlier.
         // For this we go bottom-up, but also allow f_continue to skip entire
         // subtrees from being visited if it would be a NOP.
-        stack.finish_foreign_accesses(&mut self)
+        stack.finish_foreign_accesses(&mut self)?;
+        Ok(root)
     }
 
     /// Like `traverse_this_parents_children_other`, but skips the children of `start_idx`.
+    ///
+    /// Returns the index of the root of the accessed tree.
     fn traverse_nonchildren<Err>(
         mut self,
         start_idx: UniIndex,
         f_continue: impl Fn(&NodeAppArgs<'_>) -> ContinueTraversal,
-        f_propagate: impl Fn(NodeAppArgs<'_>) -> Result<(), Err>,
-    ) -> Result<(), Err> {
+        f_propagate: impl FnMut(NodeAppArgs<'_>) -> Result<(), Err>,
+    ) -> Result<UniIndex, Err> {
         let mut stack = TreeVisitorStack::new(f_continue, f_propagate);
         // Visits the accessed node itself, and all its parents, i.e. all nodes
         // undergoing a child access. Also pushes the other cousin nodes to the
         // stack, but not the children of the accessed node.
-        stack.go_upwards_from_accessed(
+        let root = stack.go_upwards_from_accessed(
             &mut self,
             start_idx,
             ChildrenVisitMode::SkipChildrenOfAccessed,
@@ -580,7 +584,8 @@ impl<'tree> TreeVisitor<'tree> {
         // Now visit all the foreign nodes we remembered earlier.
         // For this we go bottom-up, but also allow f_continue to skip entire
         // subtrees from being visited if it would be a NOP.
-        stack.finish_foreign_accesses(&mut self)
+        stack.finish_foreign_accesses(&mut self)?;
+        Ok(root)
     }
 }
 
@@ -801,49 +806,66 @@ impl<'tcx> Tree {
         // (Weak protectors are already handled by `perform_access`.)
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
             // Returns an error if `idx` has a strong protector.
-            let check_strong_protector =
-                |idx, nodes: &UniValMap<Node>, perms: &UniValMap<LocationState>| {
-                    let node = nodes.get(idx).unwrap();
+            let check_strong_protector = |args: NodeAppArgs<'_>| {
+                let node = args.nodes.get(args.idx).unwrap();
 
-                    let perm =
-                        perms.get(idx).copied().unwrap_or_else(|| node.default_location_state());
-                    if global.borrow().protected_tags.get(&node.tag)
+                let perm = args
+                    .loc
+                    .perms
+                    .get(args.idx)
+                    .copied()
+                    .unwrap_or_else(|| node.default_location_state());
+                if global.borrow().protected_tags.get(&node.tag)
                         == Some(&ProtectorKind::StrongProtector)
                         // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
                         // Related to https://github.com/rust-lang/rust/issues/55005.
                         && !perm.permission.is_cell()
                         // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
                         && perm.accessed
-                    {
-                        Err(TbError {
-                            conflicting_info: &node.debug_info,
-                            access_cause: diagnostics::AccessCause::Dealloc,
-                            alloc_id,
-                            error_offset: loc_range.start,
-                            error_kind: TransitionError::ProtectedDealloc,
-                            accessed_info: start_idx.map(|idx| &nodes.get(idx).unwrap().debug_info),
-                        }
-                        .build())
-                    } else {
-                        Ok(())
+                {
+                    Err(TbError {
+                        conflicting_info: &node.debug_info,
+                        access_cause: diagnostics::AccessCause::Dealloc,
+                        alloc_id,
+                        error_offset: loc_range.start,
+                        error_kind: TransitionError::ProtectedDealloc,
+                        accessed_info: start_idx
+                            .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
                     }
-                };
+                    .build())
+                } else {
+                    Ok(())
+                }
+            };
             // If we have a start index we first check its subtree in traversal order.
             // This results in us showing the error of the closest node instead of an
             // arbitrary one.
-            if let Some(start_idx) = start_idx {
-                TreeVisitor { nodes: &mut self.nodes, loc }.traverse_this_parents_children_other(
-                    start_idx,
-                    // Visit all children, skipping none.
-                    |_| ContinueTraversal::Recurse,
-                    |args| check_strong_protector(args.idx, args.nodes, &args.loc.perms),
-                )?;
-            }
-            // Afterward we check all tags in arbitrary order, so that we also catch
+            let accessed_root = if let Some(start_idx) = start_idx {
+                Some(
+                    TreeVisitor { nodes: &mut self.nodes, loc }
+                        .traverse_this_parents_children_other(
+                            start_idx,
+                            // Visit all children, skipping none.
+                            |_| ContinueTraversal::Recurse,
+                            check_strong_protector,
+                        )?,
+                )
+            } else {
+                None
+            };
+            // Afterwards we check all tags in arbitrary order, so that we also catch
             // protectors on different subtrees.
             // (This unnecessarily checks the tags of `start_idx`s subtree again)
-            for (idx, _) in self.nodes.iter() {
-                check_strong_protector(idx, &self.nodes, &loc.perms)?;
+            for root in self.roots.iter() {
+                if Some(*root) == accessed_root {
+                    continue;
+                }
+                TreeVisitor { nodes: &mut self.nodes, loc }.traverse_this_parents_children_other(
+                    *root,
+                    // Visit all children, skipping none.
+                    |_| ContinueTraversal::Recurse,
+                    check_strong_protector,
+                )?;
             }
         }
         interp_ok(())
@@ -1224,7 +1246,6 @@ impl<'tcx> LocationTree {
         span: Span,        // diagnostics
         visit_children: ChildrenVisitMode,
     ) -> InterpResult<'tcx, UniIndex> {
-        let root = OnceCell::new();
         // Performs the per-node work:
         // - insert the permission if it does not exist
         // - perform the access
@@ -1244,10 +1265,6 @@ impl<'tcx> LocationTree {
         };
         let node_app = |args: NodeAppArgs<'_>| {
             let node = args.nodes.get_mut(args.idx).unwrap();
-            // When we reach the root we store it so we can return it from the function.
-            if node.parent.is_none() {
-                root.set(args.idx).unwrap();
-            }
             let mut perm = args.loc.perms.entry(args.idx);
 
             let state = perm.or_insert(node.default_location_state());
@@ -1282,15 +1299,11 @@ impl<'tcx> LocationTree {
         let visitor = TreeVisitor { nodes, loc: self };
         match visit_children {
             ChildrenVisitMode::VisitChildrenOfAccessed =>
-                visitor.traverse_this_parents_children_other(
-                    access_source,
-                    node_skipper,
-                    node_app,
-                )?,
+                visitor.traverse_this_parents_children_other(access_source, node_skipper, node_app),
             ChildrenVisitMode::SkipChildrenOfAccessed =>
-                visitor.traverse_nonchildren(access_source, node_skipper, node_app)?,
+                visitor.traverse_nonchildren(access_source, node_skipper, node_app),
         }
-        interp_ok(root.into_inner().unwrap())
+        .into()
     }
 
     /// Performs a wildcard access on the tree with root `root`. Takes the `access_relatedness`
@@ -1340,87 +1353,85 @@ impl<'tcx> LocationTree {
         // The difference to `perform_access` is that we take the access
         // relatedness from the wildcard tracking state of the node instead of
         // from the visitor itself.
-        TreeVisitor { loc: self, nodes }
-            .traverse_this_parents_children_other(
-                root,
-                |args| f_continue(args.idx, args.nodes, args.loc),
-                |args| {
-                    let node = args.nodes.get_mut(args.idx).unwrap();
-                    let mut entry = args.loc.perms.entry(args.idx);
-                    let perm = entry.or_insert(node.default_location_state());
+        TreeVisitor { loc: self, nodes }.traverse_this_parents_children_other(
+            root,
+            |args| f_continue(args.idx, args.nodes, args.loc),
+            |args| {
+                let node = args.nodes.get_mut(args.idx).unwrap();
+                let mut entry = args.loc.perms.entry(args.idx);
+                let perm = entry.or_insert(node.default_location_state());
 
-                    let protected = global.borrow().protected_tags.contains_key(&node.tag);
+                let protected = global.borrow().protected_tags.contains_key(&node.tag);
 
-                    // We can use the invariant that child tags are larger than parent tags
-                    // to further refine the relatedness.
-                    // If we know that the access comes through a certain tag, then we know
-                    // for any larger tag that the access cannot be local.
-                    let only_foreign = max_local_tag
-                        .map(|max_local_tag| max_local_tag < node.tag)
-                        .unwrap_or(false);
+                // We can use the invariant that child tags are larger than parent tags
+                // to further refine the relatedness.
+                // If we know that the access comes through a certain tag, then we know
+                // for any larger tag that the access cannot be local.
+                let only_foreign =
+                    max_local_tag.map(|max_local_tag| max_local_tag < node.tag).unwrap_or(false);
 
-                    let Some(wildcard_relatedness) = args
-                        .loc
-                        .wildcard_accesses
-                        .get(args.idx)
-                        .and_then(|s| s.access_relatedness(access_kind, only_foreign))
-                    else {
-                        // There doesn't exist a valid exposed reference for this access to
-                        // happen through.
-                        return Err(no_valid_exposed_references_error(
-                            alloc_id,
-                            loc_range.start,
-                            access_cause,
-                        ));
-                    };
-
-                    let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
-                        // If the access type is Either, then we do not apply any transition
-                        // to this node, but we still update each of its children.
-                        // This is an imprecision! In the future, maybe we can still do some sort
-                        // of best-effort update here.
-                        return Ok(());
-                    };
-                    // The `TreeVisitor` doesn't call `f_continue` on the `start_idx`
-                    // so we check here if we need to skip it.
-                    if args.idx == root
-                        && matches!(
-                            perm.skip_if_known_noop(access_kind, relatedness),
-                            ContinueTraversal::SkipSelfAndChildren
-                        )
-                    {
-                        return Ok(());
-                    }
-
-                    // We know the exact relatedness, so we can actually do precise checks.
-                    perm.perform_transition(
-                        args.idx,
-                        args.nodes,
-                        &mut args.loc.wildcard_accesses,
-                        access_kind,
+                let Some(wildcard_relatedness) = args
+                    .loc
+                    .wildcard_accesses
+                    .get(args.idx)
+                    .and_then(|s| s.access_relatedness(access_kind, only_foreign))
+                else {
+                    // There doesn't exist a valid exposed reference for this access to
+                    // happen through.
+                    return Err(no_valid_exposed_references_error(
+                        alloc_id,
+                        loc_range.start,
                         access_cause,
-                        access_range,
-                        relatedness,
-                        span,
-                        loc_range.clone(),
-                        protected,
+                    ));
+                };
+
+                let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
+                    // If the access type is Either, then we do not apply any transition
+                    // to this node, but we still update each of its children.
+                    // This is an imprecision! In the future, maybe we can still do some sort
+                    // of best-effort update here.
+                    return Ok(());
+                };
+                // The `TreeVisitor` doesn't call `f_continue` on the `start_idx`
+                // so we check here if we need to skip it.
+                if args.idx == root
+                    && matches!(
+                        perm.skip_if_known_noop(access_kind, relatedness),
+                        ContinueTraversal::SkipSelfAndChildren
                     )
-                    .map_err(|trans| {
-                        let node = args.nodes.get(args.idx).unwrap();
-                        TbError {
-                            conflicting_info: &node.debug_info,
-                            access_cause,
-                            alloc_id,
-                            error_offset: loc_range.start,
-                            error_kind: trans,
-                            accessed_info: access_source
-                                .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
-                        }
-                        .build()
-                    })
-                },
-            )
-            .into()
+                {
+                    return Ok(());
+                }
+
+                // We know the exact relatedness, so we can actually do precise checks.
+                perm.perform_transition(
+                    args.idx,
+                    args.nodes,
+                    &mut args.loc.wildcard_accesses,
+                    access_kind,
+                    access_cause,
+                    access_range,
+                    relatedness,
+                    span,
+                    loc_range.clone(),
+                    protected,
+                )
+                .map_err(|trans| {
+                    let node = args.nodes.get(args.idx).unwrap();
+                    TbError {
+                        conflicting_info: &node.debug_info,
+                        access_cause,
+                        alloc_id,
+                        error_offset: loc_range.start,
+                        error_kind: trans,
+                        accessed_info: access_source
+                            .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
+                    }
+                    .build()
+                })
+            },
+        )?;
+        interp_ok(())
     }
 }
 
