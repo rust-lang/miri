@@ -566,7 +566,7 @@ impl DisplayFmt {
 
     /// Print extra text if the tag is exposed.
     fn print_exposed(&self, exposed: bool) -> S {
-        if exposed { " Exposed" } else { "" }
+        if exposed { " (exposed)" } else { "" }
     }
 }
 

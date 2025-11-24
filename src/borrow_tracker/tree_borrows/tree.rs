@@ -295,7 +295,14 @@ pub struct Tree {
     /// Associates with each location its state and wildcard access tracking.
     pub(super) locations: DedupRangeMap<LocationTree>,
     /// Contains both the root of the main tree as well as the roots of the wildcard subtrees.
+    ///
+    /// If we reborrow a reference which has wildcard provenance, then we do not know where in
+    /// the tree to attach them. Instead we create a new additional tree for this allocation
+    /// with this new reference as a root. We call this additional tree a wildcard subtree.
+    ///
     /// Sorted according to `BorTag` from low to high. This also means the main root is `root[0]`.
+    ///
+    /// Has array size 2 because that still ensures the minimum size for SmallVec.
     pub(super) roots: SmallVec<[UniIndex; 2]>,
 }
 
@@ -685,6 +692,8 @@ impl<'tcx> Tree {
         } else {
             // If the parent had wildcard provenance, then register the idx
             // as a new wildcard root.
+            // This preserves the orderedness of `roots` because a newly created
+            // tag is greater than all previous tags.
             self.roots.push(idx);
         }
 
@@ -710,6 +719,8 @@ impl<'tcx> Tree {
 
         // We need to ensure the consistency of the wildcard access tracking data structure.
         // For this, we insert the correct entry for this tag based on its parent, if it exists.
+        // If we are inserting a new wildcard root (with Wildcard as parent_prov) then we insert
+        // the special wildcard root initial state instead.
         for (_range, loc) in self.locations.iter_mut_all() {
             if let Some(parent_idx) = parent_idx {
                 if let Some(parent_access) = loc.wildcard_accesses.get(parent_idx) {
@@ -898,7 +909,7 @@ impl<'tcx> Tree {
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
-        if matches!(prov, ProvenanceExtra::Wildcard) {
+        if self.roots.len() > 1 || matches!(prov, ProvenanceExtra::Wildcard) {
             self.verify_wildcard_consistency(global);
         }
 
@@ -1120,7 +1131,7 @@ impl Tree {
 
 impl<'tcx> LocationTree {
     /// Returns the smallest exposed tag, if any, that is a transitive child of `root`.
-    pub fn get_min_exposed_child(root: UniIndex, nodes: &UniValMap<Node>) -> Option<BorTag> {
+    fn get_min_exposed_child(root: UniIndex, nodes: &UniValMap<Node>) -> Option<BorTag> {
         let mut stack = vec![root];
         let mut min_tag = None;
         while let Some(idx) = stack.pop() {
@@ -1174,16 +1185,6 @@ impl<'tcx> LocationTree {
             None
         };
 
-        // We know that any local access has to go through the root of the tree we accessed.
-        // We use this to further narrow access_relatedness on the wildcard accesses treating
-        // all tags larger than this as only_foreign.
-        //
-        // If we accessed the main tree then its root will be the smallest tag in the entire
-        // allocation, meaning we perform only a foreign access on all other subtrees.
-        //
-        // Foreign accesses are always possible on wildcard subtrees, as they have
-        // `max_foreign_access==Write` on their root. However on the main tree this can fail
-        // resulting in an access error.
         let accessed_root_tag = accessed_root.map(|idx| nodes.get(idx).unwrap().tag);
         // On a protector release access we skip the children of the accessed tag so that
         // we can correctly return references from functions. However, if the tag has
@@ -1210,6 +1211,17 @@ impl<'tcx> LocationTree {
             if Some(root) == accessed_root {
                 continue;
             }
+            // This can only be a local access for nodes that are a parent of the accessed node.
+            // We could pass access_source as `max_local_tag`, but using accessed_root is better
+            // since that will be smaller, and it is still a node that must be
+            // on all parent paths starting at the accessed node.
+            //
+            // If we accessed the main tree then its root will be the smallest tag in the entire
+            // allocation, meaning we perform only a foreign access on all other subtrees.
+            //
+            // Foreign accesses are always possible on wildcard subtrees, as they have
+            // `max_foreign_access==Write` on their root. However on the main tree this can fail
+            // resulting in an access error.
             self.perform_wildcard_access(
                 root,
                 access_source,
@@ -1438,6 +1450,7 @@ impl Node {
 impl VisitProvenance for Tree {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
         // To ensure that the roots never get removed, we visit them.
+        // FIXME: it should be possible to GC wildcard tree roots.
         for id in self.roots.iter().copied() {
             visit(None, Some(self.nodes.get(id).unwrap().tag));
         }

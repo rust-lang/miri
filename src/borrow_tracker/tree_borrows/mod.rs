@@ -239,9 +239,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 return interp_ok(new_prov);
             }
         };
+        let new_prov = Provenance::Concrete { alloc_id, tag: new_tag };
 
         log_creation(this, Some((alloc_id, base_offset, parent_prov)))?;
-        let new_prov = Provenance::Concrete { alloc_id, tag: new_tag };
 
         trace!(
             "reborrow: reference {:?} derived from {:?} (pointee {}): {:?}, size {}",

@@ -96,12 +96,12 @@ impl WildcardState {
         kind: AccessKind,
         only_foreign: bool,
     ) -> Option<WildcardAccessRelatedness> {
-        use WildcardAccessRelatedness as E;
         let rel = match kind {
             AccessKind::Read => self.read_access_relatedness(),
             AccessKind::Write => self.write_access_relatedness(),
         };
         if only_foreign {
+            use WildcardAccessRelatedness as E;
             match rel {
                 Some(E::EitherAccess | E::ForeignAccess) => Some(E::ForeignAccess),
                 Some(E::LocalAccess) | None => None,
@@ -148,8 +148,11 @@ impl WildcardState {
         }
     }
     /// Crates the initial `WildcardState` for a wildcard root.
-    /// This has `max_foreign_access==Write` as any access that isn't from a child of
-    /// this tag is foreign.
+    /// This has `max_foreign_access==Write` as it actually is the child of *some* exposed node
+    /// through which we can receive foreign accesses.
+    ///
+    /// This is different from the main root which has `max_foreign_access==None`, since there
+    /// cannot be a foreign access to the root of the allocation.
     pub fn for_wildcard_root() -> Self {
         Self { max_foreign_access: WildcardAccessLevel::Write, ..Default::default() }
     }
