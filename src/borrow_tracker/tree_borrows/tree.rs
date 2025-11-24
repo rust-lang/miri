@@ -1130,24 +1130,6 @@ impl Tree {
 }
 
 impl<'tcx> LocationTree {
-    /// Returns the smallest exposed tag, if any, that is a transitive child of `root`.
-    fn get_min_exposed_child(root: UniIndex, nodes: &UniValMap<Node>) -> Option<BorTag> {
-        let mut stack = vec![root];
-        let mut min_tag = None;
-        while let Some(idx) = stack.pop() {
-            let node = nodes.get(idx).unwrap();
-            stack.extend_from_slice(node.children.as_slice());
-
-            if node.is_exposed {
-                min_tag = match min_tag {
-                    Some(prev) if prev < node.tag => Some(prev),
-                    _ => Some(node.tag),
-                };
-            }
-        }
-        min_tag
-    }
-
     /// Performs an access on this location.
     /// * `access_source`: The index, if any, where the access came from.
     /// * `visit_children`: Whether to skip updating the children of `access_source`.
@@ -1186,26 +1168,11 @@ impl<'tcx> LocationTree {
         };
 
         let accessed_root_tag = accessed_root.map(|idx| nodes.get(idx).unwrap().tag);
-        // On a protector release access we skip the children of the accessed tag so that
-        // we can correctly return references from functions. However, if the tag has
-        // exposed children then some of the wildcard subtrees could also be children of
-        // the accessed node and would also need to be skipped. We can narrow down which
-        // child trees are children by comparing their root tag to the minimum exposed
-        // child of the accessed node. As the parent tag is always smaller than the child
-        // tag this means we only need to skip subtrees with a root tag larger than
-        // `min_exposed_child`.
-        let min_exposed_child = match visit_children {
-            ChildrenVisitMode::SkipChildrenOfAccessed =>
-                Self::get_min_exposed_child(access_source.unwrap(), nodes),
-            _ => None,
-        };
+        if matches!(visit_children, ChildrenVisitMode::SkipChildrenOfAccessed) {
+            // FIXME: approximate which roots could be children of the accessed node and only skip them instead of all other trees.
+            return interp_ok(());
+        }
         for root in roots {
-            let tag = nodes.get(root).unwrap().tag;
-            if let Some(min_exposed_child) = min_exposed_child {
-                if tag > min_exposed_child {
-                    break;
-                }
-            }
             // We don't perform a wildcard access on the tree we already performed a
             // normal access on.
             if Some(root) == accessed_root {
