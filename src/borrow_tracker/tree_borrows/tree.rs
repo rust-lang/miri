@@ -1327,19 +1327,25 @@ impl<'tcx> LocationTree {
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
+        let get_relatedness = |node: &Node, wildcard_state: &WildcardState| {
+            // We can use the invariant that child tags are larger than parent tags
+            // to further refine the relatedness.
+            // If we know that the access comes through a certain tag, then we know
+            // for any larger tag that the access cannot be local.
+            let only_foreign = max_local_tag.is_some_and(|max_local_tag| max_local_tag < node.tag);
+            wildcard_state.access_relatedness(access_kind, only_foreign)
+        };
+
         let f_continue =
             |idx: UniIndex, nodes: &UniValMap<Node>, loc: &LocationTree| -> ContinueTraversal {
                 let node = nodes.get(idx).unwrap();
                 let perm = loc.perms.get(idx);
                 let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
 
-                let only_foreign =
-                    max_local_tag.map(|max_local_tag| max_local_tag < node.tag).unwrap_or(false);
                 let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
-                if let Some(relatedness) =
-                    wildcard_state.access_relatedness(access_kind, only_foreign)
+                if let Some(relatedness) = get_relatedness(node, &wildcard_state)
                     && let Some(relatedness) = relatedness.to_relatedness()
                 {
                     // We can use the usual SIFA machinery to skip nodes.
@@ -1348,6 +1354,11 @@ impl<'tcx> LocationTree {
                     ContinueTraversal::Recurse
                 }
             };
+        // The `TreeVisitor` doesn't call `f_continue` on the `start_idx`
+        // so we check here if we need to skip the entire tree.
+        if matches!(f_continue(root, nodes, self), ContinueTraversal::SkipSelfAndChildren) {
+            return interp_ok(());
+        }
         // This does a traversal starting from the root through the tree updating
         // the permissions of each node.
         // The difference to `perform_access` is that we take the access
@@ -1363,18 +1374,8 @@ impl<'tcx> LocationTree {
 
                 let protected = global.borrow().protected_tags.contains_key(&node.tag);
 
-                // We can use the invariant that child tags are larger than parent tags
-                // to further refine the relatedness.
-                // If we know that the access comes through a certain tag, then we know
-                // for any larger tag that the access cannot be local.
-                let only_foreign =
-                    max_local_tag.map(|max_local_tag| max_local_tag < node.tag).unwrap_or(false);
-
-                let Some(wildcard_relatedness) = args
-                    .loc
-                    .wildcard_accesses
-                    .get(args.idx)
-                    .and_then(|s| s.access_relatedness(access_kind, only_foreign))
+                let Some(wildcard_relatedness) =
+                    args.loc.wildcard_accesses.get(args.idx).and_then(|s| get_relatedness(node, s))
                 else {
                     // There doesn't exist a valid exposed reference for this access to
                     // happen through.
@@ -1392,16 +1393,6 @@ impl<'tcx> LocationTree {
                     // of best-effort update here.
                     return Ok(());
                 };
-                // The `TreeVisitor` doesn't call `f_continue` on the `start_idx`
-                // so we check here if we need to skip it.
-                if args.idx == root
-                    && matches!(
-                        perm.skip_if_known_noop(access_kind, relatedness),
-                        ContinueTraversal::SkipSelfAndChildren
-                    )
-                {
-                    return Ok(());
-                }
 
                 // We know the exact relatedness, so we can actually do precise checks.
                 perm.perform_transition(
