@@ -1303,7 +1303,8 @@ impl<'tcx> LocationTree {
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
-        let get_relatedness = |node: &Node, wildcard_state: &WildcardState| {
+        let get_relatedness = |idx: UniIndex, node: &Node, loc: &LocationTree| {
+            let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
             // We can use the invariant that child tags are larger than parent tags
             // to further refine the relatedness.
             // If we know that the access comes through a certain tag, then we know
@@ -1316,12 +1317,11 @@ impl<'tcx> LocationTree {
             |idx: UniIndex, nodes: &UniValMap<Node>, loc: &LocationTree| -> ContinueTraversal {
                 let node = nodes.get(idx).unwrap();
                 let perm = loc.perms.get(idx);
-                let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
 
                 let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
-                if let Some(relatedness) = get_relatedness(node, &wildcard_state)
+                if let Some(relatedness) = get_relatedness(idx, node, loc)
                     && let Some(relatedness) = relatedness.to_relatedness()
                 {
                     // We can use the usual SIFA machinery to skip nodes.
@@ -1345,14 +1345,10 @@ impl<'tcx> LocationTree {
             |args| f_continue(args.idx, args.nodes, args.loc),
             |args| {
                 let node = args.nodes.get_mut(args.idx).unwrap();
-                let mut entry = args.loc.perms.entry(args.idx);
-                let perm = entry.or_insert(node.default_location_state());
 
                 let protected = global.borrow().protected_tags.contains_key(&node.tag);
 
-                let Some(wildcard_relatedness) =
-                    args.loc.wildcard_accesses.get(args.idx).and_then(|s| get_relatedness(node, s))
-                else {
+                let Some(wildcard_relatedness) = get_relatedness(args.idx, node, args.loc) else {
                     // There doesn't exist a valid exposed reference for this access to
                     // happen through.
                     return Err(no_valid_exposed_references_error(
@@ -1370,6 +1366,8 @@ impl<'tcx> LocationTree {
                     return Ok(());
                 };
 
+                let mut entry = args.loc.perms.entry(args.idx);
+                let perm = entry.or_insert(node.default_location_state());
                 // We know the exact relatedness, so we can actually do precise checks.
                 perm.perform_transition(
                     args.idx,
