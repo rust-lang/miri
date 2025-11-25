@@ -302,6 +302,12 @@ pub struct Tree {
     ///
     /// Sorted according to `BorTag` from low to high. This also means the main root is `root[0]`.
     ///
+    /// The actual structure should be a single tree but with wildcard provenance we approximate
+    /// this with this ordered set of trees. Each wildcard subtree could be the direct child of
+    /// any exposed tag (that is smaller than the root). This also means that it can only be the
+    /// child of a tree that comes before it in the vec ensuring we don't have any cycles in our
+    /// approximated tree.
+    ///
     /// Has array size 2 because that still ensures the minimum size for SmallVec.
     pub(super) roots: SmallVec<[UniIndex; 2]>,
 }
@@ -816,67 +822,58 @@ impl<'tcx> Tree {
         // Check if this breaks any strong protector.
         // (Weak protectors are already handled by `perform_access`.)
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
-            // Returns an error if `idx` has a strong protector.
-            let check_strong_protector = |args: NodeAppArgs<'_>| {
-                let node = args.nodes.get(args.idx).unwrap();
+            // Checks the tree containing `idx` for strong protector violations.
+            // It does this in traversal order.
+            let mut check_tree = |idx| {
+                TreeVisitor { nodes: &mut self.nodes, loc }.traverse_this_parents_children_other(
+                    idx,
+                    // Visit all children, skipping none.
+                    |_| ContinueTraversal::Recurse,
+                    |args: NodeAppArgs<'_>| {
+                        let node = args.nodes.get(args.idx).unwrap();
 
-                let perm = args
-                    .loc
-                    .perms
-                    .get(args.idx)
-                    .copied()
-                    .unwrap_or_else(|| node.default_location_state());
-                if global.borrow().protected_tags.get(&node.tag)
+                        let perm = args
+                            .loc
+                            .perms
+                            .get(args.idx)
+                            .copied()
+                            .unwrap_or_else(|| node.default_location_state());
+                        if global.borrow().protected_tags.get(&node.tag)
                         == Some(&ProtectorKind::StrongProtector)
                         // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
                         // Related to https://github.com/rust-lang/rust/issues/55005.
                         && !perm.permission.is_cell()
                         // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
                         && perm.accessed
-                {
-                    Err(TbError {
-                        conflicting_info: &node.debug_info,
-                        access_cause: diagnostics::AccessCause::Dealloc,
-                        alloc_id,
-                        error_offset: loc_range.start,
-                        error_kind: TransitionError::ProtectedDealloc,
-                        accessed_info: start_idx
-                            .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
-                    }
-                    .build())
-                } else {
-                    Ok(())
-                }
+                        {
+                            Err(TbError {
+                                conflicting_info: &node.debug_info,
+                                access_cause: diagnostics::AccessCause::Dealloc,
+                                alloc_id,
+                                error_offset: loc_range.start,
+                                error_kind: TransitionError::ProtectedDealloc,
+                                accessed_info: start_idx
+                                    .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
+                            }
+                            .build())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                )
             };
             // If we have a start index we first check its subtree in traversal order.
             // This results in us showing the error of the closest node instead of an
             // arbitrary one.
-            let accessed_root = if let Some(start_idx) = start_idx {
-                Some(
-                    TreeVisitor { nodes: &mut self.nodes, loc }
-                        .traverse_this_parents_children_other(
-                            start_idx,
-                            // Visit all children, skipping none.
-                            |_| ContinueTraversal::Recurse,
-                            check_strong_protector,
-                        )?,
-                )
-            } else {
-                None
-            };
-            // Afterwards we check all tags in arbitrary order, so that we also catch
-            // protectors on different subtrees.
-            // (This unnecessarily checks the tags of `start_idx`s subtree again)
-            for root in self.roots.iter() {
+            let accessed_root = start_idx.map(&mut check_tree).transpose()?;
+            // Afterwards we check all other trees.
+            // We iterate over the list in reverse order to ensure that we do not visit
+            // a parent before its child.
+            for root in self.roots.iter().rev() {
                 if Some(*root) == accessed_root {
                     continue;
                 }
-                TreeVisitor { nodes: &mut self.nodes, loc }.traverse_this_parents_children_other(
-                    *root,
-                    // Visit all children, skipping none.
-                    |_| ContinueTraversal::Recurse,
-                    check_strong_protector,
-                )?;
+                check_tree(*root)?;
             }
         }
         interp_ok(())
