@@ -1,5 +1,5 @@
 error: Undefined Behavior: read access through <TAG> at ALLOC[0x0] is forbidden
-  --> tests/fail/tree_borrows/wildcard/reborrow6.rs:LL:CC
+  --> tests/fail/tree_borrows/wildcard/cross_tree_update_main.rs:LL:CC
    |
 LL |     let _fail = *ref2;
    |                 ^^^^^ Undefined Behavior occurred here
@@ -8,12 +8,12 @@ LL |     let _fail = *ref2;
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> has state Disabled which forbids this child read access
 help: the accessed tag <TAG> was created here, in the initial state Reserved
-  --> tests/fail/tree_borrows/wildcard/reborrow6.rs:LL:CC
+  --> tests/fail/tree_borrows/wildcard/cross_tree_update_main.rs:LL:CC
    |
 LL |     let ref2 = unsafe { &mut *ptr_base };
    |                         ^^^^^^^^^^^^^^
 help: the accessed tag <TAG> later transitioned to Disabled due to a foreign write access at offsets [0x0..0x4]
-  --> tests/fail/tree_borrows/wildcard/reborrow6.rs:LL:CC
+  --> tests/fail/tree_borrows/wildcard/cross_tree_update_main.rs:LL:CC
    |
 LL |     *reb = 13;
    |     ^^^^^^^^^

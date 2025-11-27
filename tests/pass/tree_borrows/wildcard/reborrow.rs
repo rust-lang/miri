@@ -5,6 +5,7 @@ pub fn main() {
     multiple_exposed_siblings2();
     reborrow3();
     returned_mut_is_usable();
+    only_foreign_is_temporary();
 }
 
 /// Checks that accessing through a reborrowed wildcard doesn't
@@ -42,8 +43,10 @@ fn multiple_exposed_siblings1() {
     // So we can't disable either of them.
     *reb = 13;
 
-    // We can still access both ref1, ref2.
+    // We can still access either ref1 or ref2.
+    // Although it is actually UB to access both of them.
     assert_eq!(*ref2, 13);
+    assert_eq!(*ref1, 13);
 }
 
 /// Checks that wildcard accesses do not invalidate any exposed
@@ -93,8 +96,10 @@ fn multiple_exposed_siblings2() {
     // the references.
     unsafe { wild.write(13) };
 
-    // We should be able to access any of the references.
+    // We should be able to access either ref1 or ref2.
+    // Although it is actually UB to access ref1 and ref2 together.
     assert_eq!(*ref2, 13);
+    assert_eq!(*ref1, 13);
 }
 
 /// Checks that accessing a reborrowed wildcard reference doesn't
@@ -109,10 +114,10 @@ fn reborrow3() {
     let wild = int as *mut u32;
 
     let reb1 = unsafe { &mut *wild };
-    let ref1 = &mut *reb1;
-    let _int = ref1 as *mut u32 as usize;
+    let ref2 = &mut *reb1;
+    let _int = ref2 as *mut u32 as usize;
 
-    let reb2 = unsafe { &mut *wild };
+    let reb3 = unsafe { &mut *wild };
 
     //   ┌────────────┐
     //   │            │
@@ -124,7 +129,7 @@ fn reborrow3() {
     //                             ▼                  ▼
     //                      ┌────────────┐     ┌────────────┐
     //                      │            │     │            │
-    //                      │ reb1(Res)  |     │ reb2(Res)  |
+    //                      │ reb1(Res)  |     │ reb3(Res)  |
     //                      │            │     │            │
     //                      └──────┬─────┘     └────────────┘
     //                             │
@@ -132,13 +137,17 @@ fn reborrow3() {
     //                             ▼
     //                      ┌────────────┐
     //                      │            │
-    //                      │ ref1(Res)* │
+    //                      │ ref2(Res)* │
     //                      │            │
     //                      └────────────┘
 
     // This is the only valid ordering these accesses can happen in.
-    *reb2 = 1;
-    *ref1 = 2;
+
+    // reb3 could be a child of ref2 so we don't disable ref2, reb1.
+    *reb3 = 1;
+    // Disables reb3 as it cannot be an ancestor of ref2.
+    *ref2 = 2;
+    // Disables ref2 (and reb3 if it wasn't already).
     *reb1 = 3;
 }
 
@@ -164,4 +173,50 @@ fn returned_mut_is_usable() {
     }
 
     *y = 4;
+}
+
+/// When accessing an allocation through a tag that was created from wildcard reference
+/// we treat nodes with a larger tag as if the access could only have been foreign to them.
+/// This change in access relatedness should not be visible in later accesses.
+fn only_foreign_is_temporary() {
+    let mut x = 0u32;
+    let wild = &mut x as *mut u32 as usize as *mut u32;
+
+    let reb1 = unsafe { &mut *wild };
+    let reb2 = unsafe { &mut *wild };
+    let ref3 = &mut *reb1;
+    let _int = ref3 as *mut u32 as usize;
+
+    let reb4 = unsafe { &mut *wild };
+
+    //
+    //
+    //             *                 *                 *
+    //             │                 │                 │
+    //             │                 │                 │
+    //             │                 │                 │
+    //             │                 │                 │
+    //             ▼                 ▼                 ▼
+    //       ┌────────────┐    ┌────────────┐    ┌────────────┐
+    //       │            │    │            │    │            │
+    //       │  reb1(Res) │    │  reb2(Res) │    │  reb4(Res) │
+    //       │            │    │            │    │            │
+    //       └──────┬─────┘    └────────────┘    └────────────┘
+    //              │
+    //              │
+    //              ▼
+    //       ┌────────────┐
+    //       │            │
+    //       │ ref3(Res)* │
+    //       │            │
+    //       └────────────┘
+
+    // Performs a foreign read on ref3 and either read on reb1.
+    // This temporarily treats ref3 as only foreign.
+    let _x = *reb2;
+    // Performs an either write on ref3 and reb1.
+    // This should stop treating ref3 as only foreign.
+    *reb4 = 32;
+    // The previous write could have been local to ref3, so this access should still work.
+    *ref3 = 4;
 }

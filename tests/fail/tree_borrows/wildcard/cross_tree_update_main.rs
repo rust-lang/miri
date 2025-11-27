@@ -1,5 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
+// Checks how accesses from one subtree effect other subtrees.
+// This tests how main is effected by an access through a subtree.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -26,7 +28,10 @@ pub fn main() {
     //    │            │     │           │     │           │
     //    └────────────┘     └───────────┘     └───────────┘
 
-    *ref2 = 13;
+    // Writes through the reborrowed reference causing a wildcard
+    // write on the main tree. This disables ref2 as it doesn't
+    // have any exposed children.
+    *reb = 13;
 
-    let _fail = *reb; //~ ERROR: /read access through .* is forbidden/
+    let _fail = *ref2; //~ ERROR: /read access through .* is forbidden/
 }

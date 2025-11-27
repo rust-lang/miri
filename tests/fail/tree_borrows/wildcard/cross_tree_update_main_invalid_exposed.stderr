@@ -1,5 +1,5 @@
 error: Undefined Behavior: write access through <wildcard> at ALLOC[0x0] is forbidden
-  --> tests/fail/tree_borrows/wildcard/reborrow8.rs:LL:CC
+  --> tests/fail/tree_borrows/wildcard/cross_tree_update_main_invalid_exposed.rs:LL:CC
    |
 LL |     *ref2 = 13;
    |     ^^^^^^^^^^ Undefined Behavior occurred here

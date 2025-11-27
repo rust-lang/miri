@@ -1,5 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
+// Checks if we correctly infer the relatedness of nodes that are
+// part of the same wildcard root.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -35,6 +37,7 @@ pub fn main() {
     //                       │            │     │           │
     //                       └────────────┘     └───────────┘
 
+    // ref1 is foreign to ref2, so this should disable ref2.
     *ref1 = 13;
 
     let _fail = *ref2; //~ ERROR: /read access through .* is forbidden/

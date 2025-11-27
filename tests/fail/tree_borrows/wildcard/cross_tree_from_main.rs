@@ -1,5 +1,7 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
+/// Checks how accesses from one subtree effect other subtrees.
+/// This test checks the case where the access is to the main tree.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -10,7 +12,7 @@ pub fn main() {
     let int1 = ref1 as *mut u32 as usize;
     let wild = int1 as *mut u32;
 
-    let reb = unsafe { &mut *wild };
+    let reb3 = unsafe { &mut *wild };
 
     //    ┌────────────┐
     //    │            │
@@ -22,11 +24,13 @@ pub fn main() {
     //           ▼                 ▼                 ▼
     //    ┌────────────┐     ┌───────────┐     ┌───────────┐
     //    │            │     │           │     │           │
-    //    │ ref1(Res)* │     │ ref2(Res) │     │ reb(Res)  │
+    //    │ ref1(Res)* │     │ ref2(Res) │     │ reb3(Res) │
     //    │            │     │           │     │           │
     //    └────────────┘     └───────────┘     └───────────┘
 
-    *reb = 13;
+    // ref2 is part of the main tree and therefore foreign to all subtrees.
+    // Therefore, this disables reb3.
+    *ref2 = 13;
 
-    let _fail = *ref2; //~ ERROR: /read access through .* is forbidden/
+    let _fail = *reb3; //~ ERROR: /read access through .* is forbidden/
 }

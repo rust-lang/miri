@@ -600,6 +600,26 @@ impl<'tree> TreeVisitor<'tree> {
         stack.finish_foreign_accesses(&mut self)?;
         Ok(root)
     }
+
+    /// Traverses all children of `start_idx` including `start_idx` itself.
+    /// Uses `f_continue` to filter out subtrees and then processes each node
+    /// with `f_propagate` so that the children get processed before their
+    /// parents.
+    fn traverse_children_this<Err>(
+        mut self,
+        start_idx: UniIndex,
+        f_continue: impl Fn(&NodeAppArgs<'_>) -> ContinueTraversal,
+        f_propagate: impl FnMut(NodeAppArgs<'_>) -> Result<(), Err>,
+    ) -> Result<(), Err> {
+        let mut stack = TreeVisitorStack::new(f_continue, f_propagate);
+
+        stack.stack.push((
+            start_idx,
+            AccessRelatedness::ForeignAccess,
+            RecursionState::BeforeChildren,
+        ));
+        stack.finish_foreign_accesses(&mut self)
+    }
 }
 
 impl Tree {
@@ -1313,15 +1333,29 @@ impl<'tcx> LocationTree {
             wildcard_state.access_relatedness(access_kind, only_foreign)
         };
 
-        let f_continue =
-            |idx: UniIndex, nodes: &UniValMap<Node>, loc: &LocationTree| -> ContinueTraversal {
-                let node = nodes.get(idx).unwrap();
-                let perm = loc.perms.get(idx);
+        // This does a traversal across the tree updating children before their parents. The
+        // difference to `perform_normal_access` is that we take the access relatedness from
+        // the wildcard tracking state of the node instead of from the visitor itself.
+        //
+        // Different from a normal access the iteration order is important for correctness.
+        // Specifically if `max_local_tag` is Some. A local access cannot come from a child
+        // with a tag larger than `max_local_tag` however in general a parent cannot know if
+        // a local access is impossible because all its exposed children have a too large tag.
+        // However, in the case were our exposed children transition to a lower permission
+        // during this access, since we update the children before their parents this means
+        // that when we are updating the parent the child counts have already been updated to
+        // reflect the new possibly lower access level. This is still only an approximation of
+        // the correct access level.
+        TreeVisitor { loc: self, nodes }.traverse_children_this(
+            root,
+            |args| -> ContinueTraversal {
+                let node = args.nodes.get(args.idx).unwrap();
+                let perm = args.loc.perms.get(args.idx);
 
                 let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
-                if let Some(relatedness) = get_relatedness(idx, node, loc)
+                if let Some(relatedness) = get_relatedness(args.idx, node, args.loc)
                     && let Some(relatedness) = relatedness.to_relatedness()
                 {
                     // We can use the usual SIFA machinery to skip nodes.
@@ -1329,20 +1363,7 @@ impl<'tcx> LocationTree {
                 } else {
                     ContinueTraversal::Recurse
                 }
-            };
-        // The `TreeVisitor` doesn't call `f_continue` on the `start_idx`
-        // so we check here if we need to skip the entire tree.
-        if matches!(f_continue(root, nodes, self), ContinueTraversal::SkipSelfAndChildren) {
-            return interp_ok(());
-        }
-        // This does a traversal starting from the root through the tree updating
-        // the permissions of each node.
-        // The difference to `perform_access` is that we take the access
-        // relatedness from the wildcard tracking state of the node instead of
-        // from the visitor itself.
-        TreeVisitor { loc: self, nodes }.traverse_this_parents_children_other(
-            root,
-            |args| f_continue(args.idx, args.nodes, args.loc),
+            },
             |args| {
                 let node = args.nodes.get_mut(args.idx).unwrap();
 

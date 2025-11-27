@@ -1,5 +1,8 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
+/// Checks how accesses from one subtree effect other subtrees.
+/// This test checks that an access from an earlier created subtree
+/// is foreign to a later created one.
 pub fn main() {
     let mut x: u32 = 42;
 
@@ -9,12 +12,11 @@ pub fn main() {
     let wild = int0 as *mut u32;
 
     let reb1 = unsafe { &mut *wild };
-    let ref1 = &mut *reb1;
-    let int1 = ref1 as *mut u32 as usize;
-    let wild = int1 as *mut u32;
 
     let reb2 = unsafe { &mut *wild };
-    let _int2 = reb2 as *mut u32 as usize;
+
+    let ref3 = &mut *reb1;
+    let _int3 = ref3 as *mut u32 as usize;
     //    ┌──────────────┐
     //    │              │
     //    │ptr_base(Res)*│         *                 *
@@ -25,7 +27,7 @@ pub fn main() {
     //                             ▼                 ▼
     //                       ┌────────────┐    ┌────────────┐
     //                       │            │    │            │
-    //                       │ reb1(Res)  │    │ reb2(Res)* │
+    //                       │ reb1(Res)  ├    │ reb2(Res)  ├
     //                       │            │    │            │
     //                       └──────┬─────┘    └────────────┘
     //                              │
@@ -33,11 +35,13 @@ pub fn main() {
     //                              ▼
     //                       ┌────────────┐
     //                       │            │
-    //                       │ ref1(Res)* │
+    //                       │ ref3(Res)* │
     //                       │            │
     //                       └────────────┘
 
-    *ref1 = 13;
+    // This access disables reb2 because ref3 cannot be a child of it
+    // as reb2 both has a higher tag and doesn't have any exposed children.
+    *ref3 = 13;
 
     let _fail = *reb2; //~ ERROR: /read access through .* is forbidden/
 }
