@@ -33,7 +33,7 @@ runs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
           # Bump the version when something here changes that needs a cache reset.
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}-v1
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}-v2
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install the tools we need

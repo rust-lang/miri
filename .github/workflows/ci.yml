@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - host_target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
           - host_target: i686-unknown-linux-gnu
             os: ubuntu-latest
             multiarch: i386
@@ -59,6 +59,11 @@ jobs:
       HOST_TARGET: ${{ matrix.host_target }}
     steps:
       - uses: actions/checkout@v4
+      - name: configure GCC 12
+        if: ${{ matrix.os == 'ubuntu-22.04' }}
+        run: |
+          echo "CC=gcc-12" | tee -a $GITHUB_ENV
+          echo "CXX=g++-12" | tee -a $GITHUB_ENV
       - name: install multiarch
         if: ${{ matrix.multiarch != '' }}
         run: |
