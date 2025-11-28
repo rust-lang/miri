@@ -272,12 +272,13 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
     }
 }
 
-struct MiriBeRustCompilerCalls;
+/// This compiler produces rlibs that are meant for later consumption by Miri.
+struct MiriDepCompilerCalls;
 
-impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
+impl rustc_driver::Callbacks for MiriDepCompilerCalls {
     #[allow(rustc::potential_query_instability)] // rustc_codegen_ssa (where this code is copied from) also allows this lint
     fn config(&mut self, config: &mut Config) {
-        // For a target crate, we emit an rlib that Miri can later consume.
+        // We don't need actual codegen, we just emit an rlib that Miri can later consume.
         config.make_codegen_backend = Some(Box::new(make_miri_codegen_backend));
 
         // Avoid warnings about unsupported crate types. However, only do that we we are *not* being
@@ -361,13 +362,10 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
         _: &rustc_interface::interface::Compiler,
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
-        // cargo-miri has patched the compiler flags to make these into check-only builds,
-        // but we are still emulating regular rustc builds, which would perform post-mono
-        // const-eval during collection. So let's also do that here, even if we might be
-        // running with `--emit=metadata`. In particular this is needed to make
-        // `compile_fail` doc tests trigger post-mono errors.
-        // In general `collect_and_partition_mono_items` is not safe to call in check-only
-        // builds, but we are setting `-Zalways-encode-mir` which avoids those issues.
+        // While the dummy codegen backend doesn't do any codegen, we are still emulating
+        // regular rustc builds, which would perform post-mono const-eval during collection.
+        // So let's also do that here. In particular this is needed to make `compile_fail`
+        // doc tests trigger post-mono errors.
         let _ = tcx.collect_and_partition_mono_items(());
 
         Compilation::Continue
@@ -451,7 +449,9 @@ fn main() {
     // If the environment asks us to actually be rustc, then do that.
     if let Some(crate_kind) = env::var_os("MIRI_BE_RUSTC") {
         if crate_kind == "host" {
-            rustc_driver::main();
+            // For host crates like proc macros and build scripts, we are an entirely normal rustc.
+            // These eventually produce actual binaries and never run in Miri.
+            return rustc_driver::main();
         } else if crate_kind != "target" {
             panic!("invalid `MIRI_BE_RUSTC` value: {crate_kind:?}")
         };
@@ -467,7 +467,7 @@ fn main() {
         args.splice(1..1, miri::MIRI_DEFAULT_ARGS.iter().map(ToString::to_string));
 
         // We cannot use `rustc_driver::main` as we want it to use `args` as the CLI arguments.
-        run_compiler_and_exit(&args, &mut MiriBeRustCompilerCalls)
+        run_compiler_and_exit(&args, &mut MiriDepCompilerCalls)
     }
 
     // Add an ICE bug report hook.
