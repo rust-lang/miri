@@ -1,6 +1,6 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-/// Checks how accesses from one subtree effect other subtrees.
+/// Checks how accesses from one subtree affect other subtrees.
 /// This test checks the case where the access is to the main tree.
 pub fn main() {
     let mut x: u32 = 42;

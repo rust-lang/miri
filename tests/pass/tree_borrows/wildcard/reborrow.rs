@@ -211,11 +211,13 @@ fn only_foreign_is_temporary() {
     //       │            │
     //       └────────────┘
 
-    // Performs a foreign read on ref3 and either read on reb1.
-    // This temporarily treats ref3 as only foreign.
+    // Performs a foreign read on ref3 and doesn't update reb1.
+    // This temporarily treats ref3 as if only foreign accesses are possible to
+    // it. This is because the accessed tag reb2 has a larger tag than ref3.
     let _x = *reb2;
-    // Performs an either write on ref3 and reb1.
-    // This should stop treating ref3 as only foreign.
+    // Should not update ref3, reb1 as we dont know if the access is local or foreign.
+    // This should stop treating ref3 as only foreign because the accessed tag reb4
+    // has a larger tag than ref3.
     *reb4 = 32;
     // The previous write could have been local to ref3, so this access should still work.
     *ref3 = 4;

@@ -1,6 +1,6 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-/// Checks how accesses from one subtree effect other subtrees.
+/// Checks how accesses from one subtree affect other subtrees.
 /// This test checks that an access from a newer created subtree
 /// performs a wildcard access on all earlier trees, and that
 /// either accesses are treated as foreign for tags that are

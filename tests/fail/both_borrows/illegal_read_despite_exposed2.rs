@@ -9,8 +9,7 @@ fn main() {
         let exposed_ptr = addr as *mut i32;
         // From the exposed ptr, we get a new unique ptr.
         let root2 = &mut *exposed_ptr;
-        // Tree borrows doesn't activate its mut references before the first write.
-        // So tree borrow would let this pass if we removed this line.
+        // Activate the reference (unnecessary on Stacked Borrows).
         *root2 = 42;
         // let _fool = root2 as *mut _; // this would fool us, since SRW(N+1) remains on the stack
         // Stack: Unknown(<N), Unique(N)

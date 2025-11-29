@@ -105,6 +105,9 @@ pub fn protected_exposed() {
     let _fail = *ref2;
 }
 
+/// Checks how accesses from one subtree affect other subtrees.
+/// This test shows an example where we don't update a node whose exposed
+/// children are greater than `max_local_tag`.
 pub fn cross_tree_update_older_invalid_exposed() {
     let mut x: [u32; 2] = [42, 43];
 
@@ -147,9 +150,10 @@ pub fn cross_tree_update_older_invalid_exposed() {
     //                      └────────────┘
 
     // This access doesn't freeze reb1 even though no access could have come from its
-    // child ref3 (since ref3>reb2).
+    // child ref3 (since ref3>reb2). This is because ref3 doesnt get disabled during this
+    // access.
     //
-    // ref3 doesn't get frozen, because It's still reserved.
+    // ref3 doesn't get frozen because it's still reserved.
     let _y = unsafe { *reb2_ptr };
 
     // reb1 should be frozen so a write should be UB. But we currently don't detect this.

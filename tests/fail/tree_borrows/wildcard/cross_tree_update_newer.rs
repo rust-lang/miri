@@ -1,6 +1,6 @@
 //@compile-flags: -Zmiri-tree-borrows -Zmiri-permissive-provenance
 
-/// Checks how accesses from one subtree effect other subtrees.
+/// Checks how accesses from one subtree affect other subtrees.
 /// This test checks that an access from an earlier created subtree
 /// is foreign to a later created one.
 pub fn main() {

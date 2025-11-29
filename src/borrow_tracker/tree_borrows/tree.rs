@@ -91,11 +91,11 @@ impl LocationState {
         nodes: &mut UniValMap<Node>,
         wildcard_accesses: &mut UniValMap<WildcardState>,
         access_kind: AccessKind,
-        access_cause: AccessCause,
-        access_range: Option<AllocRange>,
+        access_cause: AccessCause,        //diagnostics
+        access_range: Option<AllocRange>, //diagnostics
         relatedness: AccessRelatedness,
-        span: Span,
-        location_range: Range<u64>,
+        span: Span,                 //diagnostics
+        location_range: Range<u64>, //diagnostics
         protected: bool,
     ) -> Result<(), TransitionError> {
         // Call this function now (i.e. only if we know `relatedness`), which
@@ -300,13 +300,13 @@ pub struct Tree {
     /// the tree to attach them. Instead we create a new additional tree for this allocation
     /// with this new reference as a root. We call this additional tree a wildcard subtree.
     ///
-    /// Sorted according to `BorTag` from low to high. This also means the main root is `root[0]`.
-    ///
     /// The actual structure should be a single tree but with wildcard provenance we approximate
-    /// this with this ordered set of trees. Each wildcard subtree could be the direct child of
-    /// any exposed tag (that is smaller than the root). This also means that it can only be the
+    /// this with this ordered set of trees. Each wildcard subtree is the direct child of *some* exposed
+    /// tag (that is smaller than the root), but we do not know which. This also means that it can only be the
     /// child of a tree that comes before it in the vec ensuring we don't have any cycles in our
     /// approximated tree.
+    ///
+    /// Sorted according to `BorTag` from low to high. This also means the main root is `root[0]`.
     ///
     /// Has array size 2 because that still ensures the minimum size for SmallVec.
     pub(super) roots: SmallVec<[UniIndex; 2]>,
@@ -420,6 +420,7 @@ where
         (self.f_propagate)(NodeAppArgs { idx, rel_pos, nodes: this.nodes, loc: this.loc })
     }
 
+    /** Returns the root of this tree. */
     fn go_upwards_from_accessed(
         &mut self,
         this: &mut TreeVisitor<'_>,
@@ -688,7 +689,6 @@ impl<'tcx> Tree {
         span: Span,
     ) -> InterpResult<'tcx> {
         let idx = self.tag_mapping.insert(new_tag);
-
         let parent_idx = match parent_prov {
             ProvenanceExtra::Concrete(parent_tag) =>
                 Some(self.tag_mapping.get(&parent_tag).unwrap()),
@@ -889,11 +889,11 @@ impl<'tcx> Tree {
             // Afterwards we check all other trees.
             // We iterate over the list in reverse order to ensure that we do not visit
             // a parent before its child.
-            for root in self.roots.iter().rev() {
-                if Some(*root) == accessed_root {
+            for &root in self.roots.iter().rev() {
+                if Some(root) == accessed_root {
                     continue;
                 }
-                check_tree(*root)?;
+                check_tree(root)?;
             }
         }
         interp_ok(())
@@ -997,8 +997,8 @@ impl<'tcx> Tree {
 /// Integration with the BorTag garbage collector
 impl Tree {
     pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
-        for root in self.roots.clone().iter() {
-            self.remove_useless_children(*root, live_tags);
+        for i in 0..(self.roots.len()) {
+            self.remove_useless_children(self.roots[i], live_tags);
         }
         // Right after the GC runs is a good moment to check if we can
         // merge some adjacent ranges that were made equal by the removal of some
@@ -1155,10 +1155,10 @@ impl<'tcx> LocationTree {
         roots: impl Iterator<Item = UniIndex>,
         nodes: &mut UniValMap<Node>,
         access_source: Option<UniIndex>,
-        loc_range: Range<u64>,
-        access_range: Option<AllocRange>,
+        loc_range: Range<u64>,            // diagnostics
+        access_range: Option<AllocRange>, // diagnostics
         access_kind: AccessKind,
-        access_cause: diagnostics::AccessCause,
+        access_cause: diagnostics::AccessCause, // diagnostics
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
@@ -1178,8 +1178,8 @@ impl<'tcx> LocationTree {
                 visit_children,
             )?)
         } else {
-            // `SkipChildrenOfAccessed` only gets set on protector release.
-            // Since a wildcard reference are never protected this assert shouldn't fail.
+            // `SkipChildrenOfAccessed` only gets set on protector release, which only
+            // occurs on a known node.
             assert!(matches!(visit_children, ChildrenVisitMode::VisitChildrenOfAccessed));
             None
         };
@@ -1195,17 +1195,19 @@ impl<'tcx> LocationTree {
             if Some(root) == accessed_root {
                 continue;
             }
-            // This can only be a local access for nodes that are a parent of the accessed node.
-            // We could pass access_source as `max_local_tag`, but using accessed_root is better
-            // since that will be smaller, and it is still a node that must be
-            // on all parent paths starting at the accessed node.
+            // The choice of `max_local_tag` requires some thought.
+            // This can only be a local access for nodes that are a parent of the accessed node
+            // and are therefore smaller, so the accessed node itself is a valid choice for `max_local_tag`.
+            // However, using `accessed_root` is better since that will be smaller. It is still a valid choice
+            // because for nodes *in other trees*, if they are a parent of the accessed node then they
+            // are a parent of `accessed_root`.
             //
             // If we accessed the main tree then its root will be the smallest tag in the entire
             // allocation, meaning we perform only a foreign access on all other subtrees.
             //
-            // Foreign accesses are always possible on wildcard subtrees, as they have
-            // `max_foreign_access==Write` on their root. However on the main tree this can fail
-            // resulting in an access error.
+            // If `root` is the main root and it doesn't have any valid exposed children then this access
+            // will return an access error. This error doesn't get triggered on wildcard subtrees because we
+            // set `max_foreign_access==Write` on their root.
             self.perform_wildcard_access(
                 root,
                 access_source,
@@ -1233,10 +1235,10 @@ impl<'tcx> LocationTree {
         &mut self,
         access_source: UniIndex,
         nodes: &mut UniValMap<Node>,
-        loc_range: Range<u64>,
-        access_range: Option<AllocRange>,
+        loc_range: Range<u64>,            // diagnostics
+        access_range: Option<AllocRange>, // diagnostics
         access_kind: AccessKind,
-        access_cause: diagnostics::AccessCause,
+        access_cause: diagnostics::AccessCause, // diagnostics
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
@@ -1250,7 +1252,7 @@ impl<'tcx> LocationTree {
         // - skip the traversal of the children in some cases
         // - do not record noop transitions
         //
-        // `perms_range` is only for diagnostics (it is the range of
+        // `loc_range` is only for diagnostics (it is the range of
         // the `RangeMap` on which we are currently working).
         let node_skipper = |args: &NodeAppArgs<'_>| -> ContinueTraversal {
             let node = args.nodes.get(args.idx).unwrap();
@@ -1307,28 +1309,25 @@ impl<'tcx> LocationTree {
     /// * `root`: Root of the tree being accessed.
     /// * `access_source`: the index of the accessed tag, if any.
     ///   This is only used for printing the correct tag on errors.
-    /// * `max_local_tag`: For any tag larger than this we do not perform local accesses. If no
-    ///   foreign access to a node with a larger tag is possible then we return an access error.
+    /// * `max_local_tag`: The access cannot come through any node in this tree that has a larger
+    ///   tag than this tag.
     fn perform_wildcard_access(
         &mut self,
         root: UniIndex,
         access_source: Option<UniIndex>,
         max_local_tag: Option<BorTag>,
         nodes: &mut UniValMap<Node>,
-        loc_range: Range<u64>,
-        access_range: Option<AllocRange>,
+        loc_range: Range<u64>,            // diagnostics
+        access_range: Option<AllocRange>, // diagnostics
         access_kind: AccessKind,
-        access_cause: diagnostics::AccessCause,
+        access_cause: diagnostics::AccessCause, // diagnostics
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
     ) -> InterpResult<'tcx> {
         let get_relatedness = |idx: UniIndex, node: &Node, loc: &LocationTree| {
             let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
-            // We can use the invariant that child tags are larger than parent tags
-            // to further refine the relatedness.
-            // If we know that the access comes through a certain tag, then we know
-            // for any larger tag that the access cannot be local.
+            // If the tag is larger than `max_local_tag` then we treat the access as only foreign.
             let only_foreign = max_local_tag.is_some_and(|max_local_tag| max_local_tag < node.tag);
             wildcard_state.access_relatedness(access_kind, only_foreign)
         };
@@ -1337,15 +1336,20 @@ impl<'tcx> LocationTree {
         // difference to `perform_normal_access` is that we take the access relatedness from
         // the wildcard tracking state of the node instead of from the visitor itself.
         //
-        // Different from a normal access the iteration order is important for correctness.
-        // Specifically if `max_local_tag` is Some. A local access cannot come from a child
-        // with a tag larger than `max_local_tag` however in general a parent cannot know if
-        // a local access is impossible because all its exposed children have a too large tag.
-        // However, in the case were our exposed children transition to a lower permission
-        // during this access, since we update the children before their parents this means
-        // that when we are updating the parent the child counts have already been updated to
-        // reflect the new possibly lower access level. This is still only an approximation of
-        // the correct access level.
+        // Unlike for a normal access, the iteration order is important for improving the
+        // accuracy of wildcard accesses.
+        // Ideally we would recalculate the wildcard datastructure on every access while
+        // accounting for `max_local_tag` however to improve performance we only approximate
+        // this behavior.
+        // This is only less accurate if `max_local_tag` is Some. In this case accesses cannot
+        // happen from a tag that is larger than `max_local_tag` this is easy to check for nodes
+        // whose tag is larger, but otherwise we do not check for each node if its children have
+        // too large tags leading to further inaccuracies.
+        // However, in the case where all the exposed child nodes also happen to lose their access
+        // permissions during this access, we can achieve the same precision as the ideal algorithm.
+        // Since we update the children before their parent this means the wildcard datastructure
+        // has already been updated to reflect the children's new access level. So when we update
+        // the parent of them we see that no local access is possible anymore.
         TreeVisitor { loc: self, nodes }.traverse_children_this(
             root,
             |args| -> ContinueTraversal {

@@ -460,7 +460,7 @@ impl Tree {
     /// Checks that the wildcard tracking data structure is internally consistent and
     /// has the correct `exposed_as` values.
     pub fn verify_wildcard_consistency(&self, global: &GlobalState) {
-        // We rely on the fact that wildcard_roots is ordered according to tag from low to high.
+        // We rely on the fact that `roots` is ordered according to tag from low to high.
         assert!(self.roots.is_sorted_by_key(|idx| self.nodes.get(*idx).unwrap().tag));
         let main_root_idx = self.roots[0];
 
