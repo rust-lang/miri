@@ -1,6 +1,9 @@
 //! Implements calling functions from a native library.
 
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::ops::Deref;
+use std::os::raw::c_void;
 use std::sync::atomic::AtomicBool;
 
 use libffi::low::CodePtr;
@@ -15,6 +18,14 @@ use serde::{Deserialize, Serialize};
 use self::helpers::ToSoft;
 
 mod ffi;
+
+struct CallbackError {
+    message: Cow<'static, str>,
+}
+
+thread_local! {
+    pub static CALLBACK_MESSAGES: RefCell<Vec<CallbackError>> = RefCell::new(Vec::new());
+}
 
 #[cfg_attr(
     not(all(
@@ -92,6 +103,8 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let alloc = ();
 
         trace::Supervisor::do_ffi(alloc, || {
+            // clear the callback error buffer
+            CALLBACK_MESSAGES.with_borrow_mut(|c| c.clear());
             // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
             // as the specified primitive integer type
             let scalar = match dest.layout.ty.kind() {
@@ -166,6 +179,11 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     ))
                     .into(),
             };
+            let callback_error_messages = CALLBACK_MESSAGES.take();
+            if !callback_error_messages.is_empty() {
+                let first = callback_error_messages.first().unwrap();
+                return Err(err_unsup_format!("{}", first.message)).into();
+            }
             interp_ok(ImmTy::from_scalar(scalar, dest.layout))
         })
     }
@@ -285,7 +303,12 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// Extract the value from the result of reading an operand from the machine
     /// and convert it to a `OwnedArg`.
-    fn op_to_ffi_arg(&self, v: &OpTy<'tcx>, tracing: bool) -> InterpResult<'tcx, OwnedArg> {
+    fn op_to_ffi_arg(
+        &self,
+        v: &OpTy<'tcx>,
+        tracing: bool,
+        link_name: &Symbol,
+    ) -> InterpResult<'tcx, OwnedArg> {
         let this = self.eval_context_ref();
 
         // This should go first so that we emit unsupported before doing a bunch
@@ -310,6 +333,44 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // casting the integer in `byte` to a pointer and using that.
         let bytes = match v.as_mplace_or_imm() {
             either::Either::Left(mplace) => {
+                let ptr_overwrite = match v.layout.ty.kind() {
+                    ty::Adt(_adt_def, args) =>
+                        if let ty::FnPtr(fn_ptr, _header) = args.type_at(0).kind() {
+                            let args = fn_ptr
+                                .skip_binder()
+                                .inputs()
+                                .into_iter()
+                                .map(|i| {
+                                    let layout = this.layout_of(i.clone())?;
+                                    this.ty_to_ffitype(layout)
+                                })
+                                .collect::<InterpResult<'_, Vec<_>>>()?;
+                            let res_type = fn_ptr.skip_binder().output();
+                            let res_type = {
+                                let layout = this.layout_of(res_type)?;
+                                this.ty_to_ffitype(layout)?
+                            };
+                            let closure_builder = libffi::middle::Builder::new()
+                                .args(args)
+                                .res(res_type)
+                                .abi(libffi::raw::ffi_abi_FFI_UNIX64);
+                            let data = CallbackData {
+                                args: fn_ptr.skip_binder().inputs().to_vec(),
+                                result: fn_ptr.skip_binder().output(),
+                                this,
+                                link_name: link_name.clone(),
+                                ty: v.layout.ty,
+                            };
+                            // todo: leaking is likely not optimal here
+                            let data = Box::leak(Box::new(data));
+
+                            let closure = closure_builder.into_closure(callback_callback, data);
+                            Some(closure)
+                        } else {
+                            None
+                        },
+                    _ => None,
+                };
                 // Get the alloc id corresponding to this mplace, alongside
                 // a pointer that's offset to point to this particular
                 // mplace (not one at the base addr of the allocation).
@@ -330,7 +391,35 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Read the bytes that make up this argument. We cannot use the normal getter as
                 // those would fail if any part of the argument is uninitialized. Native code
                 // is kind of outside the interpreter, after all...
-                Box::from(alloc.inspect_with_uninit_and_ptr_outside_interpreter(range))
+                let ret: Box<[u8]> =
+                    Box::from(alloc.inspect_with_uninit_and_ptr_outside_interpreter(range));
+                if ret.iter().any(|b| *b != 0)
+                    && let Some(ptr_overwrite) = ptr_overwrite
+                {
+                    // we need to leak the closure here as we don't know when it's actually called
+                    // I'm not sure if it's possible to have a better solution for that
+                    let ptr_overwrite = Box::leak(Box::new(ptr_overwrite));
+
+                    // we get a **reference** to a function ptr here
+                    // (The actual argument type doesn't matter)
+                    let ptr = unsafe {
+                        ptr_overwrite.instantiate_code_ptr::<unsafe extern "C" fn(*const c_void)>()
+                    };
+                    // so deref away the reference
+                    let ptr = *ptr;
+                    // cast it to void as the actual function type doesn't matter
+                    let ptr = ptr as *const c_void;
+                    // get a the address as usize to write it into the
+                    // right memory location
+                    let bytes = ptr.addr();
+                    // bytes are in native endian, as that's literally
+                    // the definition of native endian
+                    let bytes = usize::to_ne_bytes(bytes);
+                    // return the bytes of the ptr
+                    Box::from(bytes)
+                } else {
+                    ret
+                }
             }
             either::Either::Right(imm) => {
                 let mut bytes: Box<[u8]> = vec![0; imm.layout.size.bytes_usize()].into();
@@ -439,7 +528,12 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(match layout.ty.kind() {
             // Scalar types have already been handled above.
             ty::Adt(adt_def, args) => self.adt_to_ffitype(layout.ty, *adt_def, args)?,
-            _ => throw_unsup_format!("unsupported argument type for native call: {}", layout.ty),
+            // Functions with no declared return type (i.e., the default return)
+            // have the output_type `Tuple([])`.
+            ty::Tuple(t_list) if (*t_list).deref().is_empty() => FfiType::void(),
+            _ => {
+                throw_unsup_format!("unsupported argument type for native call: {}", layout.ty)
+            }
         })
     }
 }
@@ -473,7 +567,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // Get the function arguments, copy them, and prepare the type descriptions.
         let mut libffi_args = Vec::<OwnedArg>::with_capacity(args.len());
         for arg in args.iter() {
-            libffi_args.push(this.op_to_ffi_arg(arg, tracing)?);
+            libffi_args.push(this.op_to_ffi_arg(arg, tracing, &link_name)?);
         }
 
         // Prepare all exposed memory (both previously exposed, and just newly exposed since a
@@ -535,4 +629,93 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
     }
+}
+
+struct CallbackData<'a, 'tcx> {
+    args: Vec<Ty<'tcx>>,
+    result: Ty<'tcx>,
+    this: &'a MiriInterpCx<'tcx>,
+    link_name: Symbol,
+    ty: Ty<'tcx>,
+}
+
+unsafe extern "C" fn callback_callback(
+    cif: &libffi::low::ffi_cif,
+    result: &mut c_void,
+    args: *const *const c_void,
+    infos: &CallbackData<'_, '_>,
+) {
+    debug_assert_eq!(cif.nargs as usize, infos.args.len());
+    let mut rust_args = Vec::with_capacity(infos.args.len());
+    // cast away the pointer to pointer
+    let mut args = args as *const c_void;
+    for arg in &infos.args {
+        let scalar = match arg.kind() {
+            ty::RawPtr(..) => {
+                let ptr = StrictPointer::new(Provenance::Wildcard, Size::from_bytes(args.addr()));
+                args = unsafe { args.offset(1) };
+                Scalar::from_pointer(ptr, infos.this)
+            }
+            // the other types
+            _ => todo!(),
+        };
+        rust_args.push(scalar);
+    }
+
+    CALLBACK_MESSAGES.with_borrow_mut(|msgs| {
+        msgs.push(CallbackError {
+            message: format!("Tried to call a function pointer via FFI boundary. \
+                      That's not supported yet by miri\n This function pointer was registered by a call to `{}` \
+                      using an argument of the type `{}`", infos.link_name, infos.ty)
+                .into(),
+        });
+    });
+
+    // write here the output
+    // For now we just try to write some dummy output
+    // by using some "reasonable" default values
+    // to prevent crashing
+    match infos.result.kind() {
+        ty::RawPtr(..) => {
+            write_helper::<*mut c_void>(result, std::ptr::null_mut());
+        }
+        ty::Int(IntTy::I8) => {
+            write_helper::<i8>(result, 0);
+        }
+        ty::Int(IntTy::I16) => {
+            write_helper::<i32>(result, 0);
+        }
+        ty::Int(IntTy::I32) => {
+            write_helper::<i32>(result, 0);
+        }
+        ty::Int(IntTy::I64) => {
+            write_helper::<i64>(result, 0);
+        }
+        ty::Int(IntTy::Isize) => {
+            write_helper::<isize>(result, 0);
+        }
+        ty::Uint(UintTy::U8) => {
+            write_helper::<u8>(result, 0);
+        }
+        ty::Uint(UintTy::U16) => {
+            write_helper::<u16>(result, 0);
+        }
+        ty::Uint(UintTy::U32) => {
+            write_helper::<u32>(result, 0);
+        }
+        ty::Uint(UintTy::U64) => {
+            write_helper::<u64>(result, 0);
+        }
+        ty::Uint(UintTy::Usize) => {
+            write_helper::<usize>(result, 0);
+        }
+        // unsure how to handle that at allow
+        // Just do nothing for now?
+        _ => {}
+    };
+}
+
+fn write_helper<T>(ptr: &mut c_void, value: T) {
+    let ptr = (ptr as *mut c_void) as *mut T;
+    unsafe { std::ptr::write(ptr, value) };
 }
