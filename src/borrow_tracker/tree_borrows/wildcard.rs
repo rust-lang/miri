@@ -20,6 +20,14 @@ pub enum WildcardAccessLevel {
     Read,
     Write,
 }
+impl From<AccessKind> for WildcardAccessLevel {
+    fn from(value: AccessKind) -> Self {
+        match value {
+            AccessKind::Read => Self::Read,
+            AccessKind::Write => Self::Write,
+        }
+    }
+}
 
 /// Where the access happened relative to the current node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
