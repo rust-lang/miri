@@ -80,7 +80,7 @@ pub struct Event {
 /// Diagnostics data about the current access and the location we are accessing.
 /// Used to create history events and errors.
 #[derive(Clone, Debug)]
-pub struct DiagnosticsExtra {
+pub struct AccessDiagnostics {
     pub alloc_id: AllocId,
     pub span: Span,
     /// The range the diagnostic actually applies to.
@@ -90,7 +90,7 @@ pub struct DiagnosticsExtra {
     pub access_range: Option<AllocRange>,
     pub access_cause: AccessCause,
 }
-impl DiagnosticsExtra {
+impl AccessDiagnostics {
     /// Creates a history event.
     pub fn create_event(&self, transition: PermTransition, is_foreign: bool) -> Event {
         Event {
@@ -316,7 +316,7 @@ pub(super) struct TbError<'node> {
     /// Not set on wildcard accesses.
     pub accessed_info: Option<&'node NodeDebugInfo>,
     /// Diagnostic data about the current access.
-    pub access_diagnostics: &'node DiagnosticsExtra,
+    pub access_diagnostics: &'node AccessDiagnostics,
 }
 
 impl TbError<'_> {
@@ -401,7 +401,7 @@ impl TbError<'_> {
 /// Cannot access this allocation with wildcard provenance, as there are no
 /// valid exposed references for this access kind.
 pub fn no_valid_exposed_references_error<'tcx>(
-    DiagnosticsExtra { alloc_id, transition_range, access_cause, .. }: &DiagnosticsExtra,
+    AccessDiagnostics { alloc_id, transition_range, access_cause, .. }: &AccessDiagnostics,
 ) -> InterpErrorKind<'tcx> {
     let title = format!(
         "{access_cause} through <wildcard> at {alloc_id:?}[{offset:#x}] is forbidden",

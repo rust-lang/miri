@@ -18,7 +18,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_span::Span;
 use smallvec::SmallVec;
 
-use super::diagnostics::{AccessCause, DiagnosticsExtra};
+use super::diagnostics::{AccessCause, AccessDiagnostics};
 use super::wildcard::WildcardState;
 use crate::borrow_tracker::tree_borrows::Permission;
 use crate::borrow_tracker::tree_borrows::diagnostics::{
@@ -93,7 +93,7 @@ impl LocationState {
         access_kind: AccessKind,
         relatedness: AccessRelatedness,
         protected: bool,
-        diagnostics: &DiagnosticsExtra,
+        diagnostics: &AccessDiagnostics,
     ) -> Result<(), TransitionError> {
         // Call this function now (i.e. only if we know `relatedness`), which
         // ensures it is only called when `skip_if_known_noop` returns
@@ -834,7 +834,7 @@ impl<'tcx> Tree {
         // Check if this breaks any strong protector.
         // (Weak protectors are already handled by `perform_access`.)
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
-            let diagnostics = DiagnosticsExtra {
+            let diagnostics = AccessDiagnostics {
                 alloc_id,
                 span,
                 transition_range: loc_range,
@@ -935,6 +935,13 @@ impl<'tcx> Tree {
             // Default branch: this is a "normal" access through a known range.
             // We iterate over affected locations and traverse the tree for each of them.
             for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
+                let diagnostics = AccessDiagnostics {
+                    alloc_id,
+                    span,
+                    access_cause,
+                    access_range: Some(access_range),
+                    transition_range: loc_range,
+                };
                 loc.perform_access(
                     self.roots.iter().copied(),
                     &mut self.nodes,
@@ -942,13 +949,7 @@ impl<'tcx> Tree {
                     access_kind,
                     global,
                     ChildrenVisitMode::VisitChildrenOfAccessed,
-                    &DiagnosticsExtra {
-                        alloc_id,
-                        span,
-                        access_cause,
-                        access_range: Some(access_range),
-                        transition_range: loc_range,
-                    },
+                    &diagnostics,
                 )?;
             }
         } else {
@@ -972,7 +973,13 @@ impl<'tcx> Tree {
                     && let Some(access_kind) = p.permission.protector_end_access()
                     && p.accessed
                 {
-                    let access_cause = diagnostics::AccessCause::FnExit(access_kind);
+                    let diagnostics = AccessDiagnostics {
+                        alloc_id,
+                        span,
+                        access_cause: AccessCause::FnExit(access_kind),
+                        access_range: None,
+                        transition_range: loc_range,
+                    };
                     loc.perform_access(
                         self.roots.iter().copied(),
                         &mut self.nodes,
@@ -980,13 +987,7 @@ impl<'tcx> Tree {
                         access_kind,
                         global,
                         ChildrenVisitMode::SkipChildrenOfAccessed,
-                        &DiagnosticsExtra {
-                            alloc_id,
-                            span,
-                            access_cause,
-                            access_range: None,
-                            transition_range: loc_range,
-                        },
+                        &diagnostics,
                     )?;
                 }
             }
@@ -1159,7 +1160,7 @@ impl<'tcx> LocationTree {
         access_kind: AccessKind,
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
-        diagnostics: &DiagnosticsExtra,
+        diagnostics: &AccessDiagnostics,
     ) -> InterpResult<'tcx> {
         let accessed_root = if let Some(idx) = access_source {
             Some(self.perform_normal_access(
@@ -1223,7 +1224,7 @@ impl<'tcx> LocationTree {
         access_kind: AccessKind,
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
-        diagnostics: &DiagnosticsExtra,
+        diagnostics: &AccessDiagnostics,
     ) -> InterpResult<'tcx, UniIndex> {
         // Performs the per-node work:
         // - insert the permission if it does not exist
@@ -1295,7 +1296,7 @@ impl<'tcx> LocationTree {
         nodes: &mut UniValMap<Node>,
         access_kind: AccessKind,
         global: &GlobalState,
-        diagnostics: &DiagnosticsExtra,
+        diagnostics: &AccessDiagnostics,
     ) -> InterpResult<'tcx> {
         let get_relatedness = |idx: UniIndex, node: &Node, loc: &LocationTree| {
             let wildcard_state = loc.wildcard_accesses.get(idx).cloned().unwrap_or_default();
