@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 use rustc_abi::{Align, Size};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{InstanceKind, TyCtxt};
 
 pub use self::address_generator::AddressGenerator;
 use self::reuse_pool::ReusePool;
@@ -169,9 +169,39 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         Align::from_bytes(1).unwrap(),
                         params,
                     );
-                    let ptr = alloc_bytes.as_ptr();
+                    let mut ptr = alloc_bytes.as_ptr();
                     // Leak the underlying memory to ensure it remains unique.
                     std::mem::forget(alloc_bytes);
+                    if let Some(GlobalAlloc::Function { instance, .. }) =
+                        this.tcx.try_get_global_alloc(alloc_id)
+                    {
+                        #[cfg(all(unix, feature = "native-lib"))]
+                        if let InstanceKind::Item(def_id) = instance.def {
+                            let sig = this.tcx.fn_sig(def_id).skip_binder().skip_binder();
+                            let closure =
+                                crate::shims::native_lib::build_libffi_closure(this, sig)?;
+                            if let Some(closure) = closure {
+                                let closure = Box::leak(Box::new(closure));
+                                // Libffi returns a **reference** to a function ptr here
+                                // (The actual argument type doesn't matter)
+                                let fn_ptr = unsafe {
+                                    closure.instantiate_code_ptr::<unsafe extern "C" fn(*const std::ffi::c_void)>()
+                                };
+                                // Therefore we need to dereference the reference to get the actual function pointer
+                                let fn_ptr = *fn_ptr;
+                                #[expect(
+                                    clippy::as_conversions,
+                                    reason = "No better way to cast a function ptr to a ptr"
+                                )]
+                                {
+                                    // After that we need to cast the function pointer to the
+                                    // expected pointer type. At this point we don't actually care about the
+                                    // type of this pointer
+                                    ptr = (fn_ptr as *const std::ffi::c_void).cast();
+                                }
+                            }
+                        }
+                    }
                     ptr
                 }
                 AllocKind::TypeId | AllocKind::Dead => unreachable!(),
