@@ -8,10 +8,11 @@ use std::cell::RefCell;
 
 use rustc_abi::{Align, Size};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_middle::ty::{InstanceKind, TyCtxt};
+use rustc_middle::ty::TyCtxt;
 
 pub use self::address_generator::AddressGenerator;
 use self::reuse_pool::ReusePool;
+use crate::alloc::MiriAllocParams;
 use crate::concurrency::VClock;
 use crate::diagnostics::SpanDedupDiagnostic;
 use crate::*;
@@ -162,48 +163,41 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         this.get_alloc_bytes_unchecked_raw(alloc_id)?
                     }
                 }
-                AllocKind::Function | AllocKind::VTable => {
-                    // Allocate some dummy memory to get a unique address for this function/vtable.
-                    let alloc_bytes = MiriAllocBytes::from_bytes(
-                        &[0u8; 1],
-                        Align::from_bytes(1).unwrap(),
-                        params,
-                    );
-                    let mut ptr = alloc_bytes.as_ptr();
-                    // Leak the underlying memory to ensure it remains unique.
-                    std::mem::forget(alloc_bytes);
+                #[cfg(all(unix, feature = "native-lib"))]
+                AllocKind::Function => {
                     if let Some(GlobalAlloc::Function { instance, .. }) =
                         this.tcx.try_get_global_alloc(alloc_id)
+                        && let rustc_middle::ty::InstanceKind::Item(def_id) = instance.def
+                        && let Some(closure) = crate::shims::native_lib::build_libffi_closure(
+                            this,
+                            this.tcx.fn_sig(def_id).skip_binder().skip_binder(),
+                        )
                     {
-                        #[cfg(all(unix, feature = "native-lib"))]
-                        if let InstanceKind::Item(def_id) = instance.def {
-                            let sig = this.tcx.fn_sig(def_id).skip_binder().skip_binder();
-                            let closure =
-                                crate::shims::native_lib::build_libffi_closure(this, sig)?;
-                            if let Some(closure) = closure {
-                                let closure = Box::leak(Box::new(closure));
-                                // Libffi returns a **reference** to a function ptr here
-                                // (The actual argument type doesn't matter)
-                                let fn_ptr = unsafe {
-                                    closure.instantiate_code_ptr::<unsafe extern "C" fn(*const std::ffi::c_void)>()
-                                };
-                                // Therefore we need to dereference the reference to get the actual function pointer
-                                let fn_ptr = *fn_ptr;
-                                #[expect(
-                                    clippy::as_conversions,
-                                    reason = "No better way to cast a function ptr to a ptr"
-                                )]
-                                {
-                                    // After that we need to cast the function pointer to the
-                                    // expected pointer type. At this point we don't actually care about the
-                                    // type of this pointer
-                                    ptr = (fn_ptr as *const std::ffi::c_void).cast();
-                                }
-                            }
+                        let closure = Box::leak(Box::new(closure));
+                        // Libffi returns a **reference** to a function ptr here
+                        // (The actual argument type doesn't matter)
+                        let fn_ptr = unsafe {
+                            closure.instantiate_code_ptr::<unsafe extern "C" fn(*const std::ffi::c_void)>()
+                        };
+                        // Therefore we need to dereference the reference to get the actual function pointer
+                        let fn_ptr = *fn_ptr;
+                        #[expect(
+                            clippy::as_conversions,
+                            reason = "No better way to cast a function ptr to a ptr"
+                        )]
+                        {
+                            // After that we need to cast the function pointer to the
+                            // expected pointer type. At this point we don't actually care about the
+                            // type of this pointer
+                            (fn_ptr as *const std::ffi::c_void).cast()
                         }
+                    } else {
+                        dummy_alloc(params)
                     }
-                    ptr
                 }
+                #[cfg(not(all(unix, feature = "native-lib")))]
+                AllocKind::Function => dummy_alloc(params),
+                AllocKind::VTable => dummy_alloc(params),
                 AllocKind::TypeId | AllocKind::Dead => unreachable!(),
             };
             // We don't have to expose this pointer yet, we do that in `prepare_for_native_call`.
@@ -233,6 +227,15 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
             interp_ok(new_addr)
         }
     }
+}
+
+fn dummy_alloc(params: MiriAllocParams) -> *const u8 {
+    // Allocate some dummy memory to get a unique address for this function/vtable.
+    let alloc_bytes = MiriAllocBytes::from_bytes(&[0u8; 1], Align::from_bytes(1).unwrap(), params);
+    let ptr = alloc_bytes.as_ptr();
+    // Leak the underlying memory to ensure it remains unique.
+    std::mem::forget(alloc_bytes);
+    ptr
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}

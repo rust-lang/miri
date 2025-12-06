@@ -1,7 +1,7 @@
 warning: sharing memory with a native function called via FFI
   --> tests/native-lib/fail/call_function_ptr.rs:LL:CC
    |
-LL |         call_fn_ptr(Some(nop)); // this one is not
+LL |         call_fn_ptr(Some(nop));
    |         ^^^^^^^^^^^^^^^^^^^^^^ sharing memory with a native function
    |
    = help: when memory is shared with a native function call, Miri can only track initialisation and provenance on a best-effort basis
@@ -20,7 +20,7 @@ LL |     pass_fn_ptr()
 warning: sharing a function pointer with a native function called via FFI
   --> tests/native-lib/fail/call_function_ptr.rs:LL:CC
    |
-LL |         call_fn_ptr(Some(nop)); // this one is not
+LL |         call_fn_ptr(Some(nop));
    |         ^^^^^^^^^^^^^^^^^^^^^^ sharing a function pointer with a native function
    |
    = help: calling Rust functions from C is not supported and will, in the best case, crash the program
@@ -32,5 +32,31 @@ note: inside `main`
 LL |     pass_fn_ptr()
    |     ^^^^^^^^^^^^^
 
-Tried to call a function pointer via FFI boundary. That's not supported yet by miri
-This function pointer was registered by a call to `todo: fill in name` using an argument of the type `todo: fill in type`
+error: tried to call a function pointer through the FFI boundary
+  --> tests/native-lib/fail/call_function_ptr.rs:LL:CC
+   |
+LL |         call_fn_ptr(Some(nop));
+   |         ^^^^^^^^^^^^^^^^^^^^^^ this function called a function pointer calling back into Rust
+   |
+   = note: this is not supported yet by miri
+   = note: BACKTRACE:
+   = note: inside `pass_fn_ptr` at tests/native-lib/fail/call_function_ptr.rs:LL:CC
+note: inside `main`
+  --> tests/native-lib/fail/call_function_ptr.rs:LL:CC
+   |
+LL |     pass_fn_ptr()
+   |     ^^^^^^^^^^^^^
+   = note: inside `<fn() as std::ops::FnOnce<()>>::call_once - shim(fn())` at RUSTLIB/core/src/ops/function.rs:LL:CC
+   = note: inside `std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>` at RUSTLIB/std/src/sys/backtrace.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/rt.rs:LL:CC
+   = note: inside `std::ops::function::impls::<impl std::ops::FnOnce<()> for &dyn std::ops::Fn() -> i32 + std::marker::Sync + std::panic::RefUnwindSafe>::call_once` at RUSTLIB/core/src/ops/function.rs:LL:CC
+   = note: inside `std::panicking::catch_unwind::do_call::<&dyn std::ops::Fn() -> i32 + std::marker::Sync + std::panic::RefUnwindSafe, i32>` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::panicking::catch_unwind::<i32, &dyn std::ops::Fn() -> i32 + std::marker::Sync + std::panic::RefUnwindSafe>` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::panic::catch_unwind::<&dyn std::ops::Fn() -> i32 + std::marker::Sync + std::panic::RefUnwindSafe, i32>` at RUSTLIB/std/src/panic.rs:LL:CC
+   = note: inside closure at RUSTLIB/std/src/rt.rs:LL:CC
+   = note: inside `std::panicking::catch_unwind::do_call::<{closure@std::rt::lang_start_internal::{closure#0}}, isize>` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::panicking::catch_unwind::<isize, {closure@std::rt::lang_start_internal::{closure#0}}>` at RUSTLIB/std/src/panicking.rs:LL:CC
+   = note: inside `std::panic::catch_unwind::<{closure@std::rt::lang_start_internal::{closure#0}}, isize>` at RUSTLIB/std/src/panic.rs:LL:CC
+   = note: inside `std::rt::lang_start_internal` at RUSTLIB/std/src/rt.rs:LL:CC
+   = note: inside `std::rt::lang_start::<()>` at RUSTLIB/std/src/rt.rs:LL:CC
+

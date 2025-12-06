@@ -16,6 +16,6 @@ fn pass_fn_ptr() {
 
     unsafe {
         call_fn_ptr(None); // this one is fine
-        call_fn_ptr(Some(nop)); // this one is not
+        call_fn_ptr(Some(nop)); //~ ERROR: tried to call a function pointer through the FFI boundary
     }
 }
