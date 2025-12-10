@@ -1138,8 +1138,7 @@ impl<'tcx> LocationTree {
                 .access_relatedness(access_kind, true)
                 .is_none()
         {
-            return Err(no_valid_exposed_references_error(alloc_id, loc_range.start, access_cause))
-                .into();
+            return Err(no_valid_exposed_references_error(diagnostics)).into();
         }
         interp_ok(())
     }
