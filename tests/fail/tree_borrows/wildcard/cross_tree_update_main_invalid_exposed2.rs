@@ -6,6 +6,8 @@ use std::cell::Cell;
 /// wildcard access on all earlier trees, and that local
 /// accesses are treated as access errors for tags that are
 /// larger than the root of the accessed subtree.
+/// This tests the case were we have multiple exposed nodes on
+/// the main tree that are invalid because their tag is too large.
 pub fn main() {
     let mut x: u32 = 42;
 

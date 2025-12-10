@@ -1087,6 +1087,7 @@ impl<'tcx> LocationTree {
                 let mut entry = args.data.perms.entry(args.idx);
                 let perm = entry.or_insert(node.default_location_state());
 
+                // We only count exposed nodes through which an access could happen.
                 if node.is_exposed
                     && perm.permission.strongest_allowed_child_access(protected)
                         >= access_kind.into()
@@ -1126,7 +1127,10 @@ impl<'tcx> LocationTree {
                 })
             },
         )?;
+        // If this is the main subtree and it doesn't contain any exposed children through which the access could happen then the access
+        // is invalid.
         if !has_exposed
+            // Check that this is the main subtree.
             && self
                 .wildcard_accesses
                 .get(root)
