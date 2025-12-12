@@ -77,6 +77,9 @@ fn test_file() {
     // However, writing 0 bytes can succeed or fail.
     let _ignore = file.write(&[]);
 
+    // Test calling File::create on an existing file, since that uses a different code path
+    File::create(&path).unwrap();
+
     // Removing file should succeed.
     remove_file(&path).unwrap();
 }
@@ -209,9 +212,11 @@ fn test_file_set_len() {
 
     // Can't use set_len on a file not opened for writing
     let file = OpenOptions::new().read(true).open(&path).unwrap();
-    assert_eq!(
-        if cfg!(windows) { ErrorKind::PermissionDenied } else { ErrorKind::InvalidInput },
-        file.set_len(14).unwrap_err().kind()
+    // Due to https://github.com/rust-lang/miri/issues/4457, we have to assume the failure could
+    // be either of the Windows or Unix kind, no matter which platform we're on.
+    assert!(
+        [ErrorKind::PermissionDenied, ErrorKind::InvalidInput]
+            .contains(&file.set_len(14).unwrap_err().kind())
     );
 
     remove_file(&path).unwrap();

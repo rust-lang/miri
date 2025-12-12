@@ -387,17 +387,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let class = this.read_scalar(class)?.to_u32()?;
         let buffer_size = this.read_scalar(buffer_size)?.to_u32()?;
-        let file_info = this.read_pointer(file_information)?;
+        let file_information = this.read_pointer(file_information)?;
         this.check_ptr_access(
-            file_info,
+            file_information,
             Size::from_bytes(buffer_size),
             CheckInAllocMsg::MemoryAccess,
         )?;
 
-        let file = this.read_handle(file, "GetFileInformationByHandle")?;
+        let file = this.read_handle(file, "SetFileInformationByHandle")?;
         let Handle::File(fd_num) = file else { this.invalid_handle("SetFileInformationByHandle")? };
         let Some(desc) = this.machine.fds.get(fd_num) else {
-            this.invalid_handle("GetFileInformationByHandle")?
+            this.invalid_handle("SetFileInformationByHandle")?
         };
         let file = desc.downcast::<FileHandle>().ok_or_else(|| {
             err_unsup_format!(
@@ -406,10 +406,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         })?;
 
         if class == this.eval_windows_u32("c", "FileEndOfFileInfo") {
-            let ptr = this.deref_pointer_as(
-                file_information,
-                this.windows_ty_layout("FILE_END_OF_FILE_INFO"),
-            )?;
+            let ptr = this
+                .ptr_to_mplace(file_information, this.windows_ty_layout("FILE_END_OF_FILE_INFO"));
             let new_len =
                 this.read_scalar(&this.project_field_named(&ptr, "EndOfFile")?)?.to_i64()?;
             match file.file.set_len(new_len.try_into().unwrap()) {
@@ -418,6 +416,35 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.set_last_error(e)?;
                     interp_ok(this.eval_windows("c", "FALSE"))
                 }
+            }
+        } else if class == this.eval_windows_u32("c", "FileAllocationInfo") {
+            // File allocation size is independent of file EOF position on Windows, except that
+            // EOF must be <= allocation size. So we only do something if the file is bigger than
+            // the requested allocation size.
+            let ptr = this
+                .ptr_to_mplace(file_information, this.windows_ty_layout("FILE_ALLOCATION_INFO"));
+            let new_alloc_size: u64 = this
+                .read_scalar(&this.project_field_named(&ptr, "AllocationSize")?)?
+                .to_i64()?
+                .try_into()
+                .unwrap();
+            let old_len = match file.file.metadata() {
+                Ok(m) => m.len(),
+                Err(e) => {
+                    this.set_last_error(e)?;
+                    return interp_ok(this.eval_windows("c", "FALSE"));
+                }
+            };
+            if new_alloc_size < old_len {
+                match file.file.set_len(new_alloc_size) {
+                    Ok(_) => interp_ok(this.eval_windows("c", "TRUE")),
+                    Err(e) => {
+                        this.set_last_error(e)?;
+                        interp_ok(this.eval_windows("c", "FALSE"))
+                    }
+                }
+            } else {
+                interp_ok(this.eval_windows("c", "TRUE"))
             }
         } else {
             throw_unsup_format!(
