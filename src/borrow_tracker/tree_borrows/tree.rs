@@ -1034,6 +1034,8 @@ impl<'tcx> LocationTree {
             wildcard_state.access_relatedness(access_kind, only_foreign)
         };
 
+        let mut has_exposed = false;
+
         // This does a traversal across the tree updating children before their parents. The
         // difference to `perform_normal_access` is that we take the access relatedness from
         // the wildcard tracking state of the node instead of from the visitor itself.
@@ -1082,6 +1084,18 @@ impl<'tcx> LocationTree {
                     return Err(no_valid_exposed_references_error(diagnostics));
                 };
 
+                let mut entry = args.data.perms.entry(args.idx);
+                let perm = entry.or_insert(node.default_location_state());
+
+                // We only count exposed nodes through which an access could happen.
+                if node.is_exposed
+                    && perm.permission.strongest_allowed_child_access(protected)
+                        >= access_kind.into()
+                    && max_local_tag.is_none_or(|max_local_tag| max_local_tag > node.tag)
+                {
+                    has_exposed = true;
+                }
+
                 let Some(relatedness) = wildcard_relatedness.to_relatedness() else {
                     // If the access type is Either, then we do not apply any transition
                     // to this node, but we still update each of its children.
@@ -1090,8 +1104,6 @@ impl<'tcx> LocationTree {
                     return Ok(());
                 };
 
-                let mut entry = args.data.perms.entry(args.idx);
-                let perm = entry.or_insert(node.default_location_state());
                 // We know the exact relatedness, so we can actually do precise checks.
                 perm.perform_transition(
                     args.idx,
@@ -1115,6 +1127,19 @@ impl<'tcx> LocationTree {
                 })
             },
         )?;
+        // If this is the main subtree and it doesn't contain any exposed children through which the access could happen then the access
+        // is invalid.
+        if !has_exposed
+            // Check that this is the main subtree.
+            && self
+                .wildcard_accesses
+                .get(root)
+                .unwrap()
+                .access_relatedness(access_kind, true)
+                .is_none()
+        {
+            return Err(no_valid_exposed_references_error(diagnostics)).into();
+        }
         interp_ok(())
     }
 }
