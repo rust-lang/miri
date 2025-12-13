@@ -1,6 +1,9 @@
 //! Implements calling functions from a native library.
 
+use std::cell::Cell;
 use std::ops::Deref;
+use std::os::raw::c_void;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicBool;
 
 use libffi::low::CodePtr;
@@ -16,6 +19,10 @@ use self::helpers::ToSoft;
 
 mod ffi;
 
+thread_local! {
+    static INTERP_CTX: Cell<Option<NonNull<c_void>>> = const { Cell::new(None) };
+}
+
 #[cfg_attr(
     not(all(
         target_os = "linux",
@@ -27,6 +34,7 @@ mod ffi;
 pub mod trace;
 
 use self::ffi::OwnedArg;
+use crate::diagnostics::DiagLevel;
 use crate::*;
 
 /// The final results of an FFI trace, containing every relevant event detected
@@ -94,6 +102,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         trace::Supervisor::do_ffi(alloc, || {
             // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
             // as the specified primitive integer type
+            INTERP_CTX.set(NonNull::new(std::ptr::from_ref(this).cast_mut().cast()));
             let scalar = match dest.layout.ty.kind() {
                 // ints
                 ty::Int(IntTy::I8) => {
@@ -330,7 +339,9 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Read the bytes that make up this argument. We cannot use the normal getter as
                 // those would fail if any part of the argument is uninitialized. Native code
                 // is kind of outside the interpreter, after all...
-                Box::from(alloc.inspect_with_uninit_and_ptr_outside_interpreter(range))
+                let ret: Box<[u8]> =
+                    Box::from(alloc.inspect_with_uninit_and_ptr_outside_interpreter(range));
+                ret
             }
             either::Either::Right(imm) => {
                 let mut bytes: Box<[u8]> = vec![0; imm.layout.size.bytes_usize()].into();
@@ -439,9 +450,60 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(match layout.ty.kind() {
             // Scalar types have already been handled above.
             ty::Adt(adt_def, args) => self.adt_to_ffitype(layout.ty, *adt_def, args)?,
-            _ => throw_unsup_format!("unsupported argument type for native call: {}", layout.ty),
+            // Functions with no declared return type (i.e., the default return)
+            // have the output_type `Tuple([])`.
+            ty::Tuple(t_list) if (*t_list).deref().is_empty() => FfiType::void(),
+            _ => {
+                throw_unsup_format!("unsupported argument type for native call: {}", layout.ty)
+            }
         })
     }
+}
+
+pub fn build_libffi_closure<'tcx, 'this>(
+    this: &'this MiriInterpCx<'tcx>,
+    fn_ptr: rustc_middle::ty::FnSig<'tcx>,
+) -> Option<libffi::middle::Closure<'this>> {
+    let mut args = Vec::new();
+    for input in fn_ptr.inputs().iter() {
+        let layout = match this.layout_of(*input) {
+            Ok(layout) => layout,
+            Err(e) => {
+                tracing::info!(?e, "Skip closure");
+                return None;
+            }
+        };
+        let ty = match this.ty_to_ffitype(layout).report_err() {
+            Ok(ty) => ty,
+            Err(e) => {
+                tracing::info!(?e, "Skip closure");
+                return None;
+            }
+        };
+        args.push(ty);
+    }
+    let res_type = fn_ptr.output();
+    let res_type = {
+        let layout = match this.layout_of(res_type) {
+            Ok(layout) => layout,
+            Err(e) => {
+                tracing::info!(?e, "Skip closure");
+                return None;
+            }
+        };
+        match this.ty_to_ffitype(layout).report_err() {
+            Ok(ty) => ty,
+            Err(e) => {
+                tracing::info!(?e, "Skip closure");
+                return None;
+            }
+        }
+    };
+    let closure_builder = libffi::middle::Builder::new().args(args).res(res_type);
+    let data = CallbackData {};
+    let data = Box::leak(Box::new(data));
+    let closure = closure_builder.into_closure(callback_callback, data);
+    Some(closure)
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -532,4 +594,39 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_immediate(*ret, dest)?;
         interp_ok(true)
     }
+}
+
+struct CallbackData {}
+
+unsafe extern "C" fn callback_callback(
+    _cif: &libffi::low::ffi_cif,
+    _result: &mut c_void,
+    _args: *const *const c_void,
+    _infos: &CallbackData,
+) {
+    if let Some(this) = INTERP_CTX.get() {
+        let ctx = unsafe { this.cast::<MiriInterpCx<'_>>().as_ref() };
+        let stacktrace = ctx.generate_stacktrace();
+        crate::diagnostics::report_msg(
+            DiagLevel::Error,
+            "tried to call a function pointer through the FFI boundary".into(),
+            vec!["this function called a function pointer calling back into Rust".into()],
+            vec![(None, "this is not supported yet by miri".into())],
+            Vec::new(),
+            &stacktrace,
+            None,
+            &ctx.machine,
+        );
+    } else {
+        // There is no interpctx set which likely means we are running in a different thread
+        // than that one that called into the native library. At this point we fall back
+        // to just reporting an error via eprintln before aborting.
+        eprintln!(
+            "Tried to call a function pointer via FFI boundary. \
+            That's not supported yet by miri"
+        );
+    }
+    // We abort the execution at this point as we cannot return the
+    // expected value here.
+    std::process::exit(1);
 }
