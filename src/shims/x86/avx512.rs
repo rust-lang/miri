@@ -3,7 +3,7 @@ use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
 
-use super::{permute, pmaddbw, psadbw, pshufb};
+use super::{permute, pmaddbw, psadbw, pshufb, vpdpbusd};
 use crate::*;
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -108,6 +108,18 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
 
                 pshufb(this, left, right, dest)?;
+            }
+
+            // Used to implement the _mm512_dpbusd_epi32 function.
+            "vpdpbusd.512" | "vpdpbusd.256" | "vpdpbusd.128" => {
+                this.expect_target_feature_for_intrinsic(link_name, "avx512vnni")?;
+                if matches!(unprefixed_name, "vpdpbusd.128" | "vpdpbusd.256") {
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                }
+
+                let [src, a, b] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+
+                vpdpbusd(this, src, a, b, dest)?;
             }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
