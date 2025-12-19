@@ -17,11 +17,11 @@ pub struct ShimSig<'tcx, const ARGS: usize> {
 
 /// Construct a `ShimSig` with convenient syntax:
 /// ```rust,ignore
-/// shim_sig!(this, extern "C" fn (*const T, i32) -> usize)
+/// shim_sig!(extern "C" fn (*const T, i32) -> usize)
 /// ```
 #[macro_export]
 macro_rules! shim_sig {
-    (extern $abi:literal fn($($arg:ty),*) -> $ret:ty) => {
+    (extern $abi:literal fn($($arg:ty),* $(,)?) -> $ret:ty) => {
         |this| $crate::shims::sig::ShimSig {
             abi: std::str::FromStr::from_str($abi).expect("incorrect abi specified"),
             args: [$(shim_sig_arg!(this, $arg)),*],
@@ -53,6 +53,8 @@ macro_rules! shim_sig_arg {
             "*const _" => $this.machine.layouts.const_raw_ptr.ty,
             "*mut _" => $this.machine.layouts.mut_raw_ptr.ty,
             ty if let Some(libc_ty) = ty.strip_prefix("libc::") => $this.libc_ty_layout(libc_ty).ty,
+            ty if let Some(win_ty) = ty.strip_prefix("winapi::") =>
+                $this.windows_ty_layout(win_ty).ty,
             ty => panic!("unsupported signature type {ty:?}"),
         }
     }};
