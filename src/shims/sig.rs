@@ -55,7 +55,7 @@ macro_rules! shim_sig_arg {
             ty if let Some(libc_ty) = ty.strip_prefix("libc::") => $this.libc_ty_layout(libc_ty).ty,
             ty if let Some(win_ty) = ty.strip_prefix("winapi::") =>
                 $this.windows_ty_layout(win_ty).ty,
-            ty => panic!("unsupported signature type {ty:?}"),
+            ty => helpers::path_ty_layout($this, &ty.split("::").collect::<Vec<_>>()).ty,
         }
     }};
 }
