@@ -2,11 +2,11 @@ use std::ffi::OsStr;
 use std::path::{self, Path, PathBuf};
 use std::{io, iter, str};
 
-use rustc_abi::{Align, CanonAbi, Size, X86Call};
+use rustc_abi::{Align, Size};
 use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
-use rustc_target::spec::{Arch, Env};
+use rustc_target::spec::Env;
 
 use self::shims::windows::handle::{Handle, PseudoHandle};
 use crate::shims::os_str::bytes_to_os_str;
@@ -422,7 +422,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(res, dest)?;
             }
             "FlushFileBuffers" => {
-                let [handle] = this.check_shim_sig_lenient(abi, sys_conv, link_name, args)?;
+                let [handle] = this.check_shim_sig(
+                    shim_sig!(extern "system" fn(winapi::HANDLE) -> winapi::BOOL),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let res = this.FlushFileBuffers(handle)?;
                 this.write_scalar(res, dest)?;
             }
@@ -1199,7 +1204,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_int(1, dest)?;
             }
             "GetModuleHandleA" if this.frame_in_std() => {
-                let [module_name] = this.check_shim_sig(
+                let [_module_name] = this.check_shim_sig(
                     shim_sig!(extern "system" fn(*const _) -> winapi::HMODULE),
                     link_name,
                     abi,
@@ -1209,7 +1214,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_int(1, dest)?;
             }
             "SetConsoleTextAttribute" if this.frame_in_std() => {
-                let [console_output, attribute] = this.check_shim_sig(
+                let [_console_output, _attribute] = this.check_shim_sig(
                     shim_sig!(extern "system" fn(winapi::HANDLE, u16) -> winapi::BOOL),
                     link_name,
                     abi,
@@ -1231,7 +1236,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
             "GetFileType" if this.frame_in_std() => {
-                let [file] = this.check_shim_sig(
+                let [_file] = this.check_shim_sig(
                     shim_sig!(extern "system" fn(winapi::HANDLE) -> u32),
                     link_name,
                     abi,
@@ -1241,7 +1246,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
             "AddVectoredExceptionHandler" if this.frame_in_std() => {
-                let [first, handler] = this.check_shim_sig(
+                let [_first, _handler] = this.check_shim_sig(
                     shim_sig!(extern "system" fn(u32, *mut _) -> *mut _),
                     link_name,
                     abi,
@@ -1251,7 +1256,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_int(1, dest)?;
             }
             "SetThreadStackGuarantee" if this.frame_in_std() => {
-                let [stack_size_in_bytes] = this.check_shim_sig(
+                let [_stack_size_in_bytes] = this.check_shim_sig(
                     shim_sig!(extern "system" fn(*mut _) -> winapi::BOOL),
                     link_name,
                     abi,
