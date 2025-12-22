@@ -1,6 +1,6 @@
-use std::env;
-use std::ffi::{OsStr, OsString};
-use std::io::ErrorKind;
+use std::ffi::{CStr, OsStr, OsString};
+use std::io::{self, ErrorKind};
+use std::{env, slice};
 
 use rustc_abi::{FieldIdx, Size};
 use rustc_data_structures::fx::FxHashMap;
@@ -270,6 +270,59 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // For most platforms the return type is an `i32`, but some are unsigned. The TID
         // will always be positive so we don't need to differentiate.
         interp_ok(Scalar::from_u32(this.get_current_tid()))
+    }
+
+    fn uname(&mut self, uname: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        this.assert_target_os_is_unix("uname");
+
+        let uname_ptr = this.read_pointer(uname)?;
+        if this.ptr_is_null(uname_ptr)? {
+            return this.set_last_error_and_return_i32(LibcError("EFAULT"));
+        }
+
+        let mut uname_buf = unsafe { std::mem::zeroed() };
+        if this.machine.communicate() {
+            let result = unsafe { libc::uname(&mut uname_buf) };
+            if result != 0 {
+                let err = this.io_error_to_errnum(io::Error::last_os_error())?;
+                this.set_last_error(err)?;
+                return interp_ok(Scalar::from_i32(result));
+            }
+        } else {
+            fn write_slice(dst: &mut [i8], src: &[u8]) {
+                dst[..src.len()].copy_from_slice(unsafe {
+                    slice::from_raw_parts(src.as_ptr().cast(), src.len())
+                });
+            }
+            write_slice(uname_buf.sysname.as_mut_slice(), b"Linux");
+            write_slice(uname_buf.nodename.as_mut_slice(), b"Miri");
+            write_slice(uname_buf.release.as_mut_slice(), b"6.18.1-arch1-2");
+            write_slice(
+                uname_buf.version.as_mut_slice(),
+                b"#1 SMP PREEMPT_DYNAMIC Sat, 13 Dec 2025 18:23:21 +0000",
+            );
+            write_slice(uname_buf.machine.as_mut_slice(), b"x86_64");
+            write_slice(uname_buf.domainname.as_mut_slice(), b"(none)");
+        }
+
+        let uname = this.deref_pointer_as(uname, this.libc_ty_layout("utsname"))?;
+        let values = [
+            ("sysname", uname_buf.sysname.as_ptr()),
+            ("nodename", uname_buf.nodename.as_ptr()),
+            ("release", uname_buf.release.as_ptr()),
+            ("version", uname_buf.version.as_ptr()),
+            ("machine", uname_buf.machine.as_ptr()),
+            ("domainname", uname_buf.domainname.as_ptr()),
+        ];
+        for (name, value) in values {
+            let value = unsafe { CStr::from_ptr(value) }.to_bytes();
+            let field = this.project_field_named(&uname, name)?;
+            let size = field.layout().layout.size().bytes();
+            let (written, _) = this.write_c_str(value, field.ptr(), size)?;
+            assert!(written); // All values should fit.
+        }
+        interp_ok(Scalar::from_i32(0))
     }
 
     /// The Apple-specific `int pthread_threadid_np(pthread_t thread, uint64_t *thread_id)`, which
