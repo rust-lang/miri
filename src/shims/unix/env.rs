@@ -290,7 +290,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 return interp_ok(Scalar::from_i32(result));
             }
         } else {
-            fn write_slice(dst: &mut [i8], src: &[u8]) {
+            fn write_slice(dst: &mut [libc::c_char], src: &[u8]) {
                 dst[..src.len()].copy_from_slice(unsafe {
                     slice::from_raw_parts(src.as_ptr().cast(), src.len())
                 });
