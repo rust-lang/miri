@@ -303,6 +303,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 b"#1 SMP PREEMPT_DYNAMIC Sat, 13 Dec 2025 18:23:21 +0000",
             );
             write_slice(uname_buf.machine.as_mut_slice(), b"x86_64");
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             write_slice(uname_buf.domainname.as_mut_slice(), b"(none)");
         }
 
@@ -313,6 +314,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ("release", uname_buf.release.as_ptr()),
             ("version", uname_buf.version.as_ptr()),
             ("machine", uname_buf.machine.as_ptr()),
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             ("domainname", uname_buf.domainname.as_ptr()),
         ];
         for (name, value) in values {

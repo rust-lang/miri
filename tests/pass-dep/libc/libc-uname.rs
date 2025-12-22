@@ -18,8 +18,12 @@ fn test_ok() {
     assert_eq!(unsafe { CStr::from_ptr(&uname.sysname as *const _) }, c"Linux");
     assert_eq!(unsafe { CStr::from_ptr(&uname.nodename as *const _) }, c"Miri");
     assert_eq!(unsafe { CStr::from_ptr(&uname.release as *const _) }, c"6.18.1-arch1-2");
-    assert_eq!(unsafe { CStr::from_ptr(&uname.version as *const _) }, c"#1 SMP PREEMPT_DYNAMIC Sat, 13 Dec 2025 18:23:21 +0000");
+    assert_eq!(
+        unsafe { CStr::from_ptr(&uname.version as *const _) },
+        c"#1 SMP PREEMPT_DYNAMIC Sat, 13 Dec 2025 18:23:21 +0000"
+    );
     assert_eq!(unsafe { CStr::from_ptr(&uname.machine as *const _) }, c"x86_64");
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     assert_eq!(unsafe { CStr::from_ptr(&uname.domainname as *const _) }, c"(none)");
 }
 
