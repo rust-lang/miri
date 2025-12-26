@@ -290,21 +290,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 return interp_ok(Scalar::from_i32(result));
             }
         } else {
-            fn write_slice(dst: &mut [libc::c_char], src: &[u8]) {
+            fn write_slice(dst: &mut [libc::c_char], src: &str) {
                 dst[..src.len()].copy_from_slice(unsafe {
                     slice::from_raw_parts(src.as_ptr().cast(), src.len())
                 });
             }
-            write_slice(uname_buf.sysname.as_mut_slice(), b"Linux");
-            write_slice(uname_buf.nodename.as_mut_slice(), b"Miri");
-            write_slice(uname_buf.release.as_mut_slice(), b"6.18.1-arch1-2");
-            write_slice(
-                uname_buf.version.as_mut_slice(),
-                b"#1 SMP PREEMPT_DYNAMIC Sat, 13 Dec 2025 18:23:21 +0000",
-            );
-            write_slice(uname_buf.machine.as_mut_slice(), b"x86_64");
+            write_slice(uname_buf.sysname.as_mut_slice(), "Miri");
+            write_slice(uname_buf.nodename.as_mut_slice(), "Miri");
+            write_slice(uname_buf.release.as_mut_slice(), env!("CARGO_PKG_VERSION"));
+            write_slice(uname_buf.version.as_mut_slice(), "");
+            write_slice(uname_buf.machine.as_mut_slice(), std::env::consts::ARCH);
             #[cfg(any(target_os = "linux", target_os = "android"))]
-            write_slice(uname_buf.domainname.as_mut_slice(), b"(none)");
+            write_slice(uname_buf.domainname.as_mut_slice(), "(none)");
         }
 
         let uname = this.deref_pointer_as(uname, this.libc_ty_layout("utsname"))?;

@@ -15,14 +15,17 @@ fn test_ok() {
     }
 
     // These values are only correct when running isolated.
-    assert_eq!(unsafe { CStr::from_ptr(&uname.sysname as *const _) }, c"Linux");
+    assert_eq!(unsafe { CStr::from_ptr(&uname.sysname as *const _) }, c"Miri");
     assert_eq!(unsafe { CStr::from_ptr(&uname.nodename as *const _) }, c"Miri");
-    assert_eq!(unsafe { CStr::from_ptr(&uname.release as *const _) }, c"6.18.1-arch1-2");
     assert_eq!(
-        unsafe { CStr::from_ptr(&uname.version as *const _) },
-        c"#1 SMP PREEMPT_DYNAMIC Sat, 13 Dec 2025 18:23:21 +0000"
+        unsafe { CStr::from_ptr(&uname.release as *const _) }.to_str().unwrap(),
+        env!("CARGO_PKG_VERSION")
     );
-    assert_eq!(unsafe { CStr::from_ptr(&uname.machine as *const _) }, c"x86_64");
+    assert_eq!(unsafe { CStr::from_ptr(&uname.version as *const _) }, c"");
+    assert_eq!(
+        unsafe { CStr::from_ptr(&uname.machine as *const _) }.to_str().unwrap(),
+        std::env::consts::ARCH
+    );
     #[cfg(any(target_os = "linux", target_os = "android"))]
     assert_eq!(unsafe { CStr::from_ptr(&uname.domainname as *const _) }, c"(none)");
 }
