@@ -281,7 +281,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(LibcError("EFAULT"));
         }
 
-        let mut uname_buf = unsafe { std::mem::zeroed() };
+        let mut uname_buf = libc::utsname {
+            sysname: [0; _],
+            nodename: [0; _],
+            release: [0; _],
+            version: [0; _],
+            machine: [0; _],
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            domainname: [0; _],
+        };
         if this.machine.communicate() {
             let result = unsafe { libc::uname(&mut uname_buf) };
             if result != 0 {
