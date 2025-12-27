@@ -1,6 +1,5 @@
-use std::cell::RefCell;
 use std::ptr::NonNull;
-use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
 use ipc_channel::ipc;
 use nix::sys::{mman, ptrace, signal};
@@ -10,8 +9,9 @@ use rustc_const_eval::interpret::InterpResult;
 use super::CALLBACK_STACK_SIZE;
 use super::messages::{Confirmation, StartFfiInfo, TraceRequest};
 use super::parent::{ChildListener, sv_loop};
-use crate::alloc::isolated_alloc::IsolatedAlloc;
 use crate::shims::native_lib::MemEvents;
+use crate::shims::native_lib::trace::parent::{PAGE_ADDR, PAGE_COUNT, PAGE_SIZE};
+use crate::*;
 
 /// A handle to the single, shared supervisor process across all `MiriMachine`s.
 /// Since it would be very difficult to trace multiple FFI calls in parallel, we
@@ -32,7 +32,7 @@ pub struct Supervisor {
     /// parent process has handled the request from `message_tx`.
     confirm_rx: ipc::IpcReceiver<Confirmation>,
     /// Receiver for memory acceses that ocurred during the FFI call.
-    event_rx: ipc::IpcReceiver<MemEvents>,
+    event_rx: Option<ipc::IpcReceiver<MemEvents>>,
 }
 
 /// Marker representing that an error occurred during creation of the supervisor.
@@ -45,7 +45,7 @@ impl Supervisor {
         SUPERVISOR.lock().unwrap().is_some()
     }
 
-    unsafe fn protect_pages(
+    pub unsafe fn protect_pages(
         pages: impl Iterator<Item = (NonNull<u8>, usize)>,
         prot: mman::ProtFlags,
     ) -> Result<(), nix::errno::Errno> {
@@ -54,14 +54,19 @@ impl Supervisor {
         }
         Ok(())
     }
+}
 
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Performs an arbitrary FFI call, enabling tracing from the supervisor.
     /// As this locks the supervisor via a mutex, no other threads may enter FFI
     /// until this function returns.
-    pub fn do_ffi<'tcx>(
-        alloc: &Rc<RefCell<IsolatedAlloc>>,
+    fn do_ffi(
+        &mut self,
         f: impl FnOnce() -> InterpResult<'tcx, crate::ImmTy<'tcx>>,
     ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
+        let this = self.eval_context_mut();
+        let machine_ptr = &raw mut *this;
         let mut sv_guard = SUPERVISOR.lock().unwrap();
         // If the supervisor is not initialised for whatever reason, fast-return.
         // As a side-effect, even on platforms where ptracing
@@ -69,9 +74,17 @@ impl Supervisor {
         // happens at a time.
         let Some(sv) = sv_guard.as_mut() else { return f().map(|v| (v, None)) };
 
+        // Save the machine pointer to a location where the libc interceptors can use it,
+        // since we can't pass in arguments.
+        super::parent::MACHINE_PTR.store(machine_ptr.cast(), std::sync::atomic::Ordering::Relaxed);
+        // Give the libc interceptors the event channel.
+        let mut e_rx = super::parent::EVT_RX.lock().unwrap();
+        e_rx.replace(sv.event_rx.take().unwrap());
+        drop(e_rx);
+
         // Get pointers to all the pages the supervisor must allow accesses in
         // and prepare the callback stack.
-        let alloc = alloc.borrow();
+        let alloc = this.machine.allocator.as_ref().unwrap().borrow();
         let page_size = alloc.page_size();
         let page_ptrs = alloc
             .pages()
@@ -87,6 +100,9 @@ impl Supervisor {
         let stack_ptr = raw_stack_ptr.expose_provenance();
         let start_info = StartFfiInfo { page_ptrs, stack_ptr };
 
+        let pages: Vec<_> = alloc.pages().collect();
+        // If native code allocates, we'll need to get access to the machine's allocator.
+        drop(alloc);
         // Unwinding might be messed up due to partly protected memory, so let's abort if something
         // breaks inside here.
         let res = std::panic::abort_unwind(|| {
@@ -106,14 +122,19 @@ impl Supervisor {
             // working as normal, just with extra tracing. So even if the compiler moves memory
             // accesses down to after the `mprotect`, they won't actually segfault.
             unsafe {
-                Self::protect_pages(alloc.pages(), mman::ProtFlags::PROT_NONE).unwrap();
+                Supervisor::protect_pages(pages.into_iter(), mman::ProtFlags::PROT_NONE).unwrap();
             }
 
             let res = f();
 
+            // The original `this` was used during the FFI call, so
+            // acquire a new mutable reference from the used pointer.
+            let this = unsafe { &mut *machine_ptr };
+
+            let alloc = this.machine.allocator.as_ref().unwrap().borrow();
             // SAFETY: We set memory back to normal, so this is safe.
             unsafe {
-                Self::protect_pages(
+                Supervisor::protect_pages(
                     alloc.pages(),
                     mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
                 )
@@ -129,14 +150,21 @@ impl Supervisor {
             res
         });
 
-        // SAFETY: Caller upholds that this pointer was allocated as a box with
-        // this type.
+        // SAFETY: We know that this pointer was allocated as a box with this type.
         unsafe {
             drop(Box::from_raw(raw_stack_ptr));
         }
+
+        // Now get the event channel back.
+        let mut e_rx = super::parent::EVT_RX.lock().unwrap();
+        sv.event_rx = Some(e_rx.take().unwrap());
+        drop(e_rx);
+
         // On the off-chance something really weird happens, don't block forever.
         let events = sv
             .event_rx
+            .as_ref()
+            .unwrap()
             .try_recv_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| {
                 match e {
@@ -245,6 +273,7 @@ pub unsafe fn init_sv() -> Result<(), SvInitError> {
                 // First make sure the parent succeeded with ptracing us!
                 signal::raise(signal::SIGSTOP).unwrap();
                 // If we're the child process, save the supervisor info.
+                let event_rx = Some(event_rx);
                 *lock = Some(Supervisor { message_tx, confirm_rx, event_rx });
             }
         }
@@ -259,5 +288,54 @@ pub fn register_retcode_sv(code: i32) {
     if let Some(sv) = sv_guard.as_mut() {
         sv.message_tx.send(TraceRequest::OverrideRetcode(code)).unwrap();
         sv.confirm_rx.recv().unwrap();
+    }
+}
+
+// These are functions that should not be called directly, and can only be reached
+// by offseting the instruction pointer into them. However, they are here because
+// they execute in the child process.
+
+/// Disables protections on the page whose address is currently in `PAGE_ADDR`.
+///
+/// SAFETY: `PAGE_ADDR` should be set to a page-aligned pointer to an owned page,
+/// `PAGE_SIZE` should be the host pagesize, and the range from `PAGE_ADDR` to
+/// `PAGE_SIZE` * `PAGE_COUNT` must be owned and allocated memory. No other threads
+/// should be running.
+pub unsafe extern "C" fn mempr_off() {
+    // Again, cannot allow unwinds to happen here.
+    let len = PAGE_SIZE.load(Ordering::SeqCst).saturating_mul(PAGE_COUNT.load(Ordering::SeqCst));
+    // SAFETY: Upheld by "caller".
+    unsafe {
+        // It's up to the caller to make sure this doesn't actually overflow, but
+        // we mustn't unwind from here, so...
+        if libc::mprotect(
+            PAGE_ADDR.load(Ordering::SeqCst).cast(),
+            len,
+            libc::PROT_READ | libc::PROT_WRITE,
+        ) != 0
+        {
+            // Can't return or unwind, but we can do this.
+            std::process::exit(-1);
+        }
+    }
+    // If this fails somehow we're doomed.
+    if signal::raise(signal::SIGSTOP).is_err() {
+        std::process::exit(-1);
+    }
+}
+
+/// Reenables protection on the page set by `PAGE_ADDR`.
+///
+/// SAFETY: See `mempr_off()`.
+pub unsafe extern "C" fn mempr_on() {
+    let len = PAGE_SIZE.load(Ordering::SeqCst).wrapping_mul(PAGE_COUNT.load(Ordering::SeqCst));
+    // SAFETY: Upheld by "caller".
+    unsafe {
+        if libc::mprotect(PAGE_ADDR.load(Ordering::SeqCst).cast(), len, libc::PROT_NONE) != 0 {
+            std::process::exit(-1);
+        }
+    }
+    if signal::raise(signal::SIGSTOP).is_err() {
+        std::process::exit(-1);
     }
 }
