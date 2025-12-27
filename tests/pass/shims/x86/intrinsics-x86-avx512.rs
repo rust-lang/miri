@@ -417,6 +417,8 @@ unsafe fn test_avx512ternarylogic() {
 unsafe fn test_avx512vnni() {
     #[target_feature(enable = "avx512vnni")]
     unsafe fn test_mm512_dpbusd_epi32() {
+        // These inputs aim to hit overflow cases and test that A is interpreted as unsigned and B
+        // as signed.
         const SRC: [i32; 16] = [
             1,
             0,

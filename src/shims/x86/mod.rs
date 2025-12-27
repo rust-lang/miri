@@ -1200,53 +1200,6 @@ fn pshufb<'tcx>(
     interp_ok(())
 }
 
-/// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in a with corresponding signed
-/// 8-bit integers in b, producing 4 intermediate signed 16-bit results. Sum these 4 results with
-/// the corresponding 32-bit integer in src, and store the packed 32-bit results in dst.
-///
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_dpbusd_epi32>
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_dpbusd_epi32>
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_dpbusd_epi32>
-fn vpdpbusd<'tcx>(
-    ecx: &mut crate::MiriInterpCx<'tcx>,
-    src: &OpTy<'tcx>,
-    a: &OpTy<'tcx>,
-    b: &OpTy<'tcx>,
-    dest: &MPlaceTy<'tcx>,
-) -> InterpResult<'tcx, ()> {
-    let (src, src_len) = ecx.project_to_simd(src)?;
-    let (a, a_len) = ecx.project_to_simd(a)?;
-    let (b, b_len) = ecx.project_to_simd(b)?;
-    let (dest, dest_len) = ecx.project_to_simd(dest)?;
-
-    // fn vpdpbusd(src: i32x16, a: i32x16, b: i32x16) -> i32x16;
-    // fn vpdpbusd256(src: i32x8, a: i32x8, b: i32x8) -> i32x8;
-    // fn vpdpbusd128(src: i32x4, a: i32x4, b: i32x4) -> i32x4;
-    assert_eq!(dest_len, src_len);
-    assert_eq!(dest_len, a_len);
-    assert_eq!(dest_len, b_len);
-
-    for i in 0..dest_len {
-        let src = ecx.read_scalar(&ecx.project_index(&src, i)?)?.to_i32()?;
-        let a = ecx.read_scalar(&ecx.project_index(&a, i)?)?.to_u32()?;
-        let b = ecx.read_scalar(&ecx.project_index(&b, i)?)?.to_u32()?;
-        let dest = ecx.project_index(&dest, i)?;
-
-        let [a1, a2, a3, a4] = a.to_le_bytes();
-        let [b1, b2, b3, b4] = b.to_le_bytes();
-
-        let intermediate = i32::from(i16::from(a1).wrapping_mul(i16::from(b1.cast_signed())))
-            .wrapping_add(i32::from(i16::from(a2).wrapping_mul(i16::from(b2.cast_signed()))))
-            .wrapping_add(i32::from(i16::from(a3).wrapping_mul(i16::from(b3.cast_signed()))))
-            .wrapping_add(i32::from(i16::from(a4).wrapping_mul(i16::from(b4.cast_signed()))));
-
-        let res = Scalar::from_i32(intermediate.wrapping_add(src));
-        ecx.write_scalar(res, &dest)?;
-    }
-
-    interp_ok(())
-}
-
 /// Packs two N-bit integer vectors to a single N/2-bit integers.
 ///
 /// The conversion from N-bit to N/2-bit should be provided by `f`.
