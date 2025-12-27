@@ -159,12 +159,13 @@ fn vpdpbusd<'tcx>(
         let b = ecx.read_scalar(&ecx.project_index(&b, i)?)?.to_u32()?;
         let dest = ecx.project_index(&dest, i)?;
 
-        let a = a.to_le_bytes();
-        let b = b.to_le_bytes();
+        let zipped = a.to_le_bytes().into_iter().zip(b.to_le_bytes());
+        let intermediate_sum: i32 = zipped
+            .map(|(a, b)| i32::from(a).strict_mul(i32::from(b.cast_signed())))
+            .fold(0, |x, y| x.strict_add(y));
 
-        let intermediate: [i32; 4] =
-            std::array::from_fn(|i| i32::from(a[i]).strict_mul(i32::from(b[i].cast_signed())));
-        let res = Scalar::from_i32(intermediate.into_iter().fold(src, |x, y| x.wrapping_add(y)));
+        // Use `wrapping_add` because `src` is an arbitrary i32 and the addition can overflow.
+        let res = Scalar::from_i32(intermediate_sum.wrapping_add(src));
         ecx.write_scalar(res, &dest)?;
     }
 

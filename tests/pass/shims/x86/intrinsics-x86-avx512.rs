@@ -417,13 +417,13 @@ unsafe fn test_avx512ternarylogic() {
 unsafe fn test_avx512vnni() {
     #[target_feature(enable = "avx512vnni")]
     unsafe fn test_mm512_dpbusd_epi32() {
-        // These inputs aim to hit overflow cases and test that A is interpreted as unsigned and B
-        // as signed.
         const SRC: [i32; 16] = [
             1,
             0,
             0,
             7,
+            // Using values close to the minimum/maximum here makes it very likely that the final
+            // addition with the element from this array overflows. The addition should wrap.
             i32::MAX - 10,
             i32::MIN + 10,
             12345,
@@ -438,6 +438,8 @@ unsafe fn test_avx512vnni() {
             -17,
         ];
 
+        // The `A` array must be interpreted as a sequence of unsigned 8-bit integers. Setting
+        // the high bit of a byte tests that this is implemented correctly.
         const A: [i32; 16] = [
             0x01010101,
             0xFFFF_FFFFu32 as i32,
@@ -457,6 +459,8 @@ unsafe fn test_avx512vnni() {
             0x11_22_33_44,
         ];
 
+        // The `B` array must be interpreted as a sequence of signed 8-bit integers. Setting
+        // the high bit of a byte tests that this is implemented correctly.
         const B: [i32; 16] = [
             0x01010101,
             0x7F7F_7F7F,
