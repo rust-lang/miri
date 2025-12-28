@@ -257,7 +257,7 @@ pub fn sv_loop(
     let mut curr_pid = init_pid;
 
     // There's an initial sigstop we need to deal with.
-    wait_for_signal(Some(curr_pid), signal::SIGSTOP, InitialCont::No)?;
+    wait_for_signal(Some(curr_pid), signal::SIGSTOP, InitialCont::No, None)?;
     ptrace::cont(curr_pid, None).unwrap();
 
     for evt in listener {
@@ -276,7 +276,7 @@ pub fn sv_loop(
                 confirm_tx.send(Confirmation).unwrap();
                 // We can't trust simply calling `Pid::this()` in the child process to give the right
                 // PID for us, so we get it this way.
-                curr_pid = wait_for_signal(None, signal::SIGSTOP, InitialCont::No).unwrap();
+                curr_pid = wait_for_signal(None, signal::SIGSTOP, InitialCont::No, None).unwrap();
                 // Intercept libc events we care about.
                 trap_libc(curr_pid);
                 // Continue until next syscall.
@@ -301,16 +301,16 @@ pub fn sv_loop(
                     // If it was a segfault, check if it was an artificial one
                     // caused by it trying to access the MiriMachine memory.
                     signal::SIGSEGV =>
-                        handle_segfault(
-                            pid,
-                            &ch_pages,
-                            ch_stack.unwrap(),
-                            page_size,
-                            &cs,
-                            &mut acc_events,
-                        )?,
+                        handle_segfault(pid, &ch_pages, ch_stack.unwrap(), &cs, &mut acc_events)?,
                     signal::SIGTRAP =>
-                        handle_sigtrap(pid, page_size, &mut ch_pages, &event_tx, &mut acc_events)?,
+                        handle_sigtrap(
+                            pid,
+                            &mut ch_pages,
+                            &event_tx,
+                            &mut acc_events,
+                            ch_stack.unwrap(),
+                            &cs,
+                        )?,
                     // Something weird happened.
                     _ => {
                         eprintln!("Process unexpectedly got {signal}; continuing...");
@@ -399,6 +399,13 @@ fn get_disasm() -> capstone::Capstone {
     .unwrap()
 }
 
+struct SegfaultCatchingStuff<'a, 'b, 'c> {
+    ch_pages: &'a [usize],
+    ch_stack: usize,
+    cs: &'b capstone::Capstone,
+    acc_events: &'c mut Vec<AccessEvent>,
+}
+
 /// Waits for `wait_signal`. If `init_cont`, it will first do a `ptrace::cont`.
 /// We want to avoid that in some cases, like at the beginning of FFI.
 ///
@@ -407,6 +414,7 @@ fn wait_for_signal(
     pid: Option<unistd::Pid>,
     wait_signal: signal::Signal,
     init_cont: InitialCont,
+    mut catch_segfaults: Option<SegfaultCatchingStuff<'_, '_, '_>>,
 ) -> Result<unistd::Pid, ExecEnd> {
     if matches!(init_cont, InitialCont::Yes) {
         ptrace::cont(pid.unwrap(), None).unwrap();
@@ -435,6 +443,11 @@ fn wait_for_signal(
         };
         if signal == wait_signal {
             return Ok(pid);
+        } else if let Some(ref mut sf) = catch_segfaults
+            && signal == signal::SIGSEGV
+        {
+            // Segfaults occuring during a wait should still be logged.
+            handle_segfault(pid, sf.ch_pages, sf.ch_stack, sf.cs, sf.acc_events)?;
         } else {
             ptrace::cont(pid, signal).map_err(|_| ExecEnd(None))?;
         }
@@ -519,16 +532,19 @@ fn capstone_disassemble(
     Ok(())
 }
 
+// THIS NEEDS TO SOMEHOW CATCH SEGFAULTS INSIDE IT!!!! AND ALSO IN THE FULL ONE IT
+// NEEDS TO GET THEM TO LOG THOSE ACCESSES AAAAAAAAAAAAAAAAA
+
 /// Grabs the access that caused a segfault and logs it down if it's to our memory,
 /// or kills the child and returns the appropriate error otherwise.
 fn handle_segfault(
     pid: unistd::Pid,
     ch_pages: &[usize],
     ch_stack: usize,
-    page_size: usize,
     cs: &capstone::Capstone,
     acc_events: &mut Vec<AccessEvent>,
 ) -> Result<(), ExecEnd> {
+    let page_size = PAGE_SIZE.load(Ordering::Relaxed);
     // Get information on what caused the segfault. This contains the address
     // that triggered it.
     let siginfo = ptrace::getsiginfo(pid).unwrap();
@@ -611,7 +627,7 @@ fn handle_segfault(
     ptrace::setregs(pid, new_regs).unwrap();
 
     // Our mempr_* functions end with a raise(SIGSTOP).
-    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes)?;
+    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes, None)?;
 
     // Step 1 instruction.
     ptrace::setregs(pid, regs_bak).unwrap();
@@ -645,7 +661,7 @@ fn handle_segfault(
     new_regs.set_ip(super::child::mempr_on as *const () as usize);
     new_regs.set_sp(stack_ptr);
     ptrace::setregs(pid, new_regs).unwrap();
-    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes)?;
+    wait_for_signal(Some(pid), signal::SIGSTOP, InitialCont::Yes, None)?;
 
     ptrace::setregs(pid, regs_bak).unwrap();
     ptrace::syscall(pid, None).unwrap();
@@ -656,10 +672,11 @@ fn handle_segfault(
 /// to our shims to handle it instead.
 fn handle_sigtrap(
     pid: unistd::Pid,
-    page_size: usize,
     pages: &mut Vec<usize>,
     _event_tx: &ipc::IpcSender<MemEvents>,
-    _acc_events: &mut Vec<AccessEvent>,
+    acc_events: &mut Vec<AccessEvent>,
+    ch_stack: usize,
+    cs: &capstone::Capstone,
 ) -> Result<(), ExecEnd> {
     /// The libc functions we shim.
     enum LibcFn {
@@ -686,6 +703,7 @@ fn handle_sigtrap(
         }
     }
 
+    let page_size = PAGE_SIZE.load(Ordering::Relaxed);
     let regs = ptrace::getregs(pid).unwrap();
     match get_libc_fn(regs.ip()) {
         Some(_) => {
@@ -734,7 +752,13 @@ fn handle_sigtrap(
                 ptrace::read(pid, std::ptr::without_provenance_mut(ret_addr)).unwrap();
             ptrace::write(pid, std::ptr::without_provenance_mut(ret_addr), BREAKPT_INSTR.into())
                 .unwrap();
-            wait_for_signal(Some(pid), signal::SIGTRAP, InitialCont::Yes).unwrap();
+            let catch_segfaults =
+                SegfaultCatchingStuff { ch_pages: &*pages, ch_stack, cs, acc_events };
+            // TODO: This should probably only log writes & not reads, since reads
+            // in these functions will never expose provenance to the rest of the native
+            // code. However, these functions likely won't even do any reads, so...
+            wait_for_signal(Some(pid), signal::SIGTRAP, InitialCont::Yes, Some(catch_segfaults))
+                .unwrap();
 
             // Unset the breakpoint stuff and move the ip back an instruction to compensate.
             ptrace::write(pid, std::ptr::without_provenance_mut(ret_addr), ret_addr_bytes).unwrap();
