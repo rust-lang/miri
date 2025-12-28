@@ -1,6 +1,6 @@
-use std::ffi::{CStr, OsStr, OsString};
-use std::io::{self, ErrorKind};
-use std::{env, slice};
+use std::env;
+use std::ffi::{OsStr, OsString};
+use std::io::ErrorKind;
 
 use rustc_abi::{FieldIdx, Size};
 use rustc_data_structures::fx::FxHashMap;
@@ -281,52 +281,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(LibcError("EFAULT"));
         }
 
-        let mut uname_buf = libc::utsname {
-            sysname: [0; _],
-            nodename: [0; _],
-            release: [0; _],
-            version: [0; _],
-            machine: [0; _],
-            #[cfg(any(target_os = "linux", target_os = "android"))]
-            domainname: [0; _],
-        };
-        if this.machine.communicate() {
-            let result = unsafe { libc::uname(&mut uname_buf) };
-            if result != 0 {
-                let err = this.io_error_to_errnum(io::Error::last_os_error())?;
-                this.set_last_error(err)?;
-                return interp_ok(Scalar::from_i32(result));
-            }
-        } else {
-            fn write_slice(dst: &mut [libc::c_char], src: &str) {
-                dst[..src.len()].copy_from_slice(unsafe {
-                    slice::from_raw_parts(src.as_ptr().cast(), src.len())
-                });
-            }
-            write_slice(uname_buf.sysname.as_mut_slice(), "Miri");
-            write_slice(uname_buf.nodename.as_mut_slice(), "Miri");
-            write_slice(uname_buf.release.as_mut_slice(), env!("CARGO_PKG_VERSION"));
-            write_slice(uname_buf.version.as_mut_slice(), "");
-            write_slice(uname_buf.machine.as_mut_slice(), std::env::consts::ARCH);
-            #[cfg(any(target_os = "linux", target_os = "android"))]
-            write_slice(uname_buf.domainname.as_mut_slice(), "(none)");
-        }
-
         let uname = this.deref_pointer_as(uname, this.libc_ty_layout("utsname"))?;
         let values = [
-            ("sysname", uname_buf.sysname.as_ptr()),
-            ("nodename", uname_buf.nodename.as_ptr()),
-            ("release", uname_buf.release.as_ptr()),
-            ("version", uname_buf.version.as_ptr()),
-            ("machine", uname_buf.machine.as_ptr()),
+            ("sysname", "Miri"),
+            ("nodename", "Miri"),
+            ("release", env!("CARGO_PKG_VERSION")),
+            ("version", ""),
+            ("machine", std::env::consts::ARCH),
             #[cfg(any(target_os = "linux", target_os = "android"))]
-            ("domainname", uname_buf.domainname.as_ptr()),
+            ("domainname", "(none)"),
         ];
         for (name, value) in values {
-            let value = unsafe { CStr::from_ptr(value) }.to_bytes();
             let field = this.project_field_named(&uname, name)?;
             let size = field.layout().layout.size().bytes();
-            let (written, _) = this.write_c_str(value, field.ptr(), size)?;
+            let (written, _) = this.write_c_str(value.as_bytes(), field.ptr(), size)?;
             assert!(written); // All values should fit.
         }
         interp_ok(Scalar::from_i32(0))
