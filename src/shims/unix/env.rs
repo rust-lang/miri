@@ -288,14 +288,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ("release", env!("CARGO_PKG_VERSION")),
             ("version", ""),
             ("machine", std::env::consts::ARCH),
-            #[cfg(any(target_os = "linux", target_os = "android"))]
             ("domainname", "(none)"),
         ];
         for (name, value) in values {
-            let field = this.project_field_named(&uname, name)?;
-            let size = field.layout().layout.size().bytes();
-            let (written, _) = this.write_c_str(value.as_bytes(), field.ptr(), size)?;
-            assert!(written); // All values should fit.
+            // Since not all OS have all fields (e.g. domainname), we ignore
+            // fields that are not present.
+            if let Some(field) = this.try_project_field_named(&uname, name)? {
+                let size = field.layout().layout.size().bytes();
+                let (written, _) = this.write_c_str(value.as_bytes(), field.ptr(), size)?;
+                assert!(written); // All values should fit.
+            }
         }
         interp_ok(Scalar::from_i32(0))
     }
