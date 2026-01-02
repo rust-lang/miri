@@ -9,7 +9,7 @@ use std::thread;
 
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
-use libc_utils::{errno_check, errno_result, read_all_into_array, write_all_from_slice};
+use libc_utils::*;
 
 fn main() {
     test_socketpair();
@@ -92,15 +92,13 @@ fn test_socketpair_threaded() {
         assert_eq!(&buf, b"abcde");
     });
     thread::yield_now();
-    let data = b"abcde";
-    write_all_from_slice(fds[0], data).unwrap();
+    write_all_from_slice(fds[0], b"abcde").unwrap();
     thread1.join().unwrap();
 
     // Read and write from different direction
     let thread2 = thread::spawn(move || {
         thread::yield_now();
-        let data = b"12345";
-        write_all_from_slice(fds[1], data).unwrap();
+        write_all_from_slice(fds[1], b"12345").unwrap();
     });
     let buf = read_all_into_array::<5>(fds[0]).unwrap();
     assert_eq!(&buf, b"12345");
@@ -120,8 +118,7 @@ fn test_race() {
         unsafe { assert_eq!(VAL, 1) };
     });
     unsafe { VAL = 1 };
-    let data = b"a";
-    write_all_from_slice(fds[0], data).unwrap();
+    write_all_from_slice(fds[0], b"a").unwrap();
     thread::yield_now();
     thread1.join().unwrap();
 }
@@ -137,8 +134,7 @@ fn test_blocking_read() {
     });
     let thread2 = thread::spawn(move || {
         // Unblock thread1 by doing writing something.
-        let data = b"abc";
-        write_all_from_slice(fds[0], data).unwrap();
+        write_all_from_slice(fds[0], b"abc").unwrap();
     });
     thread1.join().unwrap();
     thread2.join().unwrap();
@@ -152,9 +148,8 @@ fn test_blocking_write() {
     // Exhaust the space in the buffer so the subsequent write will block.
     write_all_from_slice(fds[0], &arr1).unwrap();
     let thread1 = thread::spawn(move || {
-        let data = b"abc";
         // The write below will be blocked because the buffer is already full.
-        write_all_from_slice(fds[0], data).unwrap();
+        write_all_from_slice(fds[0], b"abc").unwrap();
     });
     let thread2 = thread::spawn(move || {
         // Unblock thread1 by freeing up some space.
