@@ -28,6 +28,7 @@ mod ffi;
 pub mod trace;
 
 use self::ffi::OwnedArg;
+use self::trace::EvalContextExt as _;
 use crate::*;
 
 /// The final results of an FFI trace, containing every relevant event detected
@@ -92,13 +93,9 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
         libffi_args: &mut [OwnedArg],
     ) -> InterpResult<'tcx, (crate::ImmTy<'tcx>, Option<MemEvents>)> {
         let this = self.eval_context_mut();
-        #[cfg(target_os = "linux")]
-        let alloc = this.machine.allocator.as_ref().unwrap();
-        #[cfg(not(target_os = "linux"))]
-        // Placeholder value.
-        let alloc = ();
 
-        trace::Supervisor::do_ffi(alloc, || {
+        let ty_is_sized = dest.layout.ty.is_sized(*this.tcx, this.typing_env());
+        this.do_ffi(|| {
             // Call the function (`ptr`) with arguments `libffi_args`, and obtain the return value
             // as the specified primitive integer type
             let scalar = match dest.layout.ty.kind() {
@@ -124,7 +121,12 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
                 ty::Int(IntTy::Isize) => {
                     let x = unsafe { ffi::call::<isize>(fun, libffi_args) };
-                    Scalar::from_target_isize(x.try_into().unwrap(), this)
+                    // We already know native-lib mode means target == host, so
+                    // this is ok.
+                    Scalar::from_int(
+                        i128::try_from(x).unwrap(),
+                        Size::from_bytes(size_of::<isize>()),
+                    )
                 }
                 // uints
                 ty::Uint(UintTy::U8) => {
@@ -145,7 +147,10 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
                 ty::Uint(UintTy::Usize) => {
                     let x = unsafe { ffi::call::<usize>(fun, libffi_args) };
-                    Scalar::from_target_usize(x.try_into().unwrap(), this)
+                    Scalar::from_uint(
+                        u128::try_from(x).unwrap(),
+                        Size::from_bytes(size_of::<usize>()),
+                    )
                 }
                 ty::Float(FloatTy::F32) => {
                     let x = unsafe { ffi::call::<f32>(fun, libffi_args) };
@@ -161,10 +166,10 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     unsafe { ffi::call::<()>(fun, libffi_args) };
                     return interp_ok(ImmTy::uninit(dest.layout));
                 }
-                ty::RawPtr(ty, ..) if ty.is_sized(*this.tcx, this.typing_env()) => {
+                ty::RawPtr(ty, ..) if ty_is_sized => {
                     let x = unsafe { ffi::call::<*const ()>(fun, libffi_args) };
                     let ptr = StrictPointer::new(Provenance::Wildcard, Size::from_bytes(x.addr()));
-                    Scalar::from_pointer(ptr, this)
+                    Scalar::Ptr(ptr, u8::try_from(size_of::<*const ()>()).unwrap())
                 }
                 _ =>
                     return Err(err_unsup_format!(
@@ -232,7 +237,6 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// assumed to be exact.
     fn tracing_apply_accesses(&mut self, events: MemEvents) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
-
         for evt in events.acc_events {
             let evt_rg = evt.get_range();
             // LLVM at least permits vectorising accesses to adjacent allocations,
@@ -242,7 +246,11 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let Some(alloc_id) =
                     this.alloc_id_from_addr(curr.to_u64(), rg.len().try_into().unwrap())
                 else {
-                    throw_ub_format!("Foreign code did an out-of-bounds access!")
+                    throw_ub_format!(
+                        "Foreign code did an out-of-bounds access at {:#0x} for {:#0x} bytes!",
+                        curr,
+                        rg.len(),
+                    );
                 };
                 let alloc = this.get_alloc_raw(alloc_id)?;
                 // The logical and physical address of the allocation coincide, so we can use
@@ -583,7 +591,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.call_native_with_args(link_name, dest, code_ptr, &mut libffi_args)?;
 
         if tracing {
-            this.tracing_apply_accesses(maybe_memevents.unwrap())?;
+            let mm = maybe_memevents.unwrap();
+            this.tracing_apply_accesses(mm)?;
         }
 
         this.write_immediate(*ret, dest)?;
