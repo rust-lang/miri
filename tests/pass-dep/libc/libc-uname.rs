@@ -1,3 +1,5 @@
+//@ignore-target: windows # No libc
+
 use std::ffi::CStr;
 use std::{io, ptr};
 
