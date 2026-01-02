@@ -282,12 +282,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let uname = this.deref_pointer_as(uname, this.libc_ty_layout("utsname"))?;
+        let arch = this.machine.tcx.sess.target.arch.desc_symbol();
         let values = [
             ("sysname", "Miri"),
             ("nodename", "Miri"),
             ("release", env!("CARGO_PKG_VERSION")),
             ("version", ""),
-            ("machine", std::env::consts::ARCH),
+            ("machine", arch.as_str()),
             ("domainname", "(none)"),
         ];
         for (name, value) in values {
