@@ -272,6 +272,37 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_u32(this.get_current_tid()))
     }
 
+    fn uname(&mut self, uname: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        this.assert_target_os_is_unix("uname");
+
+        let uname_ptr = this.read_pointer(uname)?;
+        if this.ptr_is_null(uname_ptr)? {
+            return this.set_last_error_and_return_i32(LibcError("EFAULT"));
+        }
+
+        let uname = this.deref_pointer_as(uname, this.libc_ty_layout("utsname"))?;
+        let arch = this.machine.tcx.sess.target.arch.desc_symbol();
+        let values = [
+            ("sysname", "Miri"),
+            ("nodename", "Miri"),
+            ("release", env!("CARGO_PKG_VERSION")),
+            ("version", ""),
+            ("machine", arch.as_str()),
+            ("domainname", "(none)"),
+        ];
+        for (name, value) in values {
+            // Since not all OS have all fields (e.g. domainname), we ignore
+            // fields that are not present.
+            if let Some(field) = this.try_project_field_named(&uname, name)? {
+                let size = field.layout().layout.size().bytes();
+                let (written, _) = this.write_c_str(value.as_bytes(), field.ptr(), size)?;
+                assert!(written); // All values should fit.
+            }
+        }
+        interp_ok(Scalar::from_i32(0))
+    }
+
     /// The Apple-specific `int pthread_threadid_np(pthread_t thread, uint64_t *thread_id)`, which
     /// allows querying the ID for arbitrary threads, identified by their pthread_t.
     ///
