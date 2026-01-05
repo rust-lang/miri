@@ -283,17 +283,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let uname = this.deref_pointer_as(uname, this.libc_ty_layout("utsname"))?;
         let arch = this.machine.tcx.sess.target.arch.desc_symbol();
+        // Values required by POSIX.
         let values = [
             ("sysname", "Miri"),
             ("nodename", "Miri"),
             ("release", env!("CARGO_PKG_VERSION")),
             ("version", ""),
             ("machine", arch.as_str()),
-            ("domainname", "(none)"),
         ];
         for (name, value) in values {
-            // Since not all OS have all fields (e.g. domainname), we ignore
-            // fields that are not present.
+            let field = this.project_field_named(&uname, name)?;
+            let size = field.layout().layout.size().bytes();
+            let (written, _) = this.write_c_str(value.as_bytes(), field.ptr(), size)?;
+            assert!(written); // All values should fit.
+        }
+        // The following fields are not defined on all OS/libc implementations,
+        // so only write them if they are defined.
+        let optional_values = [("domainname", "(none)")];
+        for (name, value) in optional_values {
             if let Some(field) = this.try_project_field_named(&uname, name)? {
                 let size = field.layout().layout.size().bytes();
                 let (written, _) = this.write_c_str(value.as_bytes(), field.ptr(), size)?;
