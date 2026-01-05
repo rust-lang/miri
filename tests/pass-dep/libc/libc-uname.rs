@@ -16,7 +16,6 @@ fn test_ok() {
         panic!("failed to call uname");
     }
 
-    // These values are only correct when running isolated.
     assert_eq!(unsafe { CStr::from_ptr(&uname.sysname as *const _) }, c"Miri");
     assert_eq!(unsafe { CStr::from_ptr(&uname.nodename as *const _) }, c"Miri");
     assert_eq!(
