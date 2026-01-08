@@ -846,7 +846,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 && this.tcx.sess.target.endian == Endian::Little =>
             {
                 return shims::x86::EvalContextExt::emulate_x86_intrinsic(
-                    this, link_name, abi, args, dest,
+                    this, link_name, args, dest,
                 );
             }
             name if name.starts_with("llvm.aarch64.")
@@ -854,7 +854,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 && this.tcx.sess.target.endian == Endian::Little =>
             {
                 return shims::aarch64::EvalContextExt::emulate_aarch64_intrinsic(
-                    this, link_name, abi, args, dest,
+                    this, link_name, args, dest,
                 );
             }
             name if name.starts_with("llvm.loongarch.")
@@ -862,7 +862,7 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 && this.tcx.sess.target.endian == Endian::Little =>
             {
                 return shims::loongarch::EvalContextExt::emulate_loongarch_intrinsic(
-                    this, link_name, abi, args, dest,
+                    this, link_name, args, dest,
                 );
             }
 

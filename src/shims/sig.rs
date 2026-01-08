@@ -330,6 +330,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         panic!("mismatch between signature and `args` slice");
     }
+
+    fn check_shim_sig_unadjusted<'a, const N: usize>(
+        &mut self,
+        link_name: Symbol,
+        args: &'a [OpTy<'tcx>],
+    ) -> InterpResult<'tcx, &'a [OpTy<'tcx>; N]> {
+        let this = self.eval_context_mut();
+        check_shim_symbol_clash(this, link_name)?;
+
+        if let Ok(ops) = args.try_into() {
+            return interp_ok(ops);
+        }
+        throw_ub_format!(
+            "incorrect number of arguments for `{link_name}`: got {}, expected {}",
+            args.len(),
+            N
+        )
+    }
 }
 
 /// Check that the number of varargs is at least the minimum what we expect.
