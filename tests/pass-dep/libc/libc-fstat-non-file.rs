@@ -76,11 +76,7 @@ fn test_fstat_pipe() {
         let stat = unsafe { stat.assume_init_ref() };
 
         // Check that it's a FIFO (pipe)
-        assert_eq!(
-            stat.st_mode & libc::S_IFMT,
-            libc::S_IFIFO,
-            "pipe should have S_IFIFO mode"
-        );
+        assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFIFO, "pipe should have S_IFIFO mode");
 
         // Check that size is 0 (pipes don't have a meaningful size)
         assert_eq!(stat.st_size, 0, "pipe should have size 0");
