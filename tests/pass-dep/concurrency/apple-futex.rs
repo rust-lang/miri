@@ -188,6 +188,9 @@ fn wait_wake_multiple() {
                 0
             );
 
+            // Allow the newly woken thread to execute.
+            thread::yield_now();
+
             assert_eq!(
                 libc::os_sync_wake_by_address_any(
                     ptr::from_ref(futex).cast_mut().cast(),
@@ -196,6 +199,8 @@ fn wait_wake_multiple() {
                 ),
                 0
             );
+
+            thread::yield_now();
 
             // Wake both remaining threads at the same time.
             assert_eq!(
