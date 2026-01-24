@@ -171,4 +171,15 @@ extern "Rust" {
     ///
     /// As far as Miri is concerned, this is equivalent to `yield_now`.
     pub fn miri_spin_loop();
+
+    pub fn miri_fiber_create(body: extern "Rust" fn(*mut ()), data: *mut ()) -> usize;
+
+    pub fn miri_fiber_current() -> usize;
+
+    pub fn miri_fiber_switch(target: usize);
+
+    /// Exit the current fiber to the fiber with the given ID. Acts as
+    /// `miri_fiber_switch` but indicates that the current fiber has exited
+    /// and will never be switched to again.
+    pub fn miri_fiber_exit_to(target: usize) -> !;
 }

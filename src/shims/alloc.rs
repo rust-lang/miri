@@ -32,6 +32,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             | Arch::Mips32r6
             | Arch::PowerPC
             | Arch::PowerPC64
+            | Arch::PowerPC64LE
             | Arch::Sparc
             | Arch::Wasm32
             | Arch::Hexagon
