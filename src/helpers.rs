@@ -482,8 +482,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         assert!(this.active_thread_stack().is_empty());
-        assert!(this.active_thread_ref().origin_span.is_dummy());
-        this.active_thread_mut().origin_span = span;
+        assert!(this.active_fiber_ref().origin_span.is_dummy());
+        this.active_fiber_mut().origin_span = span;
         this.call_function(f, caller_abi, args, dest, ReturnContinuation::Stop { cleanup: true })
     }
 
@@ -1068,7 +1068,7 @@ impl<'tcx> MiriMachine<'tcx> {
     /// This function is backed by a cache, and can be assumed to be very fast.
     /// It will work even when the stack is empty.
     pub fn current_user_relevant_span(&self) -> Span {
-        self.threads.active_thread_ref().current_user_relevant_span()
+        self.threads.active_thread_ref().current_fiber().current_user_relevant_span()
     }
 
     /// Returns the span of the *caller* of the current operation, again
@@ -1089,7 +1089,7 @@ impl<'tcx> MiriMachine<'tcx> {
     }
 
     fn top_user_relevant_frame(&self) -> Option<usize> {
-        self.threads.active_thread_ref().top_user_relevant_frame()
+        self.threads.active_thread_ref().current_fiber().top_user_relevant_frame()
     }
 
     /// This is the source of truth for the `user_relevance` flag in our `FrameExtra`.

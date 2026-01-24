@@ -1773,11 +1773,11 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
 
     #[inline(always)]
     fn after_stack_push(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
-        if ecx.frame().extra.user_relevance >= ecx.active_thread_ref().current_user_relevance() {
+        if ecx.frame().extra.user_relevance >= ecx.active_fiber_ref().current_user_relevance() {
             // We just pushed a frame that's at least as relevant as the so-far most relevant frame.
             // That means we are now the most relevant frame.
             let stack_len = ecx.active_thread_stack().len();
-            ecx.active_thread_mut().set_top_user_relevant_frame(stack_len - 1);
+            ecx.active_fiber_mut().set_top_user_relevant_frame(stack_len - 1);
         }
         interp_ok(())
     }
@@ -1790,7 +1790,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             ecx.on_stack_pop(frame)?;
         }
         if ecx
-            .active_thread_ref()
+            .active_fiber_ref()
             .top_user_relevant_frame()
             .expect("there should always be a most relevant frame for a non-empty stack")
             == ecx.frame_idx()
@@ -1800,7 +1800,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             // (If this ever becomes a bottleneck, we could have `push` store the previous
             // user-relevant frame and restore that here.)
             // We have to skip the frame that is just being popped.
-            ecx.active_thread_mut().recompute_top_user_relevant_frame(/* skip */ 1);
+            ecx.active_fiber_mut().recompute_top_user_relevant_frame(/* skip */ 1);
         }
         // tracing-tree can autoamtically annotate scope changes, but it gets very confused by our
         // concurrency and what it prints is just plain wrong. So we print our own information

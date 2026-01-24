@@ -1,7 +1,6 @@
 //! Implements threads.
 
 use std::mem;
-use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
 use std::time::{Duration, SystemTime};
@@ -174,7 +173,7 @@ impl FiberId {
         self.0
     }
 
-    /// Create a new thread id from a `u32` without checking if this thread exists.
+    /// Create a new fiber id from a `u32` without checking if this fiber exists.
     pub fn new_unchecked(id: u32) -> Self {
         Self(id)
     }
@@ -363,6 +362,14 @@ impl<'tcx> Thread<'tcx> {
             format!("unnamed-{}", id.index())
         }
     }
+
+    pub fn current_fiber(&self) -> &Fiber<'tcx> {
+        &self.current_fiber
+    }
+
+    pub fn current_fiber_mut(&mut self) -> &mut Fiber<'tcx> {
+        &mut self.current_fiber
+    }
 }
 
 impl<'tcx> std::fmt::Debug for Thread<'tcx> {
@@ -374,21 +381,6 @@ impl<'tcx> std::fmt::Debug for Thread<'tcx> {
             self.state,
             self.join_status
         )
-    }
-}
-
-// TODO: Remove this in favor of proper method proxying?
-impl<'tcx> Deref for Thread<'tcx> {
-    type Target = Fiber<'tcx>;
-
-    fn deref(&self) -> &Fiber<'tcx> {
-        &self.current_fiber
-    }
-}
-
-impl<'tcx> DerefMut for Thread<'tcx> {
-    fn deref_mut(&mut self) -> &mut Fiber<'tcx> {
-        &mut self.current_fiber
     }
 }
 
@@ -509,7 +501,7 @@ impl FiberIdAllocator {
 
     fn alloc(&mut self) -> FiberId {
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).unwrap();
         FiberId::new_unchecked(id)
     }
 
@@ -1320,6 +1312,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn active_thread_ref(&self) -> &Thread<'tcx> {
         let this = self.eval_context_ref();
         this.machine.threads.active_thread_ref()
+    }
+
+    #[inline]
+    fn active_fiber_ref(&self) -> &Fiber<'tcx> {
+        let this = self.eval_context_ref();
+        this.machine.threads.active_thread_ref().current_fiber()
+    }
+
+    #[inline]
+    fn active_fiber_mut(&mut self) -> &mut Fiber<'tcx> {
+        let this = self.eval_context_mut();
+        this.machine.threads.active_thread_mut().current_fiber_mut()
     }
 
     #[inline]

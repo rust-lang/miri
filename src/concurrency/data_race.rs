@@ -1944,7 +1944,7 @@ impl GlobalState {
         callback: impl FnOnce(&VClock) -> R,
     ) -> R {
         let thread = threads.active_thread();
-        let span = threads.active_thread_ref().current_user_relevant_span();
+        let span = threads.active_thread_ref().current_fiber().current_user_relevant_span();
         let (index, mut clocks) = self.thread_state_mut(thread);
         let r = callback(&clocks.clock);
         // Increment the clock, so that all following events cannot be confused with anything that

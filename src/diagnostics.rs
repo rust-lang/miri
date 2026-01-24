@@ -554,7 +554,9 @@ fn report_msg<'tcx>(
     thread: Option<ThreadId>,
     machine: &MiriMachine<'tcx>,
 ) {
-    let origin_span = thread.map(|t| machine.threads.thread_ref(t).origin_span).unwrap_or(DUMMY_SP);
+    let origin_span = thread
+        .map(|t| machine.threads.thread_ref(t).current_fiber().origin_span)
+        .unwrap_or(DUMMY_SP);
     let span = stacktrace.first().map(|fi| fi.span).unwrap_or(origin_span);
     // The only time we do not have an origin span is for `main`, and there we check the signature
     // upfront. So we should always have a span here.

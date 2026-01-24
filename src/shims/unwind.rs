@@ -50,8 +50,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         trace!("miri_start_unwind: {:?}", this.frame().instance());
 
         let payload = this.read_immediate(payload)?;
-        let thread = this.active_thread_mut();
-        thread.unwind_payloads.push(payload);
+        let fiber = this.active_fiber_mut();
+        fiber.unwind_payloads.push(payload);
 
         interp_ok(())
     }
@@ -133,7 +133,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // The Thread's `panic_payload` holds what was passed to `miri_start_unwind`.
             // This is exactly the second argument we need to pass to `catch_fn`.
-            let payload = this.active_thread_mut().unwind_payloads.pop().unwrap();
+            let payload = this.active_fiber_mut().unwind_payloads.pop().unwrap();
 
             // Push the `catch_fn` stackframe.
             let f_instance = this.get_ptr_fn(catch_unwind.catch_fn)?.as_instance()?;
