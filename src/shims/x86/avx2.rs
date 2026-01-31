@@ -6,7 +6,7 @@ use rustc_target::callconv::FnAbi;
 
 use super::{
     ShiftOp, horizontal_bin_op, mpsadbw, packssdw, packsswb, packusdw, packuswb, permute, pmaddbw,
-    pmulhrsw, psadbw, pshufb, psign, shift_simd_by_scalar,
+    pmaddwd, pmulhrsw, psadbw, pshufb, psign, shift_simd_by_scalar,
 };
 use crate::*;
 
@@ -223,6 +223,16 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
 
                 shift_simd_by_scalar(this, left, right, which, dest)?;
+            }
+            // Used to implement the _mm256_madd_epi16 function.
+            // Multiplies packed signed 16-bit integers in `left` and `right`, producing
+            // intermediate signed 32-bit integers. Horizontally add adjacent pairs of
+            // intermediate 32-bit integers, and pack the results in `dest`.
+            "pmadd.wd" => {
+                let [left, right] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+
+                pmaddwd(this, left, right, dest)?;
             }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
