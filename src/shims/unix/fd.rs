@@ -203,20 +203,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             | this.eval_libc_i32("O_ASYNC"),
                     Os::FreeBsd =>
                         this.eval_libc_i32("O_NONBLOCK")
-                        | this.eval_libc_i32("O_APPEND")
-                        | this.eval_libc_i32("O_DIRECT")
-                        | this.eval_libc_i32("O_ASYNC"),
+                            | this.eval_libc_i32("O_APPEND")
+                            | this.eval_libc_i32("O_DIRECT")
+                            | this.eval_libc_i32("O_ASYNC"),
                     Os::Solaris | Os::Illumos =>
                         this.eval_libc_i32("O_NONBLOCK")
-                        | this.eval_libc_i32("O_APPEND")
-                        | this.eval_libc_i32("O_DIRECT"),
-                    // Linux + Android match case 
+                            | this.eval_libc_i32("O_APPEND")
+                            | this.eval_libc_i32("O_DIRECT"),
+                    // Linux + Android match case
                     _ =>
                         this.eval_libc_i32("O_NONBLOCK")
-                        | this.eval_libc_i32("O_APPEND")
-                        | this.eval_libc_i32("O_DIRECT")
-                        | this.eval_libc_i32("O_NOATIME")
-                        | this.eval_libc_i32("O_ASYNC"),
+                            | this.eval_libc_i32("O_APPEND")
+                            | this.eval_libc_i32("O_DIRECT")
+                            | this.eval_libc_i32("O_NOATIME")
+                            | this.eval_libc_i32("O_ASYNC"),
                 };
 
                 flag &= allowed_flags;
