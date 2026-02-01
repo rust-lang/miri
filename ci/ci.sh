@@ -129,7 +129,7 @@ function run_tests_minimal {
   time ./miri test $TARGET_FLAG "$@"
 
   # Ensure that a small smoke test of cargo-miri works.
-  time cargo miri run --manifest-path test-cargo-miri/no-std-smoke/Cargo.toml $TARGET_FLAG
+  time cargo miri run --manifest-path test-cargo-miri/no-std-smoke/Cargo.toml -Zjson-target-spec $TARGET_FLAG
 
   endgroup
 }
