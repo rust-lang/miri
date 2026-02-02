@@ -366,15 +366,16 @@ fn run_dep_mode(target: String, args: impl Iterator<Item = OsString>) -> Result<
         miri_config(&target, "", Mode::RunDep, Some(WithDependencies { bless: false }));
     config.comment_defaults.base().custom.remove("edition"); // `./miri` adds an `--edition` in `args`, so don't set it twice
     config.fill_host_and_target()?;
+    let dep_builder = BuildManager::one_off(config.clone());
+    // Only set these for the actual run, not the dep builder, so invalid flags do not fail
+    // the dependency build.
     config.program.args = args.collect();
+    let test_config = TestConfig::one_off_runner(config, PathBuf::new());
 
-    let test_config = TestConfig::one_off_runner(config.clone(), PathBuf::new());
-
-    let build_manager = BuildManager::one_off(config);
     let mut cmd = test_config.config.program.build(&test_config.config.out_dir);
     cmd.arg("--target").arg(test_config.config.target.as_ref().unwrap());
     // Build dependencies
-    test_config.apply_custom(&mut cmd, &build_manager).unwrap();
+    test_config.apply_custom(&mut cmd, &dep_builder).expect("failed to build dependencies");
 
     if cmd.spawn()?.wait()?.success() { Ok(()) } else { std::process::exit(1) }
 }
