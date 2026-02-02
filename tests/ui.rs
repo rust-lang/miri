@@ -132,14 +132,19 @@ fn miri_config(
                     // (It's a separate crate, so we don't get an env var from cargo.)
                     program: miri_path()
                         .with_file_name(format!("cargo-miri{}", env::consts::EXE_SUFFIX)),
-                    // There is no `cargo miri build` so we just use `cargo miri run`.
                     // Add `-Zbinary-dep-depinfo` since it is needed for bootstrap builds (and doesn't harm otherwise).
-                    args: ["miri", "run", "--quiet", "-Zbinary-dep-depinfo"]
+                    args: ["miri", "build", "-Zbinary-dep-depinfo"]
                         .into_iter()
                         .map(Into::into)
                         .collect(),
-                    // Reset `RUSTFLAGS` to work around <https://github.com/rust-lang/rust/pull/119574#issuecomment-1876878344>.
-                    envs: vec![("RUSTFLAGS".into(), None)],
+                    envs: vec![
+                        // Reset `RUSTFLAGS` to work around <https://github.com/rust-lang/rust/pull/119574#issuecomment-1876878344>.
+                        ("RUSTFLAGS".into(), None),
+                        // Reset `MIRIFLAGS` because it caused trouble in the past and should not be needed.
+                        ("MIRIFLAGS".into(), None),
+                        // Allow `cargo miri build`.
+                        ("MIRI_BUILD_TEST_DEPS".into(), Some("1".into())),
+                    ],
                     ..CommandBuilder::cargo()
                 },
                 crate_manifest_path: Path::new("tests/deps").join("Cargo.toml"),

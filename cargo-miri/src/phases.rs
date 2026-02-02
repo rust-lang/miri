@@ -63,6 +63,9 @@ pub fn phase_cargo_miri(mut args: impl Iterator<Item = String>) {
         "setup" => MiriCommand::Setup,
         "test" | "t" | "run" | "r" | "nextest" => MiriCommand::Forward(subcommand),
         "clean" => MiriCommand::Clean,
+        // For use by the `./miri test` dependency builder.
+        "build" if env::var_os("MIRI_BUILD_TEST_DEPS").is_some() =>
+            MiriCommand::Forward("build".into()),
         _ => {
             // Check for version and help flags.
             if has_arg_flag("--help") || has_arg_flag("-h") {
