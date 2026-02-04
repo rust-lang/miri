@@ -1,4 +1,4 @@
-use rustc_abi::CanonAbi;
+use rustc_abi::{CanonAbi, Size};
 use rustc_middle::mir::BinOp;
 use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
@@ -58,9 +58,76 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.write_immediate(*res_lane, &dest)?;
                 }
             }
+            // Unsigned minimum across vector lanes -> scalar result.
+            // Used to implement vminvq_u8, vminvq_u16, vminvq_u32 functions.
+            // https://developer.arm.com/architectures/instruction-sets/intrinsics/vminvq_u8
+            "neon.uminv.i8.v16i8" => {
+                cal_uminv_and_write(this, abi, link_name, args, dest, 1)?;
+            }
+            // https://developer.arm.com/architectures/instruction-sets/intrinsics/vminvq_u16
+            "neon.uminv.i16.v8i16" => {
+                cal_uminv_and_write(this, abi, link_name, args, dest, 2)?;
+            }
+            // https://developer.arm.com/architectures/instruction-sets/intrinsics/vminvq_u32
+            "neon.uminv.i32.v4i32" => {
+                cal_uminv_and_write(this, abi, link_name, args, dest, 4)?;
+            }
+            // Vector table lookup: each index selects a byte from the 16-byte table, out-of-range -> 0.
+            // Used to implement vtbl1_u8 function.
+            // https://developer.arm.com/architectures/instruction-sets/intrinsics/vtbl1_u8
+            "neon.tbl1.v16i8" => {
+                let [table, indices] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
 
+                let (table, table_len) = this.project_to_simd(table)?;
+                let (indices, idx_len) = this.project_to_simd(indices)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+                assert_eq!(table_len, 16);
+                assert_eq!(idx_len, dest_len);
+
+                let table_len = u128::from(table_len);
+                let elem_size = Size::from_bytes(1);
+                for i in 0..dest_len {
+                    let idx = this.read_immediate(&this.project_index(&indices, i)?)?;
+                    let idx_u = idx.to_scalar().to_uint(elem_size)?;
+                    let val = if idx_u < table_len {
+                        let t = this.read_immediate(
+                            &this.project_index(&table, idx_u.try_into().unwrap())?,
+                        )?;
+                        t.to_scalar()
+                    } else {
+                        Scalar::from_u8(0)
+                    };
+                    this.write_scalar(val, &this.project_index(&dest, i)?)?;
+                }
+            }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
     }
+}
+
+// Unsigned minimum across all lanes -> scalar result.
+fn cal_uminv_and_write<'tcx>(
+    ecx: &mut crate::MiriInterpCx<'tcx>,
+    abi: &FnAbi<'tcx, Ty<'tcx>>,
+    link_name: Symbol,
+    args: &[OpTy<'tcx>],
+    dest: &MPlaceTy<'tcx>,
+    size: u64,
+) -> InterpResult<'tcx, ()> {
+    let [op] = ecx.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+    let (op, op_len) = ecx.project_to_simd(op)?;
+    assert_eq!(op_len, size);
+    let size = Size::from_bytes(size);
+    let mut min_val: u128 = u128::MAX;
+    for i in 0..op_len {
+        let v = ecx.read_immediate(&ecx.project_index(&op, i)?)?;
+        let u = v.to_scalar().to_uint(size)?;
+        if u < min_val {
+            min_val = u;
+        }
+    }
+    ecx.write_scalar(Scalar::from_uint(min_val, size), dest)?;
+    interp_ok(())
 }
