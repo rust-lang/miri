@@ -173,7 +173,7 @@ case $HOST_TARGET in
     # Host
     MIR_OPT=1 MANY_SEEDS=64 TEST_BENCH=1 CARGO_MIRI_ENV=1 run_tests
     # Custom target JSON file
-    TEST_TARGET=tests/x86_64-unknown-kernel.json MIRI_NO_STD=1 run_tests_minimal no_std
+    TEST_TARGET=tests/x86_64-unknown-kernel.json MIRI_NO_STD=1 MIRIFLAGS="-Zunstable-options" run_tests_minimal no_std
     # Not officially supported tier 2
     MANY_SEEDS=16 TEST_TARGET=x86_64-pc-solaris run_tests
     ;;

@@ -312,6 +312,7 @@ pub fn phase_rustc(args: impl Iterator<Item = String>, phase: RustcPhase) {
             // Ask rustc for the filename (since that is target-dependent).
             let mut rustc = miri_for_host(); // sysroot doesn't matter for this so we just use the host
             rustc.arg("--print").arg("file-names");
+            rustc.arg("-Zunstable-options"); // needed for JSON targets
             for flag in ["--crate-name", "--crate-type", "--target"] {
                 for val in get_arg_flag_values(flag) {
                     rustc.arg(flag).arg(val);
