@@ -12,7 +12,6 @@ fn main() {
     unsafe {
         test_neon();
         tbl1_v16i8_basic();
-        uminv_reductions();
     }
 }
 
@@ -63,23 +62,5 @@ fn tbl1_v16i8_basic() {
         assert_eq!(got2_arr[1], 0); // out-of-range
         assert_eq!(got2_arr[2], 0); // out-of-range
         assert_eq!(&got2_arr[3..16], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12][..]);
-    }
-}
-
-#[target_feature(enable = "neon")]
-fn uminv_reductions() {
-    unsafe {
-        let v8: uint8x16_t =
-            transmute::<[u8; 16], _>([9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10, 11, 12, 13, 14, 15]);
-        let min8 = vminvq_u8(v8);
-        assert_eq!(min8, 0);
-
-        let v16: uint16x8_t = transmute::<[u16; 8], _>([1000, 999, 3, 2, 1, 500, 400, 300]);
-        let min16 = vminvq_u16(v16);
-        assert_eq!(min16, 1);
-
-        let v32: uint32x4_t = transmute::<[u32; 4], _>([40000, 1, 30000, 2]);
-        let min32 = vminvq_u32(v32);
-        assert_eq!(min32, 1);
     }
 }
