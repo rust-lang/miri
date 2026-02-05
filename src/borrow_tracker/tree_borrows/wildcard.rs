@@ -245,9 +245,10 @@ impl Tree {
                     .copied()
                     .map(|id| wildcard_accesses.0.get(id).cloned().unwrap_or_default())
                     .fold((0, 0), |acc, wc| (acc.0 + wc.local_reads, acc.1 + wc.local_writes));
-                let expected_reads = child_reads + (exposed_as >= WildcardAccessLevel::Read) as u16;
+                let expected_reads =
+                    child_reads + Into::<u16>::into(exposed_as >= WildcardAccessLevel::Read);
                 let expected_writes =
-                    child_writes + (exposed_as >= WildcardAccessLevel::Write) as u16;
+                    child_writes + Into::<u16>::into(exposed_as >= WildcardAccessLevel::Write);
                 assert_eq!(
                     state.local_reads, expected_reads,
                     "expected {:?}'s (id:{id:?}) local_reads to be {expected_reads:?} instead of {:?} (child_reads: {child_reads:?}, exposed_as: {exposed_as:?})",
