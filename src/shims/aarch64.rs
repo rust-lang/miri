@@ -58,12 +58,10 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.write_immediate(*res_lane, &dest)?;
                 }
             }
-            // Unsigned minimum across vector lanes -> scalar result.
-            "neon.uminv.i8.v16i8" | "neon.uminv.i8.v8i16" | "neon.uminv.i8.v4i32" => {
-                cal_uminv_and_write(this, abi, link_name, args, dest)?;
-            }
             // Vector table lookup: each index selects a byte from the 16-byte table, out-of-range -> 0.
             // Used to implement vtbl1_u8 function.
+            // LLVM does not have a portable shuffle that takes non-const indices.
+            // So we need to implement this ourselves
             // https://developer.arm.com/architectures/instruction-sets/intrinsics/vtbl1_u8
             "neon.tbl1.v16i8" => {
                 let [table, indices] =
@@ -95,37 +93,4 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
         interp_ok(EmulateItemResult::NeedsReturn)
     }
-}
-
-/// Calculates the unsigned minimum value across all lanes of a SIMD vector
-/// and stores the result as a scalar.
-///
-/// Used to implement `vminvq_u8`, `vminvq_u16`, and `vminvq_u32` intrinsics.
-///
-/// <https://developer.arm.com/architectures/instruction-sets/intrinsics/vminvq_u8>
-/// <https://developer.arm.com/architectures/instruction-sets/intrinsics/vminvq_u16>
-/// <https://developer.arm.com/architectures/instruction-sets/intrinsics/vminvq_u32>
-fn cal_uminv_and_write<'tcx>(
-    ecx: &mut crate::MiriInterpCx<'tcx>,
-    abi: &FnAbi<'tcx, Ty<'tcx>>,
-    link_name: Symbol,
-    args: &[OpTy<'tcx>],
-    dest: &MPlaceTy<'tcx>,
-) -> InterpResult<'tcx, ()> {
-    let [op] = ecx.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-    let (op, op_len) = ecx.project_to_simd(op)?;
-    let size = op.layout.field(ecx, 0).size;
-
-    let mut min_val: u128 = u128::MAX;
-
-    for i in 0..op_len {
-        let v = ecx.read_immediate(&ecx.project_index(&op, i)?)?;
-        let u = v.to_scalar().to_uint(size)?;
-        if u < min_val {
-            min_val = u;
-        }
-    }
-
-    ecx.write_scalar(Scalar::from_uint(min_val, size), dest)?;
-    interp_ok(())
 }
