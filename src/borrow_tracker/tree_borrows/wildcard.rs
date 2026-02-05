@@ -227,7 +227,7 @@ impl Tree {
             let wildcard_accesses = &loc.wildcard_accesses;
             let perms = &loc.perms;
             for (id, node) in self.nodes.iter() {
-                let state = wildcard_accesses.0.get(id).unwrap();
+                let state = wildcard_accesses.0.get(id).cloned().unwrap_or_default();
 
                 let exposed_as = if node.is_exposed {
                     let perm =
@@ -243,7 +243,7 @@ impl Tree {
                     .children
                     .iter()
                     .copied()
-                    .map(|id| wildcard_accesses.0.get(id).unwrap())
+                    .map(|id| wildcard_accesses.0.get(id).cloned().unwrap_or_default())
                     .fold((0, 0), |acc, wc| (acc.0 + wc.local_reads, acc.1 + wc.local_writes));
                 let expected_reads = child_reads + (exposed_as >= WildcardAccessLevel::Read) as u16;
                 let expected_writes =
