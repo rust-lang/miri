@@ -4,12 +4,14 @@
 
 use std::arch::aarch64::*;
 use std::arch::is_aarch64_feature_detected;
+use std::mem::transmute;
 
 fn main() {
     assert!(is_aarch64_feature_detected!("neon"));
 
     unsafe {
         test_neon();
+        tbl1_v16i8_basic();
     }
 }
 
@@ -37,4 +39,28 @@ unsafe fn test_neon() {
         assert_eq!(r, e);
     }
     test_vpmaxq_u8_is_unsigned();
+}
+
+#[target_feature(enable = "neon")]
+fn tbl1_v16i8_basic() {
+    unsafe {
+        // table = 0..15
+        let table: uint8x16_t =
+            transmute::<[u8; 16], _>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        // indices: include in-range, 15 (last), 16 and 255 (out-of-range → 0)
+        let idx: uint8x16_t =
+            transmute::<[u8; 16], _>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        let got = vqtbl1q_u8(table, idx);
+        let got_arr: [u8; 16] = transmute(got);
+        assert_eq!(got_arr, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+
+        let idx2: uint8x16_t =
+            transmute::<[u8; 16], _>([15, 16, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let got2 = vqtbl1q_u8(table, idx2);
+        let got2_arr: [u8; 16] = transmute(got2);
+        assert_eq!(got2_arr[0], 15);
+        assert_eq!(got2_arr[1], 0); // out-of-range
+        assert_eq!(got2_arr[2], 0); // out-of-range
+        assert_eq!(&got2_arr[3..16], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12][..]);
+    }
 }
