@@ -226,7 +226,7 @@ impl LocationState {
 
     /// Records a new access, so that future access can potentially be skipped
     /// by `skip_if_known_noop`. This must be called on child accesses, and otherwise
-    /// shoud be called on foreign accesses for increased performance. It should not be called
+    /// should be called on foreign accesses for increased performance. It should not be called
     /// when `skip_if_known_noop` indicated skipping, since it then is a no-op.
     /// See `foreign_access_skipping.rs`
     fn record_new_access(&mut self, access_kind: AccessKind, rel_pos: AccessRelatedness) {
