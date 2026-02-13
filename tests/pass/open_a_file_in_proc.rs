@@ -1,5 +1,6 @@
 //@compile-flags: -Zmiri-disable-isolation
 //@only-target: linux android illumos
+//@ignore-host: windows
 use std::io::Read;
 
 fn main() {
