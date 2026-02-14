@@ -1,4 +1,4 @@
-warning: miri virtualizes file descriptors, so opening a file in `/proc` may not work as expected as it would on the host.
+warning: files in `/proc` can bypass the Abstract Machine and might not work properly in Miri
   --> RUSTLIB/std/src/sys/fs/PLATFORM.rs:LL:CC
    |
 LL |         let fd = cvt_r(|| unsafe { open64(path.as_ptr(), flags, opts.mode as c_int) })?;
