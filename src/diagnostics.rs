@@ -703,7 +703,7 @@ impl<'tcx> MiriMachine<'tcx> {
                 };
                 format!("GenMC currently does not model the failure ordering for `compare_exchange`. {was_upgraded_msg}. Miri with GenMC might miss bugs related to this memory access.")
             }
-            FileInProcOpened => format!("miri virtualizes file descriptors, so opening a file in `/proc` may not work as expected as it would on the host.")
+            FileInProcOpened => format!("files in `/proc` can bypass the Abstract Machine and might not work properly in Miri")
         };
 
         let notes = match &e {
