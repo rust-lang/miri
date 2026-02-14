@@ -1,7 +1,7 @@
 //! File and file system access
 
 use std::borrow::Cow;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs::{
     self, DirBuilder, File, FileType, OpenOptions, TryLockError, read_dir, remove_dir, remove_file,
     rename,
