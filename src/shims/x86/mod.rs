@@ -1178,24 +1178,8 @@ fn pclmulqdq<'tcx>(
         let index = if (imm8 & 0x10) == 0 { lo } else { hi };
         let right = ecx.read_scalar(&ecx.project_index(&right, index)?)?.to_u64()?;
 
-        // Perform carry-less multiplication.
-        //
-        // This operation is like long multiplication, but ignores all carries.
-        // That idea corresponds to the xor operator, which is used in the implementation.
-        //
-        // Wikipedia has an example https://en.wikipedia.org/wiki/Carry-less_product#Example
-        let mut result: u128 = 0;
-
-        for i in 0..64 {
-            // if the i-th bit in right is set
-            if (right & (1 << i)) != 0 {
-                // xor result with `left` shifted to the left by i positions
-                result ^= u128::from(left) << i;
-            }
-        }
-
         let dest = ecx.project_index(&dest, i)?;
-        ecx.write_scalar(Scalar::from_u128(result), &dest)?;
+        ecx.write_scalar(Scalar::from_u128(left.widening_carryless_mul(right)), &dest)?;
     }
 
     interp_ok(())
