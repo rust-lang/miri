@@ -229,17 +229,20 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (access_sec, access_nsec) = metadata.accessed.unwrap_or((0, 0));
         let (created_sec, created_nsec) = metadata.created.unwrap_or((0, 0));
         let (modified_sec, modified_nsec) = metadata.modified.unwrap_or((0, 0));
-        let mode = metadata.mode.to_uint(this.libc_ty_layout("mode_t").size)?;
 
         // We do *not* use `deref_pointer_as` here since determining the right pointee type
         // is highly non-trivial: it depends on which exact alias of the function was invoked
         // (e.g. `fstat` vs `fstat64`), and then on FreeBSD it also depends on the ABI level
         // which can be different between the libc used by std and the libc used by everyone else.
         let buf = this.deref_pointer(buf_op)?;
+
+        // Extract mode value. write_int will handle size conversion when writing to st_mode field.
+        let mode = metadata.mode.to_uint(metadata.mode.size())?.try_into().unwrap_or(0u32);
+
         this.write_int_fields_named(
             &[
                 ("st_dev", metadata.dev.into()),
-                ("st_mode", mode.try_into().unwrap()),
+                ("st_mode", mode.into()),
                 ("st_nlink", 0),
                 ("st_ino", 0),
                 ("st_uid", metadata.uid.into()),
@@ -1665,9 +1668,126 @@ impl FileMetadata {
             return interp_ok(Err(LibcError("EBADF")));
         };
 
-        let metadata = fd.metadata()?;
-        drop(fd);
-        FileMetadata::from_meta(ecx, metadata)
+        // Check if this is a file-backed FD (FileHandle). If so, use real metadata.
+        // For non-file-backed FDs (sockets, pipes, eventfd, epoll, stdin/stdout/stderr),
+        // we create synthetic metadata based on the FD type.
+        if let Some(file_handle) = fd.clone().downcast::<FileHandle>() {
+            // This is a file-backed FD, get real metadata directly from the file
+            let metadata = file_handle.file.metadata();
+            drop(fd);
+            FileMetadata::from_meta(ecx, metadata)
+        } else {
+            // This is a non-file-backed FD, create synthetic metadata based on FD name
+            let fd_name = fd.name();
+            drop(fd);
+            FileMetadata::for_non_file_fd(ecx, fd_name)
+        }
+    }
+
+    /// Create synthetic metadata for non-file-backed file descriptors.
+    fn for_non_file_fd<'tcx>(
+        ecx: &mut MiriInterpCx<'tcx>,
+        fd_name: &str,
+    ) -> InterpResult<'tcx, Result<FileMetadata, IoError>> {
+        // Determine the file type and mode based on the FD name
+        let (mode_name, size) = match fd_name {
+            "socketpair" => ("S_IFSOCK", 0u64),
+            "pipe" => ("S_IFIFO", 0u64),
+            "event" => ("S_IFREG", 0u64),
+            "epoll" => ("S_IFREG", 0u64),
+            "stdin" | "stdout" | "stderr" | "stderr and stdout" => ("S_IFCHR", 0u64),
+            _ => ("S_IFREG", 0u64),
+        };
+
+        // Start with the base file type (S_IFSOCK, S_IFIFO, etc.)
+        // Use eval_libc to get a Scalar with the correct size, just like in from_meta
+        let mode_base = ecx.eval_libc(mode_name);
+
+        // Add default permissions (0666 for sockets/pipes, 0600 for others).
+        // Convert Scalars to u32 using to_uint with their own size, then combine with bitwise OR.
+        let mode_base_u32 = mode_base.to_uint(mode_base.size())?.try_into().unwrap_or(0u32);
+        let permissions_u32 = if mode_name == "S_IFSOCK" || mode_name == "S_IFIFO" {
+            ecx.eval_libc("S_IRUSR")
+                .to_uint(ecx.eval_libc("S_IRUSR").size())?
+                .try_into()
+                .unwrap_or(0u32)
+                | ecx
+                    .eval_libc("S_IWUSR")
+                    .to_uint(ecx.eval_libc("S_IWUSR").size())?
+                    .try_into()
+                    .unwrap_or(0u32)
+                | ecx
+                    .eval_libc("S_IRGRP")
+                    .to_uint(ecx.eval_libc("S_IRGRP").size())?
+                    .try_into()
+                    .unwrap_or(0u32)
+                | ecx
+                    .eval_libc("S_IWGRP")
+                    .to_uint(ecx.eval_libc("S_IWGRP").size())?
+                    .try_into()
+                    .unwrap_or(0u32)
+                | ecx
+                    .eval_libc("S_IROTH")
+                    .to_uint(ecx.eval_libc("S_IROTH").size())?
+                    .try_into()
+                    .unwrap_or(0u32)
+                | ecx
+                    .eval_libc("S_IWOTH")
+                    .to_uint(ecx.eval_libc("S_IWOTH").size())?
+                    .try_into()
+                    .unwrap_or(0u32)
+        } else {
+            ecx.eval_libc("S_IRUSR")
+                .to_uint(ecx.eval_libc("S_IRUSR").size())?
+                .try_into()
+                .unwrap_or(0u32)
+                | ecx
+                    .eval_libc("S_IWUSR")
+                    .to_uint(ecx.eval_libc("S_IWUSR").size())?
+                    .try_into()
+                    .unwrap_or(0u32)
+        };
+        let mode_u32 = mode_base_u32 | permissions_u32;
+
+        cfg_select! {
+            unix => {
+                use std::os::unix::fs::MetadataExt;
+                // Get current user/group IDs from a temporary file or current directory
+                let (dev, uid, gid) = match std::fs::metadata("/tmp")
+                    .or_else(|_| std::fs::metadata("."))
+                {
+                    Ok(temp_meta) => {
+                        (temp_meta.dev(), temp_meta.uid(), temp_meta.gid())
+                    }
+                    Err(_) => {
+                        // If all else fails, use defaults
+                        (0, 0, 0)
+                    }
+                };
+            }
+            _ => {
+                let dev = 0;
+                let uid = 0;
+                let gid = 0;
+            }
+        }
+
+        // Create mode as Scalar with size 4 bytes to match the typical size of st_mode field.
+        let mode_size = Size::from_bytes(4);
+        let (mode_int, _overflow) =
+            rustc_middle::ty::ScalarInt::truncate_from_uint(u128::from(mode_u32), mode_size);
+        let mode_scalar = Scalar::from(mode_int);
+
+        interp_ok(Ok(FileMetadata {
+            mode: mode_scalar,
+            size,
+            created: None,
+            accessed: None,
+            modified: None,
+            dev,
+            uid,
+            gid,
+        }))
     }
 
     fn from_meta<'tcx>(
