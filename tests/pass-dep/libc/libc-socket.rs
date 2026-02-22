@@ -3,7 +3,7 @@
 
 fn main() {
     unsafe {
-        let sockfd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+        let sockfd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
         libc::close(sockfd);
     }
 }
