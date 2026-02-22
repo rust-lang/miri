@@ -22,17 +22,27 @@ enum SocketType {
     Stream,
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 enum SocketKind {
     TcpListener(TcpListener),
     TcpStream(TcpStream),
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 struct Socket {
+    /// Family of the socket, used to ensure socket only binds/connects to address of
+    /// same family.
     family: SocketFamily,
+    /// Type of the socket, either datagram or stream.
+    /// Only stream is supported at the moment!
     socket_type: SocketType,
+    /// Inner standard library socket used for shimming.
+    /// Depending on whether `bind` or `connect` is called, we use a listener or a stream.
+    /// This is `None` until either of those methods is called.
     socket: RefCell<Option<SocketKind>>,
+    /// Whether this fd is non-blocking or not.
     is_non_block: Cell<bool>,
 }
 
