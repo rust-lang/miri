@@ -537,6 +537,9 @@ pub struct MiriMachine<'tcx> {
     /// The set of threads.
     pub(crate) threads: ThreadManager<'tcx>,
 
+    /// Handles blocking I/O and polling for completion.
+    pub(crate) blocking_io: BlockingIoManager,
+
     /// Stores which thread is eligible to run on which CPUs.
     /// This has no effect at all, it is just tracked to produce the correct result
     /// in `sched_getaffinity`
@@ -727,6 +730,7 @@ impl<'tcx> MiriMachine<'tcx> {
             config.num_cpus
         );
         let threads = ThreadManager::new(config);
+        let blocking_io = BlockingIoManager::new().expect("Couldn't create poll instance");
         let mut thread_cpu_affinity = FxHashMap::default();
         if matches!(&tcx.sess.target.os, Os::Linux | Os::FreeBsd | Os::Android) {
             thread_cpu_affinity
@@ -754,6 +758,7 @@ impl<'tcx> MiriMachine<'tcx> {
             layouts,
             threads,
             thread_cpu_affinity,
+            blocking_io,
             static_roots: Vec::new(),
             profiler,
             string_cache: Default::default(),
@@ -998,6 +1003,8 @@ impl VisitProvenance for MiriMachine<'_> {
         let MiriMachine {
             threads,
             thread_cpu_affinity: _,
+            // TODO: Check whether this needs to implement this trait as well
+            blocking_io: _,
             tls,
             env_vars,
             main_fn_ret_place,

@@ -132,6 +132,7 @@ pub use crate::borrow_tracker::{
     BorTag, BorrowTrackerMethod, EvalContextExt as _, TreeBorrowsParams,
 };
 pub use crate::clock::{Instant, MonotonicClock};
+pub use crate::concurrency::blocking_io::{BlockingIoKind, BlockingIoManager, EvalContextExt as _};
 pub use crate::concurrency::cpu_affinity::MAX_CPUS;
 pub use crate::concurrency::data_race::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, EvalContextExt as _,
