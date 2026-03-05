@@ -20,7 +20,7 @@ const MAX_COUNTER: u64 = u64::MAX - 1;
 ///
 /// <https://man.netbsd.org/eventfd.2>
 #[derive(Debug)]
-struct EventFd {
+pub(crate) struct EventFd {
     /// The object contains an unsigned 64-bit integer (uint64_t) counter that is maintained by the
     /// kernel. This counter is initialized with the value specified in the argument initval.
     counter: Cell<u64>,
@@ -35,6 +35,28 @@ struct EventFd {
 impl FileDescription for EventFd {
     fn name(&self) -> &'static str {
         "event"
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<std::fs::Metadata>> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            use std::fs::File;
+            use std::os::fd::FromRawFd;
+
+            let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
+            if fd < 0 {
+                return interp_ok(Err(io::Error::last_os_error()));
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            interp_ok(file.metadata())
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            interp_ok(Err(io::Error::new(
+                ErrorKind::Unsupported,
+                "obtaining metadata for eventfd is unsupported on this target",
+            )))
+        }
     }
 
     fn destroy<'tcx>(
