@@ -1,11 +1,13 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use mio::event::{Event, Source};
+use mio::event::Source;
 use mio::{Events, Interest, Poll, Token};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_index::Idx;
 
 use crate::*;
 
@@ -23,21 +25,17 @@ pub enum BlockingIoKind {
 pub struct BlockingIoManager {
     /// Poll instance to monitor I/O events from the OS.
     poll: RefCell<Poll>,
-    /// Handle to a list of ready I/O events.
-    ///
-    /// This is a vector under the hood which stores all events returned from
-    /// a call to [`mio::Poll::poll`]. This vector is cleared when calling
-    /// [`mio::Poll::poll`] again.
+    /// Buffer used to store the ready I/O events when calling [`Poll::poll`].
     events: RefCell<Events>,
-    /// List of events returned by the last [`mio::Poll::poll`] which haven't
-    /// yet been handled.
-    unhandled: RefCell<Vec<Event>>,
-    /// Map between tokens (threads) which are currently blocked and the underlying
-    /// I/O sources.
-    sources: RefCell<FxHashMap<Token, BlockingIoSourceFd>>,
-    /// Set of tokens for which we ignore the events. Those tokens are only still
+    /// Map between threads which are currently blocked, the kind of I/O
+    /// they are blocked on and the underlying I/O source.
+    sources: RefCell<FxHashMap<ThreadId, (BlockingIoKind, BlockingIoSourceFd)>>,
+    /// Set of threads for which we ignore the events. Those threads are only still
     /// registered since deregistering them failed.
-    ignored: RefCell<FxHashSet<Token>>,
+    ignored: RefCell<FxHashSet<ThreadId>>,
+    /// List of threads which are ready to be unblocked together with the I/O kind
+    /// they were blocked for.
+    ready: RefCell<VecDeque<(ThreadId, BlockingIoKind)>>,
 }
 
 impl BlockingIoManager {
@@ -45,65 +43,73 @@ impl BlockingIoManager {
         let manager = Self {
             poll: RefCell::new(Poll::new()?),
             events: RefCell::new(Events::with_capacity(IO_EVENT_CAPACITY)),
-            unhandled: RefCell::new(Vec::new()),
             sources: RefCell::new(FxHashMap::default()),
             ignored: RefCell::new(FxHashSet::default()),
+            ready: RefCell::new(VecDeque::new()),
         };
         Ok(manager)
     }
 
-    /// Non-blockingly poll whether an I/O event is ready.
-    ///
-    /// If there are still unhandled events from the last OS poll, return one of those.
-    /// Otherwise, perform a new non-blocking OS poll and return a new event if
-    /// any exist.
-    pub fn poll_next(&self) -> Result<Option<Event>, io::Error> {
-        let mut unhandled = self.unhandled.borrow_mut();
-
-        if let Some(next) = unhandled.pop() {
-            // We still have an unhandled event and thus don't need to poll again.
-            return Ok(Some(next));
-        };
-
+    /// Non-blockingly poll for I/O events. This method marks all threads which received
+    /// an I/O event as ready. Those threads can then be unblocked using the [`unblock_next_ready`]
+    /// method.
+    /// Returns the amount of threads ready to be unblocked.
+    pub fn poll(&self, duration: Duration) -> Result<usize, io::Error> {
         let mut events = self.events.borrow_mut();
-        self.poll.borrow_mut().poll(&mut events, Some(Duration::ZERO))?;
+        self.poll.borrow_mut().poll(&mut events, Some(duration))?;
 
-        // Since [`mio::Events`] only exposes the events through an iterator, we can only
-        // access individual elements by storing a cursor ourselves, creating a new iterator
-        // and advancing it on every access. At this point it's cleaner to just clone the vector.
-        *unhandled = events
-            .iter()
-            .flat_map(|event| {
-                let token = event.token();
-                let ignored = self.ignored.borrow().contains(&token);
+        let mut ignored = self.ignored.borrow_mut();
+        let mut ready = self.ready.borrow_mut();
+        events.iter().for_each(|event| {
+            let token = event.token();
+            let thread = ThreadId::new(token.0);
+            let is_ignored = ignored.contains(&thread);
 
-                // Deregister this source as we only want to receive one event per token.
-                if let Err(_err) = self.deregister(token) {
-                    // FIXME: We probably want to do something with this error.
-                    if ignored {
-                        // Filter out the event as the token was already ignored before.
-                        return None;
-                    }
-                } else if ignored {
-                    // Filter out the event as the token was already ignored before.
-                    return None;
+            // Deregister this source as we only want to receive one event per token.
+            match self.deregister(thread) {
+                // Ignore the event as the thread was already ignored before.
+                Ok(_) if is_ignored => {
+                    // Ensure thread is no longer part of the ignored list.
+                    ignored.remove(&thread);
                 }
-                Some(event.clone())
-            })
-            .collect();
+                // Ignore the event as the thread was already ignored before.
+                // FIXME: What do we do with this error?
+                _ if is_ignored => {}
+                // Add thread to the ready list such that it can be unblocked.
+                Ok(kind) => ready.push_back((thread, kind)),
+                Err(_err) => {
+                    // FIXME: What do we do with this error?
 
-        Ok(unhandled.pop())
+                    // Ignore future events for this thread.
+                    ignored.insert(thread);
+
+                    // We still want to unblock the thread now and deal
+                    // with deregistering it again on it's next event.
+                    if let Some((kind, _)) = self.sources.borrow().get(&thread) {
+                        ready.push_back((thread, *kind));
+                    }
+                }
+            };
+        });
+
+        Ok(ready.len())
+    }
+
+    /// Get the next thread from the ready list. If the list is empty [`None`] is returned.
+    pub fn get_next_ready(&self) -> Option<(ThreadId, BlockingIoKind)> {
+        let mut ready = self.ready.borrow_mut();
+        ready.pop_front()
     }
 
     /// Register a blocking I/O source for a thread together with it's poll interests.
     ///
     /// The source will be deregistered automatically once an event for it is received.
     ///
-    /// **Important**: As the OS can always produce spurious wake-ups, it's the callers
-    /// responsibility to verify the requested I/O operation is really ready and to re-register
-    /// if it's not.
+    /// As the OS can always produce spurious wake-ups, it's the callers responsibility to
+    /// verify the requested I/O operation is really ready and to register again if it's not.
     pub fn register(
         &self,
+        kind: BlockingIoKind,
         mut source: BlockingIoSourceFd,
         thread: ThreadId,
         interests: Interest,
@@ -113,45 +119,39 @@ impl BlockingIoManager {
         let mut sources = self.sources.borrow_mut();
         let mut ignored = self.ignored.borrow_mut();
 
-        if sources.contains_key(&token) && ignored.contains(&token) {
-            // This token should've already been removed and is thus ignored.
+        if sources.contains_key(&thread) && ignored.contains(&thread) {
+            // This thread should've already been deregistered and is thus ignored.
             // We can now attempt to re-register it with it's new interests.
             self.poll.borrow().registry().reregister(&mut source, token, interests)?;
-            ignored.remove(&token);
+            ignored.remove(&thread);
         } else {
             assert!(
-                !sources.contains_key(&token),
+                !sources.contains_key(&thread),
                 "A thread cannot be registered twice at the same time"
             );
 
             self.poll.borrow().registry().register(&mut source, token, interests)?;
-            sources.insert(token, source);
+            sources.insert(thread, (kind, source));
         }
 
         Ok(())
     }
 
-    /// Deregister the event source for a token.
-    ///
-    /// Should the deregistration fail, further events from the token will be ignored.
-    fn deregister(&self, token: Token) -> Result<(), io::Error> {
+    /// Deregister the event source for a thread. Returns the kind of I/O the thread was
+    /// blocked on.
+    fn deregister(&self, thread: ThreadId) -> Result<BlockingIoKind, io::Error> {
         let mut sources = self.sources.borrow_mut();
-        let Some(mut source) = sources.remove(&token) else {
+        let Some((kind, mut source)) = sources.remove(&thread) else {
             panic!("Attempt to deregister a token which isn't registered")
         };
 
-        let mut ignored = self.ignored.borrow_mut();
         if let Err(err) = self.poll.borrow().registry().deregister(&mut source) {
             // Re-insert source as we weren't able to deregister it.
-            sources.insert(token, source);
-            ignored.insert(token);
+            sources.insert(thread, (kind, source));
             Err(err)?;
         }
 
-        // Ensure token isn't part of the ignored list.
-        ignored.remove(&token);
-
-        Ok(())
+        Ok(kind)
     }
 }
 
@@ -171,12 +171,21 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
     ) -> Result<(), io::Error> {
         let this = self.eval_context_mut();
         this.machine.blocking_io.register(
+            kind,
             source.as_source_fd(),
             this.machine.threads.active_thread(),
             interests,
         )?;
         this.block_thread(BlockReason::IO { kind }, timeout, callback);
         Ok(())
+    }
+
+    /// Unblock the next ready thread which was blocked for I/O.
+    /// Returns [`None`] if there is no thread ready to be unblocked.
+    fn unblock_next_ready_io_thread(&mut self) -> Option<InterpResult<'tcx>> {
+        let this = self.eval_context_mut();
+        let (thread, kind) = this.machine.blocking_io.get_next_ready()?;
+        Some(this.unblock_thread(thread, BlockReason::IO { kind }))
     }
 }
 
