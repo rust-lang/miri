@@ -767,9 +767,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         }
 
         // We are not in GenMC mode, so we control the scheduling.
-        let thread_manager = &mut this.machine.threads;
-        let clock = &this.machine.monotonic_clock;
-        let rng = this.machine.rng.get_mut();
+        let thread_manager = &this.machine.threads;
         // This thread and the program can keep going.
         if thread_manager.threads[thread_manager.active_thread].state.is_enabled()
             && !thread_manager.yield_active_thread
@@ -777,6 +775,33 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // The currently active thread is still enabled, just continue with it.
             return interp_ok(SchedulingAction::ExecuteStep);
         }
+
+        if this.machine.communicate() {
+            // When isolation mode is disabled we need to check for events for
+            // threads which are blocked on host I/O.
+            let blocking_io_manager = &mut this.machine.blocking_io;
+            // Perform a non-blocking poll for newly available I/O events from the OS.
+            #[expect(clippy::manual_unwrap_or_default)]
+            let ready_io_thread_count = match blocking_io_manager.poll(Duration::ZERO) {
+                Ok(ready_count) => ready_count,
+                Err(_err) => {
+                    // FIXME: How should we handle this error?
+                    0
+                }
+            };
+
+            if ready_io_thread_count > 0 {
+                // There is at least one thread blocked on I/O which is ready and can be unblocked.
+                while let Some(callback_result) = this.unblock_next_ready_io_thread() {
+                    callback_result?
+                }
+            }
+        }
+
+        let thread_manager = &mut this.machine.threads;
+        let clock = &this.machine.monotonic_clock;
+        let rng = this.machine.rng.get_mut();
+
         // The active thread yielded or got terminated. Let's see if there are any timeouts to take
         // care of. We do this *before* running any other thread, to ensure that timeouts "in the
         // past" fire before any other thread can take an action. This ensures that for
@@ -1306,7 +1331,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.run_timeout_callback()?;
                 }
                 SchedulingAction::Sleep(duration) => {
-                    this.machine.monotonic_clock.sleep(duration);
+                    if this.machine.communicate() {
+                        // When we're running with isolation disabled, instead of
+                        // strictly sleeping the duration we allow waking up
+                        // early for I/O events from the OS.
+                        if let Err(_err) = this.machine.blocking_io.poll(duration) {
+                            // FIXME: How should we handle this error?
+                        }
+                    } else {
+                        this.machine.monotonic_clock.sleep(duration);
+                    }
                 }
             }
         }

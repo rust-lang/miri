@@ -730,12 +730,13 @@ impl<'tcx> MiriMachine<'tcx> {
             config.num_cpus
         );
         let threads = ThreadManager::new(config);
-        let blocking_io = BlockingIoManager::new().expect("Couldn't create poll instance");
         let mut thread_cpu_affinity = FxHashMap::default();
         if matches!(&tcx.sess.target.os, Os::Linux | Os::FreeBsd | Os::Android) {
             thread_cpu_affinity
                 .insert(threads.active_thread(), CpuAffinityMask::new(&layout_cx, config.num_cpus));
         }
+        let blocking_io = BlockingIoManager::new(config.isolated_op == IsolatedOp::Allow)
+            .expect("Couldn't create poll instance");
         let alloc_addresses =
             RefCell::new(alloc_addresses::GlobalStateInner::new(config, stack_addr, tcx));
         MiriMachine {
