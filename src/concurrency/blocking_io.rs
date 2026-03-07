@@ -18,7 +18,7 @@ const IO_EVENT_CAPACITY: usize = 16;
 pub type SourceRef = Rc<RefCell<dyn Source>>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-/// Types of blocking I/O a thread can be blocked on.
+/// Types of I/O a thread can be blocked on.
 pub enum BlockingIoKind {
     /// Attempting to accept an incoming TCP connection.
     TcpAccept,
