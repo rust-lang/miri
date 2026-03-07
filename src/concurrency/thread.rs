@@ -27,8 +27,11 @@ enum SchedulingAction {
     ExecuteStep,
     /// Execute a timeout callback.
     ExecuteTimeoutCallback,
-    /// Wait for a bit, until there is a timeout to be called.
-    Sleep(Duration),
+    /// Wait for a bit but at most as long as the duration specified.
+    /// We wake up early if an I/O event happened.
+    /// If the duration is [`None`], we sleep indefinitely. This is
+    /// only allowed when isolation is disabled!
+    Sleep(Option<Duration>),
 }
 
 /// What to do with TLS allocations from terminated threads
@@ -151,6 +154,10 @@ impl<'tcx> ThreadState<'tcx> {
 
     fn is_blocked_on(&self, reason: BlockReason) -> bool {
         matches!(*self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
+    }
+
+    fn is_blocked_on_io(&self) -> bool {
+        matches!(*self, ThreadState::Blocked { reason: BlockReason::IO { .. }, .. })
     }
 }
 
@@ -782,7 +789,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             let blocking_io_manager = &mut this.machine.blocking_io;
             // Perform a non-blocking poll for newly available I/O events from the OS.
             #[expect(clippy::manual_unwrap_or_default)]
-            let ready_io_thread_count = match blocking_io_manager.poll(Duration::ZERO) {
+            let ready_io_thread_count = match blocking_io_manager.poll(Some(Duration::ZERO)) {
                 Ok(ready_count) => ready_count,
                 Err(_err) => {
                     // FIXME: How should we handle this error?
@@ -859,7 +866,12 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // All threads are currently blocked, but we have unexecuted
             // timeout_callbacks, which may unblock some of the threads. Hence,
             // sleep until the first callback.
-            interp_ok(SchedulingAction::Sleep(sleep_time))
+            interp_ok(SchedulingAction::Sleep(Some(sleep_time)))
+        } else if thread_manager.threads.iter().any(|thread| thread.state.is_blocked_on_io()) {
+            // At least one thread is blocked on host I/O but doesn't
+            // have a timeout set. Hence, we sleep indefinitely in the
+            // hope that eventually an I/O event for this thread happens.
+            interp_ok(SchedulingAction::Sleep(None))
         } else {
             throw_machine_stop!(TerminationInfo::GlobalDeadlock);
         }
@@ -1339,6 +1351,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             // FIXME: How should we handle this error?
                         }
                     } else {
+                        let duration = duration.expect(
+                            "Infinite sleep should not be triggered when isolation mode is enabled",
+                        );
                         this.machine.monotonic_clock.sleep(duration);
                     }
                 }
