@@ -389,8 +389,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let socket = socket_source.borrow();
                 let state = socket.state.borrow();
                 let SocketState::Listening(listener) = &*state else {
-                    // Earlier we checked that the socket is in listening state and
-                    // since there is no outgoing transition from that state this
+                    // We checked that the socket is in listening state before blocking
+                    // and since there is no outgoing transition from that state this
                     // should be unreachable.
                     unreachable!()
                 };
@@ -426,7 +426,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(Scalar::from_i32(sockfd), &dest)
             }),
         )
-        .expect("TODO: what should we do with this error?");
+        .expect("FIXME: what should we do with this error?");
 
         interp_ok(())
     }

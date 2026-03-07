@@ -1004,8 +1004,7 @@ impl VisitProvenance for MiriMachine<'_> {
         let MiriMachine {
             threads,
             thread_cpu_affinity: _,
-            // TODO: Check whether this needs to implement this trait as well
-            blocking_io: _,
+            blocking_io,
             tls,
             env_vars,
             main_fn_ret_place,
@@ -1064,6 +1063,7 @@ impl VisitProvenance for MiriMachine<'_> {
         } = self;
 
         threads.visit_provenance(visit);
+        blocking_io.visit_provenance(visit);
         tls.visit_provenance(visit);
         env_vars.visit_provenance(visit);
         dirs.visit_provenance(visit);

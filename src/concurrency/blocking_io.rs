@@ -15,7 +15,11 @@ use crate::*;
 /// this value can be set rather low.
 const IO_EVENT_CAPACITY: usize = 16;
 
-pub type SourceRef = Rc<RefCell<dyn Source>>;
+// Supertrait to enforce that all sources implement [`Source`] as
+// well as [`VisitProvenance`].
+pub trait SourceRefExt: Source + VisitProvenance {}
+impl<T> SourceRefExt for T where T: Source + VisitProvenance {}
+type SourceRef = Rc<RefCell<dyn SourceRefExt>>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 /// Types of I/O a thread can be blocked on.
@@ -217,5 +221,16 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         let (thread, kind) = this.machine.blocking_io.get_next_ready()?;
         Some(this.unblock_thread(thread, BlockReason::IO { kind }))
+    }
+}
+
+impl VisitProvenance for BlockingIoManager {
+    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+        self.sources.iter().for_each(|(thread_id, (_, source))| {
+            thread_id.visit_provenance(visit);
+            source.borrow().visit_provenance(visit);
+        });
+        self.ignored.iter().for_each(|thread_id| thread_id.visit_provenance(visit));
+        self.ready.iter().for_each(|(thread_id, _)| thread_id.visit_provenance(visit));
     }
 }
