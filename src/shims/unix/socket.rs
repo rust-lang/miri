@@ -297,7 +297,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// For more information on the arguments see the socket manpage:
     /// <https://linux.die.net/man/2/accept4>
     ///
-    /// When there is an error, the output is written to synchronously and
+    /// When there is an error, the output is written synchronously and
     /// otherwise it's written asynchronously from a blocking I/O callback.
     fn accept4(
         &mut self,
@@ -305,9 +305,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         address: &OpTy<'tcx>,
         address_len: &OpTy<'tcx>,
         flags: Option<&OpTy<'tcx>>,
-        // Location where the output scalar containing
-        // the peer sockfd or the error indicator should
-        // be written to
+        // Location where the output scalar containing the peer sockfd
+        // or the error indicator is written to
         dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
@@ -382,12 +381,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } |this, kind: UnblockKind| {
                 if let UnblockKind::TimedOut = kind {
                     // We pretend the syscall was interrupted by a signal as there usually
-                    // is no timeout on accept syscalls.
+                    // is no timeout on `accept` syscalls.
                     return this.set_last_error_and_return(LibcError("EINTR"), &dest);
                 };
 
                 let socket = socket_source.borrow();
                 let state = socket.state.borrow();
+
                 let SocketState::Listening(listener) = &*state else {
                     // We checked that the socket is in listening state before blocking
                     // and since there is no outgoing transition from that state this

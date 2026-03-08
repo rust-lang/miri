@@ -67,22 +67,24 @@ impl BlockingIoManager {
         Ok(manager)
     }
 
-    /// Poll for new I/O events from the OS. This method marks all threads which received
-    /// an I/O event as ready. Those threads can then be unblocked using the
-    /// [`EvalContextExt::unblock_next_ready_io_thread`] method.
+    /// Poll for new I/O events from the OS or wait until the timeout expired. This method
+    /// marks all threads which received an I/O event as ready. Those threads can then
+    /// be unblocked using the [`EvalContextExt::unblock_next_ready_io_thread`] method.
     ///
-    /// - If the duration is [`Some`] and contains [`Duration::ZERO`], the poll doesn't block and just
+    /// - If the timeout is [`Some`] and contains [`Duration::ZERO`], the poll doesn't block and just
     ///   reads all events since the last poll.
-    /// - If the duration is [`None`] the poll blocks indefinitely.
+    /// - If the timeout is [`Some`] and contains a non-zero duration, it blocks at most for the
+    ///   specified duration.
+    /// - If the timeout is [`None`] the poll blocks indefinitely until an event occurs.
     ///
     /// Returns the total amount of threads ready to be unblocked, including ones which were already
     /// ready before the poll.
-    pub fn poll(&mut self, duration: Option<Duration>) -> Result<usize, io::Error> {
+    pub fn poll(&mut self, timeout: Option<Duration>) -> Result<usize, io::Error> {
         let poll =
             self.poll.as_mut().expect("Blocking I/O should not be called with isolation enabled");
 
         // Poll for new I/O events from OS and store them in the events buffer.
-        poll.poll(&mut self.events, duration)?;
+        poll.poll(&mut self.events, timeout)?;
 
         // We need to clone the iterator here since it holds an immutable reference to `self.events`.
         // This doesn't work out since we need a mutable self-reference inside the loop body.
@@ -95,7 +97,7 @@ impl BlockingIoManager {
             let thread = ThreadId::new_unchecked(token.0 as u32);
             let is_ignored = self.ignored.contains(&thread);
 
-            // Deregister this source as we only want to receive one event per token.
+            // Deregister this source as we only want to receive one event per thread.
             match self.deregister(thread) {
                 // Ignore the event as the thread was already ignored before.
                 Ok(_) if is_ignored => {
@@ -114,7 +116,7 @@ impl BlockingIoManager {
                     // Ignore future events for this thread.
                     self.ignored.insert(thread);
 
-                    // We still want to unblock the thread now and deal
+                    // We still want to mark the thread as ready now and deal
                     // with deregistering it again on it's next event.
                     if let Some((kind, _)) = self.sources.get(&thread) {
                         self.ready.push_back((thread, *kind));
@@ -136,7 +138,7 @@ impl BlockingIoManager {
     /// The source will be deregistered automatically once an event for it is received.
     ///
     /// As the OS can always produce spurious wake-ups, it's the callers responsibility to
-    /// verify the requested I/O operation is really ready and to register again if it's not.
+    /// verify the requested I/O interests are really ready and to register again if they're not.
     pub fn register(
         &mut self,
         kind: BlockingIoKind,
@@ -195,6 +197,10 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// Block the current thread until some interests on an I/O source
     /// are fulfilled or the optional timeout exceeded.
     /// The callback will be invoked when the thread gets unblocked.
+    ///
+    /// There can be spurious wake-ups by the OS and thus it's the callers
+    /// responsibility to verify that the requested I/O interests are
+    /// really ready and to block again if they're not.
     #[inline]
     fn block_thread_for_io(
         &mut self,
