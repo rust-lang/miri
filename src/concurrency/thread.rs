@@ -784,7 +784,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         }
 
         if this.machine.communicate() {
-            // When isolation mode is disabled we need to check for events for
+            // When isolation is disabled we need to check for events for
             // threads which are blocked on host I/O.
             let blocking_io_manager = &mut this.machine.blocking_io;
             // Perform a non-blocking poll for newly available I/O events from the OS.
@@ -1352,7 +1352,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         }
                     } else {
                         let duration = duration.expect(
-                            "Infinite sleep should not be triggered when isolation mode is enabled",
+                            "Infinite sleep should not be triggered when isolation is enabled",
                         );
                         this.machine.monotonic_clock.sleep(duration);
                     }
