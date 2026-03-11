@@ -26,6 +26,8 @@ type SourceRef = Rc<RefCell<dyn SourceRefExt>>;
 pub enum BlockingIoKind {
     /// Attempting to accept an incoming TCP connection.
     TcpAccept,
+    /// Attempting to connect to a TCP server
+    TcpConnect,
 }
 
 /// Manager for managing blocking host I/O in a non-blocking manner.

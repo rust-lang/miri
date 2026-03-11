@@ -792,11 +792,11 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
                 Ok(ready_count) => ready_count,
                 // We can ignore errors originating from interrupts since subsequent calls
                 // to poll are not affected.
-                Err(err) if err.kind() == io::ErrorKind::Interrupted =>
+                Err(e) if e.kind() == io::ErrorKind::Interrupted =>
                     blocking_io_manager.get_ready_count(),
-                // For other errors we panic, on Linux and BSD hosts this should only be
+                // For other errors we panic. On Linux and BSD hosts this should only be
                 // reachable when a system resource error (e.g. ENOMEM or ENOSPC) occured.
-                Err(err) => panic!("{err}"),
+                Err(e) => panic!("{e}"),
             };
 
             if ready_io_thread_count > 0 {
