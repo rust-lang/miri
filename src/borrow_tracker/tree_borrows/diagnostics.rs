@@ -682,7 +682,7 @@ impl DisplayRepr {
                     .iter_all()
                     .map(move |(_offset, loc)| {
                         let perm = loc.perms.get(idx);
-                        perm.cloned()
+                        perm.map(|x| x.base)
                     })
                     .collect::<Vec<_>>();
                 let mut children = Vec::new();
