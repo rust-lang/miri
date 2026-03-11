@@ -3,7 +3,6 @@ use rustc_middle::mir::{Mutability, RetagKind};
 use rustc_middle::ty::layout::HasTypingEnv;
 use rustc_middle::ty::{self, Ty};
 
-use self::foreign_access_skipping::IdempotentForeignAccess;
 use self::tree::LocationState;
 use crate::borrow_tracker::{AccessKind, GlobalState, GlobalStateInner, ProtectorKind};
 use crate::concurrency::data_race::NaReadType;
@@ -293,11 +292,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } else {
                 (new_perm.nonfreeze_perm, new_perm.nonfreeze_access)
             };
-            let sifa = perm.strongest_idempotent_foreign_access(protected);
             if access {
-                LocationState::new_accessed(perm, sifa)
+                LocationState::new_accessed(perm)
             } else {
-                LocationState::new_non_accessed(perm, sifa)
+                LocationState::new_non_accessed(perm)
             }
         };
         let inside_perms = if !precise_interior_mut {
@@ -309,10 +307,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // The initial state will be overwritten by the visitor below.
             let mut perms_map: DedupRangeMap<LocationState> = DedupRangeMap::new(
                 ptr_size,
-                LocationState::new_accessed(
-                    Permission::new_disabled(),
-                    IdempotentForeignAccess::None,
-                ),
+                LocationState::new_accessed(Permission::new_disabled()),
             );
             this.visit_freeze_sensitive(place, ptr_size, |range, frozen| {
                 let state = loc_state(frozen);

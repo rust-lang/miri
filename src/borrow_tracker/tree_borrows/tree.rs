@@ -49,11 +49,6 @@ pub(super) struct LocationState {
     accessed: bool,
     /// This pointer's current permission / future initial permission.
     permission: Permission,
-    /// See `foreign_access_skipping.rs`.
-    /// Stores an idempotent foreign access for this location and its children.
-    /// For correctness, this must not be too strong, and the recorded idempotent foreign access
-    /// of all children must be at least as strong as this. For performance, it should be as strong as possible.
-    idempotent_foreign_access: IdempotentForeignAccess,
 }
 
 impl LocationState {
@@ -61,16 +56,16 @@ impl LocationState {
     /// to any foreign access yet.
     /// The permission is not allowed to be `Unique`.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    pub fn new_non_accessed(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
+    pub fn new_non_accessed(permission: Permission) -> Self {
         assert!(permission.is_initial() || permission.is_disabled());
-        Self { permission, accessed: false, idempotent_foreign_access: sifa }
+        Self { permission, accessed: false }
     }
 
     /// Constructs a new initial state. It has not yet been subjected
     /// to any foreign access. However, it is already marked as having been accessed.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    pub fn new_accessed(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
-        Self { permission, accessed: true, idempotent_foreign_access: sifa }
+    pub fn new_accessed(permission: Permission) -> Self {
+        Self { permission, accessed: true }
     }
 
     /// Check if the location has been accessed, i.e. if it has
@@ -95,10 +90,6 @@ impl LocationState {
         protected: bool,
         diagnostics: &DiagnosticInfo,
     ) -> Result<(), TransitionError> {
-        // Call this function now (i.e. only if we know `relatedness`), which
-        // ensures it is only called when `skip_if_known_noop` returns
-        // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
-        self.record_new_access(access_kind, relatedness);
         let old_access_level = self.permission.strongest_allowed_local_access(protected);
         let transition = self.perform_access(access_kind, relatedness, protected)?;
         if !transition.is_noop() {
@@ -168,6 +159,42 @@ impl LocationState {
             Err(_) => None,
         }
     }
+}
+
+impl fmt::Display for LocationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.permission)?;
+        if !self.accessed {
+            write!(f, "?")?;
+        }
+        Ok(())
+    }
+}
+
+/// Data for a reference at single *location*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct LocationStateExtra {
+    pub base: LocationState,
+    /// See `foreign_access_skipping.rs`.
+    /// Stores an idempotent foreign access for this location and its children.
+    /// For correctness, this must not be too strong, and the recorded idempotent foreign access
+    /// of all children must be at least as strong as this. For performance, it should be as strong as possible.
+    idempotent_foreign_access: IdempotentForeignAccess,
+}
+
+impl LocationStateExtra {
+    pub fn new(base: LocationState, protected: bool) -> Self {
+        Self {
+            base,
+            idempotent_foreign_access: base
+                .permission
+                .strongest_idempotent_foreign_access(protected),
+        }
+    }
+
+    pub fn new_with_sifa(base: LocationState, sifa: IdempotentForeignAccess) -> Self {
+        Self { base, idempotent_foreign_access: sifa }
+    }
 
     /// Tree traversal optimizations. See `foreign_access_skipping.rs`.
     /// This checks if such a foreign access can be skipped.
@@ -180,7 +207,7 @@ impl LocationState {
             let happening_now = IdempotentForeignAccess::from_foreign(access_kind);
             let mut new_access_noop =
                 self.idempotent_foreign_access.can_skip_foreign_access(happening_now);
-            if self.permission.is_disabled() {
+            if self.base.permission.is_disabled() {
                 // A foreign access to a `Disabled` tag will have almost no observable effect.
                 // It's a theorem that `Disabled` node have no protected accessed children,
                 // and so this foreign access will never trigger any protector.
@@ -192,7 +219,7 @@ impl LocationState {
                 // blocking write will still be identified directly, just at a different tag.
                 new_access_noop = true;
             }
-            if self.permission.is_frozen() && access_kind == AccessKind::Read {
+            if self.base.permission.is_frozen() && access_kind == AccessKind::Read {
                 // A foreign read to a `Frozen` tag will have almost no observable effect.
                 // It's a theorem that `Frozen` nodes have no `Unique` children, so all children
                 // already survive foreign reads. Foreign reads in general have almost no
@@ -237,17 +264,35 @@ impl LocationState {
         self.idempotent_foreign_access
             .record_new(IdempotentForeignAccess::from_acc_and_rel(access_kind, rel_pos));
     }
-}
 
-impl fmt::Display for LocationState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.permission)?;
-        if !self.accessed {
-            write!(f, "?")?;
-        }
-        Ok(())
+    /// Performs an access on this index and updates node,
+    /// perm and wildcard_state to reflect the transition.
+    fn perform_transition(
+        &mut self,
+        idx: UniIndex,
+        nodes: &mut UniValMap<Node>,
+        exposed_cache: &mut ExposedCache,
+        access_kind: AccessKind,
+        relatedness: AccessRelatedness,
+        protected: bool,
+        diagnostics: &DiagnosticInfo,
+    ) -> Result<(), TransitionError> {
+        // Call this function now (i.e. only if we know `relatedness`), which
+        // ensures it is only called when `skip_if_known_noop` returns
+        // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
+        self.record_new_access(access_kind, relatedness);
+        self.base.perform_transition(
+            idx,
+            nodes,
+            exposed_cache,
+            access_kind,
+            relatedness,
+            protected,
+            diagnostics,
+        )
     }
 }
+
 /// The state of the full tree for a particular location: for all nodes, the local permissions
 /// of that node, and the tracking for wildcard accesses.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -260,7 +305,7 @@ pub struct LocationTree {
     /// `unwrap` any `perm.get(key)`.
     ///
     /// We do uphold the fact that `keys(perms)` is a subset of `keys(nodes)`
-    pub perms: UniValMap<LocationState>,
+    pub perms: UniValMap<LocationStateExtra>,
     /// Caches information about the relatedness of nodes for a wildcard access.
     pub exposed_cache: ExposedCache,
 }
@@ -361,9 +406,9 @@ impl Tree {
             // was a write that initialized these to `Unique`.
             perms.insert(
                 root_idx,
-                LocationState::new_accessed(
-                    Permission::new_unique(),
-                    IdempotentForeignAccess::None,
+                LocationStateExtra::new(
+                    LocationState::new_accessed(Permission::new_unique()),
+                    false,
                 ),
             );
             let exposed_cache = ExposedCache::default();
@@ -431,16 +476,14 @@ impl<'tcx> Tree {
             inside_perms.iter(Size::from_bytes(0), inside_perms.size())
         {
             assert!(perm.permission.is_initial());
-            assert_eq!(
-                perm.idempotent_foreign_access,
-                perm.permission.strongest_idempotent_foreign_access(protected)
-            );
 
-            min_sifa = cmp::min(min_sifa, perm.idempotent_foreign_access);
+            min_sifa =
+                cmp::min(min_sifa, perm.permission.strongest_idempotent_foreign_access(protected));
             for (_range, loc) in self
                 .locations
                 .iter_mut(Size::from_bytes(start) + base_offset, Size::from_bytes(end - start))
             {
+                let perm = LocationStateExtra::new(perm, protected);
                 loc.perms.insert(idx, perm);
             }
         }
@@ -564,9 +607,9 @@ impl<'tcx> Tree {
                                 == Some(&ProtectorKind::StrongProtector)
                                 // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
                                 // Related to https://github.com/rust-lang/rust/issues/55005.
-                                && !perm.permission.is_cell()
+                                && !perm.base.permission.is_cell()
                                 // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
-                                && perm.accessed
+                                && perm.base.accessed
                             {
                                 Err(TbError {
                                     error_kind: TransitionError::ProtectedDealloc,
@@ -690,8 +733,8 @@ impl<'tcx> Tree {
         for (loc_range, loc) in self.locations.iter_mut_all() {
             // Only visit accessed permissions
             if let Some(p) = loc.perms.get(source_idx)
-                && let Some(access_kind) = p.permission.protector_end_access()
-                && p.accessed
+                && let Some(access_kind) = p.base.permission.protector_end_access()
+                && p.base.accessed
             {
                 let diagnostics = DiagnosticInfo {
                     access_cause: AccessCause::FnExit(access_kind),
@@ -762,12 +805,12 @@ impl Tree {
             let parent_perm = loc
                 .perms
                 .get(idx)
-                .map(|x| x.permission)
+                .map(|x| x.base.permission)
                 .unwrap_or_else(|| node.default_initial_perm);
             let child_perm = loc
                 .perms
                 .get(child_idx)
-                .map(|x| x.permission)
+                .map(|x| x.base.permission)
                 .unwrap_or_else(|| child.default_initial_perm);
             if !parent_perm.can_be_replaced_by_child(child_perm) {
                 return None;
@@ -1129,7 +1172,11 @@ impl<'tcx> LocationTree {
 
                 // We only count exposed nodes through which an access could happen.
                 if node.is_exposed
-                    && perm.permission.strongest_allowed_local_access(protected).allows(access_kind)
+                    && perm
+                        .base
+                        .permission
+                        .strongest_allowed_local_access(protected)
+                        .allows(access_kind)
                     && max_local_tag.is_none_or(|max_local_tag| max_local_tag >= node.tag)
                 {
                     has_valid_exposed = true;
@@ -1178,9 +1225,9 @@ impl<'tcx> LocationTree {
 }
 
 impl Node {
-    pub fn default_location_state(&self) -> LocationState {
-        LocationState::new_non_accessed(
-            self.default_initial_perm,
+    pub fn default_location_state(&self) -> LocationStateExtra {
+        LocationStateExtra::new_with_sifa(
+            LocationState::new_non_accessed(self.default_initial_perm),
             self.default_initial_idempotent_foreign_access,
         )
     }
