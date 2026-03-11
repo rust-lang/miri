@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use mio::event::Source;
 use mio::{Events, Interest, Poll, Token};
-use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::FxHashMap;
 
 use crate::*;
 
@@ -45,9 +45,6 @@ pub struct BlockingIoManager {
     /// Map between threads which are currently blocked, the kind of I/O
     /// they are blocked on and the underlying I/O source.
     sources: FxHashMap<ThreadId, (BlockingIoKind, SourceRef)>,
-    /// Set of threads for which we ignore the events. Those threads are only still
-    /// registered since deregistering them failed.
-    ignored: FxHashSet<ThreadId>,
     /// List of threads which are ready to be unblocked together with the I/O kind
     /// they were blocked on.
     ready: VecDeque<(ThreadId, BlockingIoKind)>,
@@ -61,7 +58,6 @@ impl BlockingIoManager {
             poll: communicate.then_some(Poll::new()?),
             events: Events::with_capacity(IO_EVENT_CAPACITY),
             sources: FxHashMap::default(),
-            ignored: FxHashSet::default(),
             ready: VecDeque::new(),
         };
         Ok(manager)
@@ -95,34 +91,11 @@ impl BlockingIoManager {
             // since we only create tokens from thread id's which are u32.
             #[expect(clippy::as_conversions)]
             let thread = ThreadId::new_unchecked(token.0 as u32);
-            let is_ignored = self.ignored.contains(&thread);
 
             // Deregister this source as we only want to receive one event per thread.
-            match self.deregister(thread) {
-                // Ignore the event as the thread was already ignored before.
-                Ok(_) if is_ignored => {
-                    // Ensure thread is no longer part of the ignored list
-                    // since it might block again at a later point in time.
-                    self.ignored.remove(&thread);
-                }
-                // Ignore the event as the thread was already ignored before.
-                // FIXME: What do we do with this error?
-                _ if is_ignored => {}
-                // Add thread to the ready list such that it can be unblocked.
-                Ok(kind) => self.ready.push_back((thread, kind)),
-                Err(_err) => {
-                    // FIXME: What do we do with this error?
-
-                    // Ignore future events for this thread.
-                    self.ignored.insert(thread);
-
-                    // We still want to mark the thread as ready now and deal
-                    // with deregistering it again on it's next event.
-                    if let Some((kind, _)) = self.sources.get(&thread) {
-                        self.ready.push_back((thread, *kind));
-                    }
-                }
-            };
+            let kind = self.deregister(thread);
+            // Add thread to the ready list such that it can be unblocked.
+            self.ready.push_back((thread, kind));
         }
 
         Ok(self.ready.len())
@@ -131,6 +104,11 @@ impl BlockingIoManager {
     /// Get the next thread from the ready list. If the list is empty, [`None`] is returned.
     pub fn get_next_ready(&mut self) -> Option<(ThreadId, BlockingIoKind)> {
         self.ready.pop_front()
+    }
+
+    /// Get the amount of threads ready to be unblocked.
+    pub fn get_ready_count(&self) -> usize {
+        self.ready.len()
     }
 
     /// Register a blocking I/O source for a thread together with it's poll interests.
@@ -145,34 +123,27 @@ impl BlockingIoManager {
         source: SourceRef,
         thread: ThreadId,
         interests: Interest,
-    ) -> Result<(), io::Error> {
+    ) {
         let poll =
             self.poll.as_ref().expect("Blocking I/O should not be called with isolation enabled");
 
         #[allow(clippy::as_conversions)]
         let token = Token(thread.to_u32() as usize);
 
-        if self.sources.contains_key(&thread) && self.ignored.contains(&thread) {
-            // This thread should've already been deregistered and is thus ignored.
-            // We can now attempt to re-register it with it's new interests.
-            poll.registry().reregister(&mut *source.borrow_mut(), token, interests)?;
-            self.ignored.remove(&thread);
-        } else {
-            assert!(
-                !self.sources.contains_key(&thread),
-                "A thread cannot be registered twice at the same time"
-            );
+        assert!(
+            !self.sources.contains_key(&thread),
+            "A thread cannot be registered twice at the same time"
+        );
 
-            poll.registry().register(&mut *source.borrow_mut(), token, interests)?;
-            self.sources.insert(thread, (kind, source));
-        }
-
-        Ok(())
+        // Treat errors from registering as fatal. On UNIX hosts this can only
+        // fail due to system resource errors (e.g. ENOMEM or ENOSPC).
+        poll.registry().register(&mut *source.borrow_mut(), token, interests).unwrap();
+        self.sources.insert(thread, (kind, source));
     }
 
     /// Deregister the event source for a thread. Returns the kind of I/O the thread was
     /// blocked on.
-    fn deregister(&mut self, thread: ThreadId) -> Result<BlockingIoKind, io::Error> {
+    fn deregister(&mut self, thread: ThreadId) -> BlockingIoKind {
         let poll =
             self.poll.as_ref().expect("Blocking I/O should not be called with isolation enabled");
 
@@ -180,15 +151,11 @@ impl BlockingIoManager {
             panic!("Attempt to deregister a token which isn't registered")
         };
 
-        let mut source_borrow_mut = source.borrow_mut();
-        if let Err(err) = poll.registry().deregister(&mut *source_borrow_mut) {
-            drop(source_borrow_mut);
-            // Re-insert source as we weren't able to deregister it.
-            self.sources.insert(thread, (kind, source));
-            Err(err)?;
-        }
+        // Treat errors from deregistering as fatal. On UNIX hosts this can only
+        // fail due to system resource errors (e.g. ENOMEM or ENOSPC).
+        poll.registry().deregister(&mut *source.borrow_mut()).unwrap();
 
-        Ok(kind)
+        kind
     }
 }
 
@@ -209,16 +176,15 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         interests: Interest,
         timeout: Option<(TimeoutClock, TimeoutAnchor, Duration)>,
         callback: DynUnblockCallback<'tcx>,
-    ) -> Result<(), io::Error> {
+    ) {
         let this = self.eval_context_mut();
         this.machine.blocking_io.register(
             kind,
             source,
             this.machine.threads.active_thread(),
             interests,
-        )?;
+        );
         this.block_thread(BlockReason::IO { kind }, timeout, callback);
-        Ok(())
     }
 
     /// Unblock the next ready thread which was blocked for I/O.
@@ -236,7 +202,6 @@ impl VisitProvenance for BlockingIoManager {
             thread_id.visit_provenance(visit);
             source.borrow().visit_provenance(visit);
         });
-        self.ignored.iter().for_each(|thread_id| thread_id.visit_provenance(visit));
         self.ready.iter().for_each(|(thread_id, _)| thread_id.visit_provenance(visit));
     }
 }

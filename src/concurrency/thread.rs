@@ -1,9 +1,9 @@
 //! Implements threads.
 
-use std::mem;
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
 use std::time::{Duration, SystemTime};
+use std::{io, mem};
 
 use rand::seq::IteratorRandom;
 use rustc_abi::ExternAbi;
@@ -788,13 +788,15 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // threads which are blocked on host I/O.
             let blocking_io_manager = &mut this.machine.blocking_io;
             // Perform a non-blocking poll for newly available I/O events from the OS.
-            #[expect(clippy::manual_unwrap_or_default)]
             let ready_io_thread_count = match blocking_io_manager.poll(Some(Duration::ZERO)) {
                 Ok(ready_count) => ready_count,
-                Err(_err) => {
-                    // FIXME: How should we handle this error?
-                    0
-                }
+                // We can ignore errors originating from interrupts since subsequent calls
+                // to poll are not affected.
+                Err(err) if err.kind() == io::ErrorKind::Interrupted =>
+                    blocking_io_manager.get_ready_count(),
+                // For other errors we panic, on Linux and BSD hosts this should only be
+                // reachable when a system resource error (e.g. ENOMEM or ENOSPC) occured.
+                Err(err) => panic!("{err}"),
             };
 
             if ready_io_thread_count > 0 {

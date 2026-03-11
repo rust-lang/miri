@@ -425,8 +425,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let sockfd = this.machine.fds.insert(fd);
                 this.write_scalar(Scalar::from_i32(sockfd), &dest)
             }),
-        )
-        .expect("FIXME: what should we do with this error?");
+        );
 
         interp_ok(())
     }
