@@ -1003,9 +1003,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // Stream is now connected and ready to be used.
                     Ok(_) => {},
                     // We need to block the thread again as it was spuriously woken up.
-                    // FIXME: Use `ErrorKind::InProgress` once the `io_error_inprogress` unstable feature is stabilized.
-                    //        See <https://github.com/rust-lang/rust/issues/130840>.
-                    Err(e) if e.kind() == io::ErrorKind::NotConnected || e.raw_os_error() == Some(libc::EINPROGRESS) => {
+                    Err(e) if e.kind() == io::ErrorKind::NotConnected || e.kind() == io::ErrorKind::InProgress => {
                         drop(state);
                         drop(socket);
                         this.block_for_connect(socket_source, dest);

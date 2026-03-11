@@ -16,6 +16,7 @@
 #![feature(never_type)]
 #![feature(try_blocks)]
 #![feature(io_error_more)]
+#![feature(io_error_inprogress)]
 #![feature(variant_count)]
 #![feature(yeet_expr)]
 #![feature(pointer_is_aligned_to)]
