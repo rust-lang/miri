@@ -919,6 +919,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Ok(peer) => peer,
                     // We need to block the thread again as it was spuriously woken up
                     // and the listener doesn't have an incoming connection right now.
+                    // FIXME: For non-blocking sockets we probably don't want to block again but
+                    //        return the error instead.
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         drop(state);
                         drop(socket);
@@ -948,6 +950,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     is_non_block: Cell::new(is_sock_nonblock),
                 });
                 let sockfd = this.machine.fds.insert(fd);
+                // We need to create the scalar using the destination size since
+                // `SYS_accept4` returns a c_long (i64) which doesn't match
+                // the c_int (i32) returned from the `accept`/`accept4` syscalls.
                 this.write_scalar(Scalar::from_int(sockfd, dest.layout.size), &dest)
             }),
         );
@@ -1003,6 +1008,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // Stream is now connected and ready to be used.
                     Ok(_) => {},
                     // We need to block the thread again as it was spuriously woken up.
+                    // FIXME: For non-blocking sockets we probably don't want to block again but
+                    //        return the error instead.
                     Err(e) if e.kind() == io::ErrorKind::NotConnected || e.kind() == io::ErrorKind::InProgress => {
                         drop(state);
                         drop(socket);
@@ -1012,7 +1019,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Err(e) => return this.set_last_error_and_return(e, &dest)
                 }
 
-                this.write_scalar(Scalar::from_int(0, dest.layout.size), &dest)
+                this.write_scalar(Scalar::from_i32(0), &dest)
             }),
         );
     }
