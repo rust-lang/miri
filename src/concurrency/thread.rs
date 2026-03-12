@@ -1349,9 +1349,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         // When we're running with isolation disabled, instead of
                         // strictly sleeping the duration we allow waking up
                         // early for I/O events from the OS.
-                        if let Err(_err) = this.machine.blocking_io.poll(duration) {
-                            // FIXME: How should we handle this error?
-                        }
+                        //
+                        // We ignore the result from the poll as it's just used as a sleep.
+                        // Before scheduling anything, we poll again in the scheduler anyways.
+                        this.machine.blocking_io.poll(duration).ok();
                     } else {
                         let duration = duration.expect(
                             "Infinite sleep should not be triggered when isolation is enabled",

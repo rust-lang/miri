@@ -466,9 +466,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         // Mio returns a potentially unconnected stream.
-        // We need to verify later on that the stream is connected by checking
+        // We need to verify later that the stream is connected by checking
         // [`TcpStream::take_err`] and attempting to call [`TcpStream::peer_addr`]
-        // when a [`Interest::WRITEABLE`] event occured on the stream.
+        // when an [`Interest::WRITEABLE`] event occured on the stream.
         match TcpStream::connect(address) {
             Ok(stream) => *socket.state.borrow_mut() = SocketState::Connected(stream),
             Err(e) => return this.set_last_error_and_return(e, dest),
@@ -899,12 +899,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 socket_source: Rc<RefCell<FileDescriptionRef<Socket>>>,
                 dest: MPlaceTy<'tcx>,
             } |this, kind: UnblockKind| {
-                if let UnblockKind::TimedOut = kind {
-                    // We pretend the syscall was interrupted by a signal as there usually
-                    // is no timeout on `accept` syscalls.
-                    return this.set_last_error_and_return(LibcError("EINTR"), &dest);
-                };
-
                 let socket = socket_source.borrow();
                 let state = socket.state.borrow();
 
@@ -913,6 +907,12 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // and since there is no outgoing transition from that state this
                     // should be unreachable.
                     unreachable!()
+                };
+
+                if let UnblockKind::TimedOut = kind {
+                    // We pretend the syscall was interrupted by a signal as there usually
+                    // is no timeout on `accept` syscalls.
+                    return this.set_last_error_and_return(LibcError("EINTR"), &dest);
                 };
 
                 let (stream, addr) = match listener.accept() {
@@ -980,6 +980,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let socket = socket_source.borrow();
                 let mut state = socket.state.borrow_mut();
 
+                let SocketState::Connected(stream) = &*state else {
+                    // We put the socket into connected state before blocking
+                    // and since there is no outgoing transition from that state this
+                    // should be unreachable.
+                    unreachable!()
+                };
+
                 if let UnblockKind::TimedOut = kind {
                     // Connecting the socket failed so we need to reset the state.
                     *state = SocketState::Initial;
@@ -987,14 +994,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // We pretend the syscall was interrupted by a signal as there usually
                     // is no timeout on `connect` syscalls.
                     return this.set_last_error_and_return(LibcError("EINTR"), &dest);
-                };
-
-
-                let SocketState::Connected(stream) = &*state else {
-                    // We put the socket into connected state before blocking
-                    // and since there is no outgoing transition from that state this
-                    // should be unreachable.
-                    unreachable!()
                 };
 
                 if let Ok(Some(e)) = stream.take_error() {
