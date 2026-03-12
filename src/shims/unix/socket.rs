@@ -948,7 +948,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     is_non_block: Cell::new(is_sock_nonblock),
                 });
                 let sockfd = this.machine.fds.insert(fd);
-                this.write_scalar(Scalar::from_i32(sockfd), &dest)
+                this.write_scalar(Scalar::from_int(sockfd, dest.layout.size), &dest)
             }),
         );
     }
@@ -1012,7 +1012,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Err(e) => return this.set_last_error_and_return(e, &dest)
                 }
 
-                this.write_scalar(Scalar::from_i32(0), &dest)
+                this.write_scalar(Scalar::from_int(0, dest.layout.size), &dest)
             }),
         );
     }
