@@ -6,8 +6,8 @@ use rustc_middle::ty::{self, Ty};
 
 use self::tree::LocationState;
 use crate::borrow_tracker::{AccessKind, GlobalState, GlobalStateInner, ProtectorKind};
-use crate::concurrency::data_race::{NaReadType, NaWriteType};
 use crate::concurrency::VClock;
+use crate::concurrency::data_race::{NaReadType, NaWriteType};
 use crate::*;
 
 pub mod diagnostics;
@@ -40,6 +40,9 @@ impl<'tcx> Tree {
         Tree::new(tag, size, span)
     }
 
+    /// If data race tracking is enabled, invoke the closure with the current thread's clock.
+    /// If not, invoke it with `None`.
+    /// See `release_clock` in `data_race.rs`.
     fn with_release_clock<R, F: for<'b> FnOnce(Option<&'b VClock>) -> R>(
         f: F,
         machine: &MiriMachine<'tcx>,
