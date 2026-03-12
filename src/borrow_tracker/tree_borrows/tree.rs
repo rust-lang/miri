@@ -172,46 +172,68 @@ impl fmt::Display for LocationState {
     }
 }
 
-/// Protectors ending is a weak memory event.
-/// In other words, other threads need to establish happens-before ordering with the protector end
-/// event in order to be allowed to perform foreign accesses. This struct tracks which timestamp must
-/// have been acquired by a thread in order for it not to trigger any protector in this subtree on a foreign access.
-/// This struct tracks this.
+/// This struct is used to track the weak-memory aspects of a protector ending.
+/// When a protector ends, we remember whether it blocked only foreign writes (common)
+/// or also foreign reads (less common). Foreign accesses from other threads will continue
+/// to trigger UB until these accesses have observed that the protector has ended.
+/// This struct remembers the protector and tracks when it ended to appropiately
+/// trigger UB for other threads.
+///
+/// We also track the latest protector end in all subtrees, for the foreign access skipping
+/// optimisation.
+///
+/// If data-race tracking is disabled, all fields will be `None`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ProtectorEndWeakMemoryRestrictions {
-    /// If None, then there are no restrictions.
-    /// Otherwise, this vector clock must be before any write access.
-    /// In other words, this is when the last foreign-write-blocking protector ended.
-    /// This is always at least as strong as `no_reads_before_subtree`.
-    no_writes_before_subtree: Option<VClock>,
-    /// If None, then there are no restrictions.
-    /// Otherwise, this vector clock must be before any read access.
-    /// In other words, this is when the last foreign-read-blocking protector ended.
-    no_reads_before_subtree: Option<VClock>,
-    /// `no_writes_before_subtree`/`no_reads_before_subtree` is the join of this field
-    /// (depending on which accesses are blocked) in all reflexive-transitive children of this node.
-    /// This field is used for diagnostics to find the actually offending node.
-    /// If the second component is `Write` then this blocks writes, if it is `Read` it blocks both writes and reads.
-    /// It could be a pair `(VectorIdx, VTimestamp)`, but these types are not `pub`.
-    no_access_before_actual: Option<(VClock, AccessKind)>,
-    /// Records for diagnostic purposes the permission when the protector ended, which thread ended it, and the span.
+    /// If this node used to be protected, then this tracks when the protector ended.
+    /// The second field is `Write` if the protector only blocked write accesses (common)
+    /// or `Read` if it blocked both read and write accesses.
+    /// If the protector is still ongoing, or if there never was one, this is `None`.
+    /// The vector clock could be a pair `(VClockIdx, VTimestamp)` but these types are not `pub`.
+    no_access_before: Option<(VClock, AccessKind)>,
+    /// Records diagnostic information about when the protector ended: The permission we had then,
+    /// the thread that ended the protector, and the span. This is `Some` precisely when
+    /// `no_access_before` is `Some`.
     protector_end_diag_info: Option<(Permission, ThreadId, Span)>,
+    /// Tracks subtrees for the foreign access skipping optimization. This subtree can not be skipped
+    /// if it contains a node that used to be protected, but now is no longer, because it might still
+    /// trigger UB for some threads. This vector clock is an upper bound: If a thread is "after" this
+    /// vector clock, then it has also seen all protectors in this subtree end, and thus we can skip
+    /// traversing it. This field is `None` if there is no protector in the subtree. Note that this
+    /// field only tracks protectors blocking writes.
+    no_writes_before_subtree: Option<VClock>,
+    /// Like `no_writes_before_subtree` but also tracks protectors banning reads. All read-blocking
+    /// protectors also block writes, so this clock is never ahead of `no_writes_before_subtree`.
+    /// When handling a foreign read, we only need to check this clock, and thus might be able to skip
+    /// this subtree even if we could not have skipped it for writes.
+    no_reads_before_subtree: Option<VClock>,
 }
 
 impl ProtectorEndWeakMemoryRestrictions {
+    /// Creates a struct appropiate for a not-yet-ended protector.
     pub fn new() -> Self {
         Self {
             no_writes_before_subtree: None,
             no_reads_before_subtree: None,
-            no_access_before_actual: None,
+            no_access_before: None,
             protector_end_diag_info: None,
         }
     }
 
+    /// Foreign access skipping: We check if there might be a protector in this subtree that would
+    /// block us, using the `before_subtree` fields.
+    ///
+    /// `current_time` is `None` if and only if data-race tracking is disabled, in which case this is a NOP.
     fn can_skip_foreign(&self, acc: AccessKind, current_time: Option<&VClock>) -> bool {
         let Some(current_time) = current_time else {
+            // Data-race tracking is disabled.
             return true;
         };
+        assert!(
+            self.no_reads_before_subtree
+                .as_ref()
+                .is_none_or(|r| self.no_writes_before_subtree.as_ref().is_some_and(|w| r <= w))
+        );
         match acc {
             AccessKind::Read =>
                 self.no_reads_before_subtree.as_ref().is_none_or(|x| x <= current_time),
@@ -220,24 +242,29 @@ impl ProtectorEndWeakMemoryRestrictions {
         }
     }
 
+    /// Checks if this protector should still trigger UB even though it has already ended.
+    /// May only be called for foreign accesses.
+    ///
+    /// `current_time` is `None` if and only if data-race tracking is disabled, in which case this is a NOP.
     fn perform_foreign_transition(
         &mut self,
         acc: AccessKind,
         current_time: Option<&VClock>,
     ) -> Result<(), TransitionError> {
         let Some(current_time) = current_time else {
+            // Data-race tracking is disabled.
             return Ok(());
         };
-        let Some((ref vc, blocked_acc)) = self.no_access_before_actual else {
-            // the protector has not yet ended/there never was one, so no UB.
+        let Some((ref vc, blocked_acc)) = self.no_access_before else {
+            // The protector has not yet ended/there never was one, so no UB.
             return Ok(());
         };
         if acc == AccessKind::Read && blocked_acc != AccessKind::Read {
-            // the protector only blocks writes, but we're a read, so it's fine.
+            // The protector only blocks writes, but we're a read, so it's fine.
             return Ok(());
         }
         if vc <= current_time {
-            // the protector end happens-before us, so it's fine.
+            // The protector end happens-before us, so it's fine.
             Ok(())
         } else {
             let e = self.protector_end_diag_info.unwrap();
@@ -245,6 +272,9 @@ impl ProtectorEndWeakMemoryRestrictions {
         }
     }
 
+    /// Records a protector ending.
+    ///
+    /// `current_time` is `None` if and only if data-race tracking is disabled, in which case this is a NOP.
     fn record_protector_ending_here(
         &mut self,
         permission: Permission,
@@ -260,10 +290,13 @@ impl ProtectorEndWeakMemoryRestrictions {
         let current_time = current_time.clone();
         // protected Unique nodes also block foreign reads
         let blocked_acc = if permission.is_unique() { AccessKind::Read } else { AccessKind::Write };
-        self.no_access_before_actual = Some((current_time, blocked_acc));
+        self.no_access_before = Some((current_time, blocked_acc));
         blocked_acc
     }
 
+    /// Called on all parents of a node where a protector ended.
+    /// Updates the foreign access skipping information to ensure we track an upper bound
+    /// on all protector end times in this subtree.
     fn record_protector_end_in_subtree(&mut self, blocked_acc: AccessKind, current_time: &VClock) {
         self.no_writes_before_subtree.get_or_insert_default().join(current_time);
         if blocked_acc == AccessKind::Read {
@@ -271,15 +304,24 @@ impl ProtectorEndWeakMemoryRestrictions {
         }
     }
 
+    /// Checks if this node can be garbage-collected, which is the case if all
+    /// threads have observed that this protector has ended.
+    ///
+    /// `hb_lower_bounds` is a lower bound on what all threads have observed,
+    /// or `None` if data race tracking is disabled.
     fn is_gc_able(&self, hb_lower_bounds: Option<&VClock>) -> bool {
         let Some(lb) = hb_lower_bounds else {
+            // Data-race tracking is disabled.
+            // We can be garbage-collected immediately since we don't track protectors
+            // past their end, as we only do that when data-race tracking is enabled.
             return true;
         };
-        self.no_access_before_actual.as_ref().is_none_or(|x| &x.0 <= lb)
+        self.no_access_before.as_ref().is_none_or(|x| &x.0 <= lb)
     }
 }
 
 /// Data for a reference at single *location*.
+/// Contains the permission, as well as additional data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LocationStateExtra {
     pub base: LocationState,
@@ -288,6 +330,9 @@ pub(super) struct LocationStateExtra {
     /// For correctness, this must not be too strong, and the recorded idempotent foreign access
     /// of all children must be at least as strong as this. For performance, it should be as strong as possible.
     idempotent_foreign_access: IdempotentForeignAccess,
+
+    /// Tracks the information for past protectors still triggering UB in data race situation.
+    /// See the comment on `ProtectorEndWeakMemoryRestrictions` for more information.
     protector_ends: ProtectorEndWeakMemoryRestrictions,
 }
 
@@ -319,6 +364,9 @@ impl LocationStateExtra {
         current_time: Option<&VClock>,
     ) -> ContinueTraversal {
         if rel_pos.is_foreign() {
+            // If there are protectors in the subtree that we can trigger, do not skip.
+            // Note that this method returning true means we _will_ trigger UB, we just
+            // recurse to ensure we trigger UB at the right node, for diagnostics.
             if !self.protector_ends.can_skip_foreign(access_kind, current_time) {
                 return ContinueTraversal::Recurse;
             }
@@ -414,6 +462,8 @@ impl LocationStateExtra {
         )
     }
 
+    /// Ends the protector. The protector might continue to affect other threads until these have
+    /// synchronized with our thread.
     fn end_protector_at(
         &mut self,
         current_time: Option<&VClock>,
@@ -428,10 +478,15 @@ impl LocationStateExtra {
         )
     }
 
+    /// Records that a protector ended in the subtree. Needed for correctness of the
+    /// foreign access skipping information.
     fn record_protector_end_in_subtree(&mut self, blocked_acc: AccessKind, current_time: &VClock) {
         self.protector_ends.record_protector_end_in_subtree(blocked_acc, current_time);
     }
 
+    /// Indicates that this node can be garbage-collected.
+    /// Protected nodes are already accounted for elsewhere, but we also need to account for
+    /// formerly protected nodes that might still trigger UB for other threads.
     fn is_gc_able(&self, hb_lower_bound: Option<&VClock>) -> bool {
         self.protector_ends.is_gc_able(hb_lower_bound)
     }
@@ -910,6 +965,7 @@ impl<'tcx> Tree {
                     &diagnostics,
                     min_exposed_child,
                 )?;
+                // Update the protector-end foreign access skipping information.
                 loc.update_protector_end_vclocks(
                     &self.nodes,
                     source_idx,
@@ -1423,6 +1479,9 @@ impl<'tcx> LocationTree {
         interp_ok(())
     }
 
+    /// Updates the parents of a node after a protector ended there, to make sure
+    /// that their subtree information is correct. This is important for the
+    /// foreign access skipping information.
     fn update_protector_end_vclocks(
         &mut self,
         nodes: &UniValMap<Node>,

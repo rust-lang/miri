@@ -39,6 +39,9 @@ impl<'tcx> Tree {
         Tree::new(tag, size, span)
     }
 
+    /// If data race tracking is enabled, invoke the closure with the current thread's clock.
+    /// If not, invoke it with `None`.
+    /// See `release_clock` in `data_race.rs`.
     fn with_release_clock<R, F: for<'b> FnOnce(Option<&'b VClock>) -> R>(
         f: F,
         machine: &MiriMachine<'tcx>,
