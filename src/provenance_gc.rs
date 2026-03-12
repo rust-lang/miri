@@ -196,9 +196,17 @@ impl LiveAllocs<'_, '_> {
 fn remove_unreachable_tags<'tcx>(ecx: &mut MiriInterpCx<'tcx>, tags: FxHashSet<BorTag>) {
     // Avoid iterating all allocations if there's no borrow tracker anyway.
     if ecx.machine.borrow_tracker.is_some() {
+        let all_threads_lower_bound =
+            ecx.machine.data_race.as_vclocks_ref().and_then(|x| x.all_threads_lower_bound());
+        let all_threads_lower_bound = all_threads_lower_bound.as_ref();
         ecx.memory.alloc_map().iter(|it| {
             for (_id, (_kind, alloc)) in it {
-                alloc.extra.borrow_tracker.as_ref().unwrap().remove_unreachable_tags(&tags);
+                alloc
+                    .extra
+                    .borrow_tracker
+                    .as_ref()
+                    .unwrap()
+                    .remove_unreachable_tags(&tags, all_threads_lower_bound);
             }
         });
     }
