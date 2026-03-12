@@ -874,7 +874,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Ok(()))
     }
 
-    /// Block the thread until there's an incoming connection or an error occured.
+    /// Block the thread until there's an incoming connection or an error occurred.
     ///
     /// This recursively calls itself should the thread be woken up due to a
     /// spurious wake-up.
@@ -953,7 +953,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         );
     }
 
-    /// Block the thread until the stream is connected or an error occured.
+    /// Block the thread until the stream is connected or an error occurred.
     ///
     /// This recursively calls itself should the thread be woken up due to a
     /// spurious wake-up.
