@@ -512,9 +512,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(e) => return this.set_last_error_and_return(e, dest),
         };
 
-        if !socket.is_non_block.get() {
+        if cfg!(target_os = "windows") || !socket.is_non_block.get() {
             // The socket is in blocking mode and thus the connect call should block
-            // until the connection with the server is established.
+            // until the connection with the server is established, or we're on a
+            // windows host where we can't support non-blocking connects at the moment.
+            // This is because on windows the [`TcpStream::peer_addr`] always returns
+            // the address passed to the [`TcpStream::connect`] call even when the
+            // connection is not yet established.
             this.block_for_connect(Rc::new(RefCell::new(socket)), dest.clone());
             return interp_ok(());
         }
@@ -938,8 +942,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// Block the thread until there's an incoming connection or an error occurred.
     ///
-    /// This recursively calls itself should the thread be woken up due to a
-    /// spurious wake-up.
+    /// This recursively calls itself should the operation still block for some reason.
     fn block_for_accept(
         &mut self,
         address_ptr: Pointer,
@@ -979,8 +982,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let (stream, addr) = match listener.accept() {
                     Ok(peer) => peer,
-                    // We need to block the thread again as it was spuriously woken up
-                    // and the listener doesn't have an incoming connection right now.
+                    // We need to block the thread again as it would still block.
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         drop(state);
                         drop(socket);
@@ -1019,9 +1021,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     /// Block the thread until the stream is connected or an error occurred.
-    ///
-    /// This recursively calls itself should the thread be woken up due to a
-    /// spurious wake-up.
     fn block_for_connect(
         &mut self,
         socket_source: Rc<RefCell<FileDescriptionRef<Socket>>>,
@@ -1050,7 +1049,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 match state.try_set_connected() {
                     Ok(_) => this.write_scalar(Scalar::from_i32(0), &dest),
-                     // We need to block the thread again as it was spuriously woken up.
+                     // We need to block the thread again as the connection is still not yet ready.
                      Err(e) if e.kind() == io::ErrorKind::NotConnected || e.kind() == io::ErrorKind::InProgress => {
                         drop(state);
                         drop(socket);
