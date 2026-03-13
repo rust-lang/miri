@@ -1,11 +1,13 @@
 //@ignore-target: windows # No libc socket on Windows
 //@compile-flags: -Zmiri-disable-isolation
 
+#![feature(io_error_inprogress)]
+
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
 use std::io::{self, ErrorKind};
 #[allow(unused)]
-use std::{mem::MaybeUninit, thread, time::Duration};
+use std::{mem::MaybeUninit, thread};
 
 use libc_utils::*;
 
@@ -184,7 +186,7 @@ fn test_listen() {
     }
 }
 
-/// Test that nonblocking TCP server sockets receive [`io::ErrorKind::WouldBlock`] when trying
+/// Test that nonblocking TCP server sockets return [`io::ErrorKind::WouldBlock`] when trying
 /// to accept when no incoming connection exists. This also tests that nonblocking server sockets
 /// are still able to accept incoming connections should they already exist before the `accept` or
 /// `accept4` syscall is called.
@@ -199,7 +201,7 @@ fn test_listen() {
     target_os = "illumos"
 ))]
 fn test_accept_nonblock() {
-    // Create new non-blocking server socket.
+    // Create a new non-blocking server socket.
     let server_sockfd = unsafe {
         errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0))
             .unwrap()
@@ -233,37 +235,35 @@ fn test_accept_nonblock() {
     assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
 
     let t1 = thread::spawn(move || {
-        unsafe {
-            errno_check(libc::connect(
-                client_sockfd,
-                (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
-                size_of::<libc::sockaddr_in>() as libc::socklen_t,
-            ));
-        }
+        // Instantly yield to main thread to ensure that the `connect` syscall
+        // was called before we call the `accept` on the server.
+        thread::yield_now();
+
+        let result = unsafe {
+            errno_result(libc::accept(server_sockfd, storage.as_mut_ptr() as *mut _, &mut len))
+        };
+
+        let _sockfd = result.unwrap();
+        // Ensure that address has been written and that it has the correct size.
+        let family = unsafe {
+            let address = storage.as_ptr();
+            (*address).ss_family as i32
+        };
+        let size = if family == libc::AF_INET {
+            size_of::<libc::sockaddr_in>()
+        } else {
+            size_of::<libc::sockaddr_in6>()
+        };
+        assert_eq!(size, len as usize);
     });
 
-    // Instantly yield to client thread to ensure that the `connect` syscall
-    // was called before we call the `accept` on the server. We yield by sleeping
-    // for a short period of time to force the scheduler to schedule the client
-    // thread before executing this thread again.
-    thread::sleep(Duration::from_millis(50));
-
-    let result = unsafe {
-        errno_result(libc::accept(server_sockfd, storage.as_mut_ptr() as *mut _, &mut len))
-    };
-
-    let _sockfd = result.unwrap();
-    // Ensure that address has been written and that it has the correct size.
-    let family = unsafe {
-        let address = storage.as_ptr();
-        (*address).ss_family as i32
-    };
-    let size = if family == libc::AF_INET {
-        size_of::<libc::sockaddr_in>()
-    } else {
-        size_of::<libc::sockaddr_in6>()
-    };
-    assert_eq!(size, len as usize);
+    unsafe {
+        errno_check(libc::connect(
+            client_sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        ));
+    }
 
     t1.join().unwrap();
 }

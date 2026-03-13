@@ -68,7 +68,7 @@ impl SocketState {
         }
 
         if let Err(e) = stream.peer_addr() {
-            if e.kind() != io::ErrorKind::NotConnected && e.kind() != io::ErrorKind::InProgress {
+            if e.kind() != io::ErrorKind::NotConnected {
                 // All other errors are fatal for a socket and thus the state needs to be reset.
                 *self = SocketState::Initial;
             }
@@ -414,47 +414,47 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 Rc::new(RefCell::new(socket)),
                 dest.clone(),
             );
-            interp_ok(())
-        } else {
-            // The socket is in non-blocking mode and thus we're okay with returning [`io::ErrorKind::WouldBlock`]
-            // when there is no connection ready at the moment.
-            let SocketState::Listening(listener) = &*socket.state.borrow() else {
-                // We just checked that the socket is in listening state.
-                unreachable!()
-            };
-
-            let (stream, addr) = match listener.accept() {
-                Ok(peer) => peer,
-                Err(e) => return this.set_last_error_and_return(e, dest),
-            };
-
-            let family = match addr {
-                SocketAddr::V4(_) => SocketFamily::IPv4,
-                SocketAddr::V6(_) => SocketFamily::IPv6,
-            };
-
-            if address_ptr != Pointer::null() {
-                // We only attempt a write if the address pointer is not a null pointer.
-                // If the address pointer is a null pointer the user isn't interested in the
-                // address and we don't need to write anything.
-                if let Err(e) =
-                    this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?
-                {
-                    return this.set_last_error_and_return(e, &dest);
-                };
-            }
-
-            let fd = this.machine.fds.new_ref(Socket {
-                family,
-                state: RefCell::new(SocketState::Connected(stream)),
-                is_non_block: Cell::new(is_sock_nonblock),
-            });
-            let sockfd = this.machine.fds.insert(fd);
-            // We need to create the scalar using the destination size since
-            // `SYS_accept4` returns a c_long (i64) which doesn't match
-            // the c_int (i32) returned from the `accept`/`accept4` syscalls.
-            this.write_scalar(Scalar::from_int(sockfd, dest.layout.size), dest)
+            return interp_ok(());
         }
+
+        // The socket is in non-blocking mode and thus we're okay with returning [`io::ErrorKind::WouldBlock`]
+        // when there is no connection ready at the moment.
+        let SocketState::Listening(listener) = &*socket.state.borrow() else {
+            // We just checked that the socket is in listening state.
+            unreachable!()
+        };
+
+        let (stream, addr) = match listener.accept() {
+            Ok(peer) => peer,
+            Err(e) => return this.set_last_error_and_return(e, dest),
+        };
+
+        let family = match addr {
+            SocketAddr::V4(_) => SocketFamily::IPv4,
+            SocketAddr::V6(_) => SocketFamily::IPv6,
+        };
+
+        if address_ptr != Pointer::null() {
+            // We only attempt a write if the address pointer is not a null pointer.
+            // If the address pointer is a null pointer the user isn't interested in the
+            // address and we don't need to write anything.
+            if let Err(e) =
+                this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?
+            {
+                return this.set_last_error_and_return(e, dest);
+            };
+        }
+
+        let fd = this.machine.fds.new_ref(Socket {
+            family,
+            state: RefCell::new(SocketState::Connected(stream)),
+            is_non_block: Cell::new(is_sock_nonblock),
+        });
+        let sockfd = this.machine.fds.insert(fd);
+        // We need to create the scalar using the destination size since
+        // `SYS_accept4` returns a c_long (i64) which doesn't match
+        // the c_int (i32) returned from the `accept`/`accept4` syscalls.
+        this.write_scalar(Scalar::from_int(sockfd, dest.layout.size), dest)
     }
 
     fn connect(
@@ -514,9 +514,28 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // The socket is in blocking mode and thus the connect call should block
             // until the connection with the server is established.
             this.block_for_connect(Rc::new(RefCell::new(socket)), dest.clone());
+            return interp_ok(());
         }
 
-        interp_ok(())
+        // The socket is in non-blocking mode and thus we check whether
+        // the connection is already established.
+        if let Err(e) = socket.state.borrow_mut().try_set_connected() {
+            // The socket is still connecting or there was an error during
+            // the connection establishment.
+            if e.kind() == io::ErrorKind::NotConnected {
+                // Since Mio hides the EINPROGRESS error from us, we received
+                // an ENOTCONN from trying to call [`TcpStream::peer_addr`] but
+                // the connection is not yet established. This is not a valid
+                // error for `connect` and thus we just return EINPROGRESS here.
+                return this
+                    .set_last_error_and_return(io::Error::from(io::ErrorKind::InProgress), dest);
+            }
+
+            this.set_last_error_and_return(e, dest)
+        } else {
+            // The socket is successfully connected.
+            this.write_scalar(Scalar::from_i32(0), dest)
+        }
     }
 
     fn setsockopt(
@@ -1021,7 +1040,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 if let UnblockKind::TimedOut = kind {
                     // Connecting the socket failed so we need to reset the state.
-                    *state = SocketState::Initial;
+                    let old_state = std::mem::replace(&mut *state, SocketState::Initial);
+                    // Socket should have been in connecting state before.
+                    assert!(matches!(old_state, SocketState::Connecting(_)));
                     return this.set_last_error_and_return(LibcError("ETIMEDOUT"), &dest);
                 };
 
