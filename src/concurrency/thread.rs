@@ -795,7 +795,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
                 Err(e) if e.kind() == io::ErrorKind::Interrupted =>
                     blocking_io_manager.get_ready_count(),
                 // For other errors we panic. On Linux and BSD hosts this should only be
-                // reachable when a system resource error (e.g. ENOMEM or ENOSPC) occured.
+                // reachable when a system resource error (e.g. ENOMEM or ENOSPC) occurred.
                 Err(e) => panic!("{e}"),
             };
 
@@ -1351,7 +1351,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         // early for I/O events from the OS.
                         //
                         // We ignore the result from the poll as it's just used as a sleep.
-                        // Before scheduling anything, we poll again in the scheduler anyways.
+                        // In the scheduler, before scheduling anything, we poll again anyways.
                         this.machine.blocking_io.poll(duration).ok();
                     } else {
                         let duration = duration.expect(

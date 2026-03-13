@@ -419,6 +419,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // The socket is in non-blocking mode and thus we're okay with returning [`io::ErrorKind::WouldBlock`]
         // when there is no connection ready at the moment.
+
         let SocketState::Listening(listener) = &*socket.state.borrow() else {
             // We just checked that the socket is in listening state.
             unreachable!()
@@ -490,8 +491,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // The socket is already in a connecting state.
             SocketState::Connecting(_) =>
                 return this.set_last_error_and_return(LibcError("EALREADY"), dest),
-            // We don't return EISCONN for already connected sockets since
-            // TCP sockets are usually allowed to be connected multiple times.
+            // We don't return EISCONN for already connected sockets, for which we're
+            // sure that the connection is established, since TCP sockets are usually
+            // allowed to be connected multiple times.
             _ =>
                 throw_unsup_format!(
                     "connect: connecting is only supported for sockets which are neither bound, \
@@ -523,7 +525,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // The socket is still connecting or there was an error during
             // the connection establishment.
             if e.kind() == io::ErrorKind::NotConnected {
-                // Since Mio hides the EINPROGRESS error from us, we received
+                // Since mio hides the EINPROGRESS error from us, we received
                 // an ENOTCONN from trying to call [`TcpStream::peer_addr`] but
                 // the connection is not yet established. This is not a valid
                 // error for `connect` and thus we just return EINPROGRESS here.

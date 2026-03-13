@@ -208,7 +208,7 @@ fn test_accept_nonblock() {
     };
     let client_sockfd =
         unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
-    let addr = net::ipv4_sock_addr(net::IPV4_LOCALHOST, 2345);
+    let addr = net::ipv4_sock_addr(net::IPV4_LOCALHOST, 5678);
     unsafe {
         errno_check(libc::bind(
             server_sockfd,
