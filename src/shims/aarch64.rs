@@ -90,6 +90,7 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // (0x104C11DB7) or the Castagnoli polynomial (0x11EDC6F41, CRC-32C).
             "crc32b" | "crc32h" | "crc32w" | "crc32x" | "crc32cb" | "crc32ch" | "crc32cw"
             | "crc32cx" => {
+                this.expect_target_feature_for_intrinsic(link_name, "crc")?;
                 let (bit_size, polynomial): (u32, u128) = match unprefixed_name {
                     "crc32b" => (8, 0x104C11DB7),
                     "crc32h" => (16, 0x104C11DB7),

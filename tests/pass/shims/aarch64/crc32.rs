@@ -3,14 +3,18 @@
 //@compile-flags: -C target-feature=+crc
 
 use std::arch::aarch64::*;
+use std::arch::is_aarch64_feature_detected;
 
 fn main() {
+    assert!(is_aarch64_feature_detected!("crc"));
+
     unsafe {
         test_crc32_standard();
         test_crc32c_castagnoli();
     }
 }
 
+#[target_feature(enable = "crc")]
 unsafe fn test_crc32_standard() {
     // __crc32b: 8-bit input
     assert_eq!(__crc32b(0x00000000, 0x01), 0x77073096);
@@ -33,6 +37,7 @@ unsafe fn test_crc32_standard() {
     assert_eq!(__crc32d(0x0badeafe, 0xc0febeefdadafefe), 0x61a45fba);
 }
 
+#[target_feature(enable = "crc")]
 unsafe fn test_crc32c_castagnoli() {
     // __crc32cb: 8-bit input
     assert_eq!(__crc32cb(0x00000000, 0x01), 0xf26b8303);
