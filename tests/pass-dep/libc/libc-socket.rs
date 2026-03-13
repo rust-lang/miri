@@ -4,7 +4,8 @@
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
 use std::io::{self, ErrorKind};
-use std::mem::MaybeUninit;
+#[allow(unused)]
+use std::{mem::MaybeUninit, thread, time::Duration};
 
 use libc_utils::*;
 
@@ -27,6 +28,15 @@ fn main() {
     test_bind_ipv6();
 
     test_listen();
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "solaris",
+        target_os = "illumos"
+    ))]
+    test_accept_nonblock();
 
     test_getsockname_ipv4();
     test_getsockname_ipv4_random_port();
@@ -172,6 +182,90 @@ fn test_listen() {
     unsafe {
         errno_check(libc::listen(sockfd, backlog));
     }
+}
+
+/// Test that nonblocking TCP server sockets receive [`io::ErrorKind::WouldBlock`] when trying
+/// to accept when no incoming connection exists. This also tests that nonblocking server sockets
+/// are still able to accept incoming connections should they already exist before the `accept` or
+/// `accept4` syscall is called.
+///
+/// At the moment we can only test this on the targets where passing `SOCK_NONBLOCK` to `socket` is
+/// supported as it's currently not supported to set fd blocking mode using `ioctl`.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "solaris",
+    target_os = "illumos"
+))]
+fn test_accept_nonblock() {
+    // Create new non-blocking server socket.
+    let server_sockfd = unsafe {
+        errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0))
+            .unwrap()
+    };
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let addr = net::ipv4_sock_addr(net::IPV4_LOCALHOST, 2345);
+    unsafe {
+        errno_check(libc::bind(
+            server_sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        ));
+    }
+
+    // Use the supported backlog value to avoid the warning.
+    let backlog = 128;
+
+    unsafe {
+        errno_check(libc::listen(server_sockfd, backlog));
+    }
+
+    let mut storage = MaybeUninit::<libc::sockaddr_storage>::uninit();
+    let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+    // This should fail as we don't have an incoming connection for this address.
+    let result = unsafe {
+        errno_result(libc::accept(server_sockfd, storage.as_mut_ptr() as *mut _, &mut len))
+    };
+    let err = result.unwrap_err();
+    // Assert that either EAGAIN or EWOULDBLOCK was returned.
+    assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+
+    let t1 = thread::spawn(move || {
+        unsafe {
+            errno_check(libc::connect(
+                client_sockfd,
+                (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+                size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            ));
+        }
+    });
+
+    // Instantly yield to client thread to ensure that the `connect` syscall
+    // was called before we call the `accept` on the server. We yield by sleeping
+    // for a short period of time to force the scheduler to schedule the client
+    // thread before executing this thread again.
+    thread::sleep(Duration::from_millis(50));
+
+    let result = unsafe {
+        errno_result(libc::accept(server_sockfd, storage.as_mut_ptr() as *mut _, &mut len))
+    };
+
+    let _sockfd = result.unwrap();
+    // Ensure that address has been written and that it has the correct size.
+    let family = unsafe {
+        let address = storage.as_ptr();
+        (*address).ss_family as i32
+    };
+    let size = if family == libc::AF_INET {
+        size_of::<libc::sockaddr_in>()
+    } else {
+        size_of::<libc::sockaddr_in6>()
+    };
+    assert_eq!(size, len as usize);
+
+    t1.join().unwrap();
 }
 
 /// Test the `getsockname` syscall on an IPv4 socket which is bound.

@@ -36,11 +36,55 @@ enum SocketState {
     /// The `listen` syscall has been called on the socket.
     /// This is only reachable from the [`SocketState::Bound`] state.
     Listening(TcpListener),
-    /// The `connect` syscall has been called on the socket or
+    /// The `connect` syscall has been called and we weren't yet able
+    /// to ensure the connection is established. This is only reachable
+    /// from the [`SocketState::Initial`] state.
+    Connecting(TcpStream),
+    /// The `connect` syscall has been called on the socket and
+    /// we ensured that the connection is established, or
     /// the socket was created by the `accept` syscall.
-    /// For a socket created using the `socket` syscall, this is
-    /// only reachable from the [`SocketState::Initial`] state.
+    /// For a socket created using the `connect` syscall, this is
+    /// only reachable from the [`SocketState::Connecting`] state.
     Connected(TcpStream),
+}
+
+impl SocketState {
+    /// If the socket is currently in [`SocketState::Connecting`], try to ensure
+    /// that the connection is established by first checking that [`TcpStream::take_error`]
+    /// doesn't return an error and then by checking that [`TcpStream::peer_addr`]
+    /// returns the address of the connected peer.
+    ///
+    /// If the connection is established or the socket is in any other state,
+    /// [`Ok`] is returned.
+    pub fn try_set_connected(&mut self) -> io::Result<()> {
+        let SocketState::Connecting(stream) = self else { return Ok(()) };
+
+        if let Ok(Some(e)) = stream.take_error() {
+            // There was an error whilst connecting.
+            // We won't get EINPROGRESS or ENOTCONNECTED here
+            // so we need to reset the state.
+            *self = SocketState::Initial;
+            return Err(e);
+        }
+
+        if let Err(e) = stream.peer_addr() {
+            if e.kind() != io::ErrorKind::NotConnected && e.kind() != io::ErrorKind::InProgress {
+                // All other errors are fatal for a socket and thus the state needs to be reset.
+                *self = SocketState::Initial;
+            }
+            return Err(e);
+        };
+        // We just read the peer address without an error so we can be
+        // sure that the connection is established.
+
+        // Temporarily use dummy state to take ownership of the stream.
+        let SocketState::Connecting(stream) = std::mem::replace(self, SocketState::Initial) else {
+            // At the start of the function we ensured that we're currently connecting.
+            unreachable!()
+        };
+        *self = SocketState::Connected(stream);
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -223,7 +267,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 *state = SocketState::Bound(address);
             }
-            SocketState::Connected(_) =>
+            SocketState::Connecting(_) | SocketState::Connected(_) =>
                 throw_unsup_format!(
                     "bind: socket is already connected and binding a
                                     connected socket is unsupported"
@@ -286,7 +330,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             SocketState::Listening(_) => {
                 throw_unsup_format!("listen: listening on a socket multiple times is unsupported")
             }
-            SocketState::Connected(_) => {
+            SocketState::Connecting(_) | SocketState::Connected(_) => {
                 throw_unsup_format!("listen: listening on a connected socket is unsupported")
             }
         }
@@ -294,11 +338,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_i32(0))
     }
 
-    /// For more information on the arguments see the socket manpage:
+    /// For more information on the arguments see the accept manpage:
     /// <https://linux.die.net/man/2/accept4>
-    ///
-    /// When there is an error, the output is written synchronously and
-    /// otherwise it's written asynchronously from a blocking I/O callback.
     fn accept4(
         &mut self,
         socket: &OpTy<'tcx>,
@@ -332,7 +373,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!(
                 "accept4: accepting incoming connections is only allowed when socket is listening"
             )
-        }
+        };
 
         let mut is_sock_nonblock = false;
 
@@ -363,69 +404,57 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
-        let socket_source = Rc::new(RefCell::new(socket));
-        let dest = dest.clone();
+        if !socket.is_non_block.get() {
+            // The socket is in blocking mode and thus the accept call should block
+            // until an incoming connection is ready.
+            this.block_for_accept(
+                address_ptr,
+                address_len_ptr,
+                is_sock_nonblock,
+                Rc::new(RefCell::new(socket)),
+                dest.clone(),
+            );
+            interp_ok(())
+        } else {
+            // The socket is in non-blocking mode and thus we're okay with returning [`io::ErrorKind::WouldBlock`]
+            // when there is no connection ready at the moment.
+            let SocketState::Listening(listener) = &*socket.state.borrow() else {
+                // We just checked that the socket is in listening state.
+                unreachable!()
+            };
 
-        this.block_thread_for_io(
-            BlockingIoKind::TcpAccept,
-            socket_source.clone(),
-            Interest::READABLE,
-            None,
-            callback!(@capture<'tcx> {
-                address_ptr: Pointer,
-                address_len_ptr: Pointer,
-                is_sock_nonblock: bool,
-                socket_source: Rc<RefCell<FileDescriptionRef<Socket>>>,
-                dest: MPlaceTy<'tcx>,
-            } |this, kind: UnblockKind| {
-                if let UnblockKind::TimedOut = kind {
-                    // We pretend the syscall was interrupted by a signal as there usually
-                    // is no timeout on `accept` syscalls.
-                    return this.set_last_error_and_return(LibcError("EINTR"), &dest);
+            let (stream, addr) = match listener.accept() {
+                Ok(peer) => peer,
+                Err(e) => return this.set_last_error_and_return(e, dest),
+            };
+
+            let family = match addr {
+                SocketAddr::V4(_) => SocketFamily::IPv4,
+                SocketAddr::V6(_) => SocketFamily::IPv6,
+            };
+
+            if address_ptr != Pointer::null() {
+                // We only attempt a write if the address pointer is not a null pointer.
+                // If the address pointer is a null pointer the user isn't interested in the
+                // address and we don't need to write anything.
+                if let Err(e) =
+                    this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?
+                {
+                    return this.set_last_error_and_return(e, &dest);
                 };
+            }
 
-                let socket = socket_source.borrow();
-                let state = socket.state.borrow();
-
-                let SocketState::Listening(listener) = &*state else {
-                    // We checked that the socket is in listening state before blocking
-                    // and since there is no outgoing transition from that state this
-                    // should be unreachable.
-                    unreachable!()
-                };
-
-                let (stream, addr) = match listener.accept() {
-                    Ok(peer) => peer,
-                    // We need to block the thread again as it was spuriously woken up
-                    // and the listener doesn't have an incoming connection right now.
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => todo!("TODO: retry since we had a spurious wake-up"),
-                    Err(e) => return this.set_last_error_and_return(e, &dest),
-                };
-
-                let family = match addr {
-                    SocketAddr::V4(_) => SocketFamily::IPv4,
-                    SocketAddr::V6(_) => SocketFamily::IPv6,
-                };
-
-                if address_ptr != Pointer::null() {
-                    // We only attempt a write if the address pointer is not a null pointer.
-                    // If the address pointer is a null pointer the user isn't interested in the
-                    // address and we don't need to write anything.
-                    if let Err(e) = this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")? {
-                      return this.set_last_error_and_return(e, &dest);
-                    };
-                }
-
-                let fd = this.machine.fds.new_ref(Socket {
-                    family,
-                    state: RefCell::new(SocketState::Connected(stream)),
-                    is_non_block: Cell::new(is_sock_nonblock),
-                });
-                let sockfd = this.machine.fds.insert(fd);
-                this.write_scalar(Scalar::from_i32(sockfd), &dest)
-            }),
-        );
-        interp_ok(())
+            let fd = this.machine.fds.new_ref(Socket {
+                family,
+                state: RefCell::new(SocketState::Connected(stream)),
+                is_non_block: Cell::new(is_sock_nonblock),
+            });
+            let sockfd = this.machine.fds.insert(fd);
+            // We need to create the scalar using the destination size since
+            // `SYS_accept4` returns a c_long (i64) which doesn't match
+            // the c_int (i32) returned from the `accept`/`accept4` syscalls.
+            this.write_scalar(Scalar::from_int(sockfd, dest.layout.size), dest)
+        }
     }
 
     fn connect(
@@ -456,25 +485,37 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
 
-        if !matches!(*socket.state.borrow(), SocketState::Initial) {
+        match &*socket.state.borrow() {
+            SocketState::Initial => {}
+            // The socket is already in a connecting state.
+            SocketState::Connecting(_) =>
+                return this.set_last_error_and_return(LibcError("EALREADY"), dest),
             // We don't return EISCONN for already connected sockets since
             // TCP sockets are usually allowed to be connected multiple times.
-            throw_unsup_format!(
-                "connect: connecting is only supported for sockets which are neither bound, \
-                                listening nor already connected"
-            )
+            _ =>
+                throw_unsup_format!(
+                    "connect: connecting is only supported for sockets which are neither bound, \
+                                    listening nor already connected"
+                ),
         }
 
         // Mio returns a potentially unconnected stream.
-        // We need to verify later that the stream is connected by checking
-        // [`TcpStream::take_err`] and attempting to call [`TcpStream::peer_addr`]
-        // when an [`Interest::WRITEABLE`] event occured on the stream.
+        // We can be ensured that the connection is established when
+        // [`TcpStream::take_err`] and [`TcpStream::peer_addr`] both
+        // don't return errors.
+        // For non-blocking sockets we need to check that for every
+        // [`Interest::WRITEABLE`] event on the stream.
         match TcpStream::connect(address) {
-            Ok(stream) => *socket.state.borrow_mut() = SocketState::Connected(stream),
+            Ok(stream) => *socket.state.borrow_mut() = SocketState::Connecting(stream),
             Err(e) => return this.set_last_error_and_return(e, dest),
         };
 
-        this.block_for_connect(Rc::new(RefCell::new(socket)), dest.clone());
+        if !socket.is_non_block.get() {
+            // The socket is in blocking mode and thus the connect call should block
+            // until the connection with the server is established.
+            this.block_for_connect(Rc::new(RefCell::new(socket)), dest.clone());
+        }
+
         interp_ok(())
     }
 
@@ -919,8 +960,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Ok(peer) => peer,
                     // We need to block the thread again as it was spuriously woken up
                     // and the listener doesn't have an incoming connection right now.
-                    // FIXME: For non-blocking sockets we probably don't want to block again but
-                    //        return the error instead.
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         drop(state);
                         drop(socket);
@@ -980,36 +1019,16 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let socket = socket_source.borrow();
                 let mut state = socket.state.borrow_mut();
 
-                let SocketState::Connected(stream) = &*state else {
-                    // We put the socket into connected state before blocking
-                    // and since there is no outgoing transition from that state this
-                    // should be unreachable.
-                    unreachable!()
-                };
-
                 if let UnblockKind::TimedOut = kind {
                     // Connecting the socket failed so we need to reset the state.
                     *state = SocketState::Initial;
-
-                    // We pretend the syscall was interrupted by a signal as there usually
-                    // is no timeout on `connect` syscalls.
-                    return this.set_last_error_and_return(LibcError("EINTR"), &dest);
+                    return this.set_last_error_and_return(LibcError("ETIMEDOUT"), &dest);
                 };
 
-                if let Ok(Some(e)) = stream.take_error() {
-                    // There was an error whilst connecting.
-                    // We won't get EINPROGRESS or ENOTCONNECTED here
-                    // so we can just set the last error and return.
-                    return this.set_last_error_and_return(e, &dest);
-                }
-
-                match stream.peer_addr() {
-                    // Stream is now connected and ready to be used.
-                    Ok(_) => {},
-                    // We need to block the thread again as it was spuriously woken up.
-                    // FIXME: For non-blocking sockets we probably don't want to block again but
-                    //        return the error instead.
-                    Err(e) if e.kind() == io::ErrorKind::NotConnected || e.kind() == io::ErrorKind::InProgress => {
+                match state.try_set_connected() {
+                    Ok(_) => this.write_scalar(Scalar::from_i32(0), &dest),
+                     // We need to block the thread again as it was spuriously woken up.
+                     Err(e) if e.kind() == io::ErrorKind::NotConnected || e.kind() == io::ErrorKind::InProgress => {
                         drop(state);
                         drop(socket);
                         this.block_for_connect(socket_source, dest);
@@ -1017,8 +1036,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     },
                     Err(e) => return this.set_last_error_and_return(e, &dest)
                 }
-
-                this.write_scalar(Scalar::from_i32(0), &dest)
             }),
         );
     }
@@ -1040,7 +1057,8 @@ impl Source for FileDescriptionRef<Socket> {
         let mut state = self.state.borrow_mut();
         match &mut *state {
             SocketState::Listening(listener) => listener.register(registry, token, interests),
-            SocketState::Connected(stream) => stream.register(registry, token, interests),
+            SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                stream.register(registry, token, interests),
             SocketState::Initial | SocketState::Bound(_) =>
                 Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -1059,7 +1077,8 @@ impl Source for FileDescriptionRef<Socket> {
         let mut state = self.state.borrow_mut();
         match &mut *state {
             SocketState::Listening(listener) => listener.reregister(registry, token, interests),
-            SocketState::Connected(stream) => stream.reregister(registry, token, interests),
+            SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                stream.reregister(registry, token, interests),
             SocketState::Initial | SocketState::Bound(_) =>
                 Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -1073,7 +1092,8 @@ impl Source for FileDescriptionRef<Socket> {
         let mut state = self.state.borrow_mut();
         match &mut *state {
             SocketState::Listening(listener) => listener.deregister(registry),
-            SocketState::Connected(stream) => stream.deregister(registry),
+            SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                stream.deregister(registry),
             SocketState::Initial | SocketState::Bound(_) =>
                 Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
