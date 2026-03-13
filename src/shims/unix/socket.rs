@@ -533,11 +533,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     .set_last_error_and_return(io::Error::from(io::ErrorKind::InProgress), dest);
             }
 
-            this.set_last_error_and_return(e, dest)
-        } else {
-            // The socket is successfully connected.
-            this.write_scalar(Scalar::from_i32(0), dest)
+            return this.set_last_error_and_return(e, dest);
         }
+
+        // The socket is successfully connected.
+        this.write_scalar(Scalar::from_i32(0), dest)
     }
 
     fn setsockopt(
