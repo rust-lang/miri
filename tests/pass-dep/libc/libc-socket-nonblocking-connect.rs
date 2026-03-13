@@ -3,12 +3,11 @@
 //@compile-flags: -Zmiri-disable-isolation
 
 #![feature(io_error_inprogress)]
+#![allow(unused_imports)]
 
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
 use std::io;
-#[allow(unused)]
-use std::{mem::MaybeUninit, thread, time::Duration};
 
 use libc_utils::*;
 
