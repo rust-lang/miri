@@ -85,6 +85,50 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.write_scalar(val, &this.project_index(&dest, i)?)?;
                 }
             }
+            // Used to implement the __crc32{b,h,w,d} and __crc32c{b,h,w,d} functions.
+            // These compute CRC-32 checksums using either the standard polynomial
+            // (0x104C11DB7) or the Castagnoli polynomial (0x11EDC6F41, CRC-32C).
+            "crc32b" | "crc32h" | "crc32w" | "crc32x" | "crc32cb" | "crc32ch" | "crc32cw"
+            | "crc32cx" => {
+                this.expect_target_feature_for_intrinsic(link_name, "crc")?;
+                let (bit_size, polynomial): (u32, u128) = match unprefixed_name {
+                    "crc32b" => (8, 0x104C11DB7),
+                    "crc32h" => (16, 0x104C11DB7),
+                    "crc32w" => (32, 0x104C11DB7),
+                    "crc32x" => (64, 0x104C11DB7),
+                    "crc32cb" => (8, 0x11EDC6F41),
+                    "crc32ch" => (16, 0x11EDC6F41),
+                    "crc32cw" => (32, 0x11EDC6F41),
+                    "crc32cx" => (64, 0x11EDC6F41),
+                    _ => unreachable!(),
+                };
+
+                let [left, right] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let left = this.read_scalar(left)?;
+                let right = this.read_scalar(right)?;
+
+                // The first argument (CRC accumulator) is always u32.
+                let crc = u128::from(left.to_u32()?.reverse_bits());
+                #[expect(clippy::as_conversions)]
+                let v = match bit_size {
+                    8 => u128::from((right.to_u32()? as u8).reverse_bits()),
+                    16 => u128::from((right.to_u32()? as u16).reverse_bits()),
+                    32 => u128::from(right.to_u32()?.reverse_bits()),
+                    64 => u128::from(right.to_u64()?.reverse_bits()),
+                    _ => unreachable!(),
+                };
+
+                // Polynomial long division, same algorithm as x86 SSE4.2 CRC32.
+                let mut dividend = (crc << bit_size) ^ (v << 32);
+                while dividend.leading_zeros() <= polynomial.leading_zeros() {
+                    dividend ^=
+                        (polynomial << polynomial.leading_zeros()) >> dividend.leading_zeros();
+                }
+
+                let result = u32::try_from(dividend).unwrap().reverse_bits();
+                this.write_scalar(Scalar::from_u32(result), dest)?;
+            }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
