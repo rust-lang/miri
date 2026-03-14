@@ -7,6 +7,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::mir::RetagKind;
 use smallvec::SmallVec;
 
+use crate::concurrency::VClock;
 use crate::*;
 pub mod stacked_borrows;
 pub mod tree_borrows;
@@ -481,11 +482,16 @@ impl AllocState {
         }
     }
 
-    pub fn remove_unreachable_tags(&self, tags: &FxHashSet<BorTag>) {
+    pub fn remove_unreachable_tags(
+        &self,
+        tags: &FxHashSet<BorTag>,
+        all_threads_lower_bounds: Option<&VClock>,
+    ) {
         let _trace = enter_trace_span!(borrow_tracker::remove_unreachable_tags);
         match self {
             AllocState::StackedBorrows(sb) => sb.borrow_mut().remove_unreachable_tags(tags),
-            AllocState::TreeBorrows(tb) => tb.borrow_mut().remove_unreachable_tags(tags),
+            AllocState::TreeBorrows(tb) =>
+                tb.borrow_mut().remove_unreachable_tags(tags, all_threads_lower_bounds),
         }
     }
 
