@@ -34,7 +34,7 @@ enum AnonSocketType {
 
 /// One end of a pair of connected unnamed sockets.
 #[derive(Debug)]
-struct AnonSocket {
+pub(crate) struct AnonSocket {
     /// The buffer we are reading from, or `None` if this is the writing end of a pipe.
     /// (In that case, the peer FD will be the reading end of that pipe.)
     readbuf: Option<RefCell<Buffer>>,
@@ -74,6 +74,13 @@ impl AnonSocket {
     fn peer_fd(&self) -> &WeakFileDescriptionRef<AnonSocket> {
         self.peer_fd.get().unwrap()
     }
+
+    pub(crate) fn metadata_mode_name(&self) -> &'static str {
+        match self.fd_type {
+            AnonSocketType::Socketpair => "S_IFSOCK",
+            AnonSocketType::PipeRead | AnonSocketType::PipeWrite => "S_IFIFO",
+        }
+    }
 }
 
 impl FileDescription for AnonSocket {
@@ -82,6 +89,13 @@ impl FileDescription for AnonSocket {
             AnonSocketType::Socketpair => "socketpair",
             AnonSocketType::PipeRead | AnonSocketType::PipeWrite => "pipe",
         }
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<std::fs::Metadata>> {
+        interp_ok(Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "obtaining metadata for socketpairs and pipes is unsupported",
+        )))
     }
 
     fn destroy<'tcx>(

@@ -16,10 +16,13 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_target::spec::Os;
 
 use self::shims::time::system_time_to_duration;
-use crate::shims::files::FileHandle;
+use crate::shims::files::{FileHandle, NullOutput};
 use crate::shims::os_str::bytes_to_os_str;
 use crate::shims::sig::check_min_vararg_count;
 use crate::shims::unix::fd::{FlockOp, UnixFileDescription};
+use crate::shims::unix::linux_like::epoll::Epoll;
+use crate::shims::unix::linux_like::eventfd::EventFd;
+use crate::shims::unix::unnamed_socket::AnonSocket;
 use crate::*;
 
 /// An open directory, tracked by DirHandler.
@@ -229,17 +232,23 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (access_sec, access_nsec) = metadata.accessed.unwrap_or((0, 0));
         let (created_sec, created_nsec) = metadata.created.unwrap_or((0, 0));
         let (modified_sec, modified_nsec) = metadata.modified.unwrap_or((0, 0));
-        let mode = metadata.mode.to_uint(this.libc_ty_layout("mode_t").size)?;
 
         // We do *not* use `deref_pointer_as` here since determining the right pointee type
         // is highly non-trivial: it depends on which exact alias of the function was invoked
         // (e.g. `fstat` vs `fstat64`), and then on FreeBSD it also depends on the ABI level
         // which can be different between the libc used by std and the libc used by everyone else.
         let buf = this.deref_pointer(buf_op)?;
+
+        // `libc::S_IF*` constants are not uniformly typed across targets and can be sign-extended.
+        // We only set file type bits, which fit in 16 bits.
+        let mode: u32 = (metadata.mode.to_uint(metadata.mode.size())? & u128::from(u16::MAX))
+            .try_into()
+            .unwrap();
+
         this.write_int_fields_named(
             &[
                 ("st_dev", metadata.dev.into()),
-                ("st_mode", mode.try_into().unwrap()),
+                ("st_mode", mode.into()),
                 ("st_nlink", 0),
                 ("st_ino", 0),
                 ("st_uid", metadata.uid.into()),
@@ -753,9 +762,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // the owner, its group and other users. Given that we can only provide the file type
         // without using platform specific methods, we only set the bits corresponding to the file
         // type. This should be an `__u16` but `libc` provides its values as `u32`.
-        let mode: u16 = metadata
-            .mode
-            .to_u32()?
+        let mode: u16 = (metadata.mode.to_uint(metadata.mode.size())? & u128::from(u16::MAX))
             .try_into()
             .unwrap_or_else(|_| bug!("libc contains bad value for constant"));
 
@@ -1665,9 +1672,52 @@ impl FileMetadata {
             return interp_ok(Err(LibcError("EBADF")));
         };
 
+        // Stdio descriptors are target-level FDs but their host metadata can be unavailable
+        // on non-Unix hosts. Provide target-appropriate synthetic metadata in that case.
+        if fd.clone().downcast::<io::Stdin>().is_some() {
+            return FileMetadata::synthetic(ecx, "S_IFCHR", 0);
+        }
+        if fd.clone().downcast::<io::Stdout>().is_some() {
+            return FileMetadata::synthetic(ecx, "S_IFCHR", 0);
+        }
+        if fd.clone().downcast::<io::Stderr>().is_some() {
+            return FileMetadata::synthetic(ecx, "S_IFCHR", 0);
+        }
+        if fd.clone().downcast::<NullOutput>().is_some() {
+            return FileMetadata::synthetic(ecx, "S_IFCHR", 0);
+        }
+
+        if let Some(anon_socket) = fd.clone().downcast::<AnonSocket>() {
+            return FileMetadata::synthetic(ecx, anon_socket.metadata_mode_name(), 0);
+        }
+        if fd.clone().downcast::<EventFd>().is_some() {
+            return FileMetadata::synthetic(ecx, "S_IFREG", 0);
+        }
+        if fd.clone().downcast::<Epoll>().is_some() {
+            return FileMetadata::synthetic(ecx, "S_IFREG", 0);
+        }
+
         let metadata = fd.metadata()?;
         drop(fd);
         FileMetadata::from_meta(ecx, metadata)
+    }
+
+    fn synthetic<'tcx>(
+        ecx: &mut MiriInterpCx<'tcx>,
+        mode_name: &str,
+        size: u64,
+    ) -> InterpResult<'tcx, Result<FileMetadata, IoError>> {
+        let mode = ecx.eval_libc(mode_name);
+        interp_ok(Ok(FileMetadata {
+            mode,
+            size,
+            created: None,
+            accessed: None,
+            modified: None,
+            dev: 0,
+            uid: 0,
+            gid: 0,
+        }))
     }
 
     fn from_meta<'tcx>(
@@ -1683,13 +1733,38 @@ impl FileMetadata {
 
         let file_type = metadata.file_type();
 
-        let mode_name = if file_type.is_file() {
-            "S_IFREG"
-        } else if file_type.is_dir() {
-            "S_IFDIR"
-        } else {
-            "S_IFLNK"
-        };
+        cfg_select! {
+            unix => {
+                use std::os::unix::fs::FileTypeExt;
+
+                let mode_name = if file_type.is_file() {
+                    "S_IFREG"
+                } else if file_type.is_dir() {
+                    "S_IFDIR"
+                } else if file_type.is_symlink() {
+                    "S_IFLNK"
+                } else if file_type.is_socket() {
+                    "S_IFSOCK"
+                } else if file_type.is_fifo() {
+                    "S_IFIFO"
+                } else if file_type.is_char_device() {
+                    "S_IFCHR"
+                } else if file_type.is_block_device() {
+                    "S_IFBLK"
+                } else {
+                    "S_IFREG"
+                };
+            }
+            _ => {
+                let mode_name = if file_type.is_file() {
+                    "S_IFREG"
+                } else if file_type.is_dir() {
+                    "S_IFDIR"
+                } else {
+                    "S_IFLNK"
+                };
+            }
+        }
 
         let mode = ecx.eval_libc(mode_name);
 
@@ -1704,9 +1779,13 @@ impl FileMetadata {
         cfg_select! {
             unix => {
                 use std::os::unix::fs::MetadataExt;
-                let dev = metadata.dev();
-                let uid = metadata.uid();
-                let gid = metadata.gid();
+                let is_regular_fs_entry =
+                    file_type.is_file() || file_type.is_dir() || file_type.is_symlink();
+                let (dev, uid, gid) = if is_regular_fs_entry {
+                    (metadata.dev(), metadata.uid(), metadata.gid())
+                } else {
+                    (0, 0, 0)
+                };
             }
             _ => {
                 let dev = 0;

@@ -232,6 +232,27 @@ impl FileDescription for io::Stdin {
         "stdin"
     }
 
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
+        cfg_select! {
+            unix => {
+                use std::os::fd::FromRawFd;
+
+                let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
+                if fd < 0 {
+                    return interp_ok(Err(io::Error::last_os_error()));
+                }
+                let file = unsafe { File::from_raw_fd(fd) };
+                interp_ok(file.metadata())
+            }
+            _ => {
+                interp_ok(Err(io::Error::new(
+                    ErrorKind::Unsupported,
+                    "obtaining metadata for stdin is unsupported on this target",
+                )))
+            }
+        }
+    }
+
     fn read<'tcx>(
         self: FileDescriptionRef<Self>,
         communicate_allowed: bool,
@@ -266,6 +287,27 @@ impl FileDescription for io::Stdin {
 impl FileDescription for io::Stdout {
     fn name(&self) -> &'static str {
         "stdout"
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
+        cfg_select! {
+            unix => {
+                use std::os::fd::FromRawFd;
+
+                let fd = unsafe { libc::dup(libc::STDOUT_FILENO) };
+                if fd < 0 {
+                    return interp_ok(Err(io::Error::last_os_error()));
+                }
+                let file = unsafe { File::from_raw_fd(fd) };
+                interp_ok(file.metadata())
+            }
+            _ => {
+                interp_ok(Err(io::Error::new(
+                    ErrorKind::Unsupported,
+                    "obtaining metadata for stdout is unsupported on this target",
+                )))
+            }
+        }
     }
 
     fn write<'tcx>(
@@ -305,6 +347,27 @@ impl FileDescription for io::Stdout {
 impl FileDescription for io::Stderr {
     fn name(&self) -> &'static str {
         "stderr"
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
+        cfg_select! {
+            unix => {
+                use std::os::fd::FromRawFd;
+
+                let fd = unsafe { libc::dup(libc::STDERR_FILENO) };
+                if fd < 0 {
+                    return interp_ok(Err(io::Error::last_os_error()));
+                }
+                let file = unsafe { File::from_raw_fd(fd) };
+                interp_ok(file.metadata())
+            }
+            _ => {
+                interp_ok(Err(io::Error::new(
+                    ErrorKind::Unsupported,
+                    "obtaining metadata for stderr is unsupported on this target",
+                )))
+            }
+        }
     }
 
     fn destroy<'tcx>(
@@ -450,6 +513,20 @@ pub struct NullOutput;
 impl FileDescription for NullOutput {
     fn name(&self) -> &'static str {
         "stderr and stdout"
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<Metadata>> {
+        cfg_select! {
+            unix => {
+                interp_ok(File::open("/dev/null").and_then(|file| file.metadata()))
+            }
+            _ => {
+                interp_ok(Err(io::Error::new(
+                    ErrorKind::Unsupported,
+                    "obtaining metadata for null output is unsupported on this target",
+                )))
+            }
+        }
     }
 
     fn write<'tcx>(

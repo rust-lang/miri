@@ -17,7 +17,7 @@ type EpollEventKey = (FdId, FdNum);
 
 /// An `Epoll` file descriptor connects file handles and epoll events
 #[derive(Debug, Default)]
-struct Epoll {
+pub(crate) struct Epoll {
     /// A map of EpollEventInterests registered under this epoll instance. Each entry is
     /// differentiated using FdId and file descriptor value.
     interest_list: RefCell<BTreeMap<EpollEventKey, EpollEventInterest>>,
@@ -117,6 +117,28 @@ impl EpollEvents {
 impl FileDescription for Epoll {
     fn name(&self) -> &'static str {
         "epoll"
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, io::Result<std::fs::Metadata>> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            use std::fs::File;
+            use std::os::fd::FromRawFd;
+
+            let fd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+            if fd < 0 {
+                return interp_ok(Err(io::Error::last_os_error()));
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            interp_ok(file.metadata())
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            interp_ok(Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "obtaining metadata for epoll is unsupported on this target",
+            )))
+        }
     }
 
     fn destroy<'tcx>(
