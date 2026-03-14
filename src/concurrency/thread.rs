@@ -1,9 +1,9 @@
 //! Implements threads.
 
-use std::mem;
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
 use std::time::{Duration, SystemTime};
+use std::{io, mem};
 
 use rand::seq::IteratorRandom;
 use rustc_abi::ExternAbi;
@@ -27,8 +27,11 @@ enum SchedulingAction {
     ExecuteStep,
     /// Execute a timeout callback.
     ExecuteTimeoutCallback,
-    /// Wait for a bit, until there is a timeout to be called.
-    Sleep(Duration),
+    /// Wait for a bit but at most as long as the duration specified.
+    /// We wake up early if an I/O event happened.
+    /// If the duration is [`None`], we sleep indefinitely. This is
+    /// only allowed when isolation is disabled!
+    Sleep(Option<Duration>),
 }
 
 /// What to do with TLS allocations from terminated threads
@@ -111,6 +114,8 @@ pub enum BlockReason {
     Eventfd,
     /// Blocked on unnamed_socket.
     UnnamedSocket,
+    /// Blocked on an IO operation.
+    IO { kind: BlockingIoKind },
     /// Blocked for any reason related to GenMC, such as `assume` statements (GenMC mode only).
     /// Will be implicitly unblocked when GenMC schedules this thread again.
     Genmc,
@@ -149,6 +154,10 @@ impl<'tcx> ThreadState<'tcx> {
 
     fn is_blocked_on(&self, reason: BlockReason) -> bool {
         matches!(*self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
+    }
+
+    fn is_blocked_on_io(&self) -> bool {
+        matches!(*self, ThreadState::Blocked { reason: BlockReason::IO { .. }, .. })
     }
 }
 
@@ -765,9 +774,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         }
 
         // We are not in GenMC mode, so we control the scheduling.
-        let thread_manager = &mut this.machine.threads;
-        let clock = &this.machine.monotonic_clock;
-        let rng = this.machine.rng.get_mut();
+        let thread_manager = &this.machine.threads;
         // This thread and the program can keep going.
         if thread_manager.threads[thread_manager.active_thread].state.is_enabled()
             && !thread_manager.yield_active_thread
@@ -775,6 +782,35 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // The currently active thread is still enabled, just continue with it.
             return interp_ok(SchedulingAction::ExecuteStep);
         }
+
+        if this.machine.communicate() {
+            // When isolation is disabled we need to check for events for
+            // threads which are blocked on host I/O.
+            let blocking_io_manager = &mut this.machine.blocking_io;
+            // Perform a non-blocking poll for newly available I/O events from the OS.
+            let ready_io_thread_count = match blocking_io_manager.poll(Some(Duration::ZERO)) {
+                Ok(ready_count) => ready_count,
+                // We can ignore errors originating from interrupts since subsequent calls
+                // to poll are not affected.
+                Err(e) if e.kind() == io::ErrorKind::Interrupted =>
+                    blocking_io_manager.get_ready_count(),
+                // For other errors we panic. On Linux and BSD hosts this should only be
+                // reachable when a system resource error (e.g. ENOMEM or ENOSPC) occurred.
+                Err(e) => panic!("{e}"),
+            };
+
+            if ready_io_thread_count > 0 {
+                // There is at least one thread blocked on I/O which is ready and can be unblocked.
+                while let Some(callback_result) = this.unblock_next_ready_io_thread() {
+                    callback_result?
+                }
+            }
+        }
+
+        let thread_manager = &mut this.machine.threads;
+        let clock = &this.machine.monotonic_clock;
+        let rng = this.machine.rng.get_mut();
+
         // The active thread yielded or got terminated. Let's see if there are any timeouts to take
         // care of. We do this *before* running any other thread, to ensure that timeouts "in the
         // past" fire before any other thread can take an action. This ensures that for
@@ -832,7 +868,12 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // All threads are currently blocked, but we have unexecuted
             // timeout_callbacks, which may unblock some of the threads. Hence,
             // sleep until the first callback.
-            interp_ok(SchedulingAction::Sleep(sleep_time))
+            interp_ok(SchedulingAction::Sleep(Some(sleep_time)))
+        } else if thread_manager.threads.iter().any(|thread| thread.state.is_blocked_on_io()) {
+            // At least one thread is blocked on host I/O but doesn't
+            // have a timeout set. Hence, we sleep indefinitely in the
+            // hope that eventually an I/O event for this thread happens.
+            interp_ok(SchedulingAction::Sleep(None))
         } else {
             throw_machine_stop!(TerminationInfo::GlobalDeadlock);
         }
@@ -1304,7 +1345,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.run_timeout_callback()?;
                 }
                 SchedulingAction::Sleep(duration) => {
-                    this.machine.monotonic_clock.sleep(duration);
+                    if this.machine.communicate() {
+                        // When we're running with isolation disabled, instead of
+                        // strictly sleeping the duration we allow waking up
+                        // early for I/O events from the OS.
+                        //
+                        // We ignore the result from the poll as it's just used as a sleep.
+                        // In the scheduler, before scheduling anything, we poll again anyways.
+                        this.machine.blocking_io.poll(duration).ok();
+                    } else {
+                        let duration = duration.expect(
+                            "Infinite sleep should not be triggered when isolation is enabled",
+                        );
+                        this.machine.monotonic_clock.sleep(duration);
+                    }
                 }
             }
         }
