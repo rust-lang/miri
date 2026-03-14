@@ -208,7 +208,7 @@ fn test_accept_nonblock() {
     };
     let client_sockfd =
         unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
-    let addr = net::ipv4_sock_addr(net::IPV4_LOCALHOST, 5678);
+    let addr = net::ipv4_sock_addr(net::IPV4_LOCALHOST, 0);
     unsafe {
         errno_check(libc::bind(
             server_sockfd,
@@ -224,13 +224,20 @@ fn test_accept_nonblock() {
         errno_check(libc::listen(server_sockfd, backlog));
     }
 
-    let mut storage = MaybeUninit::<libc::sockaddr_storage>::uninit();
-    let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    // This should fail as we don't have an incoming connection for this address.
-    let result = unsafe {
-        errno_result(libc::accept(server_sockfd, storage.as_mut_ptr() as *mut _, &mut len))
+    // Retrieve actual listener address because we used a randomized port.
+    let (_, server_addr) =
+        sockname(|storage, len| unsafe { libc::getsockname(server_sockfd, storage, len) }).unwrap();
+
+    let LibcSocketAddr::V4(addr) = server_addr else {
+        // We bound an IPv4 address so we also expect
+        // an IPv4 address to be returned.
+        panic!()
     };
-    let err = result.unwrap_err();
+
+    // This should fail as we don't have an incoming connection for this address.
+    let err = sockname(|storage, len| unsafe { libc::accept(server_sockfd, storage, len) })
+        .err()
+        .unwrap();
     // Assert that either EAGAIN or EWOULDBLOCK was returned.
     assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
 
@@ -239,22 +246,8 @@ fn test_accept_nonblock() {
         // was called before we call the `accept` on the server.
         thread::yield_now();
 
-        let result = unsafe {
-            errno_result(libc::accept(server_sockfd, storage.as_mut_ptr() as *mut _, &mut len))
-        };
-
-        let _sockfd = result.unwrap();
-        // Ensure that address has been written and that it has the correct size.
-        let family = unsafe {
-            let address = storage.as_ptr();
-            (*address).ss_family as i32
-        };
-        let size = if family == libc::AF_INET {
-            size_of::<libc::sockaddr_in>()
-        } else {
-            size_of::<libc::sockaddr_in6>()
-        };
-        assert_eq!(size, len as usize);
+        let (_peerfd, _peer_addr) =
+            sockname(|storage, len| unsafe { libc::accept(server_sockfd, storage, len) }).unwrap();
     });
 
     unsafe {
@@ -289,10 +282,10 @@ fn test_getsockname_ipv4() {
         errno_check(libc::listen(sockfd, backlog));
     }
 
-    let sockname =
+    let (_, sock_addr) =
         sockname(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) }).unwrap();
 
-    let LibcSocketAddr::V4(sock_addr) = sockname else {
+    let LibcSocketAddr::V4(sock_addr) = sock_addr else {
         // We bound an IPv4 address so we also expect
         // an IPv4 address to be returned.
         panic!()
@@ -326,10 +319,10 @@ fn test_getsockname_ipv4_random_port() {
         errno_check(libc::listen(sockfd, backlog));
     }
 
-    let sockname =
+    let (_, sock_addr) =
         sockname(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) }).unwrap();
 
-    let LibcSocketAddr::V4(sock_addr) = sockname else {
+    let LibcSocketAddr::V4(sock_addr) = sock_addr else {
         // We bound an IPv4 address so we also expect
         // an IPv4 address to be returned.
         panic!()
@@ -346,12 +339,12 @@ fn test_getsockname_ipv4_unbound() {
     let sockfd =
         unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
 
-    let sockname =
+    let (_, sock_addr) =
         sockname(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) }).unwrap();
 
     // Libc representation of an unspecified IPv4 address with zero port.
     let addr = net::ipv4_sock_addr([0, 0, 0, 0], 0);
-    let LibcSocketAddr::V4(sock_addr) = sockname else {
+    let LibcSocketAddr::V4(sock_addr) = sock_addr else {
         // We bound an IPv4 address so we also expect
         // an IPv4 address to be returned.
         panic!()
@@ -383,10 +376,10 @@ fn test_getsockname_ipv6() {
         errno_check(libc::listen(sockfd, backlog));
     }
 
-    let sockname =
+    let (_, sock_addr) =
         sockname(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) }).unwrap();
 
-    let LibcSocketAddr::V6(sock_addr) = sockname else {
+    let LibcSocketAddr::V6(sock_addr) = sock_addr else {
         // We bound an IPv6 address so we also expect
         // an IPv6 address to be returned.
         panic!()
@@ -432,27 +425,31 @@ enum LibcSocketAddr {
 /// Wraps a call to a platform function that returns a socket address.
 /// This is very much the same as the function with the same name in the
 /// standard library implementation.
-fn sockname<F>(f: F) -> io::Result<LibcSocketAddr>
+/// Returns a tuple containing the actual return address of the performed
+/// syscall and the written address of it.
+fn sockname<F>(f: F) -> io::Result<(libc::c_int, LibcSocketAddr)>
 where
     F: FnOnce(*mut libc::sockaddr, *mut libc::socklen_t) -> libc::c_int,
 {
     let mut storage = MaybeUninit::<libc::sockaddr_storage>::zeroed();
     let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    errno_result(f(storage.as_mut_ptr().cast(), &mut len))?;
+    let value = errno_result(f(storage.as_mut_ptr().cast(), &mut len))?;
     // SAFETY:
     // The caller guarantees that the storage has been successfully initialized
     // and its size written to `len` if `f` returns a success.
-    unsafe {
+    let address = unsafe {
         match (*storage.as_ptr()).ss_family as libc::c_int {
             libc::AF_INET => {
                 assert!(len as usize >= size_of::<libc::sockaddr_in>());
-                Ok(LibcSocketAddr::V4(*(storage.as_ptr() as *const _ as *const libc::sockaddr_in)))
+                LibcSocketAddr::V4(*(storage.as_ptr() as *const _ as *const libc::sockaddr_in))
             }
             libc::AF_INET6 => {
                 assert!(len as usize >= size_of::<libc::sockaddr_in6>());
-                Ok(LibcSocketAddr::V6(*(storage.as_ptr() as *const _ as *const libc::sockaddr_in6)))
+                LibcSocketAddr::V6(*(storage.as_ptr() as *const _ as *const libc::sockaddr_in6))
             }
-            _ => Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),
+            _ => return Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),
         }
-    }
+    };
+
+    Ok((value, address))
 }

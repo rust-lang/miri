@@ -56,6 +56,13 @@ impl SocketState {
     ///
     /// If the connection is established or the socket is in any other state,
     /// [`Ok`] is returned.
+    ///
+    /// **Important**: On Windows hosts this function cannot be used to ensure the socket is connected.
+    /// Windows treats sockets which are connecting as connected until either the connection timeout hits
+    /// or an error occurs. Thus, the [`TcpStream::peer_addr`] method returns [`Ok`] with the provided peer
+    /// address even when the connection might not yet be established.
+    /// Because of this, on Windows hosts, it's only allowed to call this function after receiving a [`Interest::WRITABLE`]
+    /// for the connecting socket!
     pub fn try_set_connected(&mut self) -> io::Result<()> {
         let SocketState::Connecting(stream) = self else { return Ok(()) };
 
@@ -302,6 +309,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Only allow the same backlog value as the standard library uses since the standard library
         // doesn't provide a way to set a custom value.
+        // FIXME: We probably want to remove this warning as Mio sockets use a backlog value of -1 on
+        //        most targets which defaults to the platform limit. This would mean that we get the
+        //        warning for every program using standard library sockets.
         if backlog != SUPPORTED_LISTEN_BACKLOG {
             // The first time this happens at a particular location, print a warning.
             static DEDUP: SpanDedupDiagnostic = SpanDedupDiagnostic::new();

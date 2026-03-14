@@ -11,23 +11,26 @@ fn main() {
 }
 
 fn test_create_ipv4_listener() {
-    let _listener_ipv4 = TcpListener::bind("127.0.0.1:3456").unwrap();
+    let _listener_ipv4 = TcpListener::bind("127.0.0.1:0").unwrap();
 }
 
 fn test_create_ipv6_listener() {
-    let _listener_ipv6 = TcpListener::bind("[::1]:2345").unwrap();
+    let _listener_ipv6 = TcpListener::bind("[::1]:0").unwrap();
 }
 
 /// Try to connect to a TCP listener running in a separate thread and
 /// accepting connections.
 fn test_accept_and_connect() {
-    let listener = TcpListener::bind("127.0.0.1:3456").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    // Get local address with randomized port to know where
+    // we need to connect to.
+    let address = listener.local_addr().unwrap();
 
     let handle = thread::spawn(move || {
         let (_stream, _addr) = listener.accept().unwrap();
     });
 
-    let _stream = TcpStream::connect("127.0.0.1:3456").unwrap();
+    let _stream = TcpStream::connect(address).unwrap();
 
     handle.join().unwrap();
 }
