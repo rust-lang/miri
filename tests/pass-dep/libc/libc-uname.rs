@@ -22,7 +22,7 @@ fn test_ok() {
         unsafe { CStr::from_ptr(&uname.release as *const _) }.to_str().unwrap(),
         env!("CARGO_PKG_VERSION")
     );
-    assert_eq!(unsafe { CStr::from_ptr(&uname.version as *const _) }, c"");
+    assert_eq!(unsafe { CStr::from_ptr(&uname.version as *const _) }, c"Miri 0.1.0");
     assert_eq!(
         unsafe { CStr::from_ptr(&uname.machine as *const _) }.to_str().unwrap(),
         std::env::consts::ARCH

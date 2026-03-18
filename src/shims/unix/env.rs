@@ -288,7 +288,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ("sysname", "Miri"),
             ("nodename", "Miri"),
             ("release", env!("CARGO_PKG_VERSION")),
-            ("version", ""),
+            ("version", concat!("Miri ", env!("CARGO_PKG_VERSION"))),
             ("machine", arch.as_str()),
         ];
         for (name, value) in values {
