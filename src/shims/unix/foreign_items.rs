@@ -172,7 +172,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.getpid()?;
                 this.write_scalar(result, dest)?;
             }
-            "uname" => {
+            "uname" if !matches!(&this.tcx.sess.target.os, Os::FreeBsd) => {
                 let [uname] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*mut _) -> i32),
                     link_name,
