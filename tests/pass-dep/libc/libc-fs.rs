@@ -50,6 +50,147 @@ fn main() {
     test_ioctl();
     test_opendir_closedir();
     test_readdir();
+    #[cfg(target_os = "linux")]
+    test_statx_on_file_path();
+    #[cfg(target_os = "linux")]
+    test_statx_on_file_descriptor();
+    #[cfg(target_os = "linux")]
+    test_statx_empty_path_on_pipe();
+}
+
+#[cfg(target_os = "linux")]
+#[track_caller]
+fn assert_statx_matches_metadata(stx: &libc::statx, meta: &std::fs::Metadata, expected_size: u64) {
+    use std::os::unix::fs::MetadataExt;
+    let mask = stx.stx_mask;
+
+    // Guaranteed by the shim on any Linux target.
+    assert!(mask & libc::STATX_TYPE != 0);
+    assert!(mask & libc::STATX_SIZE != 0);
+    assert_eq!(stx.stx_size, expected_size);
+    assert_eq!((stx.stx_mode as u32) & libc::S_IFMT, libc::S_IFREG);
+
+    // Host-dependent enrichment: only assert when the mask says the field is real.
+    if mask & libc::STATX_INO != 0 {
+        assert_eq!(stx.stx_ino, meta.ino());
+    }
+    if mask & libc::STATX_NLINK != 0 {
+        assert_eq!(stx.stx_nlink as u64, meta.nlink());
+    }
+    if mask & libc::STATX_UID != 0 {
+        assert_eq!(stx.stx_uid, meta.uid());
+    }
+    if mask & libc::STATX_GID != 0 {
+        assert_eq!(stx.stx_gid, meta.gid());
+    }
+    if mask & libc::STATX_BLOCKS != 0 {
+        assert_eq!(stx.stx_blocks, meta.blocks());
+    }
+
+    // We don't support non-S_IFMT bits in stx_mode.
+    assert_eq!(mask & libc::STATX_MODE, 0);
+
+    // Do not assert stx_blksize and stx_dev_* : there are no mask bits for them.
+}
+
+#[cfg(target_os = "linux")]
+fn test_statx_on_file_descriptor() {
+    use std::mem::MaybeUninit;
+
+    let bytes = b"hello";
+    let path = utils::prepare_with_content("miri_test_libc_statx_fd.txt", bytes);
+    let file = File::open(&path).unwrap();
+
+    unsafe {
+        let mut stx = MaybeUninit::<libc::statx>::zeroed();
+        let ret = libc::statx(
+            file.as_raw_fd(),
+            c"".as_ptr(),
+            libc::AT_EMPTY_PATH,
+            libc::STATX_BASIC_STATS | libc::STATX_BTIME,
+            stx.as_mut_ptr(),
+        );
+        assert_eq!(ret, 0, "statx failed: {}", std::io::Error::last_os_error());
+
+        let stx = stx.assume_init();
+        let meta = file.metadata().unwrap();
+        assert_statx_matches_metadata(&stx, &meta, bytes.len() as u64);
+    }
+
+    drop(file);
+    remove_file(&path).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+fn test_statx_on_file_path() {
+    use std::mem::MaybeUninit;
+
+    let bytes = b"hello";
+    let path = utils::prepare_with_content("miri_test_libc_statx.txt", bytes);
+    let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString::new failed");
+
+    unsafe {
+        let mut stx = MaybeUninit::<libc::statx>::zeroed();
+        let ret = libc::statx(
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            0,
+            libc::STATX_BASIC_STATS | libc::STATX_BTIME,
+            stx.as_mut_ptr(),
+        );
+        assert_eq!(ret, 0, "statx failed: {}", std::io::Error::last_os_error());
+
+        let stx = stx.assume_init();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert_statx_matches_metadata(&stx, &meta, bytes.len() as u64);
+    }
+
+    remove_file(&path).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+fn test_statx_empty_path_on_pipe() {
+    use libc_utils::errno_check;
+
+    unsafe {
+        let mut fds = [0; 2];
+        errno_check(libc::pipe(fds.as_mut_ptr()));
+
+        let mut statx_buf = std::mem::MaybeUninit::<libc::statx>::zeroed();
+
+        let ret = libc::statx(
+            fds[0],
+            c"".as_ptr(),
+            libc::AT_EMPTY_PATH,
+            libc::STATX_BASIC_STATS,
+            statx_buf.as_mut_ptr(),
+        );
+
+        assert_eq!(
+            ret,
+            0,
+            "statx on pipe with AT_EMPTY_PATH failed: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let statx_buf = statx_buf.assume_init();
+
+        assert_ne!(statx_buf.stx_mask & libc::STATX_TYPE, 0);
+        assert_ne!(statx_buf.stx_mask & libc::STATX_SIZE, 0);
+        assert_eq!(statx_buf.stx_mask & libc::STATX_MODE, 0);
+        assert_eq!((statx_buf.stx_mode as libc::mode_t) & libc::S_IFMT, libc::S_IFIFO);
+        assert_eq!(statx_buf.stx_size, 0);
+
+        // Synthetic metadata must not advertise host-only fields.
+        assert_eq!(statx_buf.stx_mask & libc::STATX_INO, 0);
+        assert_eq!(statx_buf.stx_mask & libc::STATX_NLINK, 0);
+        assert_eq!(statx_buf.stx_mask & libc::STATX_UID, 0);
+        assert_eq!(statx_buf.stx_mask & libc::STATX_GID, 0);
+        assert_eq!(statx_buf.stx_mask & libc::STATX_BLOCKS, 0);
+
+        errno_check(libc::close(fds[0]));
+        errno_check(libc::close(fds[1]));
+    }
 }
 
 fn test_file_open_unix_allow_two_args() {
