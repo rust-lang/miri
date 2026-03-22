@@ -1,8 +1,8 @@
 //@ignore-target: windows # No libc socket on Windows
 //@compile-flags: -Zmiri-disable-isolation
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::{ErrorKind, Read, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
 
 const TEST_BYTES: &[u8] = b"these are some test bytes!";
@@ -14,6 +14,7 @@ fn main() {
     test_read_write();
     test_peek();
     test_peer_addr();
+    test_shutdown();
 }
 
 fn test_create_ipv4_listener() {
@@ -112,4 +113,42 @@ fn test_peer_addr() {
     assert_eq!(address, peer_addr);
 
     handle.join().unwrap();
+}
+
+/// Test shutting down TCP streams.
+fn test_shutdown() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    // Get local address with randomized port to know where
+    // we need to connect to.
+    let address = listener.local_addr().unwrap();
+
+    // Start server thread.
+    let handle = thread::spawn(move || {
+        let (stream, _addr) = listener.accept().unwrap();
+        // Return stream from thread such that it doesn't get dropped too early.
+        stream
+    });
+
+    let mut byte = [0u8];
+    let mut stream = TcpStream::connect(address).unwrap();
+    let mut stream_clone = stream.try_clone().unwrap();
+
+    // Closing should prevent reads/writes.
+    stream.shutdown(Shutdown::Write).unwrap();
+    stream.write(&[0]).unwrap_err();
+    stream.shutdown(Shutdown::Read).unwrap();
+    assert_eq!(stream.read(&mut byte).unwrap(), 0);
+
+    // Closing should affect previously cloned handles.
+    let err = stream_clone.write(&[0]).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::BrokenPipe);
+    assert_eq!(stream_clone.read(&mut byte).unwrap(), 0);
+
+    // Closing should affect newly cloned handles.
+    let mut stream_other_clone = stream.try_clone().unwrap();
+    let err = stream_other_clone.write(&[0]).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::BrokenPipe);
+    assert_eq!(stream_other_clone.read(&mut byte).unwrap(), 0);
+
+    let _stream = handle.join().unwrap();
 }
