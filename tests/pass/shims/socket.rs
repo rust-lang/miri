@@ -2,7 +2,7 @@
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
 
 const TEST_BYTES: &[u8] = b"these are some test bytes!";
@@ -14,6 +14,7 @@ fn main() {
     test_read_write();
     test_peek();
     test_peer_addr();
+    test_shutdown();
 }
 
 fn test_create_ipv4_listener() {
@@ -110,6 +111,27 @@ fn test_peer_addr() {
     let stream = TcpStream::connect(address).unwrap();
     let peer_addr = stream.peer_addr().unwrap();
     assert_eq!(address, peer_addr);
+
+    handle.join().unwrap();
+}
+
+/// Test shutting down TCP streams.
+fn test_shutdown() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    // Get local address with randomized port to know where
+    // we need to connect to.
+    let address = listener.local_addr().unwrap();
+
+    let handle = thread::spawn(move || {
+        let (stream, _addr) = listener.accept().unwrap();
+        stream.shutdown(Shutdown::Read).unwrap();
+    });
+
+    let stream = TcpStream::connect(address).unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
+
+    // FIXME: Real shutdown can only be tested once we have read/write.
+    //        See standard library tcp tests for a reference.
 
     handle.join().unwrap();
 }
