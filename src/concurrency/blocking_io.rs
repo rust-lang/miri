@@ -105,7 +105,7 @@ impl BlockingIoManager {
     }
 
     /// Deregister the event source for a thread.
-    pub(super) fn deregister(&mut self, thread: ThreadId) {
+    pub fn deregister(&mut self, thread: ThreadId) {
         let poll =
             self.poll.as_ref().expect("Blocking I/O should not be called with isolation enabled");
 

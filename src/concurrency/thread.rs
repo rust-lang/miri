@@ -838,18 +838,10 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         for (id, thread) in this.machine.threads.threads.iter_enumerated_mut() {
             match &thread.state {
-                ThreadState::Blocked { timeout: Some(timeout), reason, .. } => {
+                ThreadState::Blocked { timeout: Some(timeout), .. } => {
                     let wait_time = timeout.get_wait_time(clock);
                     if wait_time.is_zero() {
                         // The timeout expired for this thread.
-
-                        if reason == &BlockReason::IO {
-                            // We need to deregister the thread from the blocking I/O manager
-                            // to prevent receiving I/O events for this thread as this would
-                            // lead to invalid unblocks.
-                            this.machine.blocking_io.deregister(id);
-                        }
-
                         let old_state = mem::replace(&mut thread.state, ThreadState::Enabled);
                         let ThreadState::Blocked { callback, .. } = old_state else {
                             unreachable!()
