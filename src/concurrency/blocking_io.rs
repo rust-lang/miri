@@ -104,9 +104,8 @@ impl BlockingIoManager {
             .unwrap_or_else(|_| panic!("A thread cannot be registered twice at the same time"));
     }
 
-    /// Deregister the event source for a thread. Returns the kind of I/O the thread was
-    /// blocked on.
-    fn deregister(&mut self, thread: ThreadId) {
+    /// Deregister the event source for a thread.
+    pub(super) fn deregister(&mut self, thread: ThreadId) {
         let poll =
             self.poll.as_ref().expect("Blocking I/O should not be called with isolation enabled");
 
