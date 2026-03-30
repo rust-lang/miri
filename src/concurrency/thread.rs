@@ -420,9 +420,14 @@ pub enum TimeoutAnchor {
     Absolute,
 }
 
-/// An error signaling that the requested thread doesn't exist.
+/// An error signaling that the requested thread doesn't exist or has terminated.
 #[derive(Debug, Copy, Clone)]
-pub struct ThreadNotFound;
+pub enum ThreadLookupError {
+    /// No thread with this ID exists.
+    InvalidId,
+    /// The thread exists but has already terminated.
+    Terminated(ThreadId),
+}
 
 /// A set of threads.
 #[derive(Debug)]
@@ -488,13 +493,21 @@ impl<'tcx> ThreadManager<'tcx> {
         }
     }
 
-    pub fn thread_id_try_from(&self, id: impl TryInto<u32>) -> Result<ThreadId, ThreadNotFound> {
+    /// Returns the `ThreadId` for the given raw thread id.
+    /// Returns `Err(ThreadNotFound::InvalidId)` if the id is out of range, or
+    /// `Err(ThreadNotFound::Terminated(id))` if the thread exists but has terminated.
+    pub fn thread_id_try_from(&self, id: impl TryInto<u32>) -> Result<ThreadId, ThreadLookupError> {
         if let Ok(id) = id.try_into()
             && usize::try_from(id).is_ok_and(|id| id < self.threads.len())
         {
-            Ok(ThreadId(id))
+            let thread_id = ThreadId(id);
+            if self.threads[thread_id].state.is_terminated() {
+                Err(ThreadLookupError::Terminated(thread_id))
+            } else {
+                Ok(thread_id)
+            }
         } else {
-            Err(ThreadNotFound)
+            Err(ThreadLookupError::InvalidId)
         }
     }
 
@@ -878,7 +891,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     #[inline]
-    fn thread_id_try_from(&self, id: impl TryInto<u32>) -> Result<ThreadId, ThreadNotFound> {
+    fn thread_id_try_from(&self, id: impl TryInto<u32>) -> Result<ThreadId, ThreadLookupError> {
         self.eval_context_ref().machine.threads.thread_id_try_from(id)
     }
 

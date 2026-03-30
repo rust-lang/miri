@@ -114,6 +114,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         self.get_tid(this.machine.threads.active_thread())
     }
 
+    /// Convert TID back to a `ThreadId`, or `None` if it is invalid or the thread has terminated.
+    fn get_thread_id_from_linux_tid(&self, tid: u32) -> Option<ThreadId> {
+        let this = self.eval_context_ref();
+        debug_assert!(matches!(this.tcx.sess.target.os, Os::Linux | Os::Android));
+        // TID = PID + thread_index => index = TID - PID.
+        let id = tid.checked_sub(this.get_pid())?;
+        this.machine.threads.thread_id_try_from(id).ok()
+    }
+
     /// Get an "OS" thread ID for any thread.
     fn get_tid(&self, thread: ThreadId) -> u32 {
         let this = self.eval_context_ref();
