@@ -87,6 +87,7 @@ mod borrow_tracker;
 mod clock;
 mod concurrency;
 mod data_structures;
+mod debugger;
 mod diagnostics;
 mod eval;
 mod helpers;
@@ -147,6 +148,7 @@ pub use crate::concurrency::thread::{
 pub use crate::concurrency::{GenmcConfig, GenmcCtx, run_genmc_mode};
 pub use crate::data_structures::dedup_range_map::DedupRangeMap;
 pub use crate::data_structures::mono_hash_map::MonoHashMap;
+pub use crate::debugger::{DebuggerCommand, DebuggerState, MiriDebuggerHandle};
 pub use crate::diagnostics::{
     EvalContextExt as _, NonHaltingDiagnostic, TerminationInfo, report_result,
 };

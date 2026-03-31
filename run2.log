@@ -1,0 +1,1923 @@
+﻿cargo :    Compiling miri v0.1.0 (C:\Users\aloo\miri)
+At line:1 char:1
++ cargo miri run 2>&1 | Out-File -FilePath run2.log -Encoding utf8; Wri ...
++ ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling mi...sers\aloo\miri) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error[E0463]: can't find crate for `rustc_abi`
+  --> src\lib.rs:64:1
+   |
+64 | extern crate rustc_abi;
+   | ^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_apfloat`
+  --> src\lib.rs:65:1
+   |
+65 | extern crate rustc_apfloat;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_ast`
+  --> src\lib.rs:66:1
+   |
+66 | extern crate rustc_ast;
+   | ^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_codegen_ssa`
+  --> src\lib.rs:67:1
+   |
+67 | extern crate rustc_codegen_ssa;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_const_eval`
+  --> src\lib.rs:68:1
+   |
+68 | extern crate rustc_const_eval;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_data_structures`
+  --> src\lib.rs:69:1
+   |
+69 | extern crate rustc_data_structures;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_errors`
+  --> src\lib.rs:70:1
+   |
+70 | extern crate rustc_errors;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_hir`
+  --> src\lib.rs:71:1
+   |
+71 | extern crate rustc_hir;
+   | ^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_index`
+  --> src\lib.rs:72:1
+   |
+72 | extern crate rustc_index;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_log`
+  --> src\lib.rs:73:1
+   |
+73 | extern crate rustc_log;
+   | ^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_middle`
+  --> src\lib.rs:74:1
+   |
+74 | extern crate rustc_middle;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_session`
+  --> src\lib.rs:75:1
+   |
+75 | extern crate rustc_session;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_span`
+  --> src\lib.rs:76:1
+   |
+76 | extern crate rustc_span;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_symbol_mangling`
+  --> src\lib.rs:77:1
+   |
+77 | extern crate rustc_symbol_mangling;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_target`
+  --> src\lib.rs:78:1
+   |
+78 | extern crate rustc_target;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0463]: can't find crate for `rustc_driver`
+  --> src\lib.rs:82:1
+   |
+82 | extern crate rustc_driver;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ can't find crate
+   |
+   = help: maybe you need to install the missing components with: `rustup 
+component add rust-src rustc-dev llvm-tools-preview`
+
+error[E0432]: unresolved imports `crate::InterpResult`, `crate::interp_ok`
+ --> src\borrow_tracker\stacked_borrows\stack.rs:9:13
+  |
+9 | use crate::{InterpResult, ProvenanceExtra, interp_ok};
+  |             ^^^^^^^^^^^^                   ^^^^^^^^^ no `interp_ok` in the 
+root
+  |             |
+  |             no `InterpResult` in the root
+  |
+  = note: unresolved item `crate::concurrency::genmc::intercept::InterpResult` 
+exists but is inaccessible
+
+error[E0432]: unresolved import `InterpErrorKind`
+   --> src\diagnostics.rs:227:9
+    |
+227 |     use InterpErrorKind::*;
+    |         ^^^^^^^^^^^^^^^ use of undeclared type `InterpErrorKind`
+
+error[E0432]: unresolved import `UndefinedBehaviorInfo`
+   --> src\diagnostics.rs:228:9
+    |
+228 |     use UndefinedBehaviorInfo::*;
+    |         ^^^^^^^^^^^^^^^^^^^^^ use of undeclared type 
+`UndefinedBehaviorInfo`
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\alloc_addresses\mod.rs:375:17
+    |
+375 |                 
+throw_machine_stop!(TerminationInfo::Int2PtrWithStrictProvenance);
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_machine_stop` in this scope
+  --> src\borrow_tracker\stacked_borrows\diagnostics.rs:17:5
+   |
+17 |     err_machine_stop!(TerminationInfo::StackedBorrowsUb { msg, help, 
+history })
+   |     ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_machine_stop` in this scope
+   --> src\borrow_tracker\tree_borrows\diagnostics.rs:397:9
+    |
+397 |         err_machine_stop!(TerminationInfo::TreeBorrowsUb { title, 
+details, history })
+    |         ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_machine_stop` in this scope
+   --> src\borrow_tracker\tree_borrows\diagnostics.rs:412:5
+    |
+412 |     err_machine_stop!(TerminationInfo::TreeBorrowsUb { title, details, 
+history })
+    |     ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_ub` in this scope
+   --> src\concurrency\data_race.rs:746:49
+    |
+746 |         interp_ok(buffered_scalar.ok_or_else(|| 
+err_ub!(InvalidUninitBytes(None)))?)
+    |                                                 ^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\concurrency\data_race.rs:976:17
+    |
+976 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\concurrency\data_race.rs:991:17
+    |
+991 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_machine_stop` in this scope
+    --> src\concurrency\data_race.rs:1167:13
+     |
+1167 |         Err(err_machine_stop!(TerminationInfo::DataRace {
+     |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\concurrency\data_race.rs:1438:21
+     |
+1438 |                     throw_ub_format!(
+     |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\concurrency\data_race.rs:1446:21
+     |
+1446 |                     throw_ub_format!(
+     |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\concurrency\data_race.rs:1453:21
+     |
+1453 |                     throw_ub_format!(
+     |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\concurrency\sync.rs:695:17
+    |
+695 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\concurrency\sync.rs:700:13
+    |
+700 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\concurrency\thread.rs:620:13
+    |
+620 |             throw_ub_format!("trying to detach thread that was already 
+detached or joined");
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\concurrency\thread.rs:808:13
+    |
+808 |             throw_machine_stop!(TerminationInfo::GlobalDeadlock);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\concurrency\thread.rs:903:17
+    |
+903 |                 throw_unsup_format!("foreign thread-local statics are 
+not supported");
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\concurrency\thread.rs:1149:13
+     |
+1149 |             throw_ub_format!("trying to join a detached thread");
+     |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\concurrency\thread.rs:1220:13
+     |
+1220 |             throw_ub_format!("trying to join an already joined thread");
+     |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\concurrency\thread.rs:1224:13
+     |
+1224 |             throw_ub_format!("trying to join itself");
+     |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+    --> src\concurrency\thread.rs:1326:17
+     |
+1326 |                 throw_machine_stop!(TerminationInfo::Interrupted);
+     |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+    --> src\concurrency\thread.rs:1344:29
+     |
+1344 | ...                   throw_machine_stop!(TerminationInfo::Interrupted);
+     |                       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\eval.rs:265:21
+    |
+265 |                     throw_machine_stop!(TerminationInfo::Exit {
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\helpers.rs:376:32
+    |
+376 |                 .map_err(|err| err_unsup_format!("host getrandom failed: 
+{}", err))?;
+    |                                ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\helpers.rs:650:13
+    |
+650 |             throw_unsup_format!("`{name}` is not supported on 
+{target_os}");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\helpers.rs:952:13
+    |
+952 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\helpers.rs:994:25
+    |
+994 |                         throw_unsup_format!(
+    |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+    --> src\helpers.rs:1064:5
+     |
+1064 |     throw_machine_stop!(TerminationInfo::UnsupportedInIsolation(format!(
+     |     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\intrinsics\math.rs:142:39
+    |
+142 |                     (false, false) => throw_ub_format!(
+    |                                       ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\intrinsics\math.rs:145:35
+    |
+145 |                     (false, _) => throw_ub_format!(
+    |                                   ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\intrinsics\math.rs:148:35
+    |
+148 |                     (_, false) => throw_ub_format!(
+    |                                   ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\intrinsics\math.rs:157:21
+    |
+157 |                     throw_ub_format!("`{intrinsic_name}` intrinsic 
+produced non-finite value as result");
+    |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_ub_format` in this scope
+   --> src\intrinsics\math.rs:172:25
+    |
+172 |                         err_ub_format!(
+    |                         ^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\intrinsics\simd.rs:96:29
+   |
+96 | ...                   throw_unsup_format!(
+   |                       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\intrinsics\mod.rs:30:5
+   |
+30 |     throw_ub_format!(
+   |     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\intrinsics\mod.rs:73:21
+   |
+73 |                     throw_unsup_format!("unimplemented intrinsic: 
+`{intrinsic_name}`")
+   |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\intrinsics\mod.rs:82:21
+   |
+82 |                     throw_unsup_format!(
+   |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\intrinsics\mod.rs:127:17
+    |
+127 |                 throw_machine_stop!(TerminationInfo::Abort(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\intrinsics\mod.rs:185:17
+    |
+185 |                 
+throw_machine_stop!(TerminationInfo::Abort(format!("trace/breakpoint trap")))
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+    --> src\machine.rs:1225:17
+     |
+1225 |                 throw_machine_stop!(TerminationInfo::Abort(msg));
+     |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+    --> src\machine.rs:1227:17
+     |
+1227 |                 throw_ub_format!("{msg}");
+     |                 ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\machine.rs:1394:17
+     |
+1394 |                 throw_unsup_format!(
+     |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\machine.rs:1409:13
+     |
+1409 |             throw_unsup_format!("extern static `{link_name}` is not 
+supported by Miri",)
+     |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\alloc.rs:92:13
+   |
+92 |             throw_ub_format!("creating allocation with size 0");
+   |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\alloc.rs:95:13
+   |
+95 |             throw_ub_format!("creating an allocation larger than half the 
+address space");
+   |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\alloc.rs:100:21
+    |
+100 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\alloc.rs:106:21
+    |
+106 |                     throw_ub_format!("creating allocation with 
+non-power-of-two alignment {align}");
+    |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\alloc.rs:238:17
+    |
+238 |                 throw_ub_format!("`realloc` with a size of zero");
+    |                 ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\backtrace.rs:22:13
+   |
+22 |             throw_unsup_format!("unknown `miri_backtrace_size` flags {}", 
+flags);
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\backtrace.rs:68:17
+   |
+68 |                 throw_unsup_format!("miri_get_backtrace: v0 is not 
+supported any more");
+   |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\backtrace.rs:78:18
+   |
+78 |             _ => throw_unsup_format!("unknown `miri_get_backtrace` flags 
+{}", flags),
+   |                  ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\backtrace.rs:97:13
+   |
+97 |             throw_ub_format!("expected static function pointer, found 
+{:?}", ptr);
+   |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\backtrace.rs:132:13
+    |
+132 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\backtrace.rs:145:17
+    |
+145 |                 throw_ub_format!(
+    |                 ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\backtrace.rs:153:17
+    |
+153 |                 throw_unsup_format!("miri_resolve_frame: v0 is not 
+supported any more");
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\backtrace.rs:165:18
+    |
+165 |             _ => throw_unsup_format!("unknown `miri_resolve_frame` flags 
+{}", flags),
+    |                  ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\backtrace.rs:199:13
+    |
+199 |             throw_unsup_format!("unknown `miri_resolve_frame_names` 
+flags {}", flags);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:150:9
+    |
+150 |         throw_unsup_format!("cannot read from {}", self.name());
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:167:9
+    |
+167 |         throw_unsup_format!("cannot write to {}", self.name());
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:183:9
+    |
+183 |         throw_unsup_format!("cannot seek on {}", self.name());
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:198:9
+    |
+198 |         throw_unsup_format!("cannot close {}", self.name());
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:202:9
+    |
+202 |         throw_unsup_format!("obtaining metadata is only supported on 
+file-backed file descriptors");
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:217:9
+    |
+217 |         throw_unsup_format!("fcntl: {} is not supported for F_GETFL", 
+self.name());
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\files.rs:226:9
+    |
+226 |         throw_unsup_format!("fcntl: {} is not supported for F_SETFL", 
+self.name());
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\foreign_items.rs:75:9
+   |
+75 |         throw_unsup_format!("unimplemented sysconf name: {}", name)
+   |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\foreign_items.rs:741:21
+    |
+741 |                     throw_unsup_format!("dlsym: non UTF-8 symbol name 
+not supported")
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_ub_format` in this scope
+   --> src\shims\unix\foreign_items.rs:773:36
+    |
+773 |                     .ok_or_else(|| err_ub_format!(
+    |                                    ^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\foreign_items.rs:998:25
+    |
+998 |                         throw_unsup_format!(
+    |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\unix\foreign_items.rs:1036:25
+     |
+1036 |                         throw_unsup_format!(
+     |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\unix\foreign_items.rs:1238:21
+     |
+1238 |                     throw_unsup_format!("`getpwuid_r` on other users is 
+not supported");
+     |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\env.rs:312:17
+    |
+312 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\fd.rs:38:9
+   |
+38 |         throw_unsup_format!("cannot pread from {}", self.name());
+   |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\fd.rs:54:9
+   |
+54 |         throw_unsup_format!("cannot pwrite to {}", self.name());
+   |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\fd.rs:62:9
+   |
+62 |         throw_unsup_format!("cannot flock {}", self.name());
+   |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\fd.rs:67:9
+   |
+67 |         throw_unsup_format!("{}: epoll does not support this file 
+description", self.name());
+   |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fd.rs:123:13
+    |
+123 |             throw_unsup_format!("unsupported flags {:#x}", op);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fd.rs:225:17
+    |
+225 |                 throw_unsup_format!("fcntl: unsupported command 
+{cmd:#x}");
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fs.rs:149:21
+    |
+149 |                     throw_unsup_format!("blocking `flock` is not 
+currently supported");
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fs.rs:376:13
+    |
+376 |             throw_unsup_format!("access mode flags on this target are 
+unsupported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fs.rs:391:13
+    |
+391 |             throw_unsup_format!("unsupported access mode {:#x}", 
+access_mode);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fs.rs:426:21
+    |
+426 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fs.rs:481:13
+    |
+481 |             throw_unsup_format!("unsupported flags {:#x}", flag & 
+!mirror);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\fs.rs:706:13
+    |
+706 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_ub_format` in this scope
+   --> src\shims\unix\fs.rs:974:13
+    |
+974 |             err_ub_format!("the DIR pointer passed to `readdir` did not 
+come from opendir")
+    |             ^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+    --> src\shims\unix\fs.rs:1104:13
+     |
+1104 |             err_unsup_format!("the DIR pointer passed to readdir_r did 
+not come from opendir")
+     |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\unix\fs.rs:1133:21
+     |
+1133 |                     throw_unsup_format!(
+     |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+    --> src\shims\unix\fs.rs:1307:13
+     |
+1307 |             err_unsup_format!("`fsync` is only supported on file-backed 
+file descriptors")
+     |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+    --> src\shims\unix\fs.rs:1330:13
+     |
+1330 |             err_unsup_format!("`fdatasync` is only supported on 
+file-backed file descriptors")
+     |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+    --> src\shims\unix\fs.rs:1372:13
+     |
+1372 |             err_unsup_format!("`sync_data_range` is only supported on 
+file-backed file descriptors")
+     |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\mem.rs:73:13
+   |
+73 |             throw_unsup_format!("Miri does not support file-backed memory 
+mappings");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\mem.rs:78:13
+   |
+78 |             throw_unsup_format!(
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\mem.rs:85:13
+   |
+85 |             throw_unsup_format!(
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\mem.rs:94:13
+   |
+94 |             throw_unsup_format!(
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\mem.rs:102:13
+    |
+102 |             throw_unsup_format!("Miri does not support non-zero offsets 
+to mmap");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\socket.rs:803:13
+    |
+803 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\sync.rs:35:15
+   |
+35 |         os => throw_unsup_format!("`pthread_mutexattr` is not supported 
+on {os}"),
+   |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\sync.rs:90:9
+   |
+90 |         throw_unsup_format!("unsupported type of mutex: {kind}");
+   |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:116:13
+    |
+116 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\sync.rs:136:15
+    |
+136 |         os => throw_unsup_format!("`pthread_mutex` is not supported on 
+{os}"),
+    |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\sync.rs:165:19
+    |
+165 |             os => throw_unsup_format!("`pthread_mutex` is not supported 
+on {os}"),
+    |                   ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:228:5
+    |
+228 |     throw_ub_format!(
+    |     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:245:13
+    |
+245 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\sync.rs:262:15
+    |
+262 |         os => throw_unsup_format!("`pthread_rwlock` is not supported on 
+{os}"),
+    |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:300:17
+    |
+300 |                 throw_ub_format!(
+    |                 ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\sync.rs:318:15
+    |
+318 |         os => throw_unsup_format!("`pthread_condattr` clock field is not 
+supported on {os}"),
+    |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\sync.rs:357:15
+    |
+357 |         os => throw_unsup_format!("`pthread_cond` is not supported on 
+{os}"),
+    |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:385:13
+    |
+385 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:427:17
+    |
+427 |                 throw_ub_format!(
+    |                 ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:538:25
+    |
+538 |                         throw_ub_format!(
+    |                         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\unix\sync.rs:541:42
+    |
+541 |                     MutexKind::Normal => 
+throw_machine_stop!(TerminationInfo::LocalDeadlock),
+    |                                          ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:597:21
+    |
+597 |                     throw_ub_format!(
+    |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:601:21
+    |
+601 |                     throw_ub_format!(
+    |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:618:13
+    |
+618 |             throw_ub_format!("destroyed a locked mutex");
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:724:13
+    |
+724 |             throw_ub_format!("unlocked an rwlock that was not locked by 
+the active thread");
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:736:13
+    |
+736 |             throw_ub_format!("destroyed a locked rwlock");
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:831:13
+    |
+831 |             throw_ub_format!("pthread_cond_init: invalid attributes 
+(unsupported clock)")
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\sync.rs:929:13
+    |
+929 |             throw_ub_format!("destroying an awaited conditional 
+variable");
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\thread.rs:50:13
+   |
+50 |             throw_unsup_format!("Miri supports pthread_join only with 
+retval==NULL");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\unnamed_socket.rs:185:13
+    |
+185 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\unnamed_socket.rs:299:9
+    |
+299 |         throw_unsup_format!("reading from the write end of a pipe")
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\unnamed_socket.rs:471:13
+    |
+471 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\unnamed_socket.rs:477:13
+    |
+477 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\unnamed_socket.rs:483:13
+    |
+483 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\unnamed_socket.rs:555:13
+    |
+555 |             throw_unsup_format!("unsupported flags in `pipe2`");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\android\thread.rs:51:15
+   |
+51 |         op => throw_unsup_format!("Miri does not support `prctl` syscall 
+with op={}", op),
+   |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\freebsd\foreign_items.rs:93:25
+   |
+93 |                         throw_unsup_format!(
+   |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\freebsd\foreign_items.rs:104:21
+    |
+104 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\freebsd\sync.rs:201:17
+    |
+201 |                 throw_unsup_format!("Miri does not support `_umtx_op` 
+syscall with op={}", op)
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\freebsd\sync.rs:224:13
+    |
+224 |             throw_unsup_format!("unsupported clock")
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\linux\mem.rs:31:13
+   |
+31 |             throw_unsup_format!("Miri does not support mremap wth 
+MREMAP_FIXED");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\linux\mem.rs:35:13
+   |
+35 |             throw_unsup_format!("Miri does not support mremap wth 
+MREMAP_DONTUNMAP");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\epoll.rs:213:13
+    |
+213 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\shims\unix\linux_like\epoll.rs:271:28
+    |
+271 |             .ok_or_else(|| err_unsup_format!("non-epoll FD passed to 
+`epoll_ctl`"))?;
+    |                            ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\epoll.rs:296:17
+    |
+296 |                 throw_unsup_format!("epoll_ctl: epollet flag must be 
+included.");
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\epoll.rs:316:17
+    |
+316 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\epoll.rs:381:13
+    |
+381 |             throw_unsup_format!("unsupported epoll_ctl operation: {op}");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\epoll.rs:462:21
+    |
+462 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\eventfd.rs:151:13
+    |
+151 |             throw_unsup_format!("eventfd: EFD_SEMAPHORE is unsupported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\eventfd.rs:166:13
+    |
+166 |             throw_unsup_format!("eventfd: encountered unknown 
+unsupported flags {:#x}", flags);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\linux_like\sync.rs:217:15
+    |
+217 |         op => throw_unsup_format!("Miri does not support `futex` syscall 
+with op={}", op),
+    |               ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\unix\linux_like\syscall.rs:71:13
+   |
+71 |             throw_unsup_format!("syscall: unsupported syscall number 
+{num}");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\macos\foreign_items.rs:367:13
+    |
+367 |             throw_unsup_format!("ioctl: unsupported command {cmd:#x}");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\unix\macos\sync.rs:38:13
+   |
+38 |             throw_ub_format!(
+   |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\unix\macos\sync.rs:109:21
+    |
+109 |                     throw_ub_format!("`os_unfair_lock` was not properly 
+initialized at this location, or it got overwritten");
+    |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\macos\sync.rs:317:13
+    |
+317 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\unix\macos\sync.rs:326:17
+    |
+326 |                 throw_machine_stop!(TerminationInfo::Abort(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\macos\sync.rs:370:13
+    |
+370 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\unix\macos\sync.rs:379:13
+    |
+379 |             throw_machine_stop!(TerminationInfo::Abort(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\macos\sync.rs:399:13
+    |
+399 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\unix\macos\sync.rs:406:13
+    |
+406 |             throw_machine_stop!(TerminationInfo::Abort(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\macos\sync.rs:421:13
+    |
+421 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\unix\macos\sync.rs:428:13
+    |
+428 |             throw_machine_stop!(TerminationInfo::Abort(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\solarish\foreign_items.rs:187:21
+    |
+187 |                     throw_unsup_format!("pset_info is only supported 
+with pset==PS_MYID");
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\solarish\foreign_items.rs:191:21
+    |
+191 |                     throw_unsup_format!("pset_info is only supported 
+with type==NULL");
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\unix\solarish\foreign_items.rs:195:21
+    |
+195 |                     throw_unsup_format!("pset_info is only supported 
+with list==NULL");
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\foreign_items.rs:340:21
+    |
+340 |                     throw_unsup_format!("GetFullPathNameW: non-null 
+`lpFilePart` is not supported");
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\windows\foreign_items.rs:982:17
+    |
+982 |                 throw_machine_stop!(TerminationInfo::Exit { code, 
+leak_check: false });
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1030:29
+     |
+1030 | ...                   throw_unsup_format!(
+     |                       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1038:29
+     |
+1038 | ...                   throw_unsup_format!(
+     |                       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1044:25
+     |
+1044 |                         throw_unsup_format!(
+     |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1135:21
+     |
+1135 |                     throw_unsup_format!("`GetModuleFileNameW` only 
+supports the NULL handle");
+     |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1182:21
+     |
+1182 |                     throw_unsup_format!("FormatMessageW: unsupported 
+flags {flags:#x}");
+     |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1195:21
+     |
+1195 |                     throw_unsup_format!("FormatMessageW: buffer not big 
+enough");
+     |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+    --> src\shims\windows\foreign_items.rs:1208:21
+     |
+1208 |                     throw_unsup_format!(
+     |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\windows\env.rs:121:13
+    |
+121 |             throw_ub_format!("pointer to environment variable name is 
+NULL");
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\env.rs:126:13
+    |
+126 |             throw_unsup_format!("environment variable name is an empty 
+string");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\env.rs:128:13
+    |
+128 |             throw_unsup_format!("environment variable name contains 
+'='");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\env.rs:225:13
+    |
+225 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\windows\fs.rs:97:13
+   |
+97 |             throw_unsup_format!("CreateFileW: Unsupported creation 
+disposition: {value}");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:143:13
+    |
+143 |             throw_unsup_format!("CreateFileW: Unsupported 
+flags_and_attributes: {value}");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:197:13
+    |
+197 |             throw_unsup_format!("CreateFileW: Unsupported share mode: 
+{share_mode}");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:200:13
+    |
+200 |             throw_unsup_format!("CreateFileW: Security attributes are 
+not supported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\windows\fs.rs:205:13
+    |
+205 | ...   throw_machine_stop!(TerminationInfo::Abort("Invalid CreateFileW 
+argument combination: FILE_FLAG_OPEN_REPARSE_POINT with CREAT...
+    |       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:209:13
+    |
+209 |             throw_unsup_format!("CreateFileW: Template files are not 
+supported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:236:13
+    |
+236 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:403:13
+    |
+403 |             err_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:453:13
+    |
+453 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:474:13
+    |
+474 |             err_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:511:13
+    |
+511 |             throw_unsup_format!("MoveFileExW: Unsupported `dwFlags` 
+value {}", flags);
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:568:13
+    |
+568 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:574:13
+    |
+574 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:580:13
+    |
+580 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:586:13
+    |
+586 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:592:13
+    |
+592 |             throw_unsup_format!("`NtWriteFile` `Key` parameter is 
+non-null, which is unsupported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:673:13
+    |
+673 |             throw_unsup_format!("`NtReadFile` `Event` parameter is 
+non-null, which is unsupported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:677:13
+    |
+677 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:683:13
+    |
+683 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:689:13
+    |
+689 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:695:13
+    |
+695 |             throw_unsup_format!("`NtReadFile` `Key` parameter is 
+non-null, which is unsupported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:764:13
+    |
+764 |             throw_unsup_format!("`SetFilePointerEx` is only supported on 
+file backed handles");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\fs.rs:778:13
+    |
+778 |             throw_unsup_format!("Invalid move method: {move_method}")
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\windows\handle.rs:213:17
+    |
+213 |                 throw_machine_stop!(TerminationInfo::Abort(format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\windows\handle.rs:218:17
+    |
+218 |                 throw_machine_stop!(TerminationInfo::Abort(format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\windows\handle.rs:226:9
+    |
+226 |         throw_machine_stop!(TerminationInfo::Abort(format!(
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\handle.rs:249:13
+    |
+249 |             throw_unsup_format!("Invalid argument to `GetStdHandle`: 
+{which}")
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\handle.rs:280:13
+    |
+280 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\handle.rs:286:13
+    |
+286 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\windows\handle.rs:292:13
+    |
+292 |             throw_machine_stop!(TerminationInfo::Abort(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\handle.rs:300:13
+    |
+300 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\handle.rs:313:17
+    |
+313 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\handle.rs:318:17
+    |
+318 |                 throw_unsup_format!(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\windows\sync.rs:17:13
+   |
+17 |             throw_ub_format!(
+   |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\windows\sync.rs:64:21
+   |
+64 |                     throw_ub_format!("`INIT_ONCE` was not properly 
+initialized at this location, or it got overwritten");
+   |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\sync.rs:116:13
+    |
+116 |             throw_unsup_format!("unsupported `dwFlags` {flags} in 
+`InitOnceBeginInitialize`");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\sync.rs:120:13
+    |
+120 |             throw_unsup_format!("non-null `lpContext` in 
+`InitOnceBeginInitialize`");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\sync.rs:166:13
+    |
+166 |             throw_unsup_format!("unsupported `dwFlags` {flags} in 
+`InitOnceBeginInitialize`");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\windows\sync.rs:170:13
+    |
+170 |             throw_unsup_format!("non-null `lpContext` in 
+`InitOnceBeginInitialize`");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\windows\sync.rs:175:13
+    |
+175 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\windows\thread.rs:41:13
+   |
+41 |             throw_unsup_format!("unsupported `dwCreationFlags` {} in 
+`CreateThread`", flags)
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\windows\thread.rs:45:13
+   |
+45 |             throw_unsup_format!("non-null `lpThreadAttributes` in 
+`CreateThread`")
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\windows\thread.rs:77:13
+   |
+77 |             throw_unsup_format!("`WaitForSingleObject` with non-infinite 
+timeout");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+  --> src\shims\foreign_items.rs:91:17
+   |
+91 |                 
+throw_machine_stop!(TerminationInfo::UnsupportedForeignItem(format!(
+   |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\foreign_items.rs:192:41
+    |
+192 | ...                   throw_machine_stop!(
+    |                       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\foreign_items.rs:202:41
+    |
+202 | ...                   throw_machine_stop!(
+    |                       ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\foreign_items.rs:230:25
+    |
+230 |                         throw_ub_format!(
+    |                         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_machine_stop` in this scope
+   --> src\shims\foreign_items.rs:350:21
+    |
+350 |                     err_machine_stop!(TerminationInfo::Abort(format!(
+    |                     ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_machine_stop` in this scope
+   --> src\shims\foreign_items.rs:375:21
+    |
+375 |                     err_machine_stop!(TerminationInfo::Abort(format!(
+    |                     ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:415:21
+    |
+415 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:519:21
+    |
+519 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:533:21
+    |
+533 |                     throw_unsup_format!(
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:560:21
+    |
+560 |                     throw_unsup_format!("miri_genmc_assume is only 
+supported in GenMC mode")
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\foreign_items.rs:577:17
+    |
+577 |                 throw_machine_stop!(TerminationInfo::Exit { code, 
+leak_check: false });
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\foreign_items.rs:581:17
+    |
+581 |                 throw_machine_stop!(TerminationInfo::Abort(
+    |                 ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:800:25
+    |
+800 |                         throw_unsup_format!("invalid `rw` value passed 
+to `llvm.prefetch`: {}", rw);
+    |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:803:25
+    |
+803 |                         throw_unsup_format!(
+    |                         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\foreign_items.rs:809:21
+    |
+809 |                     throw_unsup_format!("unsupported `llvm.prefetch` 
+type argument: {}", ty);
+    |                     ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\io_error.rs:260:13
+    |
+260 |             throw_unsup_format!("unsupported io error: {err}")
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\io_error.rs:267:13
+    |
+267 |             throw_unsup_format!("unsupported io error: {err}");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\io_error.rs:269:13
+    |
+269 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\io_error.rs:301:13
+    |
+301 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+  --> src\shims\os_str.rs:28:22
+   |
+28 |         .map_err(|_| err_unsup_format!("{:?} is not a valid utf-8 
+string", bytes))?;
+   |                      ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:152:9
+    |
+152 |         throw_ub_format!(
+    |         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:159:9
+    |
+159 |         throw_ub_format!(
+    |         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:164:9
+    |
+164 |         throw_ub_format!(
+    |         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:169:9
+    |
+169 |         throw_ub_format!(
+    |         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:175:9
+    |
+175 |         throw_ub_format!(
+    |         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub` in this scope
+   --> src\shims\sig.rs:183:9
+    |
+183 |         throw_ub!(AbiMismatchReturn {
+    |         ^^^^^^^^
+
+error: cannot find macro `throw_ub` in this scope
+   --> src\shims\sig.rs:193:13
+    |
+193 |             throw_ub!(AbiMismatchArgument {
+    |             ^^^^^^^^
+
+error: cannot find macro `throw_machine_stop` in this scope
+   --> src\shims\sig.rs:218:9
+    |
+218 |         throw_machine_stop!(TerminationInfo::SymbolShimClashing {
+    |         ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:239:13
+    |
+239 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:245:13
+    |
+245 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:253:9
+    |
+253 |         throw_ub_format!(
+    |         ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:312:13
+    |
+312 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:318:13
+    |
+318 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:323:13
+    |
+323 |             throw_ub_format!(
+    |             ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\sig.rs:345:5
+    |
+345 |     throw_ub_format!(
+    |     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+  --> src\shims\time.rs:15:22
+   |
+15 |         .map_err(|_| err_unsup_format!("times before the Unix epoch are 
+not supported"))
+   |                      ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\shims\time.rs:248:13
+    |
+248 |             err_unsup_format!("programs running longer than 2^63 
+nanoseconds are not supported")
+    |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\shims\time.rs:295:26
+    |
+295 | ...   .map_err(|_| err_unsup_format!("programs running more than 2^64 
+Windows ticks after the Windows epoch are not supported"))?;
+    |                    ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `err_unsup_format` in this scope
+   --> src\shims\time.rs:309:13
+    |
+309 |             err_unsup_format!("programs running longer than 2^64 
+nanoseconds are not supported")
+    |             ^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\time.rs:396:13
+    |
+396 |             throw_unsup_format!("clock_nanosleep: only CLOCK_MONOTONIC 
+is supported");
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+   --> src\shims\time.rs:413:13
+    |
+413 |             throw_unsup_format!(
+    |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_unsup_format` in this scope
+  --> src\shims\tls.rs:70:13
+   |
+70 |             throw_unsup_format!("we ran out of TLS key space");
+   |             ^^^^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\tls.rs:81:21
+   |
+81 |             None => throw_ub_format!("removing a nonexistent TLS key: 
+{}", key),
+   |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+  --> src\shims\tls.rs:97:21
+   |
+97 |             None => throw_ub_format!("loading from a non-existing TLS 
+key: {}", key),
+   |                     ^^^^^^^^^^^^^^^
+
+error: cannot find macro `throw_ub_format` in this scope
+   --> src\shims\tls.rs:119:21
+    |
+119 |             None => throw_ub_format!("storing to a non-existing TLS key: 
+{}", key),
+    |                     ^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::diagnostics::RacingOp`
+  --> src\concurrency\data_race.rs:59:5
+   |
+59 | use crate::diagnostics::RacingOp;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Provenance as _`
+   --> src\lib.rs:108:55
+    |
+108 | pub use rustc_const_eval::interpret::{self, AllocMap, Provenance as _};
+    |                                                       ^^^^^^^^^^^^^^^
+
+error[E0223]: ambiguous associated type
+    --> src\machine.rs:1465:21
+     |
+1465 |         provenance: Self::Provenance,
+     |                     ^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated type `Provenance` 
+implemented for `machine::MiriMachine<'tcx>`, you could use the 
+fully-qualified path
+     |
+1465 -         provenance: Self::Provenance,
+1465 +         provenance: <machine::MiriMachine<'tcx> as Example>::Provenance,
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\machine.rs:1485:33
+     |
+1485 |     ) -> Option<(AllocId, Size, Self::ProvenanceExtra)> {
+     |                                 ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated type 
+`ProvenanceExtra` implemented for `machine::MiriMachine<'tcx>`, you could use 
+the fully-qualified path
+     |
+1485 -     ) -> Option<(AllocId, Size, Self::ProvenanceExtra)> {
+1485 +     ) -> Option<(AllocId, Size, <machine::MiriMachine<'tcx> as 
+Example>::ProvenanceExtra)> {
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\machine.rs:1527:43
+     |
+1527 |         (alloc_id, prov_extra): (AllocId, Self::ProvenanceExtra),
+     |                                           ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated type 
+`ProvenanceExtra` implemented for `machine::MiriMachine<'tcx>`, you could use 
+the fully-qualified path
+     |
+1527 -         (alloc_id, prov_extra): (AllocId, Self::ProvenanceExtra),
+1527 +         (alloc_id, prov_extra): (AllocId, <machine::MiriMachine<'tcx> 
+as Example>::ProvenanceExtra),
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\machine.rs:1568:43
+     |
+1568 |         (alloc_id, prov_extra): (AllocId, Self::ProvenanceExtra),
+     |                                           ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated type 
+`ProvenanceExtra` implemented for `machine::MiriMachine<'tcx>`, you could use 
+the fully-qualified path
+     |
+1568 -         (alloc_id, prov_extra): (AllocId, Self::ProvenanceExtra),
+1568 +         (alloc_id, prov_extra): (AllocId, <machine::MiriMachine<'tcx> 
+as Example>::ProvenanceExtra),
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\machine.rs:1622:44
+     |
+1622 |         (alloc_id, prove_extra): (AllocId, Self::ProvenanceExtra),
+     |                                            ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated type 
+`ProvenanceExtra` implemented for `machine::MiriMachine<'tcx>`, you could use 
+the fully-qualified path
+     |
+1622 -         (alloc_id, prove_extra): (AllocId, Self::ProvenanceExtra),
+1622 +         (alloc_id, prove_extra): (AllocId, <machine::MiriMachine<'tcx> 
+as Example>::ProvenanceExtra),
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\machine.rs:1950:44
+     |
+1950 |     fn get_default_alloc_params(&self) -> <Self::Bytes as 
+AllocBytes>::AllocParams {
+     |                                            ^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated type `Bytes` 
+implemented for `machine::MiriMachine<'tcx>`, you could use the 
+fully-qualified path
+     |
+1950 -     fn get_default_alloc_params(&self) -> <Self::Bytes as 
+AllocBytes>::AllocParams {
+1950 +     fn get_default_alloc_params(&self) -> <<machine::MiriMachine<'tcx> 
+as Example>::Bytes as AllocBytes>::AllocParams {
+     |
+
+Some errors have detailed explanations: E0223, E0432, E0463.
+For more information about an error, try `rustc --explain E0223`.
+warning: `miri` (lib) generated 2 warnings
+error: could not compile `miri` (lib) due to 280 previous errors; 2 warnings 
+emitted

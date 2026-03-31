@@ -115,6 +115,8 @@ pub struct MiriConfig {
     pub float_rounding_error: FloatRoundingErrorMode,
     /// Whether Miri artificially introduces short reads/writes on file descriptors.
     pub short_fd_operations: bool,
+    /// Whether to run the interactive debugger TUI.
+    pub debugger: bool,
     /// A list of crates that are considered user-relevant.
     pub user_relevant_crates: Vec<String>,
 }
@@ -159,6 +161,7 @@ impl Default for MiriConfig {
             float_nondet: true,
             float_rounding_error: FloatRoundingErrorMode::Random,
             short_fd_operations: true,
+            debugger: false,
             user_relevant_crates: vec![],
         }
     }
@@ -473,6 +476,14 @@ pub fn eval_entry<'tcx>(
         }
     };
 
+    let mut debugger_tui = None;
+    if config.debugger {
+        let (state_tx, state_rx) = crate::debugger::channel::state_channel();
+        let (cmd_tx, cmd_rx) = crate::debugger::channel::command_channel();
+        debugger_tui = Some(crate::debugger::tui::spawn_tui(state_rx, cmd_tx));
+        ecx.machine.debugger = Some(crate::debugger::MiriDebuggerHandle::new(state_tx, cmd_rx));
+    }
+
     // Perform the main execution.
     let res: thread::Result<InterpResult<'_, !>> =
         panic::catch_unwind(AssertUnwindSafe(|| ecx.run_threads()));
@@ -515,6 +526,10 @@ pub fn eval_entry<'tcx>(
 
         // The interpreter has not reported an error.
         // (There could still be errors in the session if there are other interpreters.)
+        ecx.machine.debugger = None;
+        if let Some(join_handle) = debugger_tui.take() {
+            let _ = join_handle.join();
+        }
         return match NonZeroI32::new(return_code) {
             None => Ok(()),
             Some(return_code) => Err(return_code),
@@ -523,6 +538,10 @@ pub fn eval_entry<'tcx>(
 
     // The interpreter reported an error.
     assert!(tcx.dcx().has_errors().is_some());
+    ecx.machine.debugger = None;
+    if let Some(join_handle) = debugger_tui.take() {
+        let _ = join_handle.join();
+    }
     Err(NonZeroI32::new(rustc_driver::EXIT_FAILURE).unwrap())
 }
 

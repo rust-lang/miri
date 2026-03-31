@@ -562,6 +562,8 @@ fn main() -> ExitCode {
             miri_config.collect_leak_backtraces = false;
         } else if arg == "-Zmiri-force-intrinsic-fallback" {
             miri_config.force_intrinsic_fallback = true;
+        } else if arg == "--debugger" {
+            miri_config.debugger = true;
         } else if arg == "-Zmiri-deterministic-floats" {
             miri_config.float_nondet = false;
         } else if arg == "-Zmiri-no-extra-rounding-error" {

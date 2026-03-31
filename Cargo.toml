@@ -29,6 +29,8 @@ directories = "6"
 bitflags = "2.6"
 serde_json = { version = "1.0", optional = true }
 mio = { version = "1.1.1", features = ["os-poll", "net"] }
+crossterm = "0.28"
+ratatui = "0.28"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
