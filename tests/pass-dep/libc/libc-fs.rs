@@ -43,6 +43,8 @@ fn main() {
     #[cfg(target_os = "linux")]
     test_sync_file_range();
     test_fstat();
+    test_stat();
+    test_lstat();
     test_isatty();
     test_read_and_uninit();
     test_nofollow_not_symlink();
@@ -464,21 +466,52 @@ fn test_fstat() {
     assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFREG);
 
     // Check that all fields are initialized.
-    let _st_nlink = stat.st_nlink;
-    let _st_blksize = stat.st_blksize;
-    let _st_blocks = stat.st_blocks;
-    let _st_ino = stat.st_ino;
-    let _st_dev = stat.st_dev;
-    let _st_uid = stat.st_uid;
-    let _st_gid = stat.st_gid;
-    let _st_rdev = stat.st_rdev;
-    let _st_atime = stat.st_atime;
-    let _st_mtime = stat.st_mtime;
-    let _st_ctime = stat.st_ctime;
-    let _st_atime_nsec = stat.st_atime_nsec;
-    let _st_mtime_nsec = stat.st_mtime_nsec;
-    let _st_ctime_nsec = stat.st_ctime_nsec;
+    libc_utils::check_stat_fields(stat);
 
+    remove_file(&path).unwrap();
+}
+
+fn test_stat() {
+    use std::mem::MaybeUninit;
+
+    let path = utils::prepare_with_content("miri_test_libc_stat.txt", b"hello");
+    let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
+
+    let mut stat = MaybeUninit::<libc::stat>::uninit();
+    let res = unsafe { libc::stat(cpath.as_ptr(), stat.as_mut_ptr()) };
+    assert_eq!(res, 0);
+    let stat = unsafe { stat.assume_init_ref() };
+
+    assert_eq!(stat.st_size, 5);
+    assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFREG);
+
+    // Check that all fields are initialized.
+    libc_utils::check_stat_fields(stat);
+
+    remove_file(&path).unwrap();
+}
+
+fn test_lstat() {
+    use std::mem::MaybeUninit;
+
+    let path = utils::prepare_with_content("miri_test_libc_lstat.txt", b"hello");
+    let symlink_path = utils::prepare("miri_test_libc_lstat_symlink.txt");
+
+    std::os::unix::fs::symlink(&path, &symlink_path).unwrap();
+
+    let cpath = CString::new(symlink_path.as_os_str().as_bytes()).unwrap();
+
+    let mut stat = MaybeUninit::<libc::stat>::uninit();
+    let res = unsafe { libc::lstat(cpath.as_ptr(), stat.as_mut_ptr()) };
+    assert_eq!(res, 0);
+    let stat = unsafe { stat.assume_init_ref() };
+
+    assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFLNK);
+
+    // Check that all fields are initialized.
+    libc_utils::check_stat_fields(stat);
+
+    remove_file(&symlink_path).unwrap();
     remove_file(&path).unwrap();
 }
 

@@ -46,13 +46,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.close(result)?;
                 this.write_scalar(result, dest)?;
             }
-            "stat" | "stat$INODE64" => {
+            "stat$INODE64" => {
                 // FIXME: This does not have a direct test (#3179).
                 let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.stat(path, buf)?;
                 this.write_scalar(result, dest)?;
             }
-            "lstat" | "lstat$INODE64" => {
+            "lstat$INODE64" => {
                 // FIXME: This does not have a direct test (#3179).
                 let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.lstat(path, buf)?;
