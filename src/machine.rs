@@ -662,7 +662,7 @@ pub struct MiriMachine<'tcx> {
     pub short_fd_operations: bool,
 
     // Stores the span of the `TailCall` (`become`) terminator
-    pub tail_call_span:Option<Span>,
+    pub tail_call_span: Option<Span>,
 }
 
 impl<'tcx> MiriMachine<'tcx> {
@@ -1650,8 +1650,11 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             obj.on_access(concurrency::sync::AccessKind::Dealloc)?;
         }
 
-        if let Some((_, deallocated_at)) = machine.allocation_spans.borrow_mut().get_mut(&alloc_id) {
-            *deallocated_at = Some(machine.tail_call_span.unwrap_or_else(|| machine.current_user_relevant_span()));
+        if let Some((_, deallocated_at)) = machine.allocation_spans.borrow_mut().get_mut(&alloc_id)
+        {
+            *deallocated_at = Some(
+                machine.tail_call_span.unwrap_or_else(|| machine.current_user_relevant_span()),
+            );
         }
 
         machine.free_alloc_id(alloc_id, size, align, kind);
@@ -1764,7 +1767,6 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             let span = terminator.source_info.span;
             ecx.machine.tail_call_span = Some(span);
         }
-
 
         ecx.machine.basic_block_count += 1u64; // a u64 that is only incremented by 1 will "never" overflow
         ecx.machine.since_gc += 1;
