@@ -660,6 +660,12 @@ pub struct MiriMachine<'tcx> {
 
     /// Whether Miri artificially introduces short reads/writes on file descriptors.
     pub short_fd_operations: bool,
+
+    /// Optional interactive debugger handle.
+    pub debugger: Option<crate::debugger::MiriDebuggerHandle>,
+
+    /// Captured stdout/stderr chunks from the interpreted program for debugger UI.
+    pub debugger_output: RefCell<Vec<(bool, String)>>,
 }
 
 impl<'tcx> MiriMachine<'tcx> {
@@ -825,6 +831,21 @@ impl<'tcx> MiriMachine<'tcx> {
             float_nondet: config.float_nondet,
             float_rounding_error: config.float_rounding_error,
             short_fd_operations: config.short_fd_operations,
+            debugger: None,
+            debugger_output: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn push_debugger_output(&self, is_stderr: bool, bytes: &[u8]) {
+        if self.debugger.is_none() || bytes.is_empty() {
+            return;
+        }
+        let text = String::from_utf8_lossy(bytes).to_string();
+        let mut out = self.debugger_output.borrow_mut();
+        out.push((is_stderr, text));
+        if out.len() > 500 {
+            let drain = out.len().saturating_sub(500);
+            out.drain(0..drain);
         }
     }
 
@@ -1060,6 +1081,8 @@ impl VisitProvenance for MiriMachine<'_> {
             float_nondet: _,
             float_rounding_error: _,
             short_fd_operations: _,
+            debugger: _,
+            debugger_output: _,
         } = self;
 
         threads.visit_provenance(visit);

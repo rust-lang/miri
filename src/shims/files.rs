@@ -278,6 +278,11 @@ impl FileDescription for io::Stdout {
         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
         // We allow writing to stdout even with isolation enabled.
+        if ecx.machine.debugger.is_some() {
+            let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
+            ecx.machine.push_debugger_output(false, bytes);
+            return finish.call(ecx, Ok(len));
+        }
         let result = ecx.write_to_host(&*self, len, ptr)?;
         // Stdout is buffered, flush to make sure it appears on the
         // screen.  This is the write() syscall of the interpreted
@@ -326,6 +331,11 @@ impl FileDescription for io::Stderr {
         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
         // We allow writing to stderr even with isolation enabled.
+        if ecx.machine.debugger.is_some() {
+            let bytes = ecx.read_bytes_ptr_strip_provenance(ptr, Size::from_bytes(len))?;
+            ecx.machine.push_debugger_output(true, bytes);
+            return finish.call(ecx, Ok(len));
+        }
         let result = ecx.write_to_host(&*self, len, ptr)?;
         // No need to flush, stderr is not buffered.
         finish.call(ecx, result)

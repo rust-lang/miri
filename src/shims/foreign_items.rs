@@ -500,6 +500,11 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [msg] = this.check_shim_sig_lenient(abi, CanonAbi::Rust, link_name, args)?;
                 let msg = this.read_immediate(msg)?;
                 let msg = this.read_byte_slice(&msg)?;
+                if this.machine.debugger.is_some() {
+                    this.machine
+                        .push_debugger_output(link_name.as_str() == "miri_write_to_stderr", msg);
+                    return interp_ok(EmulateItemResult::NeedsReturn);
+                }
                 // Note: we're ignoring errors writing to host stdout/stderr.
                 let _ignore = match link_name.as_str() {
                     "miri_write_to_stdout" => std::io::stdout().write_all(msg),
