@@ -443,7 +443,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     /// Visits the memory covered by `place`, sensitive to freezing: the 2nd parameter
-    /// of `action` will be true if this is frozen, false if this is in an `UnsafeCell`.
+    /// of `action` will be true if this is frozen, false if this is in an `UnsafeCell` or `UnsafePinned`.
     /// The range is relative to `place`.
     fn visit_freeze_sensitive(
         &self,
@@ -477,7 +477,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 action(alloc_range(cur_addr - start_addr, frozen_size), /*frozen*/ true)?;
             }
             cur_addr += frozen_size;
-            // This `UnsafeCell` is NOT frozen.
+            // This `UnsafeCell` or `UnsafePinned` is NOT frozen.
             if unsafe_cell_size != Size::ZERO {
                 action(
                     alloc_range(cur_addr - start_addr, unsafe_cell_size),
@@ -537,7 +537,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 self.ecx
             }
 
-            // Hook to detect `UnsafeCell`.
+            // Hook to detect `UnsafeCell` and `UnsafePinned`.
             fn visit_value(&mut self, v: &MPlaceTy<'tcx>) -> InterpResult<'tcx> {
                 trace!("UnsafeCellVisitor: {:?} {:?}", *v, v.layout.ty);
                 let is_unsafe_cell = match v.layout.ty.kind() {
@@ -545,11 +545,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         Some(adt.did()) == self.ecx.tcx.lang_items().unsafe_cell_type(),
                     _ => false,
                 };
-                if is_unsafe_cell {
-                    // We do not have to recurse further, this is an `UnsafeCell`.
+
+                let is_unsafe_pinned = match v.layout.ty.kind() {
+                    ty::Adt(adt, _) =>
+                        Some(adt.did()) == self.ecx.tcx.lang_items().unsafe_pinned_type(),
+                    _ => false,
+                };
+                if is_unsafe_cell || is_unsafe_pinned {
+                    // We do not have to recurse further, this is an `UnsafeCell`
+                    // or `UnsafePinned` since both opt out of aliasing rules on their bytes.
                     (self.unsafe_cell_action)(v)
                 } else if self.ecx.type_is_freeze(v.layout.ty) {
-                    // This is `Freeze`, there cannot be an `UnsafeCell`
+                    // This is `Freeze`, there cannot be an `UnsafeCell` or `UnsafePinned` inside.
                     interp_ok(())
                 } else if matches!(v.layout.fields, FieldsShape::Union(..)) {
                     // A (non-frozen) union. We fall back to whatever the type says.
@@ -573,7 +580,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             (self.unsafe_cell_action)(v)
                         }
                         Variants::Single { .. } | Variants::Empty => {
-                            // Proceed further, try to find where exactly that `UnsafeCell`
+                            // Proceed further, try to find where exactly that `UnsafeCell` or `UnsafePinned`
                             // is hiding.
                             self.walk_value(v)
                         }
