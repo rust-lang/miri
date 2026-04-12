@@ -38,6 +38,7 @@ struct ReadModifyWriteResult;
 struct CompareExchangeResult;
 struct MutexLockResult;
 struct MallocResult;
+struct FreeResult;
 
 // GenMC uses `int` for its thread IDs.
 using ThreadId = int;
@@ -135,7 +136,7 @@ struct MiriGenmcShim : private GenMCDriver {
     auto handle_malloc(ThreadId thread_id, uint64_t size, uint64_t alignment) -> MallocResult;
 
     /** Returns null on success, or an error string if an error occurs. */
-    auto handle_free(ThreadId thread_id, uint64_t address) -> std::unique_ptr<std::string>;
+    auto handle_free(ThreadId thread_id, uint64_t address) -> FreeResult;
 
     /**** Thread management ****/
     void handle_thread_create(ThreadId thread_id, ThreadId parent_id);
@@ -415,12 +416,32 @@ inline MutexLockResult invalid() {
 
 namespace MakeMallocResult {
 inline MallocResult ok(SVal addr) {
-    return MallocResult { .error = nullptr, .address = addr.get() };
+    return MallocResult { .status = OperationStatus::Ok, .error = nullptr, .address = addr.get() };
 }
 
 inline MallocResult error(std::unique_ptr<std::string> err) {
-    return MallocResult { .error = std::move(err), .address = 0UL };
+    return MallocResult { .status = OperationStatus::Error,
+                          .error = std::move(err),
+                          .address = 0UL };
+}
+
+inline MallocResult invalid() {
+    return MallocResult { .status = OperationStatus::Invalid, .error = nullptr, .address = 0UL };
 }
 } // namespace MakeMallocResult
+
+namespace MakeFreeResult {
+inline FreeResult ok() {
+    return FreeResult { .status = OperationStatus::Ok, .error = nullptr };
+}
+
+inline FreeResult error(std::unique_ptr<std::string> err) {
+    return FreeResult { .status = OperationStatus::Error, .error = std::move(err) };
+}
+
+inline FreeResult invalid() {
+    return FreeResult { .status = OperationStatus::Invalid, .error = nullptr };
+}
+} // namespace MakeFreeResult
 
 #endif /* GENMC_MIRI_INTERFACE_HPP */

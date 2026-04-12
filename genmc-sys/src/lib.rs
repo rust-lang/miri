@@ -5,6 +5,28 @@ pub use cxx::UniquePtr;
 
 pub use self::ffi::*;
 
+/// The result of a GenMC handle operation, after converting the raw C++ result struct into an
+/// idiomatic Rust type.
+///
+/// The payload type `T` is operation-specific:
+/// - [`LoadResult`]:           `T = GenmcScalar`                      (the value read)
+/// - [`NonAtomicResult`]:      `T = ()`                               (no payload)
+/// - [`StoreResult`]:          `T = bool`                             (is the write co-max)
+/// - [`ReadModifyWriteResult`]:`T = (GenmcScalar, GenmcScalar, bool)` (old, new, is_co_max)
+///
+/// For operations with more than one success mode ([`CompareExchangeResult`],
+/// [`MutexLockResult`]) the status enums carry sufficient information and should be
+/// matched directly.
+#[must_use]
+pub enum GenmcHandleResult<T> {
+    /// This execution should be dropped.
+    Invalid,
+    /// A verification error occurred; the message is formatted as a string.
+    Error(String),
+    /// The operation completed successfully.
+    Ok(T),
+}
+
 /// Defined in "genmc/src/Support/SAddr.hpp".
 /// The first bit of all global addresses must be set to `1`.
 /// This means the mask, interpreted as an address, is the lower bound of where the global address space starts.
@@ -42,6 +64,81 @@ pub fn create_genmc_driver_handle(
         "Attempt to change the GenMC log level after it was already set"
     );
     unsafe { MiriGenmcShim::create_handle(params, do_estimation) }
+}
+
+fn cxx_string_to_owned(s: &cxx::UniquePtr<cxx::CxxString>) -> String {
+    s.as_ref().unwrap().to_string_lossy().into_owned()
+}
+
+impl LoadResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<GenmcScalar> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(self.read_value),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl NonAtomicResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<()> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(()),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl StoreResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<bool> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(self.is_coherence_order_maximal_write),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl ReadModifyWriteResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<(GenmcScalar, GenmcScalar, bool)> {
+        match self.status {
+            OperationStatus::Ok =>
+                GenmcHandleResult::Ok((
+                    self.old_value,
+                    self.new_value,
+                    self.is_coherence_order_maximal_write,
+                )),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl MallocResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<u64> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(self.address),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl FreeResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<()> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(()),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
 }
 
 impl GenmcScalar {
@@ -319,10 +416,19 @@ mod ffi {
     #[must_use]
     #[derive(Debug)]
     struct MallocResult {
-        /// If not null, contains the error encountered during the handling of malloc.
+        status: OperationStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// The allocated address.
+        /// Valid when `status == Ok`. The allocated address.
         address: u64,
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct FreeResult {
+        status: OperationStatus,
+        /// Valid when `status == Error`.
+        error: UniquePtr<CxxString>,
     }
 
     /**** These are GenMC types that we have to copy-paste here since cxx does not support
@@ -513,7 +619,7 @@ mod ffi {
             self: Pin<&mut MiriGenmcShim>,
             thread_id: i32,
             address: u64,
-        ) -> UniquePtr<CxxString>;
+        ) -> FreeResult;
 
         /**** Thread management ****/
         fn handle_thread_create(self: Pin<&mut MiriGenmcShim>, thread_id: i32, parent_id: i32);

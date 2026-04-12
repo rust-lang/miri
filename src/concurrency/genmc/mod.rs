@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use genmc_sys::{
-    CasStatus, EstimationResult, GENMC_GLOBAL_ADDRESSES_MASK, GenmcScalar, MemOrdering,
-    MiriGenmcShim, OperationStatus, RMWBinOp, UniquePtr, create_genmc_driver_handle,
+    CasStatus, EstimationResult, GENMC_GLOBAL_ADDRESSES_MASK, GenmcHandleResult, GenmcScalar,
+    MemOrdering, MiriGenmcShim, RMWBinOp, UniquePtr, create_genmc_driver_handle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -454,11 +454,8 @@ impl GenmcCtx {
         match cas_result.status {
             CasStatus::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
             CasStatus::Error =>
-                // FIXME(genmc): error handling
-                throw_ub_format!(
-                    "{}",
-                    cas_result.error.as_ref().unwrap().to_string_lossy()
-                ),
+            // FIXME(genmc): error handling
+                throw_ub_format!("{}", cas_result.error.as_ref().unwrap().to_string_lossy()),
             CasStatus::Failed | CasStatus::Succeeded => {}
             status => unreachable!("unexpected CasStatus: {status:?}"),
         }
@@ -558,10 +555,12 @@ impl GenmcCtx {
             genmc_size,
             alignment.bytes(),
         );
-        if let Some(_error) = malloc_result.error.as_ref() {
-            throw_exhaust!(AddressSpaceFull);
-        }
-        let chosen_address = malloc_result.address;
+        // FIXME(genmc): error handling
+        let chosen_address = match malloc_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(_e) => throw_exhaust!(AddressSpaceFull),
+            GenmcHandleResult::Ok(a) => a,
+        };
 
         // Non-global addresses should not be in the global address space.
         assert_eq!(0, chosen_address & GENMC_GLOBAL_ADDRESSES_MASK);
@@ -596,11 +595,13 @@ impl GenmcCtx {
             .borrow_mut()
             .pin_mut()
             .handle_free(self.active_thread_genmc_tid(machine), address.bytes());
-        if let Some(error) = free_result.as_ref() {
-            // FIXME(genmc): improve error handling.
-            throw_ub_format!("{}", error.to_string_lossy());
-        }
 
+        // FIXME(genmc): error handling
+        match free_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(e) => throw_ub_format!("{e}"),
+            GenmcHandleResult::Ok(()) => {}
+        }
         interp_ok(())
     }
 
@@ -721,20 +722,14 @@ impl GenmcCtx {
             genmc_old_value,
         );
 
-        match load_result.status {
-            OperationStatus::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
-            OperationStatus::Error =>
-                // FIXME(genmc): error handling
-                throw_ub_format!(
-                    "{}",
-                    load_result.error.as_ref().unwrap().to_string_lossy()
-                ),
-            OperationStatus::Ok => {}
-            status => unreachable!("unexpected OperationStatus: {status:?}"),
-        }
-
-        debug!("GenMC: load returned value: {:?}", load_result.read_value);
-        interp_ok(load_result.read_value)
+        // FIXME(genmc): error handling
+        let read_value = match load_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(e) => throw_ub_format!("{e}"),
+            GenmcHandleResult::Ok(v) => v,
+        };
+        debug!("GenMC: load returned value: {:?}", read_value);
+        interp_ok(read_value)
     }
 
     /// Inform GenMC about a non-atomic load.
@@ -755,16 +750,11 @@ impl GenmcCtx {
             size.bytes(),
         );
 
-        match load_result.status {
-            OperationStatus::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
-            OperationStatus::Error =>
-                // FIXME(genmc): error handling
-                throw_ub_format!(
-                    "{}",
-                    load_result.error.as_ref().unwrap().to_string_lossy()
-                ),
-            OperationStatus::Ok => {}
-            status => unreachable!("unexpected OperationStatus: {status:?}"),
+        // FIXME(genmc): error handling
+        match load_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(e) => throw_ub_format!("{e}"),
+            GenmcHandleResult::Ok(()) => {}
         }
         // `load_result.read_value` is just a dummy for non-atomic loads. And anyway Miri doesn't
         // give us a chance to change the value here, it'll always use the one from its memory.
@@ -804,19 +794,13 @@ impl GenmcCtx {
             memory_ordering,
         );
 
-        match store_result.status {
-            OperationStatus::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
-            OperationStatus::Error =>
-                // FIXME(genmc): error handling
-                throw_ub_format!(
-                    "{}",
-                    store_result.error.as_ref().unwrap().to_string_lossy()
-                ),
-            OperationStatus::Ok => {}
-            status => unreachable!("unexpected OperationStatus: {status:?}"),
-        }
-
-        interp_ok(store_result.is_coherence_order_maximal_write)
+        // FIXME(genmc): error handling
+        let is_co_max = match store_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(e) => throw_ub_format!("{e}"),
+            GenmcHandleResult::Ok(v) => v,
+        };
+        interp_ok(is_co_max)
     }
 
     /// Inform GenMC about a non-atomic store.
@@ -837,19 +821,12 @@ impl GenmcCtx {
             size.bytes(),
         );
 
-        match store_result.status {
-            OperationStatus::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
-            OperationStatus::Error =>
-                // FIXME(genmc): error handling
-                throw_ub_format!(
-                    "{}",
-                    store_result.error.as_ref().unwrap().to_string_lossy()
-                ),
-            OperationStatus::Ok => {}
-            status => unreachable!("unexpected OperationStatus: {status:?}"),
+        // FIXME(genmc): error handling
+        match store_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(e) => throw_ub_format!("{e}"),
+            GenmcHandleResult::Ok(()) => {}
         }
-        // Miri will always write non-atomic stores to memory. Make sure GenMC agrees with that.
-        assert!(store_result.is_coherence_order_maximal_write);
         interp_ok(())
     }
 
@@ -891,22 +868,15 @@ impl GenmcCtx {
             genmc_old_value,
         );
 
-        match rmw_result.status {
-            OperationStatus::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
-            OperationStatus::Error =>
-                // FIXME(genmc): error handling
-                throw_ub_format!(
-                    "{}",
-                    rmw_result.error.as_ref().unwrap().to_string_lossy()
-                ),
-            OperationStatus::Ok => {}
-            status => unreachable!("unexpected OperationStatus: {status:?}"),
-        }
-
-        let old_value_scalar = genmc_scalar_to_scalar(ecx, self, rmw_result.old_value, size)?;
-
-        let new_value_scalar = if rmw_result.is_coherence_order_maximal_write {
-            Some(genmc_scalar_to_scalar(ecx, self, rmw_result.new_value, size)?)
+        // FIXME(genmc): error handling
+        let (old_value, new_value, is_co_max) = match rmw_result.into_genmc_result() {
+            GenmcHandleResult::Invalid => throw_machine_stop!(TerminationInfo::GenmcSkip),
+            GenmcHandleResult::Error(e) => throw_ub_format!("{e}"),
+            GenmcHandleResult::Ok(v) => v,
+        };
+        let old_value_scalar = genmc_scalar_to_scalar(ecx, self, old_value, size)?;
+        let new_value_scalar = if is_co_max {
+            Some(genmc_scalar_to_scalar(ecx, self, new_value, size)?)
         } else {
             None
         };

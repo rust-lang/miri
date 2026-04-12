@@ -106,7 +106,10 @@ void MiriGenmcShim::handle_assume_block(ThreadId thread_id, AssumeType assume_ty
             [](const VerificationError& err) { return MakeLoadResult::error(format_error(err)); },
             [](const Invalid&) { return MakeLoadResult::invalid(); },
             [](const SVal& v) { return MakeLoadResult::value(v); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeLoadResult::invalid();
+            },
         },
         ret.result
     );
@@ -131,7 +134,10 @@ MiriGenmcShim::handle_non_atomic_load(ThreadId thread_id, uint64_t address, uint
             },
             [](const Invalid&) { return MakeNonAtomicResult::invalid(); },
             [](const std::monostate&) { return MakeNonAtomicResult::ok(); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeNonAtomicResult::invalid();
+            },
         },
         ret.result
     );
@@ -161,12 +167,13 @@ MiriGenmcShim::handle_non_atomic_load(ThreadId thread_id, uint64_t address, uint
     // FIXME(genmc): handle `HandleResult::Reset` return value.
     return std::visit(
         overloaded {
-            [](const VerificationError& err) -> StoreResult {
-                return MakeStoreResult::error(format_error(err));
-            },
+            [](const VerificationError& err) { return MakeStoreResult::error(format_error(err)); },
             [](const Invalid&) { return MakeStoreResult::invalid(); },
             [](bool is_co_max) { return MakeStoreResult::ok(is_co_max); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeStoreResult::invalid();
+            },
         },
         ret.result
     );
@@ -191,7 +198,10 @@ MiriGenmcShim::handle_non_atomic_store(ThreadId thread_id, uint64_t address, uin
             },
             [](const Invalid&) { return MakeNonAtomicResult::invalid(); },
             [](const std::monostate&) { return MakeNonAtomicResult::ok(); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeNonAtomicResult::invalid();
+            },
         },
         ret.result
     );
@@ -264,7 +274,10 @@ void MiriGenmcShim::handle_fence(ThreadId thread_id, MemOrdering ord) {
             [&read_old_val, &new_value](bool is_co_max) {
                 return MakeReadModifyWriteResult::ok(read_old_val, new_value, is_co_max);
             },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeReadModifyWriteResult::invalid();
+            },
         },
         store_ret.result
     );
@@ -339,7 +352,10 @@ void MiriGenmcShim::handle_fence(ThreadId thread_id, MemOrdering ord) {
             [&read_old_val](bool is_co_max) {
                 return MakeCasResult::succeeded(read_old_val, is_co_max);
             },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeCasResult::invalid();
+            },
         },
         store_ret.result
     );
@@ -372,21 +388,26 @@ auto MiriGenmcShim::handle_malloc(ThreadId thread_id, uint64_t size, uint64_t al
         overloaded {
             [](const VerificationError& err) { return MakeMallocResult::error(format_error(err)); },
             [](const SVal& addr) { return MakeMallocResult::ok(addr); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeMallocResult::invalid();
+            },
         },
         ret.result
     );
 }
 
-auto MiriGenmcShim::handle_free(ThreadId thread_id, uint64_t address)
-    -> std::unique_ptr<std::string> {
+auto MiriGenmcShim::handle_free(ThreadId thread_id, uint64_t address) -> FreeResult {
     auto ret = GenMCDriver::handleFree(nullptr, curr_pos(thread_id), SAddr(address), EventDeps());
     inc_pos(thread_id, ret.count);
     return std::visit(
         overloaded {
-            [](const VerificationError& err) { return format_error(err); },
-            [](const std::monostate&) { return nullptr; },
-            [](const auto&) { UNREACHABLE(); },
+            [](const VerificationError& err) { return MakeFreeResult::error(format_error(err)); },
+            [](const std::monostate&) { return MakeFreeResult::ok(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeFreeResult::invalid();
+            },
         },
         ret.result
     );
@@ -486,7 +507,10 @@ auto MiriGenmcShim::handle_mutex_lock(ThreadId thread_id, uint64_t address, uint
             },
             [](const GenMCDriver::Invalid&) { return MakeMutexLockResult::invalid(); },
             [](bool) { return MakeMutexLockResult::acquired(); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeMutexLockResult::invalid();
+            },
         },
         store_ret.result
     );
@@ -536,7 +560,10 @@ auto MiriGenmcShim::handle_mutex_try_lock(ThreadId thread_id, uint64_t address, 
             },
             [](const GenMCDriver::Invalid&) { return MakeMutexLockResult::invalid(); },
             [](bool) { return MakeMutexLockResult::acquired(); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeMutexLockResult::invalid();
+            },
         },
         store_ret.result
     );
@@ -564,7 +591,10 @@ auto MiriGenmcShim::handle_mutex_unlock(ThreadId thread_id, uint64_t address, ui
             [](const VerificationError& err) { return MakeStoreResult::error(format_error(err)); },
             [](const GenMCDriver::Invalid&) { return MakeStoreResult::invalid(); },
             [](bool is_co_max) { return MakeStoreResult::ok(is_co_max); },
-            [](const auto&) { UNREACHABLE(); },
+            [](const auto&) {
+                UNREACHABLE();
+                return MakeStoreResult::invalid();
+            },
         },
         ret.result
     );
