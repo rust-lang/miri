@@ -52,13 +52,13 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
 
 /* unsafe */ void set_log_level_raw(LogLevel log_level) {
     // The `logLevel` is a static, non-atomic variable.
-    // It should never be changed if `MiriGenmcShim` still exists, since any of its methods may read
-    // the `logLevel`, otherwise it may cause data races.
+    // It should never be changed if `MiriGenMCInterface` still exists, since any of its methods may
+    // read the `logLevel`, otherwise it may cause data races.
     logLevel = to_genmc_verbosity_level(log_level);
 }
 
-/* unsafe */ auto MiriGenmcShim::create_handle(const GenmcParams& params, bool estimation_mode)
-    -> std::unique_ptr<MiriGenmcShim> {
+/* unsafe */ auto MiriGenMCInterface::create_handle(const GenmcParams& params, bool estimation_mode)
+    -> std::unique_ptr<MiriGenMCInterface> {
     auto conf = std::make_shared<Config>();
 
     // Set whether GenMC should print execution graphs after every explored/blocked execution.
@@ -164,7 +164,7 @@ static auto to_genmc_verbosity_level(const LogLevel log_level) -> VerbosityLevel
         exit(EUSER);
     }
 
-    // Create the actual driver and Miri-GenMC communication shim.
-    auto driver = std::make_unique<MiriGenmcShim>(std::move(conf), mode);
+    // Create the actual driver and Miri-GenMC communication interface.
+    auto driver = std::make_unique<MiriGenMCInterface>(std::move(conf), mode);
     return driver;
 }
