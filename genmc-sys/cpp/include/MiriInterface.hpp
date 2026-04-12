@@ -278,61 +278,61 @@ inline std::optional<SVal> try_to_sval(GenmcScalar scalar) {
 }
 } // namespace GenmcScalarExt
 
-namespace LoadResultExt {
-inline LoadResult from_value(SVal read_value) {
+namespace MakeLoadResult {
+inline LoadResult value(SVal read_value) {
     return LoadResult { .status = OperationStatus::Ok,
                         .error = nullptr,
                         .read_value = GenmcScalarExt::from_sval(read_value) };
 }
 
-inline LoadResult from_error(std::unique_ptr<std::string> error) {
+inline LoadResult error(std::unique_ptr<std::string> err) {
     return LoadResult { .status = OperationStatus::Error,
-                        .error = std::move(error),
+                        .error = std::move(err),
                         .read_value = GenmcScalarExt::uninit() };
 }
 
-inline LoadResult from_invalid() {
+inline LoadResult invalid() {
     return LoadResult { .status = OperationStatus::Invalid,
                         .error = nullptr,
                         .read_value = GenmcScalarExt::uninit() };
 }
-} // namespace LoadResultExt
+} // namespace MakeLoadResult
 
-namespace NonAtomicResultExt {
+namespace MakeNonAtomicResult {
 inline NonAtomicResult ok() {
     return NonAtomicResult { .status = OperationStatus::Ok, .error = nullptr };
 }
 
-inline NonAtomicResult from_error(std::unique_ptr<std::string> error) {
-    return NonAtomicResult { .status = OperationStatus::Error, .error = std::move(error) };
+inline NonAtomicResult error(std::unique_ptr<std::string> err) {
+    return NonAtomicResult { .status = OperationStatus::Error, .error = std::move(err) };
 }
 
-inline NonAtomicResult from_invalid() {
+inline NonAtomicResult invalid() {
     return NonAtomicResult { .status = OperationStatus::Invalid, .error = nullptr };
 }
-} // namespace NonAtomicResultExt
+} // namespace MakeNonAtomicResult
 
-namespace StoreResultExt {
+namespace MakeStoreResult {
 inline StoreResult ok(bool is_coherence_order_maximal_write) {
     return StoreResult { .status = OperationStatus::Ok,
                          .error = nullptr,
                          .is_coherence_order_maximal_write = is_coherence_order_maximal_write };
 }
 
-inline StoreResult from_error(std::unique_ptr<std::string> error) {
+inline StoreResult error(std::unique_ptr<std::string> err) {
     return StoreResult { .status = OperationStatus::Error,
-                         .error = std::move(error),
+                         .error = std::move(err),
                          .is_coherence_order_maximal_write = false };
 }
 
-inline StoreResult from_invalid() {
+inline StoreResult invalid() {
     return StoreResult { .status = OperationStatus::Invalid,
                          .error = nullptr,
                          .is_coherence_order_maximal_write = false };
 }
-} // namespace StoreResultExt
+} // namespace MakeStoreResult
 
-namespace ReadModifyWriteResultExt {
+namespace MakeReadModifyWriteResult {
 inline ReadModifyWriteResult
 ok(SVal old_value, SVal new_value, bool is_coherence_order_maximal_write) {
     return ReadModifyWriteResult { .status = OperationStatus::Ok,
@@ -343,25 +343,25 @@ ok(SVal old_value, SVal new_value, bool is_coherence_order_maximal_write) {
                                        is_coherence_order_maximal_write };
 }
 
-inline ReadModifyWriteResult from_error(std::unique_ptr<std::string> error) {
+inline ReadModifyWriteResult error(std::unique_ptr<std::string> err) {
     return ReadModifyWriteResult { .status = OperationStatus::Error,
-                                   .error = std::move(error),
+                                   .error = std::move(err),
                                    .old_value = GenmcScalarExt::uninit(),
                                    .new_value = GenmcScalarExt::uninit(),
                                    .is_coherence_order_maximal_write = false };
 }
 
-inline ReadModifyWriteResult from_invalid() {
+inline ReadModifyWriteResult invalid() {
     return ReadModifyWriteResult { .status = OperationStatus::Invalid,
                                    .error = nullptr,
                                    .old_value = GenmcScalarExt::uninit(),
                                    .new_value = GenmcScalarExt::uninit(),
                                    .is_coherence_order_maximal_write = false };
 }
-} // namespace ReadModifyWriteResultExt
+} // namespace MakeReadModifyWriteResult
 
-namespace CompareExchangeResultExt {
-inline CompareExchangeResult success(SVal old_value, bool is_coherence_order_maximal_write) {
+namespace MakeCasResult {
+inline CompareExchangeResult succeeded(SVal old_value, bool is_coherence_order_maximal_write) {
     return CompareExchangeResult { .status = CasStatus::Succeeded,
                                    .error = nullptr,
                                    .old_value = GenmcScalarExt::from_sval(old_value),
@@ -369,29 +369,29 @@ inline CompareExchangeResult success(SVal old_value, bool is_coherence_order_max
                                        is_coherence_order_maximal_write };
 }
 
-inline CompareExchangeResult failure(SVal old_value) {
+inline CompareExchangeResult failed(SVal old_value) {
     return CompareExchangeResult { .status = CasStatus::Failed,
                                    .error = nullptr,
                                    .old_value = GenmcScalarExt::from_sval(old_value),
                                    .is_coherence_order_maximal_write = false };
 }
 
-inline CompareExchangeResult from_error(std::unique_ptr<std::string> error) {
+inline CompareExchangeResult error(std::unique_ptr<std::string> err) {
     return CompareExchangeResult { .status = CasStatus::Error,
-                                   .error = std::move(error),
+                                   .error = std::move(err),
                                    .old_value = GenmcScalarExt::uninit(),
                                    .is_coherence_order_maximal_write = false };
 }
 
-inline CompareExchangeResult from_invalid() {
+inline CompareExchangeResult invalid() {
     return CompareExchangeResult { .status = CasStatus::Invalid,
                                    .error = nullptr,
                                    .old_value = GenmcScalarExt::uninit(),
                                    .is_coherence_order_maximal_write = false };
 }
-} // namespace CompareExchangeResultExt
+} // namespace MakeCasResult
 
-namespace MutexLockResultExt {
+namespace MakeMutexLockResult {
 inline MutexLockResult acquired() {
     return MutexLockResult { .status = MutexLockStatus::Acquired, .error = nullptr };
 }
@@ -404,23 +404,23 @@ inline MutexLockResult reset() {
     return MutexLockResult { .status = MutexLockStatus::Reset, .error = nullptr };
 }
 
-inline MutexLockResult from_error(std::unique_ptr<std::string> error) {
-    return MutexLockResult { .status = MutexLockStatus::Error, .error = std::move(error) };
+inline MutexLockResult error(std::unique_ptr<std::string> err) {
+    return MutexLockResult { .status = MutexLockStatus::Error, .error = std::move(err) };
 }
 
-inline MutexLockResult from_invalid() {
+inline MutexLockResult invalid() {
     return MutexLockResult { .status = MutexLockStatus::Invalid, .error = nullptr };
 }
-} // namespace MutexLockResultExt
+} // namespace MakeMutexLockResult
 
-namespace MallocResultExt {
+namespace MakeMallocResult {
 inline MallocResult ok(SVal addr) {
     return MallocResult { .error = nullptr, .address = addr.get() };
 }
 
-inline MallocResult from_error(std::unique_ptr<std::string> error) {
-    return MallocResult { .error = std::move(error), .address = 0UL };
+inline MallocResult error(std::unique_ptr<std::string> err) {
+    return MallocResult { .error = std::move(err), .address = 0UL };
 }
-} // namespace MallocResultExt
+} // namespace MakeMallocResult
 
 #endif /* GENMC_MIRI_INTERFACE_HPP */
