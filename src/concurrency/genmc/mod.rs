@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use genmc_sys::{
     CasStatus, EstimationResult, GENMC_GLOBAL_ADDRESSES_MASK, GenmcHandleResult, GenmcScalar,
-    MemOrdering, MiriGenmcShim, RMWBinOp, UniquePtr, create_genmc_driver_handle,
+    MemOrdering, MiriGenMCInterface, RMWBinOp, UniquePtr, create_genmc_driver_handle,
 };
 use rustc_abi::{Align, Size};
 use rustc_const_eval::interpret::{AllocId, InterpCx, InterpResult, interp_ok};
@@ -103,7 +103,7 @@ impl GlobalState {
 }
 
 /// The main interface with GenMC.
-/// Each `GenmcCtx` owns one `MiriGenmcShim`, which owns one `GenMCDriver` (the GenMC model checker).
+/// Each `GenmcCtx` owns one `MiriGenMCInterface`, which owns one `GenMCDriver` (the GenMC model checker).
 /// For each GenMC run (estimation or verification), one or more `GenmcCtx` can be created (one per Miri thread).
 /// However, for now, we only ever have one `GenmcCtx` per run.
 ///
@@ -116,7 +116,7 @@ impl GlobalState {
 /// Some state is reset between each execution in the same run.
 pub struct GenmcCtx {
     /// Handle to the GenMC model checker.
-    handle: RefCell<UniquePtr<MiriGenmcShim>>,
+    handle: RefCell<UniquePtr<MiriGenMCInterface>>,
 
     /// State that is reset at the start of every execution.
     exec_state: PerExecutionState,
