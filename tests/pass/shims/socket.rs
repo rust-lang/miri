@@ -1,6 +1,7 @@
 //@ignore-target: windows # No libc socket on Windows
 //@compile-flags: -Zmiri-disable-isolation
 
+use std::io::ErrorKind::AddrNotAvailable;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
@@ -21,7 +22,12 @@ fn test_create_ipv4_listener() {
 }
 
 fn test_create_ipv6_listener() {
-    let _listener_ipv6 = TcpListener::bind("[::1]:0").unwrap();
+    let listener_ipv6_result = TcpListener::bind("[::1]:0");
+    // On some environments, IPv6 support is not available.
+    assert!(
+        listener_ipv6_result.is_ok()
+            || listener_ipv6_result.unwrap_err().kind() == AddrNotAvailable
+    );
 }
 
 /// Try to connect to a TCP listener running in a separate thread and
