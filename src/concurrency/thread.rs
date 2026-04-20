@@ -18,8 +18,7 @@ use rustc_span::{DUMMY_SP, Span};
 use rustc_target::spec::Os;
 
 use crate::concurrency::GlobalDataRaceHandler;
-use crate::concurrency::blocking_io::InterestReceiver;
-use crate::shims::tls;
+use crate::shims::{EpollEvalContextExt, FdId, tls};
 use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,7 +107,7 @@ pub enum BlockReason {
     /// Blocked on an InitOnce.
     InitOnce,
     /// Blocked on epoll.
-    Epoll,
+    Epoll { epfd_id: FdId },
     /// Blocked on eventfd.
     Eventfd,
     /// Blocked on virtual socket.
@@ -734,7 +733,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // which received events are available for scheduling afterwards.
 
             // Perform a non-blocking poll for newly available I/O events from the OS.
-            this.poll_and_unblock(Some(Duration::ZERO))?;
+            this.poll_and_handle_receivers(Some(Duration::ZERO))?;
         }
 
         // We also check timeouts before running any other thread, to ensure that timeouts
@@ -795,14 +794,22 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // timeout_callbacks, which may unblock some of the threads. Hence,
             // sleep until the first callback.
             interp_ok(SchedulingAction::SleepAndWaitForIo(Some(sleep_time)))
-        } else if thread_manager
-            .threads
-            .iter()
-            .any(|thread| thread.state.is_blocked_on(BlockReason::IO))
-        {
-            // At least one thread is blocked on host I/O but doesn't
-            // have a timeout set. Hence, we sleep indefinitely in the
-            // hope that eventually an I/O event for this thread happens.
+        } else if thread_manager.threads.iter().any(|thread| {
+            match thread.state {
+                ThreadState::Blocked { reason: BlockReason::IO, .. } => true,
+                ThreadState::Blocked { reason: BlockReason::Epoll { epfd_id }, .. } => {
+                    // Check whether any of the epoll interests are registered in the blocking I/O manager.
+                    this.machine
+                        .epoll_interests
+                        .get_interests(epfd_id)
+                        .any(|id| this.machine.blocking_io.contains_source(id))
+                }
+                _ => false,
+            }
+        }) {
+            // At least one thread doesn't have a timeout set, and is blocked on host I/O or is waiting on an
+            // epoll instance which contains a host source interest. Hence, we sleep indefinitely in the
+            // hope that eventually an I/O event happens.
             interp_ok(SchedulingAction::SleepAndWaitForIo(None))
         } else {
             throw_machine_stop!(TerminationInfo::GlobalDeadlock);
@@ -811,7 +818,9 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
     /// Poll for I/O events until either an I/O event happened or the timeout expired.
     /// The different timeout values are described in [`BlockingIoManager::poll`].
-    fn poll_and_unblock(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
+    ///
+    /// For every ready I/O event an action is executed based on the event's [`InterestReceiver`].
+    fn poll_and_handle_receivers(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
         let ready = match this.machine.blocking_io.poll(timeout) {
@@ -823,10 +832,13 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             Err(e) => panic!("unexpected error while polling: {e}"),
         };
 
-        ready.into_iter().try_for_each(|(receiver, _source)| {
+        ready.into_iter().try_for_each(|(receiver, source_fd)| {
             match receiver {
-                InterestReceiver::UnblockThread(thread_id) =>
-                    this.unblock_thread(thread_id, BlockReason::IO),
+                InterestReceiver::UnblockThread(thread_id) => {
+                    this.machine.blocking_io.remove_receiver(source_fd.id(), receiver);
+                    this.unblock_thread(thread_id, BlockReason::IO)
+                }
+                InterestReceiver::Epoll { .. } => this.update_epoll_active_events(source_fd, false),
             }
         })
     }
@@ -1347,7 +1359,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         // strictly sleeping the duration we allow waking up
                         // early for I/O events from the OS.
 
-                        this.poll_and_unblock(duration)?;
+                        this.poll_and_handle_receivers(duration)?;
                     } else {
                         let duration = duration.expect(
                             "Infinite sleep should not be triggered when isolation is enabled",

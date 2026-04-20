@@ -392,7 +392,11 @@ fn virtual_socket_read<'tcx>(
 }
 
 impl UnixFileDescription for VirtualSocket {
-    fn epoll_active_events<'tcx>(&self) -> InterpResult<'tcx, EpollEvents> {
+    fn epoll_active_events<'tcx>(
+        &self,
+        _self_id: FdId,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, EpollEvents> {
         // We only check the status of EPOLLIN, EPOLLOUT, EPOLLHUP and EPOLLRDHUP flags.
         // If other event flags need to be supported in the future, the check should be added here.
 

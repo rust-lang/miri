@@ -20,7 +20,9 @@ mod solarish;
 pub use self::env::{EvalContextExt as _, UnixEnvVars};
 pub use self::fd::{EvalContextExt as _, UnixFileDescription};
 pub use self::fs::{DirTable, EvalContextExt as _};
-pub use self::linux_like::epoll::EpollInterestTable;
+pub use self::linux_like::epoll::{
+    EpollEventKey, EpollEvents, EpollInterestTable, EvalContextExt as EpollEvalContextExt,
+};
 pub use self::mem::EvalContextExt as _;
 pub use self::socket::EvalContextExt as _;
 pub use self::sync::EvalContextExt as _;

@@ -13,7 +13,7 @@ use crate::shims::files::{
 use crate::shims::unix::UnixFileDescription;
 use crate::*;
 
-type EpollEventKey = (FdId, FdNum);
+pub type EpollEventKey = (FdId, FdNum);
 
 /// An `Epoll` file descriptor connects file handles and epoll events
 #[derive(Debug, Default)]
@@ -56,7 +56,7 @@ pub struct EpollEventInterest {
 }
 
 /// EpollReadyEvents reflects the readiness of a file description.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EpollEvents {
     /// The associated file is available for read(2) operations, in the sense that a read will not block.
     /// (I.e., returning EOF is considered "ready".)
@@ -111,6 +111,14 @@ impl EpollEvents {
             bitmask |= epollerr;
         }
         bitmask
+    }
+
+    pub fn fulfills_interest(&self, interest: &BlockingIoInterest) -> bool {
+        match interest {
+            BlockingIoInterest::Read => self.epollin || self.epollerr,
+            BlockingIoInterest::Write => self.epollout || self.epollerr,
+            BlockingIoInterest::ReadWrite => self.epollin || self.epollout || self.epollerr,
+        }
     }
 }
 
@@ -198,6 +206,12 @@ impl EpollInterestTable {
                     .for_each(drop);
             }
         }
+    }
+
+    pub fn get_interests(&self, epoll_id: FdId) -> impl Iterator<Item = &FdId> {
+        self.0.iter().filter_map(move |(fd_id, epolls)| {
+            epolls.iter().find(|(epfd_id, _)| epfd_id == &epoll_id).map(|_| fd_id)
+        })
     }
 }
 
@@ -345,6 +359,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // We already had interest in this.
                     return this.set_last_error_and_return_i32(LibcError("EEXIST"));
                 }
+
+                if this.machine.blocking_io.contains_source(&id) {
+                    // The file description is registered in the blocking I/O manager. This means
+                    // it contains a host-backed source and we want to update our epoll interests
+                    // when we receive events for the host source.
+                    this.machine.blocking_io.add_receiver(
+                        id,
+                        InterestReceiver::Epoll { epfd_id: epfd.id(), epoll_key },
+                        BlockingIoInterest::ReadWrite,
+                    );
+                }
             } else {
                 // Modify the existing interest.
                 let Some(interest) = interest_list.get_mut(&epoll_key) else {
@@ -354,11 +379,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 interest.data = data;
             }
 
+            let active_events =
+                fd_ref.as_unix(this).epoll_active_events(id, this)?.get_event_bitmask(this);
+
             // Deliver events for the new interest.
             update_readiness(
                 this,
                 &epfd,
-                fd_ref.as_unix(this).epoll_active_events()?.get_event_bitmask(this),
+                active_events,
                 /* force_edge */ true,
                 move |callback| {
                     // Need to release the RefCell when this closure returns, so we have to move
@@ -381,6 +409,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // of who is interested in this FD.
             if interest_list.range(range_for_id(id)).next().is_none() {
                 this.machine.epoll_interests.remove(id, epfd.id());
+            }
+
+            if this.machine.blocking_io.contains_source(&id) {
+                // The file description is registered in the blocking I/O manager. This means
+                // we added an interest receiver to the source when the file descriptor was
+                // added to the epoll instance. We now need to remove this file descriptor.
+                this.machine
+                    .blocking_io
+                    .remove_receiver(id, InterestReceiver::Epoll { epfd_id: epfd.id(), epoll_key });
             }
 
             interp_ok(Scalar::from_i32(0))
@@ -479,7 +516,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // This means there'll be a leak if we never wake up, but that anyway would imply
             // a thread is permanently blocked so this is fine.
             this.block_thread(
-                BlockReason::Epoll,
+                BlockReason::Epoll { epfd_id: epfd.id() },
                 timeout,
                 callback!(
                     @capture<'tcx> {
@@ -534,7 +571,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     .expect("someone forgot to remove the garbage from `machine.epoll_interests`")
             })
             .collect::<Vec<_>>();
-        let active_events = fd_ref.as_unix(this).epoll_active_events()?.get_event_bitmask(this);
+        let active_events =
+            fd_ref.as_unix(this).epoll_active_events(id, this)?.get_event_bitmask(this);
         for epoll in epolls {
             update_readiness(this, &epoll, active_events, force_edge, |callback| {
                 for (&key, interest) in epoll.interest_list.borrow_mut().range_mut(range_for_id(id))
@@ -557,7 +595,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 /// be waking up threads which might require access to those `RefCell`.
 fn update_readiness<'tcx>(
     ecx: &mut MiriInterpCx<'tcx>,
-    epoll: &Epoll,
+    epoll: &FileDescriptionRef<Epoll>,
     active_events: u32,
     force_edge: bool,
     for_each_interest: impl FnOnce(
@@ -587,7 +625,7 @@ fn update_readiness<'tcx>(
         && let Some(thread_id) = epoll.queue.borrow_mut().pop_front()
     {
         drop(ready_set); // release the "lock" so the unblocked thread can have it
-        ecx.unblock_thread(thread_id, BlockReason::Epoll)?;
+        ecx.unblock_thread(thread_id, BlockReason::Epoll { epfd_id: epoll.id() })?;
         ready_set = epoll.ready_set.borrow_mut();
     }
 
@@ -612,8 +650,9 @@ fn return_ready_list<'tcx>(
         for (key, interest) in interest_list.iter() {
             // Ensure this matches the latest readiness of this FD.
             // We have to do an FD lookup by ID for this. The FdNum might be already closed.
-            let fd = &ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
-            let current_active = fd.as_unix(ecx).epoll_active_events()?.get_event_bitmask(ecx);
+            let fd = ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap().clone();
+            let current_active =
+                fd.as_unix(ecx).epoll_active_events(key.0, ecx)?.get_event_bitmask(ecx);
             assert_eq!(interest.active_events, current_active & interest.relevant_events);
         }
     }

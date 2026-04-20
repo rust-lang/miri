@@ -8,6 +8,7 @@ use rand::Rng;
 use rustc_abi::Size;
 use rustc_target::spec::Os;
 
+use crate::shims::FdId;
 use crate::shims::files::FileDescription;
 use crate::shims::sig::check_min_vararg_count;
 use crate::shims::unix::linux_like::epoll::EpollEvents;
@@ -77,7 +78,11 @@ pub trait UnixFileDescription: FileDescription {
     }
 
     /// Return which epoll events are currently active.
-    fn epoll_active_events<'tcx>(&self) -> InterpResult<'tcx, EpollEvents> {
+    fn epoll_active_events<'tcx>(
+        &self,
+        _self_id: FdId,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, EpollEvents> {
         throw_unsup_format!("{}: epoll does not support this file description", self.name());
     }
 }
