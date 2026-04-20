@@ -362,7 +362,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 if this.machine.blocking_io.contains_source(&id) {
                     // The file description is registered in the blocking I/O manager. This means
-                    // it contains a host-backed source and we want to update our epoll interests
+                    // it contains a host-backed source and we want to update our epoll readiness
                     // when we receive events for the host source.
                     this.machine.blocking_io.add_receiver(
                         id,
@@ -414,7 +414,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if this.machine.blocking_io.contains_source(&id) {
                 // The file description is registered in the blocking I/O manager. This means
                 // we added an interest receiver to the source when the file descriptor was
-                // added to the epoll instance. We now need to remove this file descriptor.
+                // added to the epoll instance. We now need to remove this interest receiver.
                 this.machine
                     .blocking_io
                     .remove_receiver(id, InterestReceiver::Epoll { epfd_id: epfd.id(), epoll_key });

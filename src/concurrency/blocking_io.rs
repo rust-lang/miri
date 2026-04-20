@@ -50,10 +50,10 @@ struct BlockingIoSource {
     /// The registered receivers for this file description.
     receivers: BTreeMap<InterestReceiver, BlockingIoInterest>,
     /// The current readiness of the file description.
-    /// It's the file descriptions responsibility to set the
-    /// readiness fields to `false` once they no longer hold
-    /// (e.g. `epollin` should be set to `false` once an
-    /// EWOULDBLOCK is returned when attempting to read)
+    /// It's the file descriptions responsibility to set the readiness fields
+    /// to `false` using [`BlockingIoManager::get_source_readiness_mut`]
+    /// once they no longer hold (e.g. `epollin` should be set to `false` once
+    /// an EWOULDBLOCK is returned when attempting to read).
     readiness: EpollEvents,
 }
 
@@ -98,8 +98,8 @@ impl BlockingIoManager {
     ///   specified duration.
     /// - If the timeout is [`None`] the poll blocks indefinitely until an event occurs.
     ///
-    /// Returns the interest receivers whose events are currently fulfilled together with the file description
-    /// they were registered for.
+    /// Returns the interest receivers whose events are currently fulfilled together with the source
+    /// file description they were registered for.
     pub fn poll(
         &mut self,
         timeout: Option<Duration>,
@@ -119,7 +119,7 @@ impl BlockingIoManager {
 
             assert_eq!(fd.id(), fd_id);
 
-            // Best-effort mapping from cross platform mio event readiness to epoll readiness.
+            // Best-effort mapping from cross platform mio events to epoll readiness.
             let new_readiness = EpollEvents {
                 epollin: event.is_readable(),
                 epollout: event.is_writable(),
@@ -136,7 +136,7 @@ impl BlockingIoManager {
             source.readiness.epollout |= new_readiness.epollout;
         });
 
-        // List containing all receivers for all registers sources whose interests are
+        // List containing all receivers for all registered sources whose interests are
         // currently fulfilled. This also includes receivers for sources which didn't
         // receive an event from the current poll invocation.
         let ready = self
@@ -147,6 +147,9 @@ impl BlockingIoManager {
                     .receivers
                     .iter()
                     .filter_map(|(key, interest)| {
+                        // TODO: Add option to artificially introduce spurious wake-ups here.
+                        //       Whilst we currently already can have spurious wake-ups, they
+                        //       should not be very likely.
                         source.readiness.fulfills_interest(interest).then_some(key)
                     })
                     .copied()
@@ -266,14 +269,14 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
     #[inline]
     fn block_thread_for_io(
         &mut self,
-        source_fd: FileDescriptionRef<dyn WithSource>,
+        source_id: FdId,
         interest: BlockingIoInterest,
         timeout: Option<(TimeoutClock, TimeoutAnchor, Duration)>,
         callback: DynUnblockCallback<'tcx>,
     ) {
         let this = self.eval_context_mut();
         this.machine.blocking_io.add_receiver(
-            source_fd.id(),
+            source_id,
             InterestReceiver::UnblockThread(this.machine.threads.active_thread()),
             interest,
         );

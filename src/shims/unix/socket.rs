@@ -1369,7 +1369,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) {
         let this = self.eval_context_mut();
         this.block_thread_for_io(
-            socket.clone(),
+            socket.id(),
             BlockingIoInterest::Read,
             None,
             callback!(@capture<'tcx> {
@@ -1424,8 +1424,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (stream, addr) = match listener.accept() {
             Ok(peer) => peer,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // Because this would block, we know that the source is not readable so
-                // we need to update readiness in the blocking I/O manager.
+                // Because this would block we know that the source is not readable so
+                // we need to update the readiness in the blocking I/O manager.
                 let readiness = this.machine.blocking_io.get_source_readiness_mut(socket.id());
                 readiness.epollin = false;
                 return interp_ok(Err(IoError::HostError(e)));
@@ -1477,7 +1477,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) {
         let this = self.eval_context_mut();
         this.block_thread_for_io(
-            socket.clone(),
+            socket.id(),
             BlockingIoInterest::Write,
             None,
             callback!(@capture<'tcx> {
@@ -1525,7 +1525,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::WouldBlock) =>
             {
                 // We know that the source is not writable so we need to update
-                // readiness in the blocking I/O manager.
+                // the readiness in the blocking I/O manager.
                 let readiness = this.machine.blocking_io.get_source_readiness_mut(socket.id());
                 readiness.epollout = false;
 
@@ -1554,7 +1554,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) {
         let this = self.eval_context_mut();
         this.block_thread_for_io(
-            socket.clone(),
+            socket.id(),
             BlockingIoInterest::Read,
             None,
             callback!(@capture<'tcx> {
@@ -1610,7 +1610,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::WouldBlock) =>
             {
                 // We know that the source is not readable so we need to update
-                // readiness in the blocking I/O manager.
+                // the readiness in the blocking I/O manager.
                 let readiness = this.machine.blocking_io.get_source_readiness_mut(socket.id());
                 readiness.epollin = false;
 
@@ -1667,7 +1667,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         this.block_thread_for_io(
-            socket.clone(),
+            socket.id(),
             BlockingIoInterest::Write,
             timeout,
             callback!(
