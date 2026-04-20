@@ -52,7 +52,7 @@ fn test_connect_nonblock() {
 
     check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLOUT, data: client_sockfd }], -1);
 
-    // FIXME: Check SO_ERROR here one we implemented `getsockopt`.
+    // FIXME: Check SO_ERROR here once we implemented `getsockopt`.
 
     // We should now be connected and thus getting the peer name should work.
     net::sockname_ipv4(|storage, len| unsafe { libc::getpeername(client_sockfd, storage, len) })
@@ -62,8 +62,8 @@ fn test_connect_nonblock() {
 }
 
 /// Test receiving bytes from a connected stream without blocking.
-/// Instead of busy waiting until we no longer receive EWOULDBLOCK when trying to read
-/// everything from the client, we register the client socket to epoll and wait for
+/// Instead of busy waiting until we no longer receive EWOULDBLOCK when trying to
+/// read from the client, we register the client socket to epoll and wait for
 /// READABLE events.
 fn test_recv_nonblock() {
     let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
@@ -111,7 +111,7 @@ fn test_recv_nonblock() {
 
     // Try to receive bytes from the peer socket without blocking.
     // Since the peer socket might do partial writes, we might need to
-    // sleep multiple times until we received everything.
+    // call `epoll_wait` multiple times until we received everything.
 
     // Add client socket with READABLE interest to epoll.
     epoll_ctl_add(epfd, client_sockfd, EPOLLIN | EPOLLET | libc::EPOLLERR).unwrap();
@@ -122,6 +122,8 @@ fn test_recv_nonblock() {
         check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLIN, data: client_sockfd }], -1);
 
         // Receive until we get an EWOULDBLOCK or we read everything.
+        // We're only allowed to call `epoll_wait` again once we received
+        // an EWOULDBLOCK because otherwise we could deadlock.
         while bytes_received != buffer.len() {
             let read_result = unsafe {
                 errno_result(libc::recv(
