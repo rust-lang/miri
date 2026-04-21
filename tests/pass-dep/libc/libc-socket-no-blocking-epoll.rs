@@ -21,6 +21,7 @@ const TEST_BYTES: &[u8] = b"these are some test bytes!";
 fn main() {
     test_connect_nonblock();
     test_accept_nonblock();
+    test_connect_nonblock_err();
     test_recv_nonblock();
     #[cfg(not(windows_hosts))]
     test_send_nonblock();
@@ -60,7 +61,10 @@ fn test_connect_nonblock() {
     // Wait until we are done connecting.
     check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLOUT, data: client_sockfd }], -1);
 
-    // FIXME: Check SO_ERROR here once we implemented `getsockopt`.
+    // There should be no error during async connection.
+    let errno =
+        net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR).unwrap();
+    assert_eq!(errno, 0);
 
     // We should now be connected and thus getting the peer name should work.
     net::sockname_ipv4(|storage, len| unsafe { libc::getpeername(client_sockfd, storage, len) })
@@ -110,6 +114,51 @@ fn test_accept_nonblock() {
     net::connect_ipv4(client_sockfd, addr).unwrap();
 
     server_thread.join().unwrap();
+}
+
+/// Test that the SO_ERROR socket option is set when attempting to
+/// connect to an unbound address without blocking.
+fn test_connect_nonblock_err() {
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = errno_result(unsafe { libc::epoll_create1(0) }).unwrap();
+
+    unsafe {
+        // Change client socket to be non-blocking.
+        errno_check(libc::fcntl(client_sockfd, libc::F_SETFL, libc::O_NONBLOCK));
+    }
+
+    // We cannot attempt to connect to a localhost address because
+    // it could be the case that a socket from another test is
+    // currently listening on `localhost:12321` because we bind to
+    // random ports everywhere. For `127.0.1.1` we know that it's a loopback
+    // address and thus exists but because it's not the standard loopback
+    // address we also that nothing is bound to it.
+    // The port `12321` is just a random non-zero port because Windows
+    // and Apple hosts return EADDRNOTAVAIL when attempting to connect to
+    // a zero port.
+    let addr = net::sock_addr_ipv4([127, 0, 1, 1], 12321);
+
+    // Non-blocking connect should fail with EINPROGRESS.
+    let err = net::connect_ipv4(client_sockfd, addr).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InProgress);
+
+    // Add interest for client socket.
+    epoll_ctl_add(epfd, client_sockfd, EPOLLOUT | EPOLLET | libc::EPOLLERR).unwrap();
+
+    // Wait until the socket has an error.
+    check_epoll_wait::<8>(
+        epfd,
+        &[Ev { events: libc::EPOLLERR | EPOLLOUT | EPOLLHUP, data: client_sockfd }],
+        -1,
+    );
+
+    let err = net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR)
+        .map(std::io::Error::from_raw_os_error)
+        .unwrap();
+    // Connection should be refused because we attempt to connect to
+    // an unbound address.
+    assert_eq!(err.kind(), ErrorKind::ConnectionRefused);
 }
 
 /// Test receiving bytes from a connected stream without blocking.

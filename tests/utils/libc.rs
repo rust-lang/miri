@@ -388,6 +388,32 @@ pub mod net {
         Ok(())
     }
 
+    /// Get a socket option. It's the caller's responsibility that `T` is
+    /// associated with the given socket option.
+    ///
+    /// This function is directly copied from the standard library implementation
+    /// for sockets on UNIX targets.
+    pub fn getsockopt<T: Copy>(
+        sockfd: libc::c_int,
+        level: libc::c_int,
+        option_name: libc::c_int,
+    ) -> io::Result<T> {
+        let mut option_value = std::mem::MaybeUninit::<T>::zeroed();
+        let mut option_len = size_of::<T>() as libc::socklen_t;
+
+        errno_result(unsafe {
+            libc::getsockopt(
+                sockfd,
+                level,
+                option_name,
+                option_value.as_mut_ptr().cast(),
+                &mut option_len,
+            )
+        })?;
+
+        Ok(unsafe { option_value.assume_init() })
+    }
+
     /// Wraps a call to a platform function that returns an IPv4 socket address.
     /// Returns a tuple containing the actual return value of the performed
     /// syscall and the written address of it.

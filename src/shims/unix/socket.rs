@@ -58,6 +58,9 @@ struct Socket {
     is_non_block: Cell<bool>,
     /// The current blocking I/O readiness of the file description.
     io_readiness: RefCell<BlockingIoSourceReadiness>,
+    /// [`Some`] when the socket had an async error which was consumed by
+    /// [`TcpStream::take_error`] but not yet handled.
+    error: RefCell<Option<io::Error>>,
 }
 
 impl FileDescription for Socket {
@@ -340,6 +343,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             state: RefCell::new(SocketState::Initial),
             is_non_block: Cell::new(is_sock_nonblock),
             io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
+            error: RefCell::new(None),
         });
 
         interp_ok(Scalar::from_i32(fds.insert(fd)))
@@ -950,6 +954,100 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         );
     }
 
+    fn getsockopt(
+        &mut self,
+        socket: &OpTy<'tcx>,
+        level: &OpTy<'tcx>,
+        option_name: &OpTy<'tcx>,
+        option_value: &OpTy<'tcx>,
+        option_len: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let socket = this.read_scalar(socket)?.to_i32()?;
+        let level = this.read_scalar(level)?.to_i32()?;
+        let option_name = this.read_scalar(option_name)?.to_i32()?;
+        let option_value_ptr = this.read_pointer(option_value)?;
+        let option_len_ptr = this.read_pointer(option_len)?;
+
+        // Get the file handle
+        let Some(fd) = this.machine.fds.get(socket) else {
+            return this.set_last_error_and_return_i32(LibcError("EBADF"));
+        };
+
+        let Some(socket) = fd.downcast::<Socket>() else {
+            // Man page specifies to return ENOTSOCK if `fd` is not a socket.
+            return this.set_last_error_and_return_i32(LibcError("ENOTSOCK"));
+        };
+
+        if level == this.eval_libc_i32("SOL_SOCKET") {
+            let opt_so_error = this.eval_libc_i32("SO_ERROR");
+
+            if option_name == opt_so_error {
+                if option_value_ptr == Pointer::null() || option_len_ptr == Pointer::null() {
+                    // This socket option returns a value and thus we need to return EFAULT
+                    // when either the value or the length pointers are null pointers.
+                    return this.set_last_error_and_return_i32(LibcError("EFAULT"));
+                }
+
+                let error = match &*socket.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) => socket.error.take(),
+                    SocketState::Listening(listener) =>
+                        listener.take_error().unwrap_or(socket.error.take()),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.take_error().unwrap_or(socket.error.take()),
+                };
+                // Clear the stored error in case there was a new error and
+                // we thus didn't consume the stored error.
+                socket.error.replace(None);
+
+                // We know there is no longer an async error and thus we need to update the
+                // readiness in the blocking I/O manager.
+                socket.io_readiness.borrow_mut().error = false;
+
+                let socklen_layout = this.libc_ty_layout("socklen_t");
+                let option_len_ptr_mplace = this.ptr_to_mplace(option_len_ptr, socklen_layout);
+                let option_len: usize = this
+                    .read_scalar(&option_len_ptr_mplace)?
+                    .to_int(socklen_layout.size)?
+                    .try_into()
+                    .unwrap();
+
+                let return_value = match error {
+                    Some(err) => this.io_error_to_errnum(err)?.to_i32()?,
+                    // If there is no error, we write 0 into the option value buffer.
+                    None => 0,
+                };
+
+                // Value is at most 4 bytes because it's an i32.
+                let value_len = option_len.min(4);
+
+                // If the buffer is smaller than 4 bytes, silently truncate the bytes to fill the
+                // provided buffer.
+                this.write_bytes_ptr(
+                    option_value_ptr,
+                    return_value.to_ne_bytes().into_iter().take(value_len),
+                )?;
+                // On output, the length pointer contains the amount of bytes written -- not the size
+                // of the value before truncation.
+                this.write_scalar(
+                    Scalar::from_int(i128::try_from(value_len).unwrap(), socklen_layout.size),
+                    &option_len_ptr_mplace,
+                )?;
+
+                return interp_ok(Scalar::from_i32(0));
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option_name:#x} is unsupported for level SOL_SOCKET",
+                );
+            }
+        }
+
+        throw_unsup_format!(
+            "getsockopt: level {level:#x} is unsupported, only SOL_SOCKET is allowed"
+        );
+    }
+
     fn getsockname(
         &mut self,
         socket: &OpTy<'tcx>,
@@ -1232,6 +1330,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             state: RefCell::new(SocketState::Connected(stream)),
             is_non_block: Cell::new(is_client_sock_nonblock),
             io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
+            error: RefCell::new(None),
         });
         // Register the socket to the blocking I/O manager because
         // there is an associated host socket.
@@ -1490,17 +1589,18 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     };
 
                     // Manually check whether there were any errors since calling `connect`.
-                    if let Ok(Some(_)) = stream.take_error() {
+                    if let Ok(Some(err)) = stream.take_error() {
                         // There was an error during connecting and thus we
                         // return ENOTCONN. It's the program's responsibility
                         // to read SO_ERROR itself.
-                        //
+
+                        // Store the error such that we can return it when
+                        // `getsockopt(SOL_SOCKET, SO_ERROR, ...)` is called on the socket.
+                        socket.error.replace(Some(err));
+
                         // Go back to initial state since the only way of getting into the
                         // `Connecting` state is from the `Initial` state and at this point
                         // we know that the connection won't be established anymore.
-                        //
-                        // FIXME: We're currently just dropping the error information. Eventually
-                        // we'll have to store it so that it can be recovered by the user.
                         *state = SocketState::Initial;
                         drop(state);
                         return action.call(this, Err(()))
