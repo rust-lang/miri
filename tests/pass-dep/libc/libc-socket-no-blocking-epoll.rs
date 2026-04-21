@@ -153,12 +153,10 @@ fn test_connect_nonblock_err() {
         -1,
     );
 
-    let err = net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR)
-        .map(std::io::Error::from_raw_os_error)
-        .unwrap();
-    // Connection should be refused because we attempt to connect to
-    // an unbound address.
-    assert_eq!(err.kind(), ErrorKind::ConnectionRefused);
+    let errno =
+        net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR).unwrap();
+    // There should be an error but it might differ based on target or host.
+    assert!(errno != 0)
 }
 
 /// Test receiving bytes from a connected stream without blocking.
