@@ -50,6 +50,63 @@ fn main() {
     test_ioctl();
     test_opendir_closedir();
     test_readdir();
+    #[cfg(target_os = "linux")]
+    test_statx();
+}
+
+#[cfg(target_os = "linux")]
+fn test_statx() {
+    use std::mem::MaybeUninit;
+    use std::os::unix::fs::MetadataExt;
+
+    let bytes = b"hello";
+    let path = utils::prepare_with_content("miri_test_libc_statx.txt", bytes);
+    let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString::new failed");
+
+    unsafe {
+        let mut stx = MaybeUninit::<libc::statx>::zeroed();
+        let ret = libc::statx(
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            0,
+            libc::STATX_BASIC_STATS | libc::STATX_BTIME,
+            stx.as_mut_ptr(),
+        );
+        assert_eq!(ret, 0, "statx failed: {}", std::io::Error::last_os_error());
+
+        let stx = stx.assume_init();
+        let mask = stx.stx_mask;
+        let meta = std::fs::metadata(&path).unwrap();
+
+        // Guaranteed by the shim on any Linux target.
+        assert!(mask & libc::STATX_TYPE != 0);
+        assert!(mask & libc::STATX_SIZE != 0);
+        assert_eq!(stx.stx_size, bytes.len() as u64);
+        assert_eq!((stx.stx_mode as u32) & libc::S_IFMT, libc::S_IFREG);
+
+        // Host-dependent enrichment: only assert when the mask says the field is real.
+        if mask & libc::STATX_INO != 0 {
+            assert_eq!(stx.stx_ino, meta.ino());
+        }
+        if mask & libc::STATX_NLINK != 0 {
+            assert_eq!(stx.stx_nlink as u64, meta.nlink());
+        }
+        if mask & libc::STATX_UID != 0 {
+            assert_eq!(stx.stx_uid, meta.uid());
+        }
+        if mask & libc::STATX_GID != 0 {
+            assert_eq!(stx.stx_gid, meta.gid());
+        }
+        if mask & libc::STATX_BLOCKS != 0 {
+            assert_eq!(stx.stx_blocks, meta.blocks());
+        }
+
+        assert_eq!(mask & libc::STATX_MODE, 0);
+
+        // Do not assert stx_blksize and stx_dev_* : there are no mask bits for them,
+    }
+
+    remove_file(&path).unwrap();
 }
 
 fn test_file_open_unix_allow_two_args() {

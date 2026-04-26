@@ -243,12 +243,12 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         this.write_int_fields_named(
             &[
-                ("st_dev", metadata.dev.into()),
+                ("st_dev", metadata.dev.unwrap_or(0).into()),
                 ("st_mode", mode.into()),
-                ("st_nlink", 0),
-                ("st_ino", 0),
-                ("st_uid", metadata.uid.into()),
-                ("st_gid", metadata.gid.into()),
+                ("st_nlink", metadata.nlink.unwrap_or(0).into()),
+                ("st_ino", metadata.ino.unwrap_or(0).into()),
+                ("st_uid", metadata.uid.unwrap_or(0).into()),
+                ("st_gid", metadata.gid.unwrap_or(0).into()),
                 ("st_rdev", 0),
                 ("st_atime", access_sec.into()),
                 ("st_atime_nsec", access_nsec.into()),
@@ -257,8 +257,8 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ("st_ctime", 0),
                 ("st_ctime_nsec", 0),
                 ("st_size", metadata.size.into()),
-                ("st_blocks", 0),
-                ("st_blksize", 0),
+                ("st_blocks", metadata.blocks.unwrap_or(0).into()),
+                ("st_blksize", metadata.blksize.unwrap_or(0).into()),
             ],
             &buf,
         )?;
@@ -787,19 +787,35 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             })
             .unwrap_or_else(|| interp_ok((0, 0)))?;
 
+        if metadata.ino.is_some() {
+            mask |= this.eval_libc_u32("STATX_INO");
+        }
+        if metadata.nlink.is_some() {
+            mask |= this.eval_libc_u32("STATX_NLINK");
+        }
+        if metadata.uid.is_some() {
+            mask |= this.eval_libc_u32("STATX_UID");
+        }
+        if metadata.gid.is_some() {
+            mask |= this.eval_libc_u32("STATX_GID");
+        }
+        if metadata.blocks.is_some() {
+            mask |= this.eval_libc_u32("STATX_BLOCKS");
+        }
+
         // Now we write everything to `statxbuf`. We write a zero for the unavailable fields.
         this.write_int_fields_named(
             &[
                 ("stx_mask", mask.into()),
-                ("stx_blksize", 0),
+                ("stx_blksize", metadata.blksize.unwrap_or(0).into()),
                 ("stx_attributes", 0),
-                ("stx_nlink", 0),
-                ("stx_uid", 0),
-                ("stx_gid", 0),
+                ("stx_nlink", metadata.nlink.unwrap_or(0).into()),
+                ("stx_uid", metadata.uid.unwrap_or(0).into()),
+                ("stx_gid", metadata.gid.unwrap_or(0).into()),
                 ("stx_mode", mode.into()),
-                ("stx_ino", 0),
+                ("stx_ino", metadata.ino.unwrap_or(0).into()),
                 ("stx_size", metadata.size.into()),
-                ("stx_blocks", 0),
+                ("stx_blocks", metadata.blocks.unwrap_or(0).into()),
                 ("stx_attributes_mask", 0),
                 ("stx_rdev_major", 0),
                 ("stx_rdev_minor", 0),
@@ -1670,9 +1686,21 @@ struct FileMetadata {
     created: Option<(u64, u32)>,
     accessed: Option<(u64, u32)>,
     modified: Option<(u64, u32)>,
-    dev: u64,
-    uid: u32,
-    gid: u32,
+
+    // Host/platform-specific metadata. `None` means this value is unavailable,
+    // for example for synthetic metadata or on a host platform that does not
+    // expose Unix metadata fields.
+    //
+    // For `statx`, fields that have a corresponding `STATX_*` mask bit must
+    // only have that bit set when the field is `Some`. For legacy `struct stat`,
+    // unavailable fields are written as 0.
+    dev: Option<u64>,
+    ino: Option<u64>,
+    nlink: Option<u64>,
+    uid: Option<u32>,
+    gid: Option<u32>,
+    blksize: Option<u64>,
+    blocks: Option<u64>,
 }
 
 impl FileMetadata {
@@ -1711,9 +1739,13 @@ impl FileMetadata {
             created: None,
             accessed: None,
             modified: None,
-            dev: 0,
-            uid: 0,
-            gid: 0,
+            dev: None,
+            ino: None,
+            nlink: None,
+            uid: None,
+            gid: None,
+            blksize: None,
+            blocks: None,
         }))
     }
 
@@ -1737,22 +1769,48 @@ impl FileMetadata {
         let accessed = extract_sec_and_nsec(metadata.accessed())?;
         let modified = extract_sec_and_nsec(metadata.modified())?;
 
-        // FIXME: Provide more fields using platform specific methods.
+        let extra: (
+            Option<u64>,
+            Option<u64>,
+            Option<u64>,
+            Option<u32>,
+            Option<u32>,
+            Option<u64>,
+            Option<u64>,
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
 
-        cfg_select! {
-            unix => {
-                use std::os::unix::fs::MetadataExt;
-                let dev = metadata.dev();
-                let uid = metadata.uid();
-                let gid = metadata.gid();
-            }
-            _ => {
-                let dev = 0;
-                let uid = 0;
-                let gid = 0;
-            }
+            extra = (
+                Some(metadata.dev()),
+                Some(metadata.ino()),
+                Some(metadata.nlink()),
+                Some(metadata.uid()),
+                Some(metadata.gid()),
+                Some(metadata.blksize()),
+                Some(metadata.blocks()),
+            );
+        }
+        #[cfg(not(unix))]
+        {
+            extra = (None, None, None, None, None, None, None);
         }
 
-        interp_ok(Ok(FileMetadata { mode, size, created, accessed, modified, dev, uid, gid }))
+        let (dev, ino, nlink, uid, gid, blksize, blocks) = extra;
+        interp_ok(Ok(FileMetadata {
+            mode,
+            size,
+            created,
+            accessed,
+            modified,
+            dev,
+            ino,
+            nlink,
+            uid,
+            gid,
+            blksize,
+            blocks,
+        }))
     }
 }
