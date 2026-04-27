@@ -1,11 +1,13 @@
+use std::cell::RefMut;
 use std::collections::BTreeMap;
 use std::io;
+use std::ops::BitOrAssign;
 use std::time::Duration;
 
 use mio::event::Source;
 use mio::{Events, Interest, Poll, Token};
 
-use crate::shims::{EpollEventKey, EpollEvents, FdId, FileDescription, FileDescriptionRef};
+use crate::shims::{FdId, FileDescription, FileDescriptionRef};
 use crate::*;
 
 /// Capacity of the event queue which can be polled at a time.
@@ -14,10 +16,15 @@ use crate::*;
 const IO_EVENT_CAPACITY: usize = 16;
 
 /// Trait for file descriptions that contain a mio [`Source`].
-pub trait WithSource: FileDescription {
+pub trait SourceFileDescription: FileDescription {
     /// Invoke `f` on the source inside `self`.
     fn with_source(&self, f: &mut dyn FnMut(&mut dyn Source) -> io::Result<()>) -> io::Result<()>;
+
+    /// Get a mutable reference to the readiness of the source.
+    fn get_readiness_mut(&self) -> RefMut<'_, BlockingIoSourceReadiness>;
 }
+
+pub type DynSourceFileDescriptionRef = FileDescriptionRef<dyn SourceFileDescription>;
 
 /// An interest receiver defines the action that should be taken when
 /// the associated [`Interest`] is fulfilled.
@@ -25,9 +32,14 @@ pub trait WithSource: FileDescription {
 pub enum InterestReceiver {
     /// The specified thread should be unblocked.
     UnblockThread(ThreadId),
-    /// The file descriptor for the file description in `epoll_key` received
-    /// an epoll event on the epoll instance with id `epfd_id`.
-    Epoll { epfd_id: FdId, epoll_key: EpollEventKey },
+}
+
+/// The reason why an event is returned from [`BlockingIoManager::poll`].
+pub enum ReadyReason {
+    /// The readiness of the source file description has changed.
+    ReadinessChanged,
+    /// The interest of the interest receiver is fulfilled.
+    InterestFulfilled(InterestReceiver),
 }
 
 /// An I/O interest for an [`InterestReceiver`].
@@ -44,17 +56,70 @@ pub enum BlockingIoInterest {
     ReadWrite,
 }
 
+/// Struct reflecting the readiness of a source file description.
+#[derive(Debug)]
+pub struct BlockingIoSourceReadiness {
+    /// Boolean whether the source is currently readable.
+    pub readable: bool,
+    /// Boolean whether the source is currently writable.
+    pub writable: bool,
+    /// Boolean whether the read end of the source has been
+    /// closed.
+    pub read_closed: bool,
+    /// Boolean whether the write end of the source has been
+    /// closed.
+    pub write_closed: bool,
+    /// Boolean whether the source currently has an error.
+    pub error: bool,
+}
+
+impl BlockingIoSourceReadiness {
+    pub fn empty() -> Self {
+        Self {
+            readable: false,
+            writable: false,
+            read_closed: false,
+            write_closed: false,
+            error: false,
+        }
+    }
+
+    pub fn fulfills_interest(&self, interest: &BlockingIoInterest) -> bool {
+        match interest {
+            BlockingIoInterest::Read => self.readable || self.error,
+            BlockingIoInterest::Write => self.writable || self.error,
+            BlockingIoInterest::ReadWrite => self.readable || self.writable || self.error,
+        }
+    }
+}
+
+impl BitOrAssign for BlockingIoSourceReadiness {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.readable |= rhs.readable;
+        self.writable |= rhs.writable;
+        self.read_closed |= rhs.read_closed;
+        self.write_closed |= rhs.write_closed;
+        self.error |= rhs.error;
+    }
+}
+
+impl From<&mio::event::Event> for BlockingIoSourceReadiness {
+    fn from(event: &mio::event::Event) -> Self {
+        Self {
+            readable: event.is_readable(),
+            writable: event.is_writable(),
+            read_closed: event.is_read_closed(),
+            write_closed: event.is_write_closed(),
+            error: event.is_error(),
+        }
+    }
+}
+
 struct BlockingIoSource {
     /// The source file description which is registered into the poll.
-    fd: FileDescriptionRef<dyn WithSource>,
+    fd: FileDescriptionRef<dyn SourceFileDescription>,
     /// The registered receivers for this file description.
     receivers: BTreeMap<InterestReceiver, BlockingIoInterest>,
-    /// The current readiness of the file description.
-    /// It's the file descriptions responsibility to set the readiness fields
-    /// to `false` using [`BlockingIoManager::get_source_readiness_mut`]
-    /// once they no longer hold (e.g. `epollin` should be set to `false` once
-    /// an EWOULDBLOCK is returned when attempting to read).
-    readiness: EpollEvents,
 }
 
 /// Manager for managing blocking host I/O in a non-blocking manner.
@@ -74,7 +139,7 @@ pub struct BlockingIoManager {
     /// new buffer for every poll.
     events: Events,
     /// Map from source file description ids to the actual sources with their
-    /// registered receivers and their current readiness.
+    /// registered receivers.
     sources: BTreeMap<FdId, BlockingIoSource>,
 }
 
@@ -98,76 +163,66 @@ impl BlockingIoManager {
     ///   specified duration.
     /// - If the timeout is [`None`] the poll blocks indefinitely until an event occurs.
     ///
-    /// Returns the interest receivers whose events are currently fulfilled together with the source
-    /// file description they were registered for.
+    /// Returns a list of [`ReadyReason`]s together with the file description they're for.
+    /// Note that the [`ReadyReason::InterestFulfilled`] events are returned in a level-triggered way.
+    /// This means that [`InterestReceiver`]s whose interests were fulfilled before the poll will be
+    /// returned again.
     pub fn poll(
         &mut self,
         timeout: Option<Duration>,
-    ) -> Result<Vec<(InterestReceiver, FileDescriptionRef<dyn WithSource>)>, io::Error> {
+    ) -> Result<Vec<(ReadyReason, DynSourceFileDescriptionRef)>, io::Error> {
         let poll =
             self.poll.as_mut().expect("Blocking I/O should not be called with isolation enabled");
 
         // Poll for new I/O events from OS and store them in the events buffer.
         poll.poll(&mut self.events, timeout)?;
 
-        self.events.iter().for_each(|event| {
-            let token = event.token();
-            // We know all tokens are valid `FdId`.
-            let fd_id = FdId::new_unchecked(token.0);
-            let source = self.sources.get_mut(&fd_id).expect("Source should be registered");
-            let fd = source.fd.clone();
+        let mut ready = self
+            .events
+            .iter()
+            .map(|event| {
+                let token = event.token();
+                // We know all tokens are valid `FdId`.
+                let fd_id = FdId::new_unchecked(token.0);
+                let source = self.sources.get_mut(&fd_id).expect("Source should be registered");
+                let fd = source.fd.clone();
 
-            assert_eq!(fd.id(), fd_id);
-
-            // Best-effort mapping from cross platform mio events to epoll readiness.
-            let new_readiness = EpollEvents {
-                epollin: event.is_readable(),
-                epollout: event.is_writable(),
-                epollrdhup: event.is_read_closed(),
-                epollhup: event.is_write_closed(),
-                epollerr: event.is_error(),
-            };
-
-            // Update the readiness of the source with new readiness data from the event.
-            source.readiness.epollerr |= new_readiness.epollerr;
-            source.readiness.epollhup |= new_readiness.epollhup;
-            source.readiness.epollrdhup |= new_readiness.epollrdhup;
-            source.readiness.epollin |= new_readiness.epollin;
-            source.readiness.epollout |= new_readiness.epollout;
-        });
+                assert_eq!(fd.id(), fd_id);
+                // Update stored readiness in source.
+                *fd.get_readiness_mut() |= BlockingIoSourceReadiness::from(event);
+                (ReadyReason::ReadinessChanged, fd)
+            })
+            .collect::<Vec<_>>();
 
         // List containing all receivers for all registered sources whose interests are
         // currently fulfilled. This also includes receivers for sources which didn't
         // receive an event from the current poll invocation.
-        let ready = self
-            .sources
-            .values()
-            .flat_map(|source| {
-                source
-                    .receivers
-                    .iter()
-                    .filter_map(|(key, interest)| {
-                        // TODO: Add option to artificially introduce spurious wake-ups here.
-                        //       Whilst we currently already can have spurious wake-ups, they
-                        //       should not be very likely.
-                        source.readiness.fulfills_interest(interest).then_some(key)
-                    })
-                    .copied()
-                    .map(|receiver| (receiver, source.fd.clone()))
-            })
-            .collect::<Vec<_>>();
+        self.sources.values().for_each(|source| {
+            source
+                .receivers
+                .iter()
+                .filter_map(|(key, interest)| {
+                    source.fd.get_readiness_mut().fulfills_interest(interest).then_some(key)
+                })
+                .copied()
+                .for_each(|receiver| {
+                    ready.push((ReadyReason::InterestFulfilled(receiver), source.fd.clone()))
+                });
+        });
 
         Ok(ready)
     }
 
     /// Get whether a source file description is currently registered in the
     /// blocking I/O poll.
+    /// This can also be used to check whether a file description is a host
+    /// I/O source.
     pub fn contains_source(&self, source_id: &FdId) -> bool {
         self.sources.contains_key(source_id)
     }
 
     /// Register a source file description to the blocking I/O poll.
-    pub fn register(&mut self, source_fd: FileDescriptionRef<dyn WithSource>) {
+    pub fn register(&mut self, source_fd: FileDescriptionRef<dyn SourceFileDescription>) {
         let poll =
             self.poll.as_ref().expect("Blocking I/O should not be called with isolation enabled");
 
@@ -186,11 +241,7 @@ impl BlockingIoManager {
             .with_source(&mut |source| poll.registry().register(source, token, interest))
             .unwrap();
 
-        let source = BlockingIoSource {
-            fd: source_fd,
-            readiness: EpollEvents::new(),
-            receivers: BTreeMap::default(),
-        };
+        let source = BlockingIoSource { fd: source_fd, receivers: BTreeMap::default() };
 
         self.sources
             .try_insert(id, source)
@@ -238,22 +289,6 @@ impl BlockingIoManager {
     pub fn remove_receiver(&mut self, source_id: FdId, receiver: InterestReceiver) {
         let source = self.sources.get_mut(&source_id).expect("Source should be registered");
         source.receivers.remove(&receiver).expect("Receiver should exist for source");
-    }
-
-    /// Get a reference to the current readiness for a registered source.
-    ///
-    /// It's assumed that the source with id `source_id` is currently registered.
-    pub fn get_source_readiness(&self, source_id: FdId) -> &EpollEvents {
-        let source = self.sources.get(&source_id).expect("Source should be registered");
-        &source.readiness
-    }
-
-    /// Get a mutable reference to the current readiness for a registered source.
-    ///
-    /// It's assumed that the source with id `source_id` is currently registered.
-    pub fn get_source_readiness_mut(&mut self, source_id: FdId) -> &mut EpollEvents {
-        let source = self.sources.get_mut(&source_id).expect("Source should be registered");
-        &mut source.readiness
     }
 }
 

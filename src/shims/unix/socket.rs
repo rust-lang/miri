@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, RefMut};
 use std::io::Read;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
@@ -11,9 +11,9 @@ use rustc_const_eval::interpret::{InterpResult, interp_ok};
 use rustc_middle::throw_unsup_format;
 use rustc_target::spec::Os;
 
-use crate::shims::EpollEvents;
 use crate::shims::files::{EvalContextExt as _, FdId, FileDescription, FileDescriptionRef};
 use crate::shims::unix::UnixFileDescription;
+use crate::shims::unix::linux_like::epoll::{EpollReadiness, EvalContextExt as _};
 use crate::*;
 
 #[derive(Debug, PartialEq)]
@@ -55,6 +55,8 @@ struct Socket {
     state: RefCell<SocketState>,
     /// Whether this fd is non-blocking or not.
     is_non_block: Cell<bool>,
+    /// The current blocking I/O readiness of the file description.
+    io_readiness: RefCell<BlockingIoSourceReadiness>,
 }
 
 impl FileDescription for Socket {
@@ -261,12 +263,8 @@ impl UnixFileDescription for Socket {
         throw_unsup_format!("ioctl: unsupported operation {op:#x} on socket");
     }
 
-    fn epoll_active_events<'tcx>(
-        &self,
-        self_id: FdId,
-        ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx, EpollEvents> {
-        interp_ok(ecx.machine.blocking_io.get_source_readiness(self_id).clone())
+    fn epoll_active_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadiness> {
+        interp_ok(EpollReadiness::from(&*self.io_readiness.borrow()))
     }
 }
 
@@ -345,6 +343,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             family,
             state: RefCell::new(SocketState::Initial),
             is_non_block: Cell::new(is_sock_nonblock),
+            io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
         });
 
         interp_ok(Scalar::from_i32(fds.insert(fd)))
@@ -1381,6 +1380,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } |this, kind: UnblockKind| {
                 assert_eq!(kind, UnblockKind::Ready);
 
+                // Remove the blocking I/O interest receiver for unblocking this thread.
+                this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
+
                 match this.try_non_block_accept(&socket, address_ptr, address_len_ptr, is_client_sock_nonblock)? {
                     Ok(sockfd) => {
                         // We need to create the scalar using the destination size since
@@ -1424,10 +1426,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (stream, addr) = match listener.accept() {
             Ok(peer) => peer,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // Because this would block we know that the source is not readable so
-                // we need to update the readiness in the blocking I/O manager.
-                let readiness = this.machine.blocking_io.get_source_readiness_mut(socket.id());
-                readiness.epollin = false;
+                // We know that the source is not readable so we need to update it's readiness.
+                socket.io_readiness.borrow_mut().readable = false;
+                this.update_epoll_active_events(socket.clone(), false)?;
+
                 return interp_ok(Err(IoError::HostError(e)));
             }
             Err(e) => return interp_ok(Err(IoError::HostError(e))),
@@ -1453,6 +1455,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             family,
             state: RefCell::new(SocketState::Connected(stream)),
             is_non_block: Cell::new(is_client_sock_nonblock),
+            io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
         });
         // Register the socket to the blocking I/O manager because
         // there is an associated host socket.
@@ -1487,6 +1490,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
             } |this, kind: UnblockKind| {
                 assert_eq!(kind, UnblockKind::Ready);
+
+                // Remove the blocking I/O interest receiver for unblocking this thread.
+                this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
 
                 match this.try_non_block_send(&socket, buffer_ptr, length)? {
                     Err(IoError::HostError(e)) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -1524,10 +1530,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(IoError::HostError(e))
                 if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::WouldBlock) =>
             {
-                // We know that the source is not writable so we need to update
-                // the readiness in the blocking I/O manager.
-                let readiness = this.machine.blocking_io.get_source_readiness_mut(socket.id());
-                readiness.epollout = false;
+                // We know that the source is not writable so we need to update it's readiness.
+                socket.io_readiness.borrow_mut().writable = false;
+                this.update_epoll_active_events(socket.clone(), false)?;
 
                 // On Windows hosts, `send` can return WSAENOTCONN where EAGAIN or EWOULDBLOCK
                 // would be returned on UNIX-like systems. We thus remap this error to an EWOULDBLOCK.
@@ -1565,6 +1570,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
             } |this, kind: UnblockKind| {
                 assert_eq!(kind, UnblockKind::Ready);
+
+                // Remove the blocking I/O interest receiver for unblocking this thread.
+                this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
 
                 match this.try_non_block_recv(&socket, buffer_ptr, length, should_peek)? {
                     Err(IoError::HostError(e)) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -1609,10 +1617,9 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(IoError::HostError(e))
                 if matches!(e.kind(), io::ErrorKind::NotConnected | io::ErrorKind::WouldBlock) =>
             {
-                // We know that the source is not readable so we need to update
-                // the readiness in the blocking I/O manager.
-                let readiness = this.machine.blocking_io.get_source_readiness_mut(socket.id());
-                readiness.epollin = false;
+                // We know that the source is not readable so we need to update it's readiness.
+                socket.io_readiness.borrow_mut().readable = false;
+                this.update_epoll_active_events(socket.clone(), false)?;
 
                 // On Windows hosts, `recv` can return WSAENOTCONN where EAGAIN or EWOULDBLOCK
                 // would be returned on UNIX-like systems. We thus remap this error to an EWOULDBLOCK.
@@ -1677,11 +1684,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     foreign_name: &'static str,
                     action: DynMachineCallback<'tcx, Result<(), ()>>,
                 } |this, kind: UnblockKind| {
+                    // Remove the blocking I/O interest receiver for unblocking this thread.
+                    this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
+
                     if UnblockKind::TimedOut == kind {
                         // We can only time out when `should_wait` is false.
                         // This then means that the socket is not yet connected.
                         assert!(!should_wait);
-                        this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.active_thread()));
                         return action.call(this, Err(()))
                     }
 
@@ -1766,7 +1775,7 @@ impl VisitProvenance for FileDescriptionRef<Socket> {
     fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
-impl WithSource for Socket {
+impl SourceFileDescription for Socket {
     fn with_source(&self, f: &mut dyn FnMut(&mut dyn Source) -> io::Result<()>) -> io::Result<()> {
         let mut state = self.state.borrow_mut();
         match &mut *state {
@@ -1775,5 +1784,9 @@ impl WithSource for Socket {
             // We never try adding a socket which is not backed by a real socket to the poll registry.
             _ => unreachable!(),
         }
+    }
+
+    fn get_readiness_mut(&self) -> RefMut<'_, BlockingIoSourceReadiness> {
+        self.io_readiness.borrow_mut()
     }
 }

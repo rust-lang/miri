@@ -733,7 +733,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // which received events are available for scheduling afterwards.
 
             // Perform a non-blocking poll for newly available I/O events from the OS.
-            this.poll_and_handle_receivers(Some(Duration::ZERO))?;
+            this.poll_and_handle_events(Some(Duration::ZERO))?;
         }
 
         // We also check timeouts before running any other thread, to ensure that timeouts
@@ -765,7 +765,9 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             .filter(|(_id, thread)| thread.state.is_enabled());
         // Pick a new thread, and switch to it.
         let new_thread = if thread_manager.fixed_scheduling {
-            threads_iter.next()
+            let next = threads_iter.next();
+            drop(threads_iter);
+            next
         } else {
             threads_iter.choose(rng)
         };
@@ -786,27 +788,18 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         if thread_manager.threads[thread_manager.active_thread].state.is_enabled() {
             return interp_ok(SchedulingAction::ExecuteStep);
         }
+
         // We have not found a thread to execute.
-        if thread_manager.threads.iter().all(|thread| thread.state.is_terminated()) {
+        let threads = &this.machine.threads.threads;
+
+        if threads.iter().all(|thread| thread.state.is_terminated()) {
             unreachable!("all threads terminated without the main thread terminating?!");
         } else if let Some(sleep_time) = potential_sleep_time {
             // All threads are currently blocked, but we have unexecuted
             // timeout_callbacks, which may unblock some of the threads. Hence,
             // sleep until the first callback.
             interp_ok(SchedulingAction::SleepAndWaitForIo(Some(sleep_time)))
-        } else if thread_manager.threads.iter().any(|thread| {
-            match thread.state {
-                ThreadState::Blocked { reason: BlockReason::IO, .. } => true,
-                ThreadState::Blocked { reason: BlockReason::Epoll { epfd_id }, .. } => {
-                    // Check whether any of the epoll interests are registered in the blocking I/O manager.
-                    this.machine
-                        .epoll_interests
-                        .get_interests(epfd_id)
-                        .any(|id| this.machine.blocking_io.contains_source(id))
-                }
-                _ => false,
-            }
-        }) {
+        } else if threads.iter().any(|thread| this.is_thread_blocked_on_host(thread)) {
             // At least one thread doesn't have a timeout set, and is blocked on host I/O or is waiting on an
             // epoll instance which contains a host source interest. Hence, we sleep indefinitely in the
             // hope that eventually an I/O event happens.
@@ -816,11 +809,24 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         }
     }
 
+    /// Get whether the provided thread is currently blocked on host I/O.
+    /// This means, it's either blocked on an I/O operation directly or it's
+    /// blocked on an epoll instance which contains a host source interest.
+    fn is_thread_blocked_on_host(&self, thread: &Thread<'tcx>) -> bool {
+        let this = self.eval_context_ref();
+        match thread.state {
+            ThreadState::Blocked { reason: BlockReason::IO, .. } => true,
+            ThreadState::Blocked { reason: BlockReason::Epoll { epfd_id }, .. } =>
+                this.has_epoll_host_interests(&epfd_id),
+            _ => false,
+        }
+    }
+
     /// Poll for I/O events until either an I/O event happened or the timeout expired.
     /// The different timeout values are described in [`BlockingIoManager::poll`].
     ///
-    /// For every ready I/O event an action is executed based on the event's [`InterestReceiver`].
-    fn poll_and_handle_receivers(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
+    /// For every ready I/O event an action is executed based on the event's [`EventKind`].
+    fn poll_and_handle_events(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
         let ready = match this.machine.blocking_io.poll(timeout) {
@@ -832,13 +838,11 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             Err(e) => panic!("unexpected error while polling: {e}"),
         };
 
-        ready.into_iter().try_for_each(|(receiver, source_fd)| {
-            match receiver {
-                InterestReceiver::UnblockThread(thread_id) => {
-                    this.machine.blocking_io.remove_receiver(source_fd.id(), receiver);
-                    this.unblock_thread(thread_id, BlockReason::IO)
-                }
-                InterestReceiver::Epoll { .. } => this.update_epoll_active_events(source_fd, false),
+        ready.into_iter().try_for_each(|(reason, source_fd)| {
+            match reason {
+                ReadyReason::ReadinessChanged => this.update_epoll_active_events(source_fd, false),
+                ReadyReason::InterestFulfilled(InterestReceiver::UnblockThread(thread_id)) =>
+                    this.unblock_thread(thread_id, BlockReason::IO),
             }
         })
     }
@@ -1359,7 +1363,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         // strictly sleeping the duration we allow waking up
                         // early for I/O events from the OS.
 
-                        this.poll_and_handle_receivers(duration)?;
+                        this.poll_and_handle_events(duration)?;
                     } else {
                         let duration = duration.expect(
                             "Infinite sleep should not be triggered when isolation is enabled",

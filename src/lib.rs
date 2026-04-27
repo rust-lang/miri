@@ -135,7 +135,8 @@ pub use crate::borrow_tracker::{
 };
 pub use crate::clock::{Instant, MonotonicClock};
 pub use crate::concurrency::blocking_io::{
-    BlockingIoInterest, BlockingIoManager, EvalContextExt as _, InterestReceiver, WithSource,
+    BlockingIoInterest, BlockingIoManager, BlockingIoSourceReadiness, EvalContextExt as _,
+    InterestReceiver, ReadyReason, SourceFileDescription,
 };
 pub use crate::concurrency::cpu_affinity::MAX_CPUS;
 pub use crate::concurrency::data_race::{

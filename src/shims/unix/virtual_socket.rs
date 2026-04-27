@@ -13,7 +13,7 @@ use crate::shims::files::{
     EvalContextExt as _, FdId, FileDescription, FileDescriptionRef, WeakFileDescriptionRef,
 };
 use crate::shims::unix::UnixFileDescription;
-use crate::shims::unix::linux_like::epoll::{EpollEvents, EvalContextExt as _};
+use crate::shims::unix::linux_like::epoll::{EpollReadiness, EvalContextExt as _};
 use crate::*;
 
 /// The maximum capacity of the socketpair buffer in bytes.
@@ -392,24 +392,20 @@ fn virtual_socket_read<'tcx>(
 }
 
 impl UnixFileDescription for VirtualSocket {
-    fn epoll_active_events<'tcx>(
-        &self,
-        _self_id: FdId,
-        _ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx, EpollEvents> {
+    fn epoll_active_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadiness> {
         // We only check the status of EPOLLIN, EPOLLOUT, EPOLLHUP and EPOLLRDHUP flags.
         // If other event flags need to be supported in the future, the check should be added here.
 
-        let mut epoll_ready_events = EpollEvents::new();
+        let mut epoll_readiness = EpollReadiness::empty();
 
         // Check if it is readable.
         if let Some(readbuf) = &self.readbuf {
             if !readbuf.borrow().buf.is_empty() {
-                epoll_ready_events.epollin = true;
+                epoll_readiness.epollin = true;
             }
         } else {
             // Without a read buffer, reading never blocks, so we are always ready.
-            epoll_ready_events.epollin = true;
+            epoll_readiness.epollin = true;
         }
 
         // Check if is writable.
@@ -418,28 +414,28 @@ impl UnixFileDescription for VirtualSocket {
                 let data_size = writebuf.borrow().buf.len();
                 let available_space = MAX_SOCKETPAIR_BUFFER_CAPACITY.strict_sub(data_size);
                 if available_space != 0 {
-                    epoll_ready_events.epollout = true;
+                    epoll_readiness.epollout = true;
                 }
             } else {
                 // Without a write buffer, writing never blocks.
-                epoll_ready_events.epollout = true;
+                epoll_readiness.epollout = true;
             }
         } else {
             // Peer FD has been closed. This always sets both the RDHUP and HUP flags
             // as we do not support `shutdown` that could be used to partially close the stream.
-            epoll_ready_events.epollrdhup = true;
-            epoll_ready_events.epollhup = true;
+            epoll_readiness.epollrdhup = true;
+            epoll_readiness.epollhup = true;
             // Since the peer is closed, even if no data is available reads will return EOF and
             // writes will return EPIPE. In other words, they won't block, so we mark this as ready
             // for read and write.
-            epoll_ready_events.epollin = true;
-            epoll_ready_events.epollout = true;
+            epoll_readiness.epollin = true;
+            epoll_readiness.epollout = true;
             // If there is data lost in peer_fd, set EPOLLERR.
             if self.peer_lost_data.get() {
-                epoll_ready_events.epollerr = true;
+                epoll_readiness.epollerr = true;
             }
         }
-        interp_ok(epoll_ready_events)
+        interp_ok(epoll_readiness)
     }
 }
 
