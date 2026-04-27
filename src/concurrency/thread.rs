@@ -825,7 +825,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// Poll for I/O events until either an I/O event happened or the timeout expired.
     /// The different timeout values are described in [`BlockingIoManager::poll`].
     ///
-    /// For every ready I/O event an action is executed based on the event's [`EventKind`].
+    /// For every ready I/O event an action is executed based on the event's [`ReadyReason`].
     fn poll_and_handle_events(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
