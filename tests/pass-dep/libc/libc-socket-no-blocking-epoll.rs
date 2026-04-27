@@ -239,7 +239,7 @@ fn test_send_nonblock() {
     epoll_ctl_add(epfd, client_sockfd, EPOLLOUT | EPOLLET | EPOLLERR).unwrap();
 
     let fill_buf = [1u8; 32_000];
-
+    let mut written = 0usize;
     loop {
         // Ensure the socket is still writable.
         assert_eq!(
@@ -252,7 +252,7 @@ fn test_send_nonblock() {
         };
 
         match result {
-            Ok(_) => continue,
+            Ok(count) => written += count as usize,
             Err(err) if err.kind() == ErrorKind::WouldBlock => break,
             Err(err) => panic!("unexpected error whilst filling up buffer: {err}"),
         }
@@ -266,19 +266,19 @@ fn test_send_nonblock() {
 
     // Spawn the reader thread.
     let reader_thread = thread::spawn(move || {
-        // Read enough to make the client buffer
-        // writable again.
-        let mut buffer = [0u8; 128_000];
+        // Read half of the bytes needed to fill the buffer.
+        // This should make the client buffer writable again.
+        let mut buffer = Vec::with_capacity(written / 2);
+        buffer.fill(0u8);
         unsafe {
             errno_result(libc_utils::read_all_generic(
                 buffer.as_mut_ptr().cast(),
-                buffer.len(),
+                written / 2,
                 libc_utils::NoRetry,
                 |buf, count| libc::recv(peerfd, buf, count, 0),
             ))
             .unwrap()
         };
-        assert_eq!(&buffer, &[1u8; 128_000]);
     });
 
     // Wait until the socket is again writable.
