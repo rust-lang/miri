@@ -466,7 +466,7 @@ fn test_fstat() {
     assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFREG);
 
     // Check that all fields are initialized.
-    libc_utils::check_stat_fields(stat);
+    check_stat_fields(stat);
 
     remove_file(&path).unwrap();
 }
@@ -486,7 +486,7 @@ fn test_stat() {
     assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFREG);
 
     // Check that all fields are initialized.
-    libc_utils::check_stat_fields(stat);
+    check_stat_fields(stat);
 
     remove_file(&path).unwrap();
 }
@@ -509,7 +509,7 @@ fn test_lstat() {
     assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFLNK);
 
     // Check that all fields are initialized.
-    libc_utils::check_stat_fields(stat);
+    check_stat_fields(stat);
 
     remove_file(&symlink_path).unwrap();
     remove_file(&path).unwrap();
@@ -683,4 +683,22 @@ fn test_readdir() {
     remove_file(&file1).unwrap();
     remove_file(&file2).unwrap();
     remove_dir(&dir_path).unwrap();
+}
+
+/// Check that all common fields of a `stat` struct are initialized.
+pub fn check_stat_fields(stat: &libc::stat) {
+    let _st_nlink = stat.st_nlink;
+    let _st_blksize = stat.st_blksize;
+    let _st_blocks = stat.st_blocks;
+    let _st_ino = stat.st_ino;
+    let _st_dev = stat.st_dev;
+    let _st_uid = stat.st_uid;
+    let _st_gid = stat.st_gid;
+    let _st_rdev = stat.st_rdev;
+    let _st_atime = stat.st_atime;
+    let _st_mtime = stat.st_mtime;
+    let _st_ctime = stat.st_ctime;
+    let _st_atime_nsec = stat.st_atime_nsec;
+    let _st_mtime_nsec = stat.st_mtime_nsec;
+    let _st_ctime_nsec = stat.st_ctime_nsec;
 }

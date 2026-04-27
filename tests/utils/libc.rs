@@ -141,24 +141,6 @@ pub unsafe fn write_all(
     write_all_generic(buf, count, NoRetry, |buf, count| libc::write(fd, buf, count))
 }
 
-/// Check that all common fields of a `stat` struct are initialized.
-pub fn check_stat_fields(stat: &libc::stat) {
-    let _st_nlink = stat.st_nlink;
-    let _st_blksize = stat.st_blksize;
-    let _st_blocks = stat.st_blocks;
-    let _st_ino = stat.st_ino;
-    let _st_dev = stat.st_dev;
-    let _st_uid = stat.st_uid;
-    let _st_gid = stat.st_gid;
-    let _st_rdev = stat.st_rdev;
-    let _st_atime = stat.st_atime;
-    let _st_mtime = stat.st_mtime;
-    let _st_ctime = stat.st_ctime;
-    let _st_atime_nsec = stat.st_atime_nsec;
-    let _st_mtime_nsec = stat.st_mtime_nsec;
-    let _st_ctime_nsec = stat.st_ctime_nsec;
-}
-
 /// Write the entire `buf` to `fd`. Panic if not all bytes could be written.
 #[track_caller]
 pub fn write_all_from_slice(fd: libc::c_int, buf: &[u8]) -> io::Result<()> {
