@@ -825,11 +825,11 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// Poll for I/O events until either an I/O event happened or the timeout expired.
     /// The different timeout values are described in [`BlockingIoManager::poll`].
     ///
-    /// For every ready I/O event an action is executed based on the event's [`ReadyReason`].
+    /// For every ready I/O event an action is executed based on the event's [`InterestReceiver`].
     fn poll_and_handle_events(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let ready = match this.machine.blocking_io.poll(timeout) {
+        let ready = match BlockingIoManager::poll(this, timeout)? {
             Ok(ready) => ready,
             // We can ignore errors originating from interrupts; that's just a spurious wakeup.
             Err(e) if e.kind() == io::ErrorKind::Interrupted => return interp_ok(()),
@@ -838,10 +838,9 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             Err(e) => panic!("unexpected error while polling: {e}"),
         };
 
-        ready.into_iter().try_for_each(|(reason, source_fd)| {
-            match reason {
-                ReadyReason::ReadinessChanged => this.update_epoll_active_events(source_fd, false),
-                ReadyReason::InterestFulfilled(InterestReceiver::UnblockThread(thread_id)) =>
+        ready.into_iter().try_for_each(|receiver| {
+            match receiver {
+                InterestReceiver::UnblockThread(thread_id) =>
                     this.unblock_thread(thread_id, BlockReason::IO),
             }
         })

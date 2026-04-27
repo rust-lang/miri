@@ -7,7 +7,7 @@ use std::time::Duration;
 use mio::event::Source;
 use mio::{Events, Interest, Poll, Token};
 
-use crate::shims::{FdId, FileDescription, FileDescriptionRef};
+use crate::shims::{EpollEvalContextExt, FdId, FileDescription, FileDescriptionRef};
 use crate::*;
 
 /// Capacity of the event queue which can be polled at a time.
@@ -24,22 +24,12 @@ pub trait SourceFileDescription: FileDescription {
     fn get_readiness_mut(&self) -> RefMut<'_, BlockingIoSourceReadiness>;
 }
 
-pub type DynSourceFileDescriptionRef = FileDescriptionRef<dyn SourceFileDescription>;
-
 /// An interest receiver defines the action that should be taken when
 /// the associated [`Interest`] is fulfilled.
 #[derive(Debug, PartialEq, Clone, Copy, Eq, PartialOrd, Ord)]
 pub enum InterestReceiver {
     /// The specified thread should be unblocked.
     UnblockThread(ThreadId),
-}
-
-/// The reason why an event is returned from [`BlockingIoManager::poll`].
-pub enum ReadyReason {
-    /// The readiness of the source file description has changed.
-    ReadinessChanged,
-    /// The interest of the interest receiver is fulfilled.
-    InterestFulfilled(InterestReceiver),
 }
 
 /// An I/O interest for an [`InterestReceiver`].
@@ -163,54 +153,74 @@ impl BlockingIoManager {
     ///   specified duration.
     /// - If the timeout is [`None`] the poll blocks indefinitely until an event occurs.
     ///
-    /// Returns a list of [`ReadyReason`]s together with the file description they're for.
-    /// Note that the [`ReadyReason::InterestFulfilled`] events are returned in a level-triggered way.
-    /// This means that [`InterestReceiver`]s whose interests were fulfilled before the poll will be
+    /// Returns the list of [`InterestReceiver`]s whose interests are currently fulfilled together with
+    /// the file description they're for. Note that the events are returned in a level-triggered way,
+    /// which means that [`InterestReceiver`]s whose interests were fulfilled before the poll will be
     /// returned again.
-    pub fn poll(
-        &mut self,
+    pub fn poll<'tcx>(
+        ecx: &mut MiriInterpCx<'tcx>,
         timeout: Option<Duration>,
-    ) -> Result<Vec<(ReadyReason, DynSourceFileDescriptionRef)>, io::Error> {
-        let poll =
-            self.poll.as_mut().expect("Blocking I/O should not be called with isolation enabled");
+    ) -> InterpResult<'tcx, Result<Vec<InterestReceiver>, io::Error>> {
+        let poll = ecx
+            .machine
+            .blocking_io
+            .poll
+            .as_mut()
+            .expect("Blocking I/O should not be called with isolation enabled");
 
         // Poll for new I/O events from OS and store them in the events buffer.
-        poll.poll(&mut self.events, timeout)?;
+        if let Err(err) = poll.poll(&mut ecx.machine.blocking_io.events, timeout) {
+            return interp_ok(Err(err));
+        };
 
-        let mut ready = self
+        let event_fds = ecx
+            .machine
+            .blocking_io
             .events
             .iter()
             .map(|event| {
                 let token = event.token();
                 // We know all tokens are valid `FdId`.
                 let fd_id = FdId::new_unchecked(token.0);
-                let source = self.sources.get_mut(&fd_id).expect("Source should be registered");
+                let source = ecx
+                    .machine
+                    .blocking_io
+                    .sources
+                    .get(&fd_id)
+                    .expect("Source should be registered");
                 let fd = source.fd.clone();
 
                 assert_eq!(fd.id(), fd_id);
-                // Update stored readiness in source.
+                // Update the readiness of the source.
                 *fd.get_readiness_mut() |= BlockingIoSourceReadiness::from(event);
-                (ReadyReason::ReadinessChanged, fd)
+                fd
             })
             .collect::<Vec<_>>();
+
+        for fd in event_fds.into_iter() {
+            ecx.update_epoll_active_events(fd, false)?;
+        }
 
         // List containing all receivers for all registered sources whose interests are
         // currently fulfilled. This also includes receivers for sources which didn't
         // receive an event from the current poll invocation.
-        self.sources.values().for_each(|source| {
-            source
-                .receivers
-                .iter()
-                .filter_map(|(key, interest)| {
-                    source.fd.get_readiness_mut().fulfills_interest(interest).then_some(key)
-                })
-                .copied()
-                .for_each(|receiver| {
-                    ready.push((ReadyReason::InterestFulfilled(receiver), source.fd.clone()))
-                });
-        });
+        let ready = ecx
+            .machine
+            .blocking_io
+            .sources
+            .values()
+            .flat_map(|source| {
+                source
+                    .receivers
+                    .iter()
+                    .filter_map(|(key, interest)| {
+                        source.fd.get_readiness_mut().fulfills_interest(interest).then_some(key)
+                    })
+                    .copied()
+            })
+            .collect::<Vec<_>>();
 
-        Ok(ready)
+        interp_ok(Ok(ready))
     }
 
     /// Get whether a source file description is currently registered in the

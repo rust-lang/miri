@@ -1,5 +1,8 @@
 //@only-target: linux android illumos
 //@compile-flags: -Zmiri-disable-isolation
+//@revisions: windows_host unix_host
+//@[unix_host] ignore-host: windows
+//@[windows_host] only-host: windows
 
 #![feature(io_error_inprogress)]
 
@@ -17,7 +20,10 @@ const TEST_BYTES: &[u8] = b"these are some test bytes!";
 
 fn main() {
     test_connect_nonblock();
+    test_accept_nonblock();
     test_recv_nonblock();
+    #[cfg(not(windows_hosts))]
+    test_send_nonblock();
 }
 
 /// Test that connecting to a server socket works when the client
@@ -48,7 +54,7 @@ fn test_connect_nonblock() {
     assert_eq!(err.kind(), ErrorKind::InProgress);
 
     // Add client socket with WRITABLE interest to epoll.
-    epoll_ctl_add(epfd, client_sockfd, EPOLLOUT | EPOLLET | libc::EPOLLERR).unwrap();
+    epoll_ctl_add(epfd, client_sockfd, EPOLLOUT | EPOLLET | EPOLLERR).unwrap();
 
     check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLOUT, data: client_sockfd }], -1);
 
@@ -57,6 +63,45 @@ fn test_connect_nonblock() {
     // We should now be connected and thus getting the peer name should work.
     net::sockname_ipv4(|storage, len| unsafe { libc::getpeername(client_sockfd, storage, len) })
         .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// Test that accepting incoming connections works with non-blocking server sockets.
+/// Instead of busy waiting until we no longer get EWOULDBLOCK, we add the
+/// server socket to an epoll instance and wait for a READABLE event.
+fn test_accept_nonblock() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = errno_result(unsafe { libc::epoll_create1(0) }).unwrap();
+
+    unsafe {
+        // Change server socket to be non-blocking.
+        errno_check(libc::fcntl(server_sockfd, libc::F_SETFL, libc::O_NONBLOCK));
+    }
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || {
+        // Add client socket with READABLE interest to epoll.
+        epoll_ctl_add(epfd, server_sockfd, EPOLLIN | EPOLLET | EPOLLERR).unwrap();
+
+        // Wait until we get a readable event on the server socket.
+        check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLIN, data: server_sockfd }], -1);
+
+        // Accepting should now be possible.
+        net::accept_ipv4(server_sockfd).unwrap();
+
+        // Accepting should now trigger an EWOULDBLOCK.
+        let err = net::accept_ipv4(server_sockfd).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::WouldBlock);
+
+        // Ensure that the server is no longer readable because we just
+        // attempted to accept without an incoming connection.
+        assert_eq!(&current_epoll_readiness::<8>(server_sockfd, EPOLLIN | EPOLLET), &[]);
+    });
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
 
     server_thread.join().unwrap();
 }
@@ -114,7 +159,7 @@ fn test_recv_nonblock() {
     // call `epoll_wait` multiple times until we received everything.
 
     // Add client socket with READABLE interest to epoll.
-    epoll_ctl_add(epfd, client_sockfd, EPOLLIN | EPOLLET | libc::EPOLLERR).unwrap();
+    epoll_ctl_add(epfd, client_sockfd, EPOLLIN | EPOLLET | EPOLLERR).unwrap();
 
     let mut bytes_received = 0;
 
@@ -144,5 +189,108 @@ fn test_recv_nonblock() {
 
     assert_eq!(&buffer, TEST_BYTES);
 
+    let mut buffer = [0u8; 1];
+    let err = unsafe {
+        errno_result(libc::recv(client_sockfd, buffer.as_mut_ptr().cast(), buffer.len(), 0))
+            .unwrap_err()
+    };
+    assert_eq!(err.kind(), ErrorKind::WouldBlock);
+
+    // Ensure that the client is no longer readable because
+    // we just got an EWOULDBLOCK from a receive call.
+    assert_eq!(&current_epoll_readiness::<8>(client_sockfd, EPOLLIN | EPOLLET), &[]);
+
     server_thread.join().unwrap();
+}
+
+/// Test sending bytes into a connected stream without blocking.
+/// Once the buffer is filled we wait for the epoll WRITABLE
+/// readiness instead of busy waiting until we can
+/// write again.
+///
+/// **Note**: This can only be tested on UNIX hosts because
+/// the socket write buffers dynamically grow for localhost
+/// connections on Windows.
+#[cfg(not(windows_hosts))]
+fn test_send_nonblock() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = errno_result(unsafe { libc::epoll_create1(0) }).unwrap();
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || {
+        let (peerfd, _) = net::accept_ipv4(server_sockfd).unwrap();
+        peerfd
+    });
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    unsafe {
+        // Change client socket to be non-blocking.
+        errno_check(libc::fcntl(client_sockfd, libc::F_SETFL, libc::O_NONBLOCK));
+    }
+
+    // Try to send bytes to the peer socket without blocking.
+    // We first fill up the buffer and ensure that we keep the
+    // writable readiness during the fill up process.
+
+    // Add client socket with READABLE interest to epoll.
+    epoll_ctl_add(epfd, client_sockfd, EPOLLOUT | EPOLLET | EPOLLERR).unwrap();
+
+    let fill_buf = [1u8; 32_000];
+
+    loop {
+        // Ensure the socket is still writable.
+        assert_eq!(
+            &current_epoll_readiness::<8>(client_sockfd, EPOLLOUT | EPOLLET),
+            &[Ev { events: EPOLLOUT, data: client_sockfd }]
+        );
+
+        let result = unsafe {
+            errno_result(libc::send(client_sockfd, fill_buf.as_ptr().cast(), fill_buf.len(), 0))
+        };
+
+        match result {
+            Ok(_) => continue,
+            Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+            Err(err) => panic!("unexpected error whilst filling up buffer: {err}"),
+        }
+    }
+
+    // The buffer should be filled up because we received an EWOULDBLOCK.
+    // This also means that the client socket should no longer be writable.
+    assert_eq!(&current_epoll_readiness::<8>(client_sockfd, EPOLLOUT | EPOLLET), &[]);
+
+    let peerfd = server_thread.join().unwrap();
+
+    // Spawn the reader thread.
+    let reader_thread = thread::spawn(move || {
+        // Read enough to make the client buffer
+        // writable again.
+        let mut buffer = [0u8; 128_000];
+        unsafe {
+            errno_result(libc_utils::read_all_generic(
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                libc_utils::NoRetry,
+                |buf, count| libc::recv(peerfd, buf, count, 0),
+            ))
+            .unwrap()
+        };
+        assert_eq!(&buffer, &[1u8; 128_000]);
+    });
+
+    // Wait until the socket is again writable.
+    check_epoll_wait::<8>(epfd, &[Ev { events: EPOLLOUT, data: client_sockfd }], -1);
+
+    let fill_buf = [1u8; 100];
+    // We should be able to write again without blocking because we just received
+    // a writable event.
+    unsafe {
+        errno_result(libc::send(client_sockfd, fill_buf.as_ptr().cast(), fill_buf.len(), 0))
+            .unwrap()
+    };
+
+    reader_thread.join().unwrap();
 }
