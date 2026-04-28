@@ -2,7 +2,7 @@
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::thread;
 
 const TEST_BYTES: &[u8] = b"these are some test bytes!";
@@ -14,6 +14,7 @@ fn main() {
     test_read_write();
     test_peek();
     test_peer_addr();
+    test_getaddrinfo();
 }
 
 fn test_create_ipv4_listener() {
@@ -112,4 +113,12 @@ fn test_peer_addr() {
     assert_eq!(address, peer_addr);
 
     handle.join().unwrap();
+}
+
+fn test_getaddrinfo() {
+    let addr_str = "localhost:8888";
+    // TODO: Fix nullptr dereference.
+    for addr in addr_str.to_socket_addrs().unwrap() {
+        println!("{addr:?}")
+    }
 }

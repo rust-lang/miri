@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::io::Read;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 use std::time::Duration;
 use std::{io, iter};
 
@@ -10,6 +10,7 @@ use mio::net::{TcpListener, TcpStream};
 use rand::Rng;
 use rustc_abi::Size;
 use rustc_const_eval::interpret::{InterpResult, interp_ok};
+use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::throw_unsup_format;
 use rustc_target::spec::Os;
 
@@ -17,6 +18,22 @@ use crate::concurrency::blocking_io::InterestReceiver;
 use crate::shims::files::{EvalContextExt as _, FdId, FileDescription, FileDescriptionRef};
 use crate::shims::unix::UnixFileDescription;
 use crate::*;
+
+/// Store containing pointers to head elements of
+/// allocated linked lists with address infos.
+pub struct AddressInfoStore(FxHashSet<Pointer>);
+
+impl AddressInfoStore {
+    pub fn new() -> Self {
+        AddressInfoStore(FxHashSet::default())
+    }
+}
+
+impl VisitProvenance for AddressInfoStore {
+    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+        self.0.iter().for_each(|ptr| ptr.visit_provenance(visit));
+    }
+}
 
 #[derive(Debug, PartialEq)]
 enum SocketFamily {
@@ -1076,6 +1093,127 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ),
         )
     }
+
+    fn getaddrinfo(
+        &mut self,
+        node: &OpTy<'tcx>,
+        service: &OpTy<'tcx>,
+        hints: &OpTy<'tcx>,
+        res: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let node_ptr = this.read_pointer(node)?;
+        let service_ptr = this.read_pointer(service)?;
+        let hints_ptr = this.read_pointer(hints)?;
+        let res_mplace = this.deref_pointer(res)?;
+
+        // Standard library implementation:
+        // https://github.com/rust-lang/rust/blob/c043085801b7a884054add21a94882216df5971c/library/std/src/sys/net/connection/socket/mod.rs#L343
+
+        if node_ptr == Pointer::null() {
+            // We cannot get an address without the `node` part because
+            // the [`ToSocketAddrs`] trait requires an address.
+            throw_unsup_format!(
+                "getaddrinfo: getting the address info without a `node` is unsupported"
+            );
+        }
+
+        let mut port = 0;
+        if service_ptr != Pointer::null() {
+            // The C-string at `service_ptr` is either a port number or a name of a
+            // well-known service.
+            let service_c_str = this.read_c_str(service_ptr)?;
+            let service_string = String::from_utf8_lossy(service_c_str);
+            match service_string.parse::<u16>() {
+                Ok(service_port) => port = service_port,
+                Err(_) => {
+                    // The string is not a valid port number; this is unsupported
+                    // because the standard library's [`ToSocketAddrs`] only supports
+                    // numeric ports.
+                    throw_unsup_format!(
+                        "getaddrinfo: non-numeric `service` arguments aren't supported"
+                    )
+                }
+            }
+        }
+
+        let node_c_str = this.read_c_str(node_ptr)?;
+        let node_str = String::from_utf8_lossy(node_c_str).to_string();
+
+        if hints_ptr == Pointer::null() {
+            // The standard library only supports getting TCP address information. The
+            // empty hints pointer would allow any socket type so we cannot support it.
+            throw_unsup_format!(
+                "getaddrinfo: getting address info without providing socket type hint is unsupported"
+            )
+        }
+
+        let hints_layout = this.libc_ty_layout("addrinfo");
+        let hints_mplace = this.ptr_to_mplace(hints_ptr, hints_layout);
+
+        let family_field = this.project_field_named(&hints_mplace, "ai_family")?;
+        let family = this.read_scalar(&family_field)?;
+        if family != Scalar::from_i32(0) {
+            // We cannot provide a family hint to the standard library implementation.
+            throw_unsup_format!("getaddrinfo: family hints are not supported")
+        }
+
+        let socktype_field = this.project_field_named(&hints_mplace, "ai_socktype")?;
+        let socktype = this.read_scalar(&socktype_field)?;
+        if socktype != this.eval_libc("SOCK_STREAM") {
+            // The standard library only supports getting TCP address information.
+            throw_unsup_format!(
+                "getaddrinfo: only queries with socket type SOCK_STREAM are supported"
+            )
+        }
+
+        let protocol_field = this.project_field_named(&hints_mplace, "ai_protocol")?;
+        let protocol = this.read_scalar(&protocol_field)?;
+        if protocol != Scalar::from_i32(0) {
+            // We cannot provide a protocol hint to the standard library implementation.
+            throw_unsup_format!("getaddrinfo: protocol hints are not supported")
+        }
+
+        let flags_field = this.project_field_named(&hints_mplace, "ai_flags")?;
+        let flags = this.read_scalar(&flags_field)?;
+        if flags != Scalar::from_i32(0) {
+            // We cannot provide any flag hints to the standard library implementation.
+            throw_unsup_format!("getaddrinfo: flag hints are not supported")
+        }
+
+        let socket_addrs = match (node_str, port).to_socket_addrs() {
+            Ok(addrs) => addrs,
+            Err(e) => return this.set_last_error_and_return_i32(e),
+        };
+
+        let res_ptr = match this.allocate_address_infos(socket_addrs)? {
+            Ok(res_ptr) => res_ptr,
+            Err(e) => return this.set_last_error_and_return_i32(e),
+        };
+
+        // Store pointer to the linked list such that
+        // we can deallocate it later.
+        this.machine.address_store.0.insert(res_ptr);
+
+        this.write_scalar(Scalar::from_maybe_pointer(res_ptr, this), &res_mplace)?;
+        interp_ok(Scalar::from_i32(0))
+    }
+
+    fn freeaddrinfo(&mut self, res: &OpTy<'tcx>) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let res_ptr = this.read_pointer(res)?;
+
+        if !this.machine.address_store.0.remove(&res_ptr) {
+            // The pointer was not stored in the set.
+            throw_ub_format!("freeaddrinfo: attempted to free linked list which isn't allocated");
+        }
+
+        this.free_address_infos(res_ptr)?;
+
+        interp_ok(())
+    }
 }
 
 impl<'tcx> EvalContextPrivExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -1346,6 +1484,89 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         )?;
 
         interp_ok(Ok(()))
+    }
+
+    /// Allocate a linked list of address info structs from an iterator of [`SocketAddr`]s.
+    /// Returns a pointer pointing to the head of the linked list.
+    fn allocate_address_infos(
+        &mut self,
+        mut addresses: impl Iterator<Item = SocketAddr>,
+    ) -> InterpResult<'tcx, Result<Pointer, IoError>> {
+        let this = self.eval_context_mut();
+
+        let Some(address) = addresses.next() else {
+            // Iterator is empty; we return a null pointer.
+            return interp_ok(Ok(Pointer::null()));
+        };
+
+        let addrinfo_layout = this.libc_ty_layout("addrinfo");
+
+        let addrinfo_mplace = this.allocate(addrinfo_layout, MiriMemoryKind::Machine.into())?;
+        // Zero the newly allocated struct.
+        this.write_bytes_ptr(
+            addrinfo_mplace.ptr(),
+            iter::repeat_n(0, addrinfo_mplace.layout.size.bytes_usize()),
+        )?;
+
+        let flags_mplace = this.project_field_named(&addrinfo_mplace, "ai_flags")?;
+        this.write_int(0, &flags_mplace)?;
+
+        let family_mplace = this.project_field_named(&addrinfo_mplace, "ai_family")?;
+        let family = match &address {
+            SocketAddr::V4(_) => this.eval_libc("AF_INET"),
+            SocketAddr::V6(_) => this.eval_libc("AF_INET6"),
+        };
+        this.write_scalar(family, &family_mplace)?;
+
+        let socktype_mplace = this.project_field_named(&addrinfo_mplace, "ai_socktype")?;
+        this.write_scalar(this.eval_libc("SOCK_STREAM"), &socktype_mplace)?;
+
+        let protocol_mplace = this.project_field_named(&addrinfo_mplace, "ai_protocol")?;
+        this.write_int(0, &protocol_mplace)?;
+
+        let addrlen_mplace = this.project_field_named(&addrinfo_mplace, "ai_addrlen")?;
+        let addr_mplace = this.project_field_named(&addrinfo_mplace, "ai_addr")?;
+        if let Err(err) = this.write_socket_address(
+            &address,
+            addr_mplace.ptr(),
+            addrlen_mplace.ptr(),
+            "getaddrinfo",
+        )? {
+            return interp_ok(Err(err));
+        };
+
+        let canonname_mplace = this.project_field_named(&addrinfo_mplace, "ai_canonname")?;
+        this.write_scalar(Scalar::from_target_usize(0, this), &canonname_mplace)?;
+
+        let next_mplace = this.project_field_named(&addrinfo_mplace, "ai_next")?;
+        let next = match this.allocate_address_infos(addresses)? {
+            Ok(next_ptr) => Scalar::from_maybe_pointer(next_ptr, this),
+            Err(e) => return interp_ok(Err(e)),
+        };
+        this.write_scalar(next, &next_mplace)?;
+
+        interp_ok(Ok(addrinfo_mplace.ptr()))
+    }
+
+    /// Deallocate the linked list of address info structs.
+    /// `address_ptr` points to the start from where we deallocate recursively.
+    fn free_address_infos(&mut self, address_ptr: Pointer) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        if address_ptr == Pointer::null() {
+            // We're at the end of the linked list.
+            return interp_ok(());
+        }
+
+        let addrinfo_layout = this.libc_ty_layout("addrinfo");
+        let addrinfo_mplace = this.ptr_to_mplace(address_ptr, addrinfo_layout);
+
+        let next_field = this.project_field_named(&addrinfo_mplace, "ai_next")?;
+        this.free_address_infos(next_field.ptr())?;
+
+        this.deallocate_ptr(address_ptr, None, MiriMemoryKind::Machine.into())?;
+
+        interp_ok(())
     }
 
     /// Block the thread until there's an incoming connection or an error occurred.
