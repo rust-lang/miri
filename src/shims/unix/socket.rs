@@ -1108,9 +1108,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let hints_ptr = this.read_pointer(hints)?;
         let res_mplace = this.deref_pointer(res)?;
 
-        // Standard library implementation:
-        // https://github.com/rust-lang/rust/blob/c043085801b7a884054add21a94882216df5971c/library/std/src/sys/net/connection/socket/mod.rs#L343
-
         if node_ptr == Pointer::null() {
             // We cannot get an address without the `node` part because
             // the [`ToSocketAddrs`] trait requires an address.
