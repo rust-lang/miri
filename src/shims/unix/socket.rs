@@ -1,13 +1,12 @@
 use std::cell::{Cell, RefCell, RefMut};
+use std::io;
 use std::io::Read;
-use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
-use std::{io, iter};
 
 use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
-use rustc_abi::Size;
 use rustc_const_eval::interpret::{InterpResult, interp_ok};
 use rustc_middle::throw_unsup_format;
 use rustc_target::spec::Os;
@@ -15,6 +14,7 @@ use rustc_target::spec::Os;
 use crate::shims::files::{EvalContextExt as _, FdId, FileDescription, FileDescriptionRef};
 use crate::shims::unix::UnixFileDescription;
 use crate::shims::unix::linux_like::epoll::{EpollReadiness, EvalContextExt as _};
+use crate::shims::unix::socket_address::EvalContextExt as _;
 use crate::*;
 
 #[derive(Debug, PartialEq)]
@@ -354,7 +354,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         let socket = this.read_scalar(socket)?.to_i32()?;
-        let address = match this.socket_address(address, address_len, "bind")? {
+        let address = match this.read_socket_address(address, address_len, "bind")? {
             Ok(addr) => addr,
             Err(e) => return this.set_last_error_and_return_i32(e),
         };
@@ -570,7 +570,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
 
         let socket = this.read_scalar(socket)?.to_i32()?;
-        let address = match this.socket_address(address, address_len, "connect")? {
+        let address = match this.read_socket_address(address, address_len, "connect")? {
             Ok(address) => address,
             Err(e) => return this.set_last_error_and_return(e, dest),
         };
@@ -1018,10 +1018,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             SocketState::Initial => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
         };
 
-        match this.write_socket_address(&address, address_ptr, address_len_ptr, "getsockname")? {
-            Ok(_) => interp_ok(Scalar::from_i32(0)),
-            Err(e) => this.set_last_error_and_return_i32(e),
-        }
+        this.write_socket_address(&address, address_ptr, address_len_ptr, "getsockname")
+            .map(|_| Scalar::from_i32(0))
     }
 
     fn getpeername(
@@ -1078,15 +1076,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         Err(e) => return this.set_last_error_and_return(e, &dest),
                     };
 
-                    match this.write_socket_address(
+                    this.write_socket_address(
                         &address,
                         address_ptr,
                         address_len_ptr,
                         "getpeername",
-                    )? {
-                        Ok(_) => this.write_scalar(Scalar::from_i32(0), &dest),
-                        Err(e) => this.set_last_error_and_return(e, &dest),
-                    }
+                    )?;
+                   this.write_scalar(Scalar::from_i32(0), &dest)
                 }
             ),
         )
@@ -1137,274 +1133,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
 impl<'tcx> EvalContextPrivExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    /// Attempt to turn an address and length operand into a standard library socket address.
-    ///
-    /// Returns an IO error should the address length not match the address family length.
-    fn socket_address(
-        &self,
-        address: &OpTy<'tcx>,
-        address_len: &OpTy<'tcx>,
-        foreign_name: &'static str,
-    ) -> InterpResult<'tcx, Result<SocketAddr, IoError>> {
-        let this = self.eval_context_ref();
-
-        let socklen_layout = this.libc_ty_layout("socklen_t");
-        // We only support address lengths which can be stored in a u64 since the
-        // size of a layout is also stored in a u64.
-        let address_len: u64 =
-            this.read_scalar(address_len)?.to_int(socklen_layout.size)?.try_into().unwrap();
-
-        // Initially, treat address as generic sockaddr just to extract the family field.
-        let sockaddr_layout = this.libc_ty_layout("sockaddr");
-        if address_len < sockaddr_layout.size.bytes() {
-            // Address length should be at least as big as the generic sockaddr
-            return interp_ok(Err(LibcError("EINVAL")));
-        }
-        let address = this.deref_pointer_as(address, sockaddr_layout)?;
-
-        let family_field = this.project_field_named(&address, "sa_family")?;
-        let family_layout = this.libc_ty_layout("sa_family_t");
-        let family = this.read_scalar(&family_field)?.to_int(family_layout.size)?;
-
-        // Depending on the family, decide whether it's IPv4 or IPv6 and use specialized layout
-        // to extract address and port.
-        let socket_addr = if family == this.eval_libc_i32("AF_INET").into() {
-            let sockaddr_in_layout = this.libc_ty_layout("sockaddr_in");
-            if address_len != sockaddr_in_layout.size.bytes() {
-                // Address length should be exactly the length of an IPv4 address.
-                return interp_ok(Err(LibcError("EINVAL")));
-            }
-            let address = address.transmute(sockaddr_in_layout, this)?;
-
-            let port_field = this.project_field_named(&address, "sin_port")?;
-            // Read bytes and treat them as big endian since port is stored in network byte order.
-            let port_bytes: [u8; 2] = this
-                .read_bytes_ptr_strip_provenance(port_field.ptr(), Size::from_bytes(2))?
-                .try_into()
-                .unwrap();
-            let port = u16::from_be_bytes(port_bytes);
-
-            let addr_field = this.project_field_named(&address, "sin_addr")?;
-            let s_addr_field = this.project_field_named(&addr_field, "s_addr")?;
-            // Read bytes and treat them as big endian since address is stored in network byte order.
-            let addr_bytes: [u8; 4] = this
-                .read_bytes_ptr_strip_provenance(s_addr_field.ptr(), Size::from_bytes(4))?
-                .try_into()
-                .unwrap();
-            let addr_bits = u32::from_be_bytes(addr_bytes);
-
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from_bits(addr_bits), port))
-        } else if family == this.eval_libc_i32("AF_INET6").into() {
-            let sockaddr_in6_layout = this.libc_ty_layout("sockaddr_in6");
-            if address_len != sockaddr_in6_layout.size.bytes() {
-                // Address length should be exactly the length of an IPv6 address.
-                return interp_ok(Err(LibcError("EINVAL")));
-            }
-            // We cannot transmute since the `sockaddr_in6` layout is bigger than the `sockaddr` layout.
-            let address = address.offset(Size::ZERO, sockaddr_in6_layout, this)?;
-
-            let port_field = this.project_field_named(&address, "sin6_port")?;
-            // Read bytes and treat them as big endian since port is stored in network byte order.
-            let port_bytes: [u8; 2] = this
-                .read_bytes_ptr_strip_provenance(port_field.ptr(), Size::from_bytes(2))?
-                .try_into()
-                .unwrap();
-            let port = u16::from_be_bytes(port_bytes);
-
-            let addr_field = this.project_field_named(&address, "sin6_addr")?;
-            let s_addr_field = this
-                .project_field_named(&addr_field, "s6_addr")?
-                .transmute(this.machine.layouts.u128, this)?;
-            // Read bytes and treat them as big endian since address is stored in network byte order.
-            let addr_bytes: [u8; 16] = this
-                .read_bytes_ptr_strip_provenance(s_addr_field.ptr(), Size::from_bytes(16))?
-                .try_into()
-                .unwrap();
-            let addr_bits = u128::from_be_bytes(addr_bytes);
-
-            let flowinfo_field = this.project_field_named(&address, "sin6_flowinfo")?;
-            // flowinfo doesn't get the big endian treatment as this field is stored in native byte order
-            // and not in network byte order.
-            let flowinfo = this.read_scalar(&flowinfo_field)?.to_u32()?;
-
-            let scope_id_field = this.project_field_named(&address, "sin6_scope_id")?;
-            // scope_id doesn't get the big endian treatment as this field is stored in native byte order
-            // and not in network byte order.
-            let scope_id = this.read_scalar(&scope_id_field)?.to_u32()?;
-
-            SocketAddr::V6(SocketAddrV6::new(
-                Ipv6Addr::from_bits(addr_bits),
-                port,
-                flowinfo,
-                scope_id,
-            ))
-        } else {
-            // Socket of other types shouldn't be created in a first place and
-            // thus also no address family of another type should be supported.
-            throw_unsup_format!(
-                "{foreign_name}: address family {family:#x} is unsupported, \
-                only AF_INET and AF_INET6 are allowed"
-            );
-        };
-
-        interp_ok(Ok(socket_addr))
-    }
-
-    /// Attempt to write a standard library socket address into a pointer.
-    ///
-    /// The `address_len_ptr` parameter serves both as input and output parameter.
-    /// On input, it points to the size of the buffer `address_ptr` points to, and
-    /// on output it points to the non-truncated size of the written address in the
-    /// buffer pointed to by `address_ptr`.
-    ///
-    /// If the address buffer doesn't fit the whole address, the address is truncated to not
-    /// overflow the buffer.
-    fn write_socket_address(
-        &mut self,
-        address: &SocketAddr,
-        address_ptr: Pointer,
-        address_len_ptr: Pointer,
-        foreign_name: &'static str,
-    ) -> InterpResult<'tcx, Result<(), IoError>> {
-        let this = self.eval_context_mut();
-
-        if address_ptr == Pointer::null() || address_len_ptr == Pointer::null() {
-            // The POSIX man page doesn't account for the cases where the `address_ptr` or
-            // `address_len_ptr` could be null pointers. Thus, this behavior is undefined!
-            throw_ub_format!(
-                "{foreign_name}: writing a socket address but the address or the length pointer is a null pointer"
-            )
-        }
-
-        let socklen_layout = this.libc_ty_layout("socklen_t");
-        let address_buffer_len_place = this.ptr_to_mplace(address_len_ptr, socklen_layout);
-        // We only support buffer lengths which can be stored in a u64 since the
-        // size of a layout in bytes is also stored in a u64.
-        let address_buffer_len: u64 = this
-            .read_scalar(&address_buffer_len_place)?
-            .to_int(socklen_layout.size)?
-            .try_into()
-            .unwrap();
-
-        let (address_buffer, address_layout) = match address {
-            SocketAddr::V4(address) => {
-                // IPv4 address bytes; already stored in network byte order.
-                let address_bytes = address.ip().octets();
-                // Port needs to be manually turned into network byte order.
-                let port = address.port().to_be();
-
-                let sockaddr_in_layout = this.libc_ty_layout("sockaddr_in");
-                // Allocate new buffer on the stack with the `sockaddr_in` layout.
-                // We need a temporary buffer as `address_ptr` might not point to a large enough
-                // buffer, in which case we have to truncate.
-                let address_buffer = this.allocate(sockaddr_in_layout, MemoryKind::Stack)?;
-                // Zero the whole buffer as some libc targets have additional fields which we fill
-                // with zero bytes (just like the standard library does it).
-                this.write_bytes_ptr(
-                    address_buffer.ptr(),
-                    iter::repeat_n(0, address_buffer.layout.size.bytes_usize()),
-                )?;
-
-                let sin_family_field = this.project_field_named(&address_buffer, "sin_family")?;
-                // We cannot simply write the `AF_INET` scalar into the `sin_family_field` because on most
-                // systems the field has a layout of 16-bit whilst the scalar has a size of 32-bit.
-                // Since the `AF_INET` constant is chosen such that it can safely be converted into
-                // a 16-bit integer, we use the following logic to get a scalar of the right size.
-                let af_inet = this.eval_libc("AF_INET");
-                let address_family =
-                    Scalar::from_int(af_inet.to_int(af_inet.size())?, sin_family_field.layout.size);
-                this.write_scalar(address_family, &sin_family_field)?;
-
-                let sin_port_field = this.project_field_named(&address_buffer, "sin_port")?;
-                // Write the port in target native endianness bytes as we already converted it
-                // to big endian above.
-                this.write_bytes_ptr(sin_port_field.ptr(), port.to_ne_bytes())?;
-
-                let sin_addr_field = this.project_field_named(&address_buffer, "sin_addr")?;
-                let s_addr_field = this.project_field_named(&sin_addr_field, "s_addr")?;
-                this.write_bytes_ptr(s_addr_field.ptr(), address_bytes)?;
-
-                (address_buffer, sockaddr_in_layout)
-            }
-            SocketAddr::V6(address) => {
-                // IPv6 address bytes; already stored in network byte order.
-                let address_bytes = address.ip().octets();
-                // Port needs to be manually turned into network byte order.
-                let port = address.port().to_be();
-                // Flowinfo is stored in native byte order.
-                let flowinfo = address.flowinfo();
-                // Scope id is stored in native byte order.
-                let scope_id = address.scope_id();
-
-                let sockaddr_in6_layout = this.libc_ty_layout("sockaddr_in6");
-                // Allocate new buffer on the stack with the `sockaddr_in6` layout.
-                // We need a temporary buffer as `address_ptr` might not point to a large enough
-                // buffer, in which case we have to truncate.
-                let address_buffer = this.allocate(sockaddr_in6_layout, MemoryKind::Stack)?;
-                // Zero the whole buffer as some libc targets have additional fields which we fill
-                // with zero bytes (just like the standard library does it).
-                this.write_bytes_ptr(
-                    address_buffer.ptr(),
-                    iter::repeat_n(0, address_buffer.layout.size.bytes_usize()),
-                )?;
-
-                let sin6_family_field = this.project_field_named(&address_buffer, "sin6_family")?;
-                // We cannot simply write the `AF_INET6` scalar into the `sin6_family_field` because on most
-                // systems the field has a layout of 16-bit whilst the scalar has a size of 32-bit.
-                // Since the `AF_INET6` constant is chosen such that it can safely be converted into
-                // a 16-bit integer, we use the following logic to get a scalar of the right size.
-                let af_inet6 = this.eval_libc("AF_INET6");
-                let address_family = Scalar::from_int(
-                    af_inet6.to_int(af_inet6.size())?,
-                    sin6_family_field.layout.size,
-                );
-                this.write_scalar(address_family, &sin6_family_field)?;
-
-                let sin6_port_field = this.project_field_named(&address_buffer, "sin6_port")?;
-                // Write the port in target native endianness bytes as we already converted it
-                // to big endian above.
-                this.write_bytes_ptr(sin6_port_field.ptr(), port.to_ne_bytes())?;
-
-                let sin6_flowinfo_field =
-                    this.project_field_named(&address_buffer, "sin6_flowinfo")?;
-                this.write_scalar(Scalar::from_u32(flowinfo), &sin6_flowinfo_field)?;
-
-                let sin6_scope_id_field =
-                    this.project_field_named(&address_buffer, "sin6_scope_id")?;
-                this.write_scalar(Scalar::from_u32(scope_id), &sin6_scope_id_field)?;
-
-                let sin6_addr_field = this.project_field_named(&address_buffer, "sin6_addr")?;
-                let s6_addr_field = this.project_field_named(&sin6_addr_field, "s6_addr")?;
-                this.write_bytes_ptr(s6_addr_field.ptr(), address_bytes)?;
-
-                (address_buffer, sockaddr_in6_layout)
-            }
-        };
-
-        // Copy the truncated address into the pointer pointed to by `address_ptr`.
-        this.mem_copy(
-            address_buffer.ptr(),
-            address_ptr,
-            // Truncate the address to fit the provided buffer.
-            address_layout.size.min(Size::from_bytes(address_buffer_len)),
-            // The buffers are guaranteed to not overlap since the `address_buffer`
-            // was just newly allocated on the stack.
-            true,
-        )?;
-        // Deallocate the address buffer as it was only needed to construct the address and
-        // copy it into the buffer pointed to by `address_ptr`.
-        this.deallocate_ptr(address_buffer.ptr(), None, MemoryKind::Stack)?;
-        // Size of the non-truncated address.
-        let address_len = address_layout.size.bytes();
-
-        this.write_scalar(
-            Scalar::from_uint(address_len, socklen_layout.size),
-            &address_buffer_len_place,
-        )?;
-
-        interp_ok(Ok(()))
-    }
-
     /// Block the thread until there's an incoming connection or an error occurred.
     ///
     /// This recursively calls itself should the operation still block for some reason.
@@ -1496,11 +1224,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // We only attempt a write if the address pointer is not a null pointer.
             // If the address pointer is a null pointer the user isn't interested in the
             // address and we don't need to write anything.
-            if let Err(e) =
-                this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?
-            {
-                return interp_ok(Err(e));
-            };
+            this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?;
         }
 
         let fd = this.machine.fds.new_ref(Socket {
