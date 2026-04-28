@@ -560,6 +560,7 @@ fn test_getaddrinfo_freeaddrinfo() {
         ));
     }
     let start = res;
+    let mut addr_count = 0;
 
     loop {
         unsafe {
@@ -568,6 +569,7 @@ fn test_getaddrinfo_freeaddrinfo() {
                 break;
             };
 
+            addr_count += 1;
             match (*cur).ai_family as libc::c_int {
                 libc::AF_INET => {
                     let (_, addr) = net::sockname_ipv4(|storage, len| {
@@ -603,6 +605,9 @@ fn test_getaddrinfo_freeaddrinfo() {
             res = cur.ai_next;
         }
     }
+
+    // We expect an IPv4 and an IPv6 address.
+    assert!(addr_count == 2);
 
     unsafe {
         libc::freeaddrinfo(start.cast());

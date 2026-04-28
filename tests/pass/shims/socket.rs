@@ -3,7 +3,7 @@
 
 use std::io::{Read, Write};
 use std::net::{
-    Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream,
+    IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream,
     ToSocketAddrs,
 };
 use std::thread;
@@ -120,12 +120,23 @@ fn test_peer_addr() {
 
 /// Test getting a socket address from a hostname and a port.
 fn test_address_resolution() {
+    let listener = TcpListener::bind("localhost:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    match address.ip() {
+        IpAddr::V4(addr) => assert_eq!(addr, Ipv4Addr::LOCALHOST),
+        IpAddr::V6(addr) => assert_eq!(addr, Ipv6Addr::LOCALHOST),
+    }
+
     let addr_str = "localhost:8888";
+    let mut addr_count = 0;
     for addr in addr_str.to_socket_addrs().unwrap() {
+        addr_count += 1;
         match addr {
             SocketAddr::V4(addr) => assert_eq!(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8888), addr),
             SocketAddr::V6(addr) =>
                 assert_eq!(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8888, 0, 0), addr),
         }
     }
+    // We expect an IPv4 and an IPv6 address.
+    assert!(addr_count == 2)
 }
