@@ -177,7 +177,7 @@ fn test_accept4_sock_nonblock_opt() {
     // Spawn the server thread.
     let server_thread = thread::spawn(move || {
         let (peerfd, _) = net::sockname_ipv4(|storage, len| unsafe {
-            libc::accept4(server_sockfd, storage, len, libc::SOCK_NONBLOCK)
+            libc::accept4(server_sockfd, storage.cast(), len, libc::SOCK_NONBLOCK)
         })
         .unwrap();
 
@@ -226,7 +226,7 @@ fn test_connect_nonblock() {
 
     loop {
         let result = net::sockname_ipv4(|storage, len| unsafe {
-            libc::getpeername(client_sockfd, storage, len)
+            libc::getpeername(client_sockfd, storage.cast(), len)
         });
         match result {
             Ok(_) => {
@@ -601,7 +601,7 @@ fn test_getpeername_ipv4_nonblock() {
 
     loop {
         let peername_result = net::sockname_ipv4(|storage, len| unsafe {
-            libc::getpeername(client_sockfd, storage, len)
+            libc::getpeername(client_sockfd, storage.cast(), len)
         });
 
         match peername_result {
@@ -654,7 +654,7 @@ fn test_getpeername_ipv4_nonblock_no_peer() {
     // Since we're never accepting the connection, the socket should never be
     // successfully connected and thus we should be unable to read the peername.
     let Err(err) = net::sockname_ipv4(|storage, len| unsafe {
-        libc::getpeername(client_sockfd, storage, len)
+        libc::getpeername(client_sockfd, storage.cast(), len)
     }) else {
         unreachable!()
     };
