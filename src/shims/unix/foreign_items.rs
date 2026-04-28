@@ -678,7 +678,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "freeaddrinfo" => {
                 let [res] = this.check_shim_sig(
-                    shim_sig!(extern "C" fn(*mut _) -> i32),
+                    shim_sig!(extern "C" fn(*mut _) -> ()),
                     link_name,
                     abi,
                     args,

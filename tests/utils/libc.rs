@@ -274,8 +274,9 @@ pub mod net {
         }
 
         // Retrieve actual listener address because we used a randomized port.
-        let (_, addr_with_port) =
-            sockname_ipv4(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) })?;
+        let (_, addr_with_port) = sockname_ipv4(|storage, len| unsafe {
+            libc::getsockname(sockfd, storage.cast(), len)
+        })?;
 
         Ok((sockfd, addr_with_port))
     }
@@ -299,20 +300,21 @@ pub mod net {
         }
 
         // Retrieve actual listener address because we used a randomized port.
-        let (_, addr_with_port) =
-            sockname_ipv6(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) })?;
+        let (_, addr_with_port) = sockname_ipv6(|storage, len| unsafe {
+            libc::getsockname(sockfd, storage.cast(), len)
+        })?;
 
         Ok((sockfd, addr_with_port))
     }
 
     /// Accept an incoming IPv4 connection.
     pub fn accept_ipv4(sockfd: libc::c_int) -> io::Result<(libc::c_int, libc::sockaddr_in)> {
-        sockname_ipv4(|storage, len| unsafe { libc::accept(sockfd, storage, len) })
+        sockname_ipv4(|storage, len| unsafe { libc::accept(sockfd, storage.cast(), len) })
     }
 
     /// Accept an incoming IPv6 connection.
     pub fn accept_ipv6(sockfd: libc::c_int) -> io::Result<(libc::c_int, libc::sockaddr_in6)> {
-        sockname_ipv6(|storage, len| unsafe { libc::accept(sockfd, storage, len) })
+        sockname_ipv6(|storage, len| unsafe { libc::accept(sockfd, storage.cast(), len) })
     }
 
     /// Connect the socket to the specified IPv4 address.
@@ -369,7 +371,7 @@ pub mod net {
     /// syscall and the written address of it.
     pub fn sockname_ipv4<F>(f: F) -> io::Result<(libc::c_int, libc::sockaddr_in)>
     where
-        F: FnOnce(*mut libc::sockaddr, *mut libc::socklen_t) -> libc::c_int,
+        F: FnOnce(*mut libc::sockaddr_storage, *mut libc::socklen_t) -> libc::c_int,
     {
         let (result, addr) = sockname(f)?;
         let LibcSocketAddr::V4(addr) = addr else { panic!("expected IPv4 address") };
@@ -382,7 +384,7 @@ pub mod net {
     /// syscall and the written address of it.
     pub fn sockname_ipv6<F>(f: F) -> io::Result<(libc::c_int, libc::sockaddr_in6)>
     where
-        F: FnOnce(*mut libc::sockaddr, *mut libc::socklen_t) -> libc::c_int,
+        F: FnOnce(*mut libc::sockaddr_storage, *mut libc::socklen_t) -> libc::c_int,
     {
         let (result, addr) = sockname(f)?;
         let LibcSocketAddr::V6(addr) = addr else { panic!("expected IPv6 address") };
@@ -402,7 +404,7 @@ pub mod net {
     /// syscall and the written address of it.
     fn sockname<F>(f: F) -> io::Result<(libc::c_int, LibcSocketAddr)>
     where
-        F: FnOnce(*mut libc::sockaddr, *mut libc::socklen_t) -> libc::c_int,
+        F: FnOnce(*mut libc::sockaddr_storage, *mut libc::socklen_t) -> libc::c_int,
     {
         let mut storage = std::mem::MaybeUninit::<libc::sockaddr_storage>::zeroed();
         let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;

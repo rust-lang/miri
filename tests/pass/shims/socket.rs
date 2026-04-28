@@ -2,7 +2,10 @@
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{
+    Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream,
+    ToSocketAddrs,
+};
 use std::thread;
 
 const TEST_BYTES: &[u8] = b"these are some test bytes!";
@@ -14,7 +17,7 @@ fn main() {
     test_read_write();
     test_peek();
     test_peer_addr();
-    test_getaddrinfo();
+    test_address_resolution();
 }
 
 fn test_create_ipv4_listener() {
@@ -115,10 +118,14 @@ fn test_peer_addr() {
     handle.join().unwrap();
 }
 
-fn test_getaddrinfo() {
+/// Test getting a socket address from a hostname and a port.
+fn test_address_resolution() {
     let addr_str = "localhost:8888";
-    // TODO: Fix nullptr dereference.
     for addr in addr_str.to_socket_addrs().unwrap() {
-        println!("{addr:?}")
+        match addr {
+            SocketAddr::V4(addr) => assert_eq!(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8888), addr),
+            SocketAddr::V6(addr) =>
+                assert_eq!(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8888, 0, 0), addr),
+        }
     }
 }

@@ -1196,7 +1196,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // we can deallocate it later.
         this.machine.address_store.0.insert(res_ptr);
 
-        this.write_scalar(Scalar::from_maybe_pointer(res_ptr, this), &res_mplace)?;
+        this.write_pointer(res_ptr, &res_mplace)?;
         interp_ok(Scalar::from_i32(0))
     }
 
@@ -1207,7 +1207,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if !this.machine.address_store.0.remove(&res_ptr) {
             // The pointer was not stored in the set.
-            throw_ub_format!("freeaddrinfo: attempted to free linked list which isn't allocated");
+            throw_ub_format!(
+                "freeaddrinfo: attempted to free linked list which wasn't allocated using getaddrinfo"
+            );
         }
 
         this.free_address_infos(res_ptr)?;
@@ -1502,7 +1504,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let addrinfo_layout = this.libc_ty_layout("addrinfo");
 
         let addrinfo_mplace = this.allocate(addrinfo_layout, MiriMemoryKind::Machine.into())?;
-        // Zero the newly allocated struct.
+        // Zero the newly allocated address info struct.
         this.write_bytes_ptr(
             addrinfo_mplace.ptr(),
             iter::repeat_n(0, addrinfo_mplace.layout.size.bytes_usize()),
@@ -1524,26 +1526,38 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let protocol_mplace = this.project_field_named(&addrinfo_mplace, "ai_protocol")?;
         this.write_int(0, &protocol_mplace)?;
 
+        // `sockaddr_storage` is guaranteed to fit any `sockaddr_*` address structure.
+        let sockaddr_layout = this.libc_ty_layout("sockaddr_storage");
+
         let addrlen_mplace = this.project_field_named(&addrinfo_mplace, "ai_addrlen")?;
         let addr_mplace = this.project_field_named(&addrinfo_mplace, "ai_addr")?;
+        this.write_int(sockaddr_layout.size.bytes(), &addrlen_mplace)?;
+
+        let sockaddr_mplace = this.allocate(sockaddr_layout, MiriMemoryKind::Machine.into())?;
+        // Zero the newly allocated socket address struct.
+        this.write_bytes_ptr(
+            sockaddr_mplace.ptr(),
+            iter::repeat_n(0, sockaddr_mplace.layout.size.bytes_usize()),
+        )?;
         if let Err(err) = this.write_socket_address(
             &address,
-            addr_mplace.ptr(),
+            sockaddr_mplace.ptr(),
             addrlen_mplace.ptr(),
             "getaddrinfo",
         )? {
             return interp_ok(Err(err));
         };
+        this.write_pointer(sockaddr_mplace.ptr(), &addr_mplace)?;
 
         let canonname_mplace = this.project_field_named(&addrinfo_mplace, "ai_canonname")?;
-        this.write_scalar(Scalar::from_target_usize(0, this), &canonname_mplace)?;
+        this.write_pointer(Pointer::null(), &canonname_mplace)?;
 
         let next_mplace = this.project_field_named(&addrinfo_mplace, "ai_next")?;
-        let next = match this.allocate_address_infos(addresses)? {
-            Ok(next_ptr) => Scalar::from_maybe_pointer(next_ptr, this),
+        let next_ptr = match this.allocate_address_infos(addresses)? {
+            Ok(next_ptr) => next_ptr,
             Err(e) => return interp_ok(Err(e)),
         };
-        this.write_scalar(next, &next_mplace)?;
+        this.write_pointer(next_ptr, &next_mplace)?;
 
         interp_ok(Ok(addrinfo_mplace.ptr()))
     }
@@ -1561,8 +1575,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let addrinfo_layout = this.libc_ty_layout("addrinfo");
         let addrinfo_mplace = this.ptr_to_mplace(address_ptr, addrinfo_layout);
 
+        let addr_field = this.project_field_named(&addrinfo_mplace, "ai_addr")?;
+        let addr_ptr = this.read_pointer(&addr_field)?;
+        this.deallocate_ptr(addr_ptr, None, MiriMemoryKind::Machine.into())?;
+
         let next_field = this.project_field_named(&addrinfo_mplace, "ai_next")?;
-        this.free_address_infos(next_field.ptr())?;
+        let next_ptr = this.read_pointer(&next_field)?;
+        this.free_address_infos(next_ptr)?;
 
         this.deallocate_ptr(address_ptr, None, MiriMemoryKind::Machine.into())?;
 
