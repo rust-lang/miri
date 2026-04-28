@@ -24,24 +24,16 @@ pub trait SourceFileDescription: FileDescription {
     fn get_readiness_mut(&self) -> RefMut<'_, BlockingIoSourceReadiness>;
 }
 
-/// An interest receiver defines the action that should be taken when
-/// the associated [`Interest`] is fulfilled.
-#[derive(Debug, PartialEq, Clone, Copy, Eq, PartialOrd, Ord)]
-pub enum InterestReceiver {
-    /// The specified thread should be unblocked.
-    UnblockThread(ThreadId),
-}
-
-/// An I/O interest for an [`InterestReceiver`].
+/// An I/O interest for a blocked thread.
 /// For all variants the interest in error events is implicitly added
 /// to the specified interests!
 #[derive(Debug)]
 pub enum BlockingIoInterest {
-    /// The receiver is interested in [`Interest::READABLE`].
+    /// The blocked thread is interested in [`Interest::READABLE`].
     Read,
-    /// The receiver is interested in [`Interest::WRITABLE`].
+    /// The blocked thread is interested in [`Interest::WRITABLE`].
     Write,
-    /// The receiver is interested in [`Interest::READABLE`] and
+    /// The blocked thread is interested in [`Interest::READABLE`] and
     /// [`Interest::WRITABLE`].
     ReadWrite,
 }
@@ -108,8 +100,8 @@ impl From<&mio::event::Event> for BlockingIoSourceReadiness {
 struct BlockingIoSource {
     /// The source file description which is registered into the poll.
     fd: FileDescriptionRef<dyn SourceFileDescription>,
-    /// The registered receivers for this file description.
-    receivers: BTreeMap<InterestReceiver, BlockingIoInterest>,
+    /// The threads which are blocked on the I/O source.
+    blocked_threads: BTreeMap<ThreadId, BlockingIoInterest>,
 }
 
 /// Manager for managing blocking host I/O in a non-blocking manner.
@@ -128,8 +120,8 @@ pub struct BlockingIoManager {
     /// This is not part of the state and only stored to avoid allocating a
     /// new buffer for every poll.
     events: Events,
-    /// Map from source file description ids to the actual sources with their
-    /// registered receivers.
+    /// Map from source file description ids to the actual sources and their
+    /// blocked threads.
     sources: BTreeMap<FdId, BlockingIoSource>,
 }
 
@@ -153,14 +145,13 @@ impl BlockingIoManager {
     ///   specified duration.
     /// - If the timeout is [`None`] the poll blocks indefinitely until an event occurs.
     ///
-    /// Returns the list of [`InterestReceiver`]s whose interests are currently fulfilled together with
-    /// the file description they're for. Note that the events are returned in a level-triggered way,
-    /// which means that [`InterestReceiver`]s whose interests were fulfilled before the poll will be
-    /// returned again.
+    /// Returns the list of [`ThreadId`]s which can be unblocked because their interests are currently fulfilled.
+    /// Note that the events are returned in a level-triggered way, which means that [`ThreadId`]s whose interests
+    /// were already fulfilled before the poll will be returned again.
     pub fn poll<'tcx>(
         ecx: &mut MiriInterpCx<'tcx>,
         timeout: Option<Duration>,
-    ) -> InterpResult<'tcx, Result<Vec<InterestReceiver>, io::Error>> {
+    ) -> InterpResult<'tcx, Result<Vec<ThreadId>, io::Error>> {
         let poll = ecx
             .machine
             .blocking_io
@@ -201,26 +192,30 @@ impl BlockingIoManager {
             ecx.update_epoll_active_events(fd, false)?;
         }
 
-        // List containing all receivers for all registered sources whose interests are
-        // currently fulfilled. This also includes receivers for sources which didn't
-        // receive an event from the current poll invocation.
-        let ready = ecx
+        // List of all thread id's whose interests are currently fulfilled.
+        // This also includes thread id's whose interests were already
+        // fulfilled before the `poll` invocation.
+        let ready_threads = ecx
             .machine
             .blocking_io
             .sources
             .values()
             .flat_map(|source| {
                 source
-                    .receivers
+                    .blocked_threads
                     .iter()
-                    .filter_map(|(key, interest)| {
-                        source.fd.get_readiness_mut().fulfills_interest(interest).then_some(key)
+                    .filter_map(|(thread_id, interest)| {
+                        source
+                            .fd
+                            .get_readiness_mut()
+                            .fulfills_interest(interest)
+                            .then_some(thread_id)
                     })
                     .copied()
             })
             .collect::<Vec<_>>();
 
-        interp_ok(Ok(ready))
+        interp_ok(Ok(ready_threads))
     }
 
     /// Get whether a source file description is currently registered in the
@@ -251,7 +246,7 @@ impl BlockingIoManager {
             .with_source(&mut |source| poll.registry().register(source, token, interest))
             .unwrap();
 
-        let source = BlockingIoSource { fd: source_fd, receivers: BTreeMap::default() };
+        let source = BlockingIoSource { fd: source_fd, blocked_threads: BTreeMap::default() };
 
         self.sources
             .try_insert(id, source)
@@ -270,35 +265,37 @@ impl BlockingIoManager {
         source.fd.with_source(&mut |source| poll.registry().deregister(source)).unwrap();
     }
 
-    /// Add a new receiver to a registered source.
+    /// Add a new blocked thread to a registered source.
     ///
     /// As the OS can always produce spurious wake-ups, it's the callers responsibility to
     /// verify the requested I/O interests are really fulfilled when an event for this
-    /// receiver is returned from [`BlockingIoManager::poll`].
+    /// thread is returned from [`BlockingIoManager::poll`].
     ///
-    /// It's assumed that the source with id `source_id` is currently registered and that
-    /// it doesn't already have the same [`InterestReceiver`] as `receiver` added.
-    pub fn add_receiver(
+    /// It's assumed that the thread of `thread_id` isn't already blocked on
+    /// the source with id `source_id` and that this source is currently
+    /// registered.
+    pub fn add_blocked_thread(
         &mut self,
         source_id: FdId,
-        receiver: InterestReceiver,
+        thread_id: ThreadId,
         interest: BlockingIoInterest,
     ) {
         let source = self.sources.get_mut(&source_id).expect("Source should be registered");
 
         source
-            .receivers
-            .try_insert(receiver, interest)
-            .expect("Receiver should not already exist for source");
+            .blocked_threads
+            .try_insert(thread_id, interest)
+            .expect("Thread cannot be blocked multiple times on the same source");
     }
 
-    /// Remove a receiver from a registered source.
+    /// Remove a blocked thread from a registered source.
     ///
-    /// It's assumed that the source with id `source_id` is currently registered and that
-    /// the specified receiver exists for this source.
-    pub fn remove_receiver(&mut self, source_id: FdId, receiver: InterestReceiver) {
+    /// It's assumed that the thread of `thread_id` is blocked on the
+    /// source with id `source_id` and that this source is currently
+    /// registered.
+    pub fn remove_blocked_thread(&mut self, source_id: FdId, thread_id: ThreadId) {
         let source = self.sources.get_mut(&source_id).expect("Source should be registered");
-        source.receivers.remove(&receiver).expect("Receiver should exist for source");
+        source.blocked_threads.remove(&thread_id).expect("Thread should be blocked on source");
     }
 }
 
@@ -320,9 +317,9 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         callback: DynUnblockCallback<'tcx>,
     ) {
         let this = self.eval_context_mut();
-        this.machine.blocking_io.add_receiver(
+        this.machine.blocking_io.add_blocked_thread(
             source_id,
-            InterestReceiver::UnblockThread(this.machine.threads.active_thread()),
+            this.machine.threads.active_thread(),
             interest,
         );
         this.block_thread(BlockReason::IO, timeout, callback);

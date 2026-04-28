@@ -733,7 +733,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             // which received events are available for scheduling afterwards.
 
             // Perform a non-blocking poll for newly available I/O events from the OS.
-            this.poll_and_handle_events(Some(Duration::ZERO))?;
+            this.poll_and_unblock(Some(Duration::ZERO))?;
         }
 
         // We also check timeouts before running any other thread, to ensure that timeouts
@@ -825,11 +825,12 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// Poll for I/O events until either an I/O event happened or the timeout expired.
     /// The different timeout values are described in [`BlockingIoManager::poll`].
     ///
-    /// For every ready I/O event an action is executed based on the event's [`InterestReceiver`].
-    fn poll_and_handle_events(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
+    /// Unblocks all threads which are blocked on I/O and whose I/O interests
+    /// are currently fulfilled.
+    fn poll_and_unblock(&mut self, timeout: Option<Duration>) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let ready = match BlockingIoManager::poll(this, timeout)? {
+        let ready_threads = match BlockingIoManager::poll(this, timeout)? {
             Ok(ready) => ready,
             // We can ignore errors originating from interrupts; that's just a spurious wakeup.
             Err(e) if e.kind() == io::ErrorKind::Interrupted => return interp_ok(()),
@@ -838,12 +839,9 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
             Err(e) => panic!("unexpected error while polling: {e}"),
         };
 
-        ready.into_iter().try_for_each(|receiver| {
-            match receiver {
-                InterestReceiver::UnblockThread(thread_id) =>
-                    this.unblock_thread(thread_id, BlockReason::IO),
-            }
-        })
+        ready_threads
+            .into_iter()
+            .try_for_each(|thread_id| this.unblock_thread(thread_id, BlockReason::IO))
     }
 
     /// Find all threads with expired timeouts, unblock them and execute their timeout callbacks.
@@ -1362,7 +1360,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         // strictly sleeping the duration we allow waking up
                         // early for I/O events from the OS.
 
-                        this.poll_and_handle_events(duration)?;
+                        this.poll_and_unblock(duration)?;
                     } else {
                         let duration = duration.expect(
                             "Infinite sleep should not be triggered when isolation is enabled",

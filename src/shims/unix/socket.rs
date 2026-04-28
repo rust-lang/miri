@@ -1380,8 +1380,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } |this, kind: UnblockKind| {
                 assert_eq!(kind, UnblockKind::Ready);
 
-                // Remove the blocking I/O interest receiver for unblocking this thread.
-                this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
+                // Remove the blocking I/O interest for unblocking this thread.
+                this.machine.blocking_io.remove_blocked_thread(socket.id(), this.machine.threads.active_thread());
 
                 match this.try_non_block_accept(&socket, address_ptr, address_len_ptr, is_client_sock_nonblock)? {
                     Ok(sockfd) => {
@@ -1491,8 +1491,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } |this, kind: UnblockKind| {
                 assert_eq!(kind, UnblockKind::Ready);
 
-                // Remove the blocking I/O interest receiver for unblocking this thread.
-                this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
+                // Remove the blocking I/O interest for unblocking this thread.
+                this.machine.blocking_io.remove_blocked_thread(socket.id(), this.machine.threads.active_thread());
 
                 match this.try_non_block_send(&socket, buffer_ptr, length)? {
                     Err(IoError::HostError(e)) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -1571,8 +1571,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             } |this, kind: UnblockKind| {
                 assert_eq!(kind, UnblockKind::Ready);
 
-                // Remove the blocking I/O interest receiver for unblocking this thread.
-                this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
+                // Remove the blocking I/O interest for unblocking this thread.
+                this.machine.blocking_io.remove_blocked_thread(socket.id(), this.machine.threads.active_thread());
 
                 match this.try_non_block_recv(&socket, buffer_ptr, length, should_peek)? {
                     Err(IoError::HostError(e)) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -1684,8 +1684,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     foreign_name: &'static str,
                     action: DynMachineCallback<'tcx, Result<(), ()>>,
                 } |this, kind: UnblockKind| {
-                    // Remove the blocking I/O interest receiver for unblocking this thread.
-                    this.machine.blocking_io.remove_receiver(socket.id(), InterestReceiver::UnblockThread(this.machine.threads.active_thread()));
+                    // Remove the blocking I/O interest for unblocking this thread.
+                    this.machine.blocking_io.remove_blocked_thread(socket.id(), this.machine.threads.active_thread());
 
                     if UnblockKind::TimedOut == kind {
                         // We can only time out when `should_wait` is false.
