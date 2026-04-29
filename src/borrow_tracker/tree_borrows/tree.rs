@@ -28,6 +28,7 @@ use super::tree_visitor::{ChildrenVisitMode, ContinueTraversal, NodeAppArgs, Tre
 use super::unimap::{UniIndex, UniKeyMap, UniValMap};
 use super::wildcard::ExposedCache;
 use crate::borrow_tracker::{AccessKind, GlobalState, ProtectorKind};
+use crate::concurrency::VClock;
 use crate::*;
 
 mod tests;
@@ -49,11 +50,6 @@ pub(super) struct LocationState {
     accessed: bool,
     /// This pointer's current permission / future initial permission.
     permission: Permission,
-    /// See `foreign_access_skipping.rs`.
-    /// Stores an idempotent foreign access for this location and its children.
-    /// For correctness, this must not be too strong, and the recorded idempotent foreign access
-    /// of all children must be at least as strong as this. For performance, it should be as strong as possible.
-    idempotent_foreign_access: IdempotentForeignAccess,
 }
 
 impl LocationState {
@@ -61,16 +57,16 @@ impl LocationState {
     /// to any foreign access yet.
     /// The permission is not allowed to be `Unique`.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    pub fn new_non_accessed(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
+    pub fn new_non_accessed(permission: Permission) -> Self {
         assert!(permission.is_initial() || permission.is_disabled());
-        Self { permission, accessed: false, idempotent_foreign_access: sifa }
+        Self { permission, accessed: false }
     }
 
     /// Constructs a new initial state. It has not yet been subjected
     /// to any foreign access. However, it is already marked as having been accessed.
     /// `sifa` is the (strongest) idempotent foreign access, see `foreign_access_skipping.rs`
-    pub fn new_accessed(permission: Permission, sifa: IdempotentForeignAccess) -> Self {
-        Self { permission, accessed: true, idempotent_foreign_access: sifa }
+    pub fn new_accessed(permission: Permission) -> Self {
+        Self { permission, accessed: true }
     }
 
     /// Check if the location has been accessed, i.e. if it has
@@ -95,10 +91,6 @@ impl LocationState {
         protected: bool,
         diagnostics: &DiagnosticInfo,
     ) -> Result<(), TransitionError> {
-        // Call this function now (i.e. only if we know `relatedness`), which
-        // ensures it is only called when `skip_if_known_noop` returns
-        // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
-        self.record_new_access(access_kind, relatedness);
         let old_access_level = self.permission.strongest_allowed_local_access(protected);
         let transition = self.perform_access(access_kind, relatedness, protected)?;
         if !transition.is_noop() {
@@ -168,6 +160,200 @@ impl LocationState {
             Err(_) => None,
         }
     }
+}
+
+impl fmt::Display for LocationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.permission)?;
+        if !self.accessed {
+            write!(f, "?")?;
+        }
+        Ok(())
+    }
+}
+
+/// This struct is used to track the weak-memory aspects of a protector ending.
+/// When a protector ends, we remember whether it blocked only foreign writes (common)
+/// or also foreign reads (less common). Foreign accesses from other threads will continue
+/// to trigger UB until these accesses have observed that the protector has ended.
+/// This struct remembers the protector and tracks when it ended to appropiately
+/// trigger UB for other threads.
+///
+/// We also track the latest protector end in all subtrees, for the foreign access skipping
+/// optimisation.
+///
+/// If data-race tracking is disabled, all fields will be `None`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ProtectorEndWeakMemoryRestrictions {
+    /// If this node used to be protected, then this tracks when the protector ended.
+    /// The second field is `Write` if the protector only blocked write accesses (common)
+    /// or `Read` if it blocked both read and write accesses.
+    /// If the protector is still ongoing, or if there never was one, this is `None`.
+    /// The vector clock could be a pair `(VClockIdx, VTimestamp)` but these types are not `pub`.
+    no_access_before: Option<(VClock, AccessKind)>,
+    /// Records diagnostic information about when the protector ended: The permission we had then,
+    /// the thread that ended the protector, and the span. This is `Some` precisely when
+    /// `no_access_before` is `Some`.
+    protector_end_diag_info: Option<(Permission, ThreadId, Span)>,
+    /// Tracks subtrees for the foreign access skipping optimization. This subtree can not be skipped
+    /// if it contains a node that used to be protected, but now is no longer, because it might still
+    /// trigger UB for some threads. This vector clock is an upper bound: If a thread is "after" this
+    /// vector clock, then it has also seen all protectors in this subtree end, and thus we can skip
+    /// traversing it. This field is `None` if there is no protector in the subtree. Note that this
+    /// field only tracks protectors blocking writes.
+    no_writes_before_subtree: Option<VClock>,
+    /// Like `no_writes_before_subtree` but also tracks protectors banning reads. All read-blocking
+    /// protectors also block writes, so this clock is never ahead of `no_writes_before_subtree`.
+    /// When handling a foreign read, we only need to check this clock, and thus might be able to skip
+    /// this subtree even if we could not have skipped it for writes.
+    no_reads_before_subtree: Option<VClock>,
+}
+
+impl ProtectorEndWeakMemoryRestrictions {
+    /// Creates a struct appropiate for a not-yet-ended protector.
+    pub fn new() -> Self {
+        Self {
+            no_writes_before_subtree: None,
+            no_reads_before_subtree: None,
+            no_access_before: None,
+            protector_end_diag_info: None,
+        }
+    }
+
+    /// Foreign access skipping: We check if there might be a protector in this subtree that would
+    /// block us, using the `before_subtree` fields.
+    ///
+    /// `current_time` is `None` if and only if data-race tracking is disabled, in which case this is a NOP.
+    fn can_skip_foreign(&self, acc: AccessKind, current_time: Option<&VClock>) -> bool {
+        let Some(current_time) = current_time else {
+            // Data-race tracking is disabled.
+            return true;
+        };
+        assert!(
+            self.no_reads_before_subtree
+                .as_ref()
+                .is_none_or(|r| self.no_writes_before_subtree.as_ref().is_some_and(|w| r <= w))
+        );
+        match acc {
+            AccessKind::Read =>
+                self.no_reads_before_subtree.as_ref().is_none_or(|x| x <= current_time),
+            AccessKind::Write =>
+                self.no_writes_before_subtree.as_ref().is_none_or(|x| x <= current_time),
+        }
+    }
+
+    /// Checks if this protector should still trigger UB even though it has already ended.
+    /// May only be called for foreign accesses.
+    ///
+    /// `current_time` is `None` if and only if data-race tracking is disabled, in which case this is a NOP.
+    fn perform_foreign_transition(
+        &mut self,
+        acc: AccessKind,
+        current_time: Option<&VClock>,
+    ) -> Result<(), TransitionError> {
+        let Some(current_time) = current_time else {
+            // Data-race tracking is disabled.
+            return Ok(());
+        };
+        let Some((ref vc, blocked_acc)) = self.no_access_before else {
+            // The protector has not yet ended/there never was one, so no UB.
+            return Ok(());
+        };
+        if acc == AccessKind::Read && blocked_acc != AccessKind::Read {
+            // The protector only blocks writes, but we're a read, so it's fine.
+            return Ok(());
+        }
+        if vc <= current_time {
+            // The protector end happens-before us, so it's fine.
+            Ok(())
+        } else {
+            let e = self.protector_end_diag_info.unwrap();
+            Err(TransitionError::ProtectorEndDataRace(e.0, e.1, e.2))
+        }
+    }
+
+    /// Records a protector ending.
+    ///
+    /// `current_time` is `None` if and only if data-race tracking is disabled, in which case this is a NOP.
+    fn record_protector_ending_here(
+        &mut self,
+        permission: Permission,
+        current_time: Option<&VClock>,
+        tid: ThreadId,
+        span: Span,
+    ) -> AccessKind {
+        assert!(self.protector_end_diag_info.is_none());
+        self.protector_end_diag_info = Some((permission, tid, span));
+        let Some(current_time) = current_time else {
+            return AccessKind::Write; // dummy value, any would be correct here
+        };
+        let current_time = current_time.clone();
+        // protected Unique nodes also block foreign reads
+        let blocked_acc = if permission.is_unique() { AccessKind::Read } else { AccessKind::Write };
+        self.no_access_before = Some((current_time, blocked_acc));
+        blocked_acc
+    }
+
+    /// Called on all parents of a node where a protector ended.
+    /// Updates the foreign access skipping information to ensure we track an upper bound
+    /// on all protector end times in this subtree.
+    fn record_protector_end_in_subtree(&mut self, blocked_acc: AccessKind, current_time: &VClock) {
+        self.no_writes_before_subtree.get_or_insert_default().join(current_time);
+        if blocked_acc == AccessKind::Read {
+            self.no_reads_before_subtree.get_or_insert_default().join(current_time);
+        }
+    }
+
+    /// Checks if this node can be garbage-collected, which is the case if all
+    /// threads have observed that this protector has ended.
+    ///
+    /// `hb_lower_bounds` is a lower bound on what all threads have observed,
+    /// or `None` if data race tracking is disabled.
+    fn is_gc_able(&self, hb_lower_bounds: Option<&VClock>) -> bool {
+        let Some(lb) = hb_lower_bounds else {
+            // Data-race tracking is disabled.
+            // We can be garbage-collected immediately since we don't track protectors
+            // past their end, as we only do that when data-race tracking is enabled.
+            return true;
+        };
+        self.no_access_before.as_ref().is_none_or(|x| &x.0 <= lb)
+    }
+}
+
+/// Data for a reference at single *location*.
+/// Contains the permission, as well as additional data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LocationStateExtra {
+    pub base: LocationState,
+    /// See `foreign_access_skipping.rs`.
+    /// Stores an idempotent foreign access for this location and its children.
+    /// For correctness, this must not be too strong, and the recorded idempotent foreign access
+    /// of all children must be at least as strong as this. For performance, it should be as strong as possible.
+    idempotent_foreign_access: IdempotentForeignAccess,
+
+    /// Tracks the information for past protectors still triggering UB in data race situation.
+    /// See the comment on `ProtectorEndWeakMemoryRestrictions` for more information.
+    protector_ends: ProtectorEndWeakMemoryRestrictions,
+}
+
+impl LocationStateExtra {
+    pub fn new(base: LocationState, protected: bool) -> Self {
+        Self {
+            base,
+            idempotent_foreign_access: base
+                .permission
+                .strongest_idempotent_foreign_access(protected),
+            protector_ends: ProtectorEndWeakMemoryRestrictions::new(),
+        }
+    }
+
+    pub fn new_with_sifa(base: LocationState, sifa: IdempotentForeignAccess) -> Self {
+        Self {
+            base,
+            idempotent_foreign_access: sifa,
+            protector_ends: ProtectorEndWeakMemoryRestrictions::new(),
+        }
+    }
 
     /// Tree traversal optimizations. See `foreign_access_skipping.rs`.
     /// This checks if such a foreign access can be skipped.
@@ -175,12 +361,19 @@ impl LocationState {
         &self,
         access_kind: AccessKind,
         rel_pos: AccessRelatedness,
+        current_time: Option<&VClock>,
     ) -> ContinueTraversal {
         if rel_pos.is_foreign() {
+            // If there are protectors in the subtree that we can trigger, do not skip.
+            // Note that this method returning true means we _will_ trigger UB, we just
+            // recurse to ensure we trigger UB at the right node, for diagnostics.
+            if !self.protector_ends.can_skip_foreign(access_kind, current_time) {
+                return ContinueTraversal::Recurse;
+            }
             let happening_now = IdempotentForeignAccess::from_foreign(access_kind);
             let mut new_access_noop =
                 self.idempotent_foreign_access.can_skip_foreign_access(happening_now);
-            if self.permission.is_disabled() {
+            if self.base.permission.is_disabled() {
                 // A foreign access to a `Disabled` tag will have almost no observable effect.
                 // It's a theorem that `Disabled` node have no protected accessed children,
                 // and so this foreign access will never trigger any protector.
@@ -192,7 +385,7 @@ impl LocationState {
                 // blocking write will still be identified directly, just at a different tag.
                 new_access_noop = true;
             }
-            if self.permission.is_frozen() && access_kind == AccessKind::Read {
+            if self.base.permission.is_frozen() && access_kind == AccessKind::Read {
                 // A foreign read to a `Frozen` tag will have almost no observable effect.
                 // It's a theorem that `Frozen` nodes have no `Unique` children, so all children
                 // already survive foreign reads. Foreign reads in general have almost no
@@ -231,23 +424,74 @@ impl LocationState {
     /// See `foreign_access_skipping.rs`
     fn record_new_access(&mut self, access_kind: AccessKind, rel_pos: AccessRelatedness) {
         debug_assert!(matches!(
-            self.skip_if_known_noop(access_kind, rel_pos),
+            self.skip_if_known_noop(access_kind, rel_pos, None),
             ContinueTraversal::Recurse
         ));
         self.idempotent_foreign_access
             .record_new(IdempotentForeignAccess::from_acc_and_rel(access_kind, rel_pos));
     }
-}
 
-impl fmt::Display for LocationState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.permission)?;
-        if !self.accessed {
-            write!(f, "?")?;
+    /// Performs an access on this index and updates node,
+    /// perm and wildcard_state to reflect the transition.
+    fn perform_transition(
+        &mut self,
+        idx: UniIndex,
+        nodes: &mut UniValMap<Node>,
+        exposed_cache: &mut ExposedCache,
+        access_kind: AccessKind,
+        relatedness: AccessRelatedness,
+        protected: bool,
+        current_time: Option<&VClock>,
+        diagnostics: &DiagnosticInfo,
+    ) -> Result<(), TransitionError> {
+        // Call this function now (i.e. only if we know `relatedness`), which
+        // ensures it is only called when `skip_if_known_noop` returns
+        // `Recurse`, due to the contract of `traverse_this_parents_children_other`.
+        self.record_new_access(access_kind, relatedness);
+        if relatedness.is_foreign() {
+            self.protector_ends.perform_foreign_transition(access_kind, current_time)?;
         }
-        Ok(())
+        self.base.perform_transition(
+            idx,
+            nodes,
+            exposed_cache,
+            access_kind,
+            relatedness,
+            protected,
+            diagnostics,
+        )
+    }
+
+    /// Ends the protector. The protector might continue to affect other threads until these have
+    /// synchronized with our thread.
+    fn end_protector_at(
+        &mut self,
+        current_time: Option<&VClock>,
+        tid: ThreadId,
+        span: Span,
+    ) -> AccessKind {
+        self.protector_ends.record_protector_ending_here(
+            self.base.permission,
+            current_time,
+            tid,
+            span,
+        )
+    }
+
+    /// Records that a protector ended in the subtree. Needed for correctness of the
+    /// foreign access skipping information.
+    fn record_protector_end_in_subtree(&mut self, blocked_acc: AccessKind, current_time: &VClock) {
+        self.protector_ends.record_protector_end_in_subtree(blocked_acc, current_time);
+    }
+
+    /// Indicates that this node can be garbage-collected.
+    /// Protected nodes are already accounted for elsewhere, but we also need to account for
+    /// formerly protected nodes that might still trigger UB for other threads.
+    fn is_gc_able(&self, hb_lower_bound: Option<&VClock>) -> bool {
+        self.protector_ends.is_gc_able(hb_lower_bound)
     }
 }
+
 /// The state of the full tree for a particular location: for all nodes, the local permissions
 /// of that node, and the tracking for wildcard accesses.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -260,7 +504,7 @@ pub struct LocationTree {
     /// `unwrap` any `perm.get(key)`.
     ///
     /// We do uphold the fact that `keys(perms)` is a subset of `keys(nodes)`
-    pub perms: UniValMap<LocationState>,
+    pub perms: UniValMap<LocationStateExtra>,
     /// Caches information about the relatedness of nodes for a wildcard access.
     pub exposed_cache: ExposedCache,
 }
@@ -361,9 +605,9 @@ impl Tree {
             // was a write that initialized these to `Unique`.
             perms.insert(
                 root_idx,
-                LocationState::new_accessed(
-                    Permission::new_unique(),
-                    IdempotentForeignAccess::None,
+                LocationStateExtra::new(
+                    LocationState::new_accessed(Permission::new_unique()),
+                    false,
                 ),
             );
             let exposed_cache = ExposedCache::default();
@@ -431,16 +675,14 @@ impl<'tcx> Tree {
             inside_perms.iter(Size::from_bytes(0), inside_perms.size())
         {
             assert!(perm.permission.is_initial());
-            assert_eq!(
-                perm.idempotent_foreign_access,
-                perm.permission.strongest_idempotent_foreign_access(protected)
-            );
 
-            min_sifa = cmp::min(min_sifa, perm.idempotent_foreign_access);
+            min_sifa =
+                cmp::min(min_sifa, perm.permission.strongest_idempotent_foreign_access(protected));
             for (_range, loc) in self
                 .locations
                 .iter_mut(Size::from_bytes(start) + base_offset, Size::from_bytes(end - start))
             {
+                let perm = LocationStateExtra::new(perm, protected);
                 loc.perms.insert(idx, perm);
             }
         }
@@ -515,8 +757,10 @@ impl<'tcx> Tree {
         prov: ProvenanceExtra,
         access_range: AllocRange,
         global: &GlobalState,
-        alloc_id: AllocId, // diagnostics
-        span: Span,        // diagnostics
+        current_time: Option<&VClock>,
+        alloc_id: AllocId,           // diagnostics
+        threads: &ThreadManager<'_>, // diagnostics
+        span: Span,                  // diagnostics
     ) -> InterpResult<'tcx> {
         self.perform_access(
             prov,
@@ -524,7 +768,9 @@ impl<'tcx> Tree {
             AccessKind::Write,
             AccessCause::Dealloc,
             global,
+            current_time,
             alloc_id,
+            threads,
             span,
         )?;
 
@@ -558,15 +804,15 @@ impl<'tcx> Tree {
                                 .data
                                 .perms
                                 .get(args.idx)
-                                .copied()
+                                .cloned()
                                 .unwrap_or_else(|| node.default_location_state());
                             if global.borrow().protected_tags.get(&node.tag)
                                 == Some(&ProtectorKind::StrongProtector)
                                 // Don't check for protector if it is a Cell (see `unsafe_cell_deallocate` in `interior_mutability.rs`).
                                 // Related to https://github.com/rust-lang/rust/issues/55005.
-                                && !perm.permission.is_cell()
+                                && !perm.base.permission.is_cell()
                                 // Only trigger UB if the accessed bit is set, i.e. if the protector is actually protecting this offset. See #4579.
-                                && perm.accessed
+                                && perm.base.accessed
                             {
                                 Err(TbError {
                                     error_kind: TransitionError::ProtectedDealloc,
@@ -575,7 +821,7 @@ impl<'tcx> Tree {
                                     accessed_node_info: start_idx
                                         .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
                                 }
-                                .build())
+                                .build(threads))
                             } else {
                                 Ok(())
                             }
@@ -616,8 +862,10 @@ impl<'tcx> Tree {
         access_kind: AccessKind,
         access_cause: AccessCause, // diagnostics
         global: &GlobalState,
-        alloc_id: AllocId, // diagnostics
-        span: Span,        // diagnostics
+        current_time: Option<&VClock>,
+        alloc_id: AllocId,           // diagnostics
+        threads: &ThreadManager<'_>, // diagnostics
+        span: Span,                  // diagnostics
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 || matches!(prov, ProvenanceExtra::Wildcard) {
@@ -644,6 +892,8 @@ impl<'tcx> Tree {
                 access_kind,
                 global,
                 ChildrenVisitMode::VisitChildrenOfAccessed,
+                current_time,
+                threads,
                 &diagnostics,
                 /* min_exposed_child */ None, // only matters for protector end access,
             )?;
@@ -661,8 +911,10 @@ impl<'tcx> Tree {
         &mut self,
         tag: BorTag,
         global: &GlobalState,
-        alloc_id: AllocId, // diagnostics
-        span: Span,        // diagnostics
+        current_time: Option<&VClock>,
+        alloc_id: AllocId,           // diagnostics
+        threads: &ThreadManager<'_>, // diagnostics
+        span: Span,                  // diagnostics
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 {
@@ -689,9 +941,9 @@ impl<'tcx> Tree {
         // why this is important.
         for (loc_range, loc) in self.locations.iter_mut_all() {
             // Only visit accessed permissions
-            if let Some(p) = loc.perms.get(source_idx)
-                && let Some(access_kind) = p.permission.protector_end_access()
-                && p.accessed
+            if let Some(p) = loc.perms.get_mut(source_idx)
+                && let Some(access_kind) = p.base.permission.protector_end_access()
+                && p.base.accessed
             {
                 let diagnostics = DiagnosticInfo {
                     access_cause: AccessCause::FnExit(access_kind),
@@ -700,6 +952,7 @@ impl<'tcx> Tree {
                     span,
                     transition_range: loc_range,
                 };
+                let propagate_up = p.end_protector_at(current_time, threads.active_thread(), span);
                 loc.perform_access(
                     self.roots.iter().copied(),
                     &mut self.nodes,
@@ -707,9 +960,18 @@ impl<'tcx> Tree {
                     access_kind,
                     global,
                     ChildrenVisitMode::SkipChildrenOfAccessed,
+                    current_time,
+                    threads,
                     &diagnostics,
                     min_exposed_child,
                 )?;
+                // Update the protector-end foreign access skipping information.
+                loc.update_protector_end_vclocks(
+                    &self.nodes,
+                    source_idx,
+                    propagate_up,
+                    current_time,
+                );
             }
         }
         interp_ok(())
@@ -718,9 +980,13 @@ impl<'tcx> Tree {
 
 /// Integration with the BorTag garbage collector
 impl Tree {
-    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
+    pub fn remove_unreachable_tags(
+        &mut self,
+        live_tags: &FxHashSet<BorTag>,
+        hb_lower_bound: Option<&VClock>,
+    ) {
         for i in 0..(self.roots.len()) {
-            self.remove_useless_children(self.roots[i], live_tags);
+            self.remove_useless_children(self.roots[i], live_tags, hb_lower_bound);
         }
         // Right after the GC runs is a good moment to check if we can
         // merge some adjacent ranges that were made equal by the removal of some
@@ -731,9 +997,19 @@ impl Tree {
 
     /// Checks if a node is useless and should be GC'ed.
     /// A node is useless if it has no children and also the tag is no longer live.
-    fn is_useless(&self, idx: UniIndex, live: &FxHashSet<BorTag>) -> bool {
+    fn is_useless(
+        &self,
+        idx: UniIndex,
+        live: &FxHashSet<BorTag>,
+        hb_lower_bound: Option<&VClock>,
+    ) -> bool {
         let node = self.nodes.get(idx).unwrap();
-        node.children.is_empty() && !live.contains(&node.tag)
+        if !node.children.is_empty() || live.contains(&node.tag) {
+            return false;
+        }
+        self.locations
+            .iter_all()
+            .all(|x| x.1.perms.get(idx).is_none_or(|y| y.is_gc_able(hb_lower_bound)))
     }
 
     /// Checks whether a node can be replaced by its only child.
@@ -743,6 +1019,7 @@ impl Tree {
         &self,
         idx: UniIndex,
         live: &FxHashSet<BorTag>,
+        hb_lower_bound: Option<&VClock>,
     ) -> Option<UniIndex> {
         let node = self.nodes.get(idx).unwrap();
 
@@ -759,17 +1036,18 @@ impl Tree {
         // Check that for that one child, `can_be_replaced_by_child` holds for the permission
         // on all locations.
         for (_range, loc) in self.locations.iter_all() {
-            let parent_perm = loc
-                .perms
-                .get(idx)
-                .map(|x| x.permission)
-                .unwrap_or_else(|| node.default_initial_perm);
+            let parent = loc.perms.get(idx);
             let child_perm = loc
                 .perms
                 .get(child_idx)
-                .map(|x| x.permission)
+                .map(|x| x.base.permission)
                 .unwrap_or_else(|| child.default_initial_perm);
+            let parent_perm =
+                parent.map(|x| x.base.permission).unwrap_or_else(|| node.default_initial_perm);
             if !parent_perm.can_be_replaced_by_child(child_perm) {
+                return None;
+            }
+            if !parent.is_none_or(|x| x.is_gc_able(hb_lower_bound)) {
                 return None;
             }
         }
@@ -809,7 +1087,12 @@ impl Tree {
     /// `child: Reserved`. This tree can exist. If we blindly delete `parent` and reassign
     /// `child` to be a direct child of `root` then Writes to `child` are now permitted
     /// whereas they were not when `parent` was still there.
-    fn remove_useless_children(&mut self, root: UniIndex, live: &FxHashSet<BorTag>) {
+    fn remove_useless_children(
+        &mut self,
+        root: UniIndex,
+        live: &FxHashSet<BorTag>,
+        hb_lower_bound: Option<&VClock>,
+    ) {
         // To avoid stack overflows, we roll our own stack.
         // Each element in the stack consists of the current tag, and the number of the
         // next child to be processed.
@@ -838,13 +1121,15 @@ impl Tree {
                     mem::take(&mut self.nodes.get_mut(*tag).unwrap().children);
                 // Remove all useless children.
                 children_of_node.retain_mut(|idx| {
-                    if self.is_useless(*idx, live) {
+                    if self.is_useless(*idx, live, hb_lower_bound) {
                         // Delete `idx` node everywhere else.
                         self.remove_useless_node(*idx);
                         // And delete it from children_of_node.
                         false
                     } else {
-                        if let Some(nextchild) = self.can_be_replaced_by_single_child(*idx, live) {
+                        if let Some(nextchild) =
+                            self.can_be_replaced_by_single_child(*idx, live, hb_lower_bound)
+                        {
                             // `nextchild` is our grandchild, and will become our direct child.
                             // Delete the in-between node, `idx`.
                             self.remove_useless_node(*idx);
@@ -907,6 +1192,8 @@ impl<'tcx> LocationTree {
         access_kind: AccessKind,
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
+        current_time: Option<&VClock>,
+        threads: &ThreadManager<'_>,
         diagnostics: &DiagnosticInfo,
         min_exposed_child: Option<BorTag>,
     ) -> InterpResult<'tcx> {
@@ -917,6 +1204,8 @@ impl<'tcx> LocationTree {
                 access_kind,
                 global,
                 visit_children,
+                current_time,
+                threads,
                 diagnostics,
             )?)
         } else {
@@ -964,6 +1253,8 @@ impl<'tcx> LocationTree {
                 nodes,
                 access_kind,
                 global,
+                current_time,
+                threads,
                 diagnostics,
                 /*is_wildcard_tree*/ i != 0,
             )?;
@@ -984,6 +1275,8 @@ impl<'tcx> LocationTree {
         access_kind: AccessKind,
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
+        current_time: Option<&VClock>,
+        threads: &ThreadManager<'_>,
         diagnostics: &DiagnosticInfo,
     ) -> InterpResult<'tcx, UniIndex> {
         // Performs the per-node work:
@@ -999,9 +1292,10 @@ impl<'tcx> LocationTree {
         let node_skipper = |args: &NodeAppArgs<'_, LocationTree>| -> ContinueTraversal {
             let node = args.nodes.get(args.idx).unwrap();
             let perm = args.data.perms.get(args.idx);
+            //TODO avoid unnecessary allocations here
 
-            let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
-            old_state.skip_if_known_noop(access_kind, args.rel_pos)
+            let old_state = perm.cloned().unwrap_or_else(|| node.default_location_state());
+            old_state.skip_if_known_noop(access_kind, args.rel_pos, current_time)
         };
         let node_app = |args: NodeAppArgs<'_, LocationTree>| {
             let node = args.nodes.get_mut(args.idx).unwrap();
@@ -1018,6 +1312,7 @@ impl<'tcx> LocationTree {
                     access_kind,
                     args.rel_pos,
                     protected,
+                    current_time,
                     diagnostics,
                 )
                 .map_err(|error_kind| {
@@ -1029,7 +1324,7 @@ impl<'tcx> LocationTree {
                             &args.nodes.get(access_source).unwrap().debug_info,
                         ),
                     }
-                    .build()
+                    .build(threads)
                 })
         };
 
@@ -1058,6 +1353,8 @@ impl<'tcx> LocationTree {
         nodes: &mut UniValMap<Node>,
         access_kind: AccessKind,
         global: &GlobalState,
+        current_time: Option<&VClock>,
+        threads: &ThreadManager<'_>,
         diagnostics: &DiagnosticInfo,
         is_wildcard_tree: bool,
     ) -> InterpResult<'tcx> {
@@ -1098,14 +1395,15 @@ impl<'tcx> LocationTree {
                 let node = args.nodes.get(args.idx).unwrap();
                 let perm = args.data.perms.get(args.idx);
 
-                let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
+                //TODO avoid unnecessary allocations here
+                let old_state = perm.cloned().unwrap_or_else(|| node.default_location_state());
                 // If we know where, relative to this node, the wildcard access occurs,
                 // then check if we can skip the entire subtree.
                 if let Some(relatedness) = get_relatedness(args.idx, node, args.data)
                     && let Some(relatedness) = relatedness.to_relatedness()
                 {
                     // We can use the usual SIFA machinery to skip nodes.
-                    old_state.skip_if_known_noop(access_kind, relatedness)
+                    old_state.skip_if_known_noop(access_kind, relatedness, current_time)
                 } else {
                     ContinueTraversal::Recurse
                 }
@@ -1129,7 +1427,11 @@ impl<'tcx> LocationTree {
 
                 // We only count exposed nodes through which an access could happen.
                 if node.is_exposed
-                    && perm.permission.strongest_allowed_local_access(protected).allows(access_kind)
+                    && perm
+                        .base
+                        .permission
+                        .strongest_allowed_local_access(protected)
+                        .allows(access_kind)
                     && max_local_tag.is_none_or(|max_local_tag| max_local_tag >= node.tag)
                 {
                     has_valid_exposed = true;
@@ -1151,6 +1453,7 @@ impl<'tcx> LocationTree {
                     access_kind,
                     relatedness,
                     protected,
+                    current_time,
                     diagnostics,
                 )
                 .map_err(|trans| {
@@ -1162,7 +1465,7 @@ impl<'tcx> LocationTree {
                         accessed_node_info: access_source
                             .map(|idx| &args.nodes.get(idx).unwrap().debug_info),
                     }
-                    .build()
+                    .build(threads)
                 })
             },
         )?;
@@ -1175,12 +1478,38 @@ impl<'tcx> LocationTree {
         }
         interp_ok(())
     }
+
+    /// Updates the parents of a node after a protector ended there, to make sure
+    /// that their subtree information is correct. This is important for the
+    /// foreign access skipping information.
+    fn update_protector_end_vclocks(
+        &mut self,
+        nodes: &UniValMap<Node>,
+        source_idx: UniIndex,
+        propagate_up: AccessKind,
+        current_time: Option<&VClock>,
+    ) {
+        let Some(current_time) = current_time else {
+            return;
+        };
+        let mut cur_idx = source_idx;
+        loop {
+            let node = self.perms.get_mut(cur_idx).unwrap();
+            node.record_protector_end_in_subtree(propagate_up, current_time);
+            if let Some(p) = nodes.get(cur_idx).unwrap().parent {
+                cur_idx = p;
+                continue;
+            } else {
+                break;
+            }
+        }
+    }
 }
 
 impl Node {
-    pub fn default_location_state(&self) -> LocationState {
-        LocationState::new_non_accessed(
-            self.default_initial_perm,
+    pub fn default_location_state(&self) -> LocationStateExtra {
+        LocationStateExtra::new_with_sifa(
+            LocationState::new_non_accessed(self.default_initial_perm),
             self.default_initial_idempotent_foreign_access,
         )
     }

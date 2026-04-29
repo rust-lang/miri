@@ -265,6 +265,11 @@ impl Permission {
         self.inner == Cell
     }
 
+    /// Check if `self` is the activated, foreign-read-banning state of a pointer (is `Unique`).
+    pub fn is_unique(&self) -> bool {
+        self.inner == Unique
+    }
+
     /// Default initial permission of the root of a new tree at inbounds positions.
     /// Must *only* be used for the root, this is not in general an "initial" permission!
     pub fn new_unique() -> Self {
@@ -555,7 +560,8 @@ pub mod diagnostics {
                             unreachable!("permissions between self and err must be increasing"),
                     }
                 }
-                TransitionError::ProtectedDisabled(before_disabled) => {
+                TransitionError::ProtectedDisabled(before_disabled)
+                | TransitionError::ProtectorEndDataRace(before_disabled, _, _) => {
                     // Show how we got to the starting point of the forbidden transition,
                     // but ignore what came before.
                     // This eliminates transitions like `Reserved -> Unique`
