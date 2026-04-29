@@ -136,12 +136,10 @@ impl FileDescription for VirtualSocket {
     }
 
     fn short_fd_operations(&self) -> bool {
-        // Linux de-facto guarantees (or at least, applications like tokio assume [1, 2]) that
-        // when a read/write on a streaming socket comes back short, the kernel buffer is
-        // empty/full. SO we can't do short reads/writes here.
-        //
-        // [1]: https://github.com/tokio-rs/tokio/blob/6c03e03898d71eca976ee1ad8481cf112ae722ba/tokio/src/io/poll_evented.rs#L182
-        // [2]: https://github.com/tokio-rs/tokio/blob/6c03e03898d71eca976ee1ad8481cf112ae722ba/tokio/src/io/poll_evented.rs#L240
+        // Linux guarantees that when a read/write on a streaming socket comes back short,
+        // the kernel buffer is empty/full:
+        // See <https://man7.org/linux/man-pages/man7/epoll.7.html> in Q&A section.
+        // So we can't do short reads/writes here.
         false
     }
 
