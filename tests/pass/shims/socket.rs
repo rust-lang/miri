@@ -4,6 +4,7 @@
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
+use std::time::Duration;
 
 const TEST_BYTES: &[u8] = b"these are some test bytes!";
 
@@ -122,16 +123,33 @@ fn test_shutdown() {
     // we need to connect to.
     let address = listener.local_addr().unwrap();
 
+    // Start server thread.
     let handle = thread::spawn(move || {
-        let (stream, _addr) = listener.accept().unwrap();
-        stream.shutdown(Shutdown::Read).unwrap();
+        let (_stream, _addr) = listener.accept().unwrap();
+
+        // Yield back to client thread to ensure that the peer
+        // is only dropped at the end of the test.
+        thread::sleep(Duration::from_millis(10));
     });
 
-    let stream = TcpStream::connect(address).unwrap();
-    stream.shutdown(Shutdown::Write).unwrap();
+    let mut byte = [0u8];
+    let mut stream = TcpStream::connect(address).unwrap();
+    let mut stream_clone = stream.try_clone().unwrap();
 
-    // FIXME: Real shutdown can only be tested once we have read/write.
-    //        See standard library tcp tests for a reference.
+    // Closing should prevent reads/writes.
+    stream.shutdown(Shutdown::Write).unwrap();
+    stream.write(&[0]).unwrap_err();
+    stream.shutdown(Shutdown::Read).unwrap();
+    assert_eq!(stream.read(&mut byte).unwrap(), 0);
+
+    // Closing should affect previous handles.
+    stream_clone.write(&[0]).unwrap_err();
+    assert_eq!(stream_clone.read(&mut byte).unwrap(), 0);
+
+    // Closing should affect new handles.
+    let mut stream_other_clone = stream.try_clone().unwrap();
+    stream_other_clone.write(&[0]).unwrap_err();
+    assert_eq!(stream_other_clone.read(&mut byte).unwrap(), 0);
 
     handle.join().unwrap();
 }

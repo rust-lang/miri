@@ -1074,6 +1074,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let state = socket.state.borrow();
 
+        // The suggestions of clippy loop here, see:
+        // <https://github.com/rust-lang/rust-clippy/issues/16930>
+        #[expect(clippy::manual_let_else)]
         let stream = match &*state {
             SocketState::Connecting(stream) | SocketState::Connected(stream) => stream,
             // We can only call `shutdown` on connecting/connected sockets.
