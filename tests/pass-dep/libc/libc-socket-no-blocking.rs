@@ -607,13 +607,18 @@ fn test_getsockname_ipv4_connect_nonblock() {
     })
     .unwrap();
 
-    // We want to ensure that the local address is not the unspecified address.
-    // Because the bound address could be of any local interface, we cannot
-    // test for localhost.
+    // The unspecified IPv4 address.
     let addr = net::sock_addr_ipv4([0, 0, 0, 0], 0);
 
     assert_eq!(addr.sin_family, sock_addr.sin_family);
-    assert_ne!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+    if cfg!(windows_host) {
+        // On Windows hosts a connecting socket is bound to the unspecified address.
+        assert_eq!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+    } else {
+        // On UNIX hosts a connecting socket is bound to any local interface address
+        // but not the unspecified address.
+        assert_ne!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+    }
     assert!(sock_addr.sin_port > 0);
 }
 
