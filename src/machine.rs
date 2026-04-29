@@ -531,6 +531,10 @@ pub struct MiriMachine<'tcx> {
     /// The list of all EpollEventInterest.
     pub(crate) epoll_interests: shims::EpollInterestTable,
 
+    /// The set of allocated linked lists with
+    /// address infos.
+    pub(crate) address_store: shims::AddressInfoStore,
+
     /// This machine's monotone clock.
     pub(crate) monotonic_clock: MonotonicClock,
 
@@ -755,6 +759,7 @@ impl<'tcx> MiriMachine<'tcx> {
             validation: config.validation,
             fds: shims::FdTable::init(config.mute_stdout_stderr),
             epoll_interests: shims::EpollInterestTable::new(),
+            address_store: shims::AddressInfoStore::new(),
             dirs: Default::default(),
             layouts,
             threads,
@@ -1016,6 +1021,7 @@ impl VisitProvenance for MiriMachine<'_> {
             data_race,
             alloc_addresses,
             fds,
+            address_store,
             blocking_io:_,
             epoll_interests:_,
             tcx: _,
@@ -1067,6 +1073,7 @@ impl VisitProvenance for MiriMachine<'_> {
         env_vars.visit_provenance(visit);
         dirs.visit_provenance(visit);
         fds.visit_provenance(visit);
+        address_store.visit_provenance(visit);
         data_race.visit_provenance(visit);
         borrow_tracker.visit_provenance(visit);
         alloc_addresses.visit_provenance(visit);

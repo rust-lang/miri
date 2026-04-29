@@ -6,9 +6,10 @@ mod libc_utils;
 #[path = "../../utils/mod.rs"]
 mod utils;
 
+use std::ffi::CString;
 use std::io::ErrorKind;
-use std::thread;
 use std::time::Duration;
+use std::{ptr, thread};
 
 use libc_utils::*;
 
@@ -45,6 +46,8 @@ fn main() {
 
     test_getpeername_ipv4();
     test_getpeername_ipv6();
+
+    test_getaddrinfo_freeaddrinfo();
 }
 
 /// Test creating a socket and then closing it afterwards.
@@ -365,9 +368,10 @@ fn test_getsockname_ipv4() {
         errno_check(libc::listen(sockfd, 16));
     }
 
-    let (_, sock_addr) =
-        net::sockname_ipv4(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) })
-            .unwrap();
+    let (_, sock_addr) = net::sockname_ipv4(|storage, len| unsafe {
+        libc::getsockname(sockfd, storage.cast(), len)
+    })
+    .unwrap();
 
     assert_eq!(addr.sin_family, sock_addr.sin_family);
     assert_eq!(addr.sin_port, sock_addr.sin_port);
@@ -395,9 +399,10 @@ fn test_getsockname_ipv4_random_port() {
         errno_check(libc::listen(sockfd, 16));
     }
 
-    let (_, sock_addr) =
-        net::sockname_ipv4(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) })
-            .unwrap();
+    let (_, sock_addr) = net::sockname_ipv4(|storage, len| unsafe {
+        libc::getsockname(sockfd, storage.cast(), len)
+    })
+    .unwrap();
 
     assert_eq!(addr.sin_family, sock_addr.sin_family);
     // The bound port must not be the zero port.
@@ -411,9 +416,10 @@ fn test_getsockname_ipv4_unbound() {
     let sockfd =
         unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
 
-    let (_, sock_addr) =
-        net::sockname_ipv4(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) })
-            .unwrap();
+    let (_, sock_addr) = net::sockname_ipv4(|storage, len| unsafe {
+        libc::getsockname(sockfd, storage.cast(), len)
+    })
+    .unwrap();
 
     // Libc representation of an unspecified IPv4 address with zero port.
     let addr = net::sock_addr_ipv4([0, 0, 0, 0], 0);
@@ -442,9 +448,10 @@ fn test_getsockname_ipv6() {
         errno_check(libc::listen(sockfd, 16));
     }
 
-    let (_, sock_addr) =
-        net::sockname_ipv6(|storage, len| unsafe { libc::getsockname(sockfd, storage, len) })
-            .unwrap();
+    let (_, sock_addr) = net::sockname_ipv6(|storage, len| unsafe {
+        libc::getsockname(sockfd, storage.cast(), len)
+    })
+    .unwrap();
 
     assert_eq!(addr.sin6_family, sock_addr.sin6_family);
     assert_eq!(addr.sin6_port, sock_addr.sin6_port);
@@ -467,7 +474,7 @@ fn test_getpeername_ipv4() {
     net::connect_ipv4(client_sockfd, addr).unwrap();
 
     let (_, peer_addr) = net::sockname_ipv4(|storage, len| unsafe {
-        libc::getpeername(client_sockfd, storage, len)
+        libc::getpeername(client_sockfd, storage.cast(), len)
     })
     .unwrap();
 
@@ -492,7 +499,7 @@ fn test_getpeername_ipv6() {
     net::connect_ipv6(client_sockfd, addr).unwrap();
 
     let (_, peer_addr) = net::sockname_ipv6(|storage, len| unsafe {
-        libc::getpeername(client_sockfd, storage, len)
+        libc::getpeername(client_sockfd, storage.cast(), len)
     })
     .unwrap();
 
@@ -503,4 +510,76 @@ fn test_getpeername_ipv6() {
     assert_eq!(addr.sin6_addr.s6_addr, peer_addr.sin6_addr.s6_addr);
 
     server_thread.join().unwrap();
+}
+
+/// Test doing address resolution using the `getaddrinfo` syscall.
+/// This also tests freeing the address linked list using `freeaddrinfo`.
+fn test_getaddrinfo_freeaddrinfo() {
+    let node_c_str = CString::new("localhost").unwrap();
+    let service_c_str = CString::new("8080").unwrap();
+
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_socktype = libc::SOCK_STREAM;
+    let mut res: *mut libc::addrinfo = ptr::null_mut();
+    unsafe {
+        errno_check(libc::getaddrinfo(
+            node_c_str.as_ptr(),
+            service_c_str.as_ptr(),
+            &hints,
+            &mut res,
+        ));
+    }
+    let start = res;
+    let mut addr_count = 0;
+
+    loop {
+        unsafe {
+            let Some(cur) = res.as_ref() else {
+                // It's a null pointer so we're at the end of the linked list.
+                break;
+            };
+
+            addr_count += 1;
+            match (*cur).ai_family as libc::c_int {
+                libc::AF_INET => {
+                    let (_, addr) = net::sockname_ipv4(|storage, len| {
+                        *storage = *cur.ai_addr.cast();
+                        *len = (*res).ai_addrlen;
+                        0
+                    })
+                    .unwrap();
+
+                    let localhost_ipv4 = net::sock_addr_ipv4(net::IPV4_LOCALHOST, 8080);
+                    assert_eq!(localhost_ipv4.sin_family, addr.sin_family);
+                    assert_eq!(localhost_ipv4.sin_port, addr.sin_port);
+                    assert_eq!(localhost_ipv4.sin_addr.s_addr, addr.sin_addr.s_addr);
+                }
+                libc::AF_INET6 => {
+                    let (_, addr) = net::sockname_ipv6(|storage, len| {
+                        *storage = *cur.ai_addr.cast();
+                        *len = (*res).ai_addrlen;
+                        0
+                    })
+                    .unwrap();
+
+                    let localhost_ipv6 = net::sock_addr_ipv6(net::IPV6_LOCALHOST, 8080);
+                    assert_eq!(localhost_ipv6.sin6_family, addr.sin6_family);
+                    assert_eq!(localhost_ipv6.sin6_port, addr.sin6_port);
+                    assert_eq!(localhost_ipv6.sin6_flowinfo, addr.sin6_flowinfo);
+                    assert_eq!(localhost_ipv6.sin6_scope_id, addr.sin6_scope_id);
+                    assert_eq!(localhost_ipv6.sin6_addr.s6_addr, addr.sin6_addr.s6_addr);
+                }
+                family => panic!("unexpected address family: {family}"),
+            }
+
+            res = cur.ai_next;
+        }
+    }
+
+    // We expect an IPv4 and an IPv6 address.
+    assert!(addr_count == 2);
+
+    unsafe {
+        libc::freeaddrinfo(start.cast());
+    }
 }
