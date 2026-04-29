@@ -499,6 +499,12 @@ impl<'tcx> ThreadManager<'tcx> {
         }
     }
 
+    /// Find a thread by its internal index, if the thread is still alive (not terminated).
+    pub fn thread_id_from_index_if_alive(&self, index: u32) -> Option<ThreadId> {
+        let thread_id = self.thread_id_try_from(index).ok()?;
+        if self.threads[thread_id].state.is_terminated() { None } else { Some(thread_id) }
+    }
+
     /// Check if we have an allocation for the given thread local static for the
     /// active thread.
     fn get_thread_local_alloc_id(&self, def_id: DefId) -> Option<StrictPointer> {
