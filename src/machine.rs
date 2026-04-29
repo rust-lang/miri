@@ -660,6 +660,9 @@ pub struct MiriMachine<'tcx> {
 
     /// Whether Miri artificially introduces short reads/writes on file descriptors.
     pub short_fd_operations: bool,
+
+    // Stores the span of the `TailCall` (`become`) terminator
+    pub tail_call_span: Option<Span>,
 }
 
 impl<'tcx> MiriMachine<'tcx> {
@@ -825,6 +828,7 @@ impl<'tcx> MiriMachine<'tcx> {
             float_nondet: config.float_nondet,
             float_rounding_error: config.float_rounding_error,
             short_fd_operations: config.short_fd_operations,
+            tail_call_span: None,
         }
     }
 
@@ -1060,6 +1064,7 @@ impl VisitProvenance for MiriMachine<'_> {
             float_nondet: _,
             float_rounding_error: _,
             short_fd_operations: _,
+            tail_call_span: _,
         } = self;
 
         threads.visit_provenance(visit);
@@ -1647,8 +1652,11 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
 
         if let Some((_, deallocated_at)) = machine.allocation_spans.borrow_mut().get_mut(&alloc_id)
         {
-            *deallocated_at = Some(machine.current_user_relevant_span());
+            *deallocated_at = Some(
+                machine.tail_call_span.unwrap_or_else(|| machine.current_user_relevant_span()),
+            );
         }
+
         machine.free_alloc_id(alloc_id, size, align, kind);
         interp_ok(())
     }
@@ -1749,6 +1757,17 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
     }
 
     fn before_terminator(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
+        // Inspect the current frame's terminator to detect a `TailCall` (`become`)
+        // If found, record its span so the deallocation is caused by the ensuing frame
+        let frame = ecx.frame();
+        let block = frame.current_loc().unwrap_left().block;
+        let body = frame.body();
+        let terminator = body.basic_blocks[block].terminator();
+        if let mir::TerminatorKind::TailCall { .. } = terminator.kind {
+            let span = terminator.source_info.span;
+            ecx.machine.tail_call_span = Some(span);
+        }
+
         ecx.machine.basic_block_count += 1u64; // a u64 that is only incremented by 1 will "never" overflow
         ecx.machine.since_gc += 1;
         // Possibly report our progress. This will point at the terminator we are about to execute.
