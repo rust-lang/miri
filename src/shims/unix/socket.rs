@@ -975,6 +975,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Ok(address) => address,
                     Err(e) => return this.set_last_error_and_return_i32(e),
                 },
+            SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                match stream.local_addr() {
+                    Ok(address) => address,
+                    Err(e) => return this.set_last_error_and_return_i32(e),
+                },
             // For non-bound sockets the POSIX manual says the returned address is unspecified.
             // Often this is 0.0.0.0:0 and thus we set it to this value.
             _ => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),

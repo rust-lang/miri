@@ -51,6 +51,8 @@ fn main() {
     test_send_recv_dontwait();
     test_write_read_nonblock();
 
+    test_getsockname_ipv4_connect_nonblock();
+
     test_getpeername_ipv4_nonblock();
     test_getpeername_ipv4_nonblock_no_peer();
 }
@@ -572,6 +574,52 @@ fn test_write_read_nonblock() {
     }
 
     server_thread.join().unwrap();
+}
+
+/// Test the `getsockname` syscall on a connecting IPv4 socket
+/// which is not connected.
+fn test_getsockname_ipv4_connect_nonblock() {
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    unsafe {
+        // Change client socket to be non-blocking.
+        errno_check(libc::fcntl(client_sockfd, libc::F_SETFL, libc::O_NONBLOCK));
+    }
+
+    // We cannot attempt to connect to a localhost address because
+    // it could be the case that a socket from another test is
+    // currently listening on `localhost:12321` because we bind to
+    // random ports everywhere. For `192.0.2.1` we know that nothing is
+    // listening because it's a blackhole address:
+    // <https://www.rfc-editor.org/rfc/rfc5737>
+    // The port `12321` is just a random non-zero port because Windows
+    // and Apple hosts return EADDRNOTAVAIL when attempting to connect to
+    // a zero port.
+    let addr = net::sock_addr_ipv4([192, 0, 2, 1], 12321);
+
+    // Non-blocking connect should fail with EINPROGRESS.
+    let err = net::connect_ipv4(client_sockfd, addr).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InProgress);
+
+    let (_, sock_addr) = net::sockname_ipv4(|storage, len| unsafe {
+        libc::getsockname(client_sockfd, storage, len)
+    })
+    .unwrap();
+
+    // The unspecified IPv4 address.
+    let addr = net::sock_addr_ipv4([0, 0, 0, 0], 0);
+
+    assert_eq!(addr.sin_family, sock_addr.sin_family);
+    if cfg!(windows_host) {
+        // On Windows hosts a connecting socket is bound to the unspecified address.
+        assert_eq!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+    } else {
+        // On UNIX hosts a connecting socket is bound to any local interface address
+        // but not the unspecified address.
+        assert_ne!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+    }
+    assert!(sock_addr.sin_port > 0);
 }
 
 /// Test that the `getpeername` syscall successfully returns the peer address
