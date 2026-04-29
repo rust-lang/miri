@@ -2,8 +2,9 @@
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
+use std::time::Duration;
 
 const TEST_BYTES: &[u8] = b"these are some test bytes!";
 
@@ -14,6 +15,7 @@ fn main() {
     test_read_write();
     test_peek();
     test_peer_addr();
+    test_shutdown();
 }
 
 fn test_create_ipv4_listener() {
@@ -110,6 +112,44 @@ fn test_peer_addr() {
     let stream = TcpStream::connect(address).unwrap();
     let peer_addr = stream.peer_addr().unwrap();
     assert_eq!(address, peer_addr);
+
+    handle.join().unwrap();
+}
+
+/// Test shutting down TCP streams.
+fn test_shutdown() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    // Get local address with randomized port to know where
+    // we need to connect to.
+    let address = listener.local_addr().unwrap();
+
+    // Start server thread.
+    let handle = thread::spawn(move || {
+        let (_stream, _addr) = listener.accept().unwrap();
+
+        // Yield back to client thread to ensure that the peer
+        // is only dropped at the end of the test.
+        thread::sleep(Duration::from_millis(10));
+    });
+
+    let mut byte = [0u8];
+    let mut stream = TcpStream::connect(address).unwrap();
+    let mut stream_clone = stream.try_clone().unwrap();
+
+    // Closing should prevent reads/writes.
+    stream.shutdown(Shutdown::Write).unwrap();
+    stream.write(&[0]).unwrap_err();
+    stream.shutdown(Shutdown::Read).unwrap();
+    assert_eq!(stream.read(&mut byte).unwrap(), 0);
+
+    // Closing should affect previous handles.
+    stream_clone.write(&[0]).unwrap_err();
+    assert_eq!(stream_clone.read(&mut byte).unwrap(), 0);
+
+    // Closing should affect new handles.
+    let mut stream_other_clone = stream.try_clone().unwrap();
+    stream_other_clone.write(&[0]).unwrap_err();
+    assert_eq!(stream_other_clone.read(&mut byte).unwrap(), 0);
 
     handle.join().unwrap();
 }

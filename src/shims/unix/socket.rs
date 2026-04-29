@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::io::Read;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use std::{io, iter};
 
@@ -1052,6 +1052,53 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             ),
         )
+    }
+
+    fn shutdown(&mut self, socket: &OpTy<'tcx>, how: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let socket = this.read_scalar(socket)?.to_i32()?;
+        let how = this.read_scalar(how)?.to_i32()?;
+
+        // Get the file handle
+        let Some(fd) = this.machine.fds.get(socket) else {
+            return this.set_last_error_and_return_i32(LibcError("EBADF"));
+        };
+
+        let Some(socket) = fd.downcast::<Socket>() else {
+            // Man page specifies to return ENOTSOCK if `fd` is not a socket.
+            return this.set_last_error_and_return_i32(LibcError("ENOTSOCK"));
+        };
+
+        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+
+        let state = socket.state.borrow();
+
+        // The suggestions of clippy loop here, see:
+        // <https://github.com/rust-lang/rust-clippy/issues/16930>
+        #[expect(clippy::manual_let_else)]
+        let stream = match &*state {
+            SocketState::Connecting(stream) | SocketState::Connected(stream) => stream,
+            // We can only call `shutdown` on connecting/connected sockets.
+            _ => return this.set_last_error_and_return_i32(LibcError("ENOTCONN")),
+        };
+
+        let shut_rd = this.eval_libc_i32("SHUT_RD");
+        let shut_wr = this.eval_libc_i32("SHUT_WR");
+        let shut_rdwr = this.eval_libc_i32("SHUT_RDWR");
+
+        let how = match () {
+            _ if how == shut_rd => Shutdown::Read,
+            _ if how == shut_wr => Shutdown::Write,
+            _ if how == shut_rdwr => Shutdown::Both,
+            // An invalid value was passed to `how`.
+            _ => return this.set_last_error_and_return_i32(LibcError("EINVAL")),
+        };
+
+        match stream.shutdown(how) {
+            Ok(_) => interp_ok(Scalar::from_i32(0)),
+            Err(e) => this.set_last_error_and_return_i32(e),
+        }
     }
 }
 

@@ -45,6 +45,8 @@ fn main() {
 
     test_getpeername_ipv4();
     test_getpeername_ipv6();
+
+    test_shutdown();
 }
 
 /// Test creating a socket and then closing it afterwards.
@@ -501,6 +503,53 @@ fn test_getpeername_ipv6() {
     assert_eq!(addr.sin6_flowinfo, peer_addr.sin6_flowinfo);
     assert_eq!(addr.sin6_scope_id, peer_addr.sin6_scope_id);
     assert_eq!(addr.sin6_addr.s6_addr, peer_addr.sin6_addr.s6_addr);
+
+    server_thread.join().unwrap();
+}
+
+/// Test shutting down TCP streams.
+fn test_shutdown() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || net::accept_ipv4(server_sockfd).unwrap());
+
+    let mut byte = [0u8];
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+    let client_dup_sockfd = unsafe { libc::dup(client_sockfd) };
+
+    // Closing should prevent reads/writes.
+    unsafe {
+        libc::shutdown(client_sockfd, libc::SHUT_WR);
+        errno_result(libc::write(client_sockfd, [0].as_ptr().cast(), 1)).unwrap_err();
+        libc::shutdown(client_sockfd, libc::SHUT_RD);
+        let bytes_read =
+            errno_result(libc::read(client_sockfd, byte.as_mut_ptr().cast(), 1)).unwrap();
+        assert_eq!(bytes_read, 0);
+    }
+
+    // TODO: Once epoll is available for TCP sockets, ensure that the rdhup and hup readiness
+    // are set.
+
+    // Closing should affect previous handles.
+    unsafe {
+        errno_result(libc::write(client_dup_sockfd, [0].as_ptr().cast(), 1)).unwrap_err();
+        let bytes_read =
+            errno_result(libc::read(client_dup_sockfd, byte.as_mut_ptr().cast(), 1)).unwrap();
+        assert_eq!(bytes_read, 0);
+    }
+
+    // Closing should affect new handles.
+    unsafe {
+        let client_dup2_sockfd = libc::dup(client_sockfd);
+        errno_result(libc::write(client_dup2_sockfd, [0].as_ptr().cast(), 1)).unwrap_err();
+        let bytes_read =
+            errno_result(libc::read(client_dup2_sockfd, byte.as_mut_ptr().cast(), 1)).unwrap();
+        assert_eq!(bytes_read, 0);
+    }
 
     server_thread.join().unwrap();
 }
