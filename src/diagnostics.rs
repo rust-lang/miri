@@ -144,6 +144,7 @@ pub enum NonHaltingDiagnostic {
         effective_failure_ordering: AtomicReadOrd,
     },
     FileInProcOpened,
+    ConnectingSocketGetsockname,
 }
 
 /// Level of Miri specific diagnostics
@@ -650,6 +651,8 @@ impl<'tcx> MiriMachine<'tcx> {
             | WeakMemoryOutdatedLoad { .. } =>
                 ("tracking was triggered here".to_string(), DiagLevel::Note),
             FileInProcOpened => ("open a file in `/proc`".to_string(), DiagLevel::Warning),
+            ConnectingSocketGetsockname =>
+                ("Called `getsockname` on connecting socket".to_string(), DiagLevel::Warning),
         };
 
         let title = match &e {
@@ -698,12 +701,22 @@ impl<'tcx> MiriMachine<'tcx> {
                 format!("GenMC currently does not model the failure ordering for `compare_exchange`. {was_upgraded_msg}. Miri with GenMC might miss bugs related to this memory access.")
             }
             FileInProcOpened => format!("files in `/proc` can bypass the Abstract Machine and might not work properly in Miri"),
+            ConnectingSocketGetsockname => format!("connecting sockets return unspecified socket addresses on Windows hosts")
         };
 
         let notes = match &e {
             ProgressReport { block_count } => {
                 vec![note!("so far, {block_count} basic blocks have been executed")]
             }
+            ConnectingSocketGetsockname =>
+                vec![
+                    note!(
+                        "Windows hosts do not provide `local_addr` information while the socket is still connecting, which might break the assumptions of code compiled for Unix targets"
+                    ),
+                    note!(
+                        "an unspecified socket address (e.g. `0.0.0.0:0`) will be returned instead"
+                    ),
+                ],
             _ => vec![],
         };
 
