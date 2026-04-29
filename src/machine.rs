@@ -40,6 +40,7 @@ use crate::concurrency::sync::SyncObj;
 use crate::concurrency::{
     AllocDataRaceHandler, GenmcCtx, GenmcEvalContextExt as _, GlobalDataRaceHandler, weak_memory,
 };
+use crate::helpers::is_no_core;
 use crate::*;
 
 /// First real-time signal.
@@ -731,7 +732,8 @@ impl<'tcx> MiriMachine<'tcx> {
         );
         let threads = ThreadManager::new(config);
         let mut thread_cpu_affinity = FxHashMap::default();
-        if matches!(&tcx.sess.target.os, Os::Linux | Os::FreeBsd | Os::Android) {
+        if matches!(&tcx.sess.target.os, Os::Linux | Os::FreeBsd | Os::Android) && !is_no_core(tcx)
+        {
             thread_cpu_affinity
                 .insert(threads.active_thread(), CpuAffinityMask::new(&layout_cx, config.num_cpus));
         }
