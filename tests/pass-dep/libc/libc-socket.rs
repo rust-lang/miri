@@ -515,6 +515,9 @@ fn test_shutdown() {
         assert_eq!(bytes_read, 0);
     }
 
+    // TODO: Once epoll is available for TCP sockets, ensure that the rdhup and hup readiness
+    // are set.
+
     // Closing should affect previous handles.
     unsafe {
         errno_result(libc::write(client_dup_sockfd, [0].as_ptr().cast(), 1)).unwrap_err();
