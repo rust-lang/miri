@@ -1,4 +1,5 @@
 use rustc_abi::Size;
+use rustc_hir::find_attr;
 use rustc_middle::mir::{Mutability, RetagKind};
 use rustc_middle::ty::layout::HasTypingEnv;
 use rustc_middle::ty::{self, Ty};
@@ -133,16 +134,23 @@ impl<'tcx> NewPermission {
         let ty_is_freeze = pointee.is_freeze(*cx.tcx, cx.typing_env());
         let is_protected = retag_kind == RetagKind::FnEntry;
 
-        // Check if the implicit writes check has been enabled for this function using the `-Zmiri-tree-borrows-implicit-writes` flag
-        let implicit_writes = cx
-            .machine
-            .borrow_tracker
-            .as_ref()
-            .unwrap()
-            .borrow()
-            .borrow_tracker_method
-            .get_tree_borrows_params()
-            .implicit_writes;
+        // Check if the implicit writes feature is globally enabled, using the
+        // `-Zmiri-tree-borrows-implicit-writes` flag, and not locally disabled using the
+        // `#[rustc_no_writable]` attribute. For performance reasons, only performs the lookup if
+        // is_protected is true as implicit writes are only performed for protected references.
+        let implicit_writes_enabled = is_protected && {
+            let implicit_writes = cx
+                .machine
+                .borrow_tracker
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .borrow_tracker_method
+                .get_tree_borrows_params()
+                .implicit_writes;
+            let def_id = cx.frame().instance().def_id();
+            implicit_writes && !find_attr!(cx.tcx, def_id, RustcNoWritable)
+        };
 
         if matches!(ref_mutability, Some(Mutability::Mut) | None if !ty_is_unpin) {
             // Mutable reference / Box to pinning type: retagging is a NOP.
@@ -175,7 +183,7 @@ impl<'tcx> NewPermission {
                     },
                 // Mutable references
                 Some(Mutability::Mut) => {
-                    if is_protected && implicit_writes && !matches!(part, Outside) {
+                    if implicit_writes_enabled && !matches!(part, Outside) {
                         // We cannot use `Unique` for the outside part.
                         Permission::new_unique()
                     } else if is_protected || frozen {
@@ -187,8 +195,8 @@ impl<'tcx> NewPermission {
                     }
                 }
                 // Boxes
-                None =>
-                    if is_protected && implicit_writes && !matches!(part, Outside) {
+                None => {
+                    if implicit_writes_enabled && !matches!(part, Outside) {
                         // Boxes are treated the same as mutable references.
                         Permission::new_unique()
                     } else if is_protected || frozen {
@@ -197,7 +205,8 @@ impl<'tcx> NewPermission {
                         Permission::new_reserved_frz()
                     } else {
                         Permission::new_reserved_im()
-                    },
+                    }
+                }
             }
         };
 
