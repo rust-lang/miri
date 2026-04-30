@@ -134,9 +134,11 @@ impl<'tcx> NewPermission {
         let ty_is_freeze = pointee.is_freeze(*cx.tcx, cx.typing_env());
         let is_protected = retag_kind == RetagKind::FnEntry;
 
-        // Check if the implicit writes feature is globally enabled, using the `-Zmiri-tree-borrows-implicit-writes` flag, and not locally disabled using the `#[rustc_no_writable]` attribute.
-        // For performance reasons, only performs the lookup if is_protected is true as implicit write checking only works for protected references.
-        let implicit_writes_enabled = if is_protected {
+        // Check if the implicit writes feature is globally enabled, using the
+        // `-Zmiri-tree-borrows-implicit-writes` flag, and not locally disabled using the
+        // `#[rustc_no_writable]` attribute. For performance reasons, only performs the lookup if
+        // is_protected is true as implicit writes are only performed for protected references.
+        let implicit_writes_enabled = is_protected && {
             let implicit_writes = cx
                 .machine
                 .borrow_tracker
@@ -147,10 +149,7 @@ impl<'tcx> NewPermission {
                 .get_tree_borrows_params()
                 .implicit_writes;
             let def_id = cx.frame().instance().def_id();
-            let no_writable = find_attr!(cx.tcx, def_id, RustcNoWritable);
-            implicit_writes && !no_writable
-        } else {
-            false
+            implicit_writes && !find_attr!(cx.tcx, def_id, RustcNoWritable)
         };
 
         if matches!(ref_mutability, Some(Mutability::Mut) | None if !ty_is_unpin) {
