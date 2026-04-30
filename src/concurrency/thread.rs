@@ -90,7 +90,7 @@ impl From<ThreadId> for u64 {
 }
 
 /// Keeps track of what the thread is blocked on.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockReason {
     /// The thread tried to join the specified thread and is blocked until that
     /// thread terminates.
@@ -151,8 +151,8 @@ impl<'tcx> ThreadState<'tcx> {
         matches!(self, ThreadState::Terminated)
     }
 
-    fn is_blocked_on(&self, reason: BlockReason) -> bool {
-        matches!(*self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
+    fn is_blocked_on(&self, reason: &BlockReason) -> bool {
+        matches!(self, ThreadState::Blocked { reason: actual_reason, .. } if actual_reason == reason)
     }
 }
 
@@ -696,7 +696,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
                 // If a thread is blocked on GenMC, we have to implicitly unblock it when it gets scheduled again.
                 if this.machine.threads.threads[next_thread_id]
                     .state
-                    .is_blocked_on(BlockReason::Genmc)
+                    .is_blocked_on(&BlockReason::Genmc)
                 {
                     info!(
                         "GenMC: scheduling blocked thread {next_thread_id:?}, so we unblock it now."
@@ -798,7 +798,7 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         } else if thread_manager
             .threads
             .iter()
-            .any(|thread| thread.state.is_blocked_on(BlockReason::IO))
+            .any(|thread| thread.state.is_blocked_on(&BlockReason::IO))
         {
             // At least one thread is blocked on host I/O but doesn't
             // have a timeout set. Hence, we sleep indefinitely in the
@@ -1059,11 +1059,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let threads = &this.machine.threads.threads;
         let joining_threads = threads
             .iter_enumerated()
-            .filter(|(_, thread)| thread.state.is_blocked_on(unblock_reason))
+            .filter(|(_, thread)| thread.state.is_blocked_on(&unblock_reason))
             .map(|(id, _)| id)
             .collect::<Vec<_>>();
         for thread in joining_threads {
-            this.unblock_thread(thread, unblock_reason)?;
+            this.unblock_thread(thread, unblock_reason.clone())?;
         }
 
         interp_ok(())
@@ -1231,9 +1231,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Sanity check `join_status`.
         assert!(
-            threads
-                .iter()
-                .all(|thread| { !thread.state.is_blocked_on(BlockReason::Join(joined_thread_id)) }),
+            threads.iter().all(|thread| {
+                !thread.state.is_blocked_on(&BlockReason::Join(joined_thread_id))
+            }),
             "this thread already has threads waiting for its termination"
         );
 
