@@ -251,6 +251,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn io_error_to_errnum(&self, err: std::io::Error) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_ref();
         let target = &this.tcx.sess.target;
+
         if target.families.iter().any(|f| f == "unix") {
             for &(name, kind) in UNIX_IO_ERROR_TABLE {
                 if err.kind() == kind {
