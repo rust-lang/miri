@@ -58,7 +58,7 @@ jobs:
     env:
       HOST_TARGET: ${{ matrix.host_target }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: install multiarch
         if: ${{ matrix.multiarch != '' }}
         run: |
@@ -105,7 +105,7 @@ jobs:
     name: style checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/workflows/setup
 
       - name: rustfmt
@@ -121,7 +121,7 @@ jobs:
     name: bootstrap build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       # Deliberately skipping `./.github/workflows/setup` as we do our own setup
       - name: Add cache for cargo
         id: cache
@@ -156,7 +156,7 @@ jobs:
     name: coverage report
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/workflows/setup
       - name: coverage
         run: ./miri test --coverage
@@ -191,7 +191,7 @@ jobs:
         pull-requests: write
     if: ${{ github.event_name == 'schedule' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 256 # get a bit more of the history
       - name: install josh-sync
@@ -205,7 +205,7 @@ jobs:
       - name: Install rustup-toolchain-install-master
         run: cargo install -f rustup-toolchain-install-master
       # Create a token for the next step so it can create a PR that actually runs CI.
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.APP_CLIENT_ID }}
