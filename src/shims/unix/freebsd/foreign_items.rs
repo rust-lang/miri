@@ -85,7 +85,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let _which_cpuset = this.eval_libc_i32("CPU_WHICH_CPUSET");
                 let _which_irq = this.eval_libc_i32("CPU_WHICH_IRQ");
 
-                // For sched_getaffinity, the current process is identified by -1.
+                // For cpuset_getaffinity, the current process is identified by -1.
                 // TODO: Use gettid? I'm (LorrensP-2158466) not that familiar with this api .
                 let id = match id {
                     -1 => this.active_thread(),

@@ -9,9 +9,9 @@ use libc::{sched_getaffinity, sched_setaffinity};
 
 #[rustfmt::skip] // don't merge with imports above
 #[cfg(any(target_os = "linux", target_os = "android"))]
-use libc::cpu_set_t;
+use libc::{cpu_set_t, gettid};
 #[cfg(target_os = "freebsd")]
-use libc::cpuset_t as cpu_set_t;
+use libc::{cpuset_t as cpu_set_t, pthread_getthreadid_np as gettid};
 
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
@@ -201,10 +201,9 @@ fn parent_child() {
     errno_check(unsafe { sched_setaffinity(PID, size_of::<cpu_set_t>(), &cpuset) });
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
 fn use_gettid() {
     // sched_getaffinity/sched_setaffinity also accept a TID (as returned by gettid)
-    let tid = unsafe { libc::gettid() };
+    let tid = unsafe { gettid() };
     assert_ne!(tid, 0);
 
     let mut cpuset: cpu_set_t = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
@@ -229,6 +228,5 @@ fn main() {
     set_small_cpu_mask();
     set_custom_cpu_mask();
     parent_child();
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     use_gettid();
 }
