@@ -13,7 +13,7 @@ help: the accessed tag <TAG> was created here
   --> tests/fail/both_borrows/aliasing_mut1.rs:LL:CC
    |
 LL |     let xraw: *mut i32 = unsafe { mem::transmute(&mut x) };
-   |                                                  ^^^^^^
+   |                                   ^^^^^^^^^^^^^^^^^^^^^^
 help: the protected tag <TAG> was created here, in the initial state Reserved
   --> tests/fail/both_borrows/aliasing_mut1.rs:LL:CC
    |
