@@ -1,11 +1,17 @@
-//@only-target: linux # these are Linux-specific APIs
+//@only-target: linux freebsd # these are Linux/FreeBSD-specific APIs
 //@compile-flags: -Zmiri-disable-isolation -Zmiri-num-cpus=4
 #![feature(io_error_more)]
 #![feature(pointer_is_aligned_to)]
 
 use std::mem::{size_of, size_of_val};
 
-use libc::{cpu_set_t, sched_getaffinity, sched_setaffinity};
+use libc::{sched_getaffinity, sched_setaffinity};
+
+#[rustfmt::skip] // don't merge with imports above
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use libc::cpu_set_t;
+#[cfg(target_os = "freebsd")]
+use libc::cpuset_t as cpu_set_t;
 
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
