@@ -1034,13 +1034,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let cpusetsize = this.read_target_usize(cpusetsize)?;
                 let mask = this.read_pointer(mask)?;
 
-                // TODO: when https://github.com/rust-lang/miri/issues/3730 is fixed this should use its notion of tid/pid
-                let thread_id = match pid {
-                    0 => this.active_thread(),
-                    _ =>
-                        throw_unsup_format!(
-                            "`sched_getaffinity` is only supported with a pid of 0 (indicating the current thread)"
-                        ),
+                let thread_id = if pid == 0 {
+                    this.active_thread()
+                } else if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android) {
+                    // On Linux/Android, pid can be a TID as returned by `gettid`.
+                    let Some(thread_id) = this.get_thread_id_from_linux_tid(pid) else {
+                        this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+                        return interp_ok(EmulateItemResult::NeedsReturn);
+                    };
+                    thread_id
+                } else {
+                    throw_unsup_format!(
+                        "`sched_getaffinity` is only supported with a pid of 0 (indicating the current thread) on non-Linux platforms"
+                    )
                 };
 
                 // The mask is stored in chunks, and the size must be a whole number of chunks.
@@ -1072,13 +1078,19 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let cpusetsize = this.read_target_usize(cpusetsize)?;
                 let mask = this.read_pointer(mask)?;
 
-                // TODO: when https://github.com/rust-lang/miri/issues/3730 is fixed this should use its notion of tid/pid
-                let thread_id = match pid {
-                    0 => this.active_thread(),
-                    _ =>
-                        throw_unsup_format!(
-                            "`sched_setaffinity` is only supported with a pid of 0 (indicating the current thread)"
-                        ),
+                let thread_id = if pid == 0 {
+                    this.active_thread()
+                } else if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android) {
+                    // On Linux/Android, pid can be a TID as returned by `gettid`.
+                    let Some(thread_id) = this.get_thread_id_from_linux_tid(pid) else {
+                        this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+                        return interp_ok(EmulateItemResult::NeedsReturn);
+                    };
+                    thread_id
+                } else {
+                    throw_unsup_format!(
+                        "`sched_setaffinity` is only supported with a pid of 0 (indicating the current thread) on non-Linux platforms"
+                    )
                 };
 
                 if this.ptr_is_null(mask)? {
