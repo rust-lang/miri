@@ -486,15 +486,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         mode: RetagMode,
     ) -> InterpResult<'tcx, Option<ImmTy<'tcx>>> {
         let this = self.eval_context_mut();
-        let new_perm = match ty.kind() {
+        let new_perm = match *ty.kind() {
             _ if ty.is_box_global(*this.tcx) => {
                 // The `None` marks this as a Box.
                 NewPermission::new(ty.builtin_deref(true).unwrap(), None, mode, this)
             }
-            &ty::Ref(_, pointee, mutability) =>
+            ty::Ref(_, pointee, mutability) =>
                 NewPermission::new(pointee, Some(mutability), mode, this),
 
-            &ty::RawPtr(..) => {
+            ty::RawPtr(..) => {
                 assert!(mode == RetagMode::Raw);
                 // We don't give new tags to raw pointers.
                 None
