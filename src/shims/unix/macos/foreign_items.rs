@@ -244,7 +244,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "pthread_threadid_np" => {
                 let [thread, tid_ptr] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-                let res = this.apple_pthread_threadip_np(thread, tid_ptr)?;
+                let res = this.apple_pthread_threadid_np(thread, tid_ptr)?;
                 this.write_scalar(res, dest)?;
             }
 

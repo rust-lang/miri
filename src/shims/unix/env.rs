@@ -269,7 +269,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // For most platforms the return type is an `i32`, but some are unsigned. The TID
         // will always be positive so we don't need to differentiate.
-        interp_ok(Scalar::from_u32(this.get_current_tid()))
+        interp_ok(Scalar::from_u32(this.get_tid(this.active_thread())))
     }
 
     /// `fields_size`, if present, says how large each field of the struct is.
@@ -323,7 +323,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// allows querying the ID for arbitrary threads, identified by their pthread_t.
     ///
     /// API documentation: <https://www.manpagez.com/man/3/pthread_threadid_np/>.
-    fn apple_pthread_threadip_np(
+    fn apple_pthread_threadid_np(
         &mut self,
         thread_op: &OpTy<'tcx>,
         tid_op: &OpTy<'tcx>,
@@ -349,6 +349,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             thread
         };
 
+        // This returns an `int`, not a `pthread_t`, so we treat it like we treat `gettid` on Linux.
         let tid = this.get_tid(thread);
         let tid_dest = this.deref_pointer_as(tid_op, this.machine.layouts.u64)?;
         this.write_int(tid, &tid_dest)?;
