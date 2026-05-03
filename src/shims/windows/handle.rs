@@ -184,7 +184,8 @@ impl Handle {
 
         match Self::from_packed(handle) {
             Some(Self::Thread(thread)) => {
-                // Validate the thread id. Windows handles remain valid even after thread termination
+                // Validate the thread id. Windows handles remain valid even after thread
+                // termination.
                 use crate::concurrency::thread::ThreadLookupError;
                 match cx.machine.threads.thread_id_try_from(thread.to_u32()) {
                     Ok(id) | Err(ThreadLookupError::Terminated(id)) =>

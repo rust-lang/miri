@@ -165,8 +165,13 @@ fn main() {
     // The value is not important, we only care that whatever the value is,
     // won't change from execution to execution.
     if cfg!(with_isolation) {
-        if cfg!(any(target_os = "linux", target_os = "android")) {
-            // Linux starts the TID at the PID, which is 1000.
+        if cfg!(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd",
+            target_os = "macos"
+        )) {
+            // On these OSes we start the TID at the PID, which is 1000.
             assert_eq!(tid, 1000);
         } else {
             // Other platforms start counting from 0.
@@ -174,7 +179,7 @@ fn main() {
         }
     }
 
-    // On Linux, the first TID is the PID.
+    // On Linux, the main thread TID is the PID.
     #[cfg(any(target_os = "linux", target_os = "android"))]
     assert_eq!(tid, unsafe { libc::getpid() } as u64);
 
