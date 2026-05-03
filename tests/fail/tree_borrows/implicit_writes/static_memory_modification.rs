@@ -8,4 +8,4 @@ fn main() {
     foo(x);
 }
 
-fn foo(_x: &mut usize) {} //~ ERROR: writing to alloc1 which is read-only
+fn foo(_x: &mut usize) {} //~ ERROR: mutable reference pointing to read-only memory
