@@ -180,6 +180,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::Linux, Os::Android, Os::MacOs, Os::Solaris, Os::Illumos],
                     link_name,
                 )?;
+
                 let [uname] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*mut _) -> i32),
                     link_name,
@@ -296,6 +297,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "flock" => {
                 // Currently this function does not exist on all Unixes, e.g. on Solaris.
                 this.check_target_os(&[Os::Linux, Os::FreeBsd, Os::MacOs, Os::Illumos], link_name)?;
+
                 let [fd, op] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, i32) -> i32),
                     link_name,
@@ -305,6 +307,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let op = this.read_scalar(op)?.to_i32()?;
                 let result = this.flock(fd, op)?;
+                this.write_scalar(result, dest)?;
+            }
+            "ioctl" => {
+                let ([fd, op], varargs) =
+                    this.check_shim_sig_variadic_lenient(abi, CanonAbi::C, link_name, args)?;
+                let result = this.ioctl(fd, op, varargs)?;
                 this.write_scalar(result, dest)?;
             }
 
@@ -342,6 +350,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "fstat" => {
                 let [fd, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.fstat(fd, buf)?;
+                this.write_scalar(result, dest)?;
+            }
+            "lstat" => {
+                let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let result = this.lstat(path, buf)?;
+                this.write_scalar(result, dest)?;
+            }
+            "stat" => {
+                let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let result = this.stat(path, buf)?;
                 this.write_scalar(result, dest)?;
             }
             "rename" => {
@@ -479,6 +497,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::Linux, Os::FreeBsd, Os::Solaris, Os::Illumos, Os::Android],
                     link_name,
                 )?;
+
                 let [fd, offset, len] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, libc::off_t, libc::off_t) -> i32),
                     link_name,
@@ -544,6 +563,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::Linux, Os::Android, Os::FreeBsd, Os::Solaris, Os::Illumos],
                     link_name,
                 )?;
+
                 let [pipefd, flags] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*mut _, i32) -> i32),
                     link_name,
@@ -658,7 +678,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     abi,
                     args,
                 )?;
-                let result = this.getpeername(socket, address, address_len)?;
+                this.getpeername(socket, address, address_len, dest)?;
+            }
+            "shutdown" => {
+                let [sockfd, how] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, i32) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                let result = this.shutdown(sockfd, how)?;
                 this.write_scalar(result, dest)?;
             }
 
@@ -718,6 +747,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "reallocarray" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(&[Os::Linux, Os::FreeBsd, Os::Android], link_name)?;
+
                 let [ptr, nmemb, size] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let ptr = this.read_pointer(ptr)?;
@@ -995,6 +1025,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::FreeBsd, Os::Linux, Os::Android, Os::Solaris, Os::Illumos],
                     link_name,
                 )?;
+
                 let [clock_id, flags, req, rem] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.clock_nanosleep(clock_id, flags, req, rem)?;
@@ -1003,19 +1034,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "sched_getaffinity" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(&[Os::Linux, Os::FreeBsd, Os::Android], link_name)?;
+
                 let [pid, cpusetsize, mask] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let pid = this.read_scalar(pid)?.to_u32()?;
                 let cpusetsize = this.read_target_usize(cpusetsize)?;
                 let mask = this.read_pointer(mask)?;
 
-                // TODO: when https://github.com/rust-lang/miri/issues/3730 is fixed this should use its notion of tid/pid
-                let thread_id = match pid {
-                    0 => this.active_thread(),
-                    _ =>
-                        throw_unsup_format!(
-                            "`sched_getaffinity` is only supported with a pid of 0 (indicating the current thread)"
-                        ),
+                let thread_id = if pid == 0 {
+                    this.active_thread()
+                } else if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android) {
+                    // On Linux/Android, pid can be a TID as returned by `gettid`.
+                    let Some(thread_id) = this.get_thread_id_from_linux_tid(pid) else {
+                        this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+                        return interp_ok(EmulateItemResult::NeedsReturn);
+                    };
+                    thread_id
+                } else {
+                    throw_unsup_format!(
+                        "`sched_getaffinity` is only supported with a pid of 0 (indicating the current thread) on non-Linux platforms"
+                    )
                 };
 
                 // The mask is stored in chunks, and the size must be a whole number of chunks.
@@ -1041,19 +1079,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "sched_setaffinity" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(&[Os::Linux, Os::FreeBsd, Os::Android], link_name)?;
+
                 let [pid, cpusetsize, mask] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let pid = this.read_scalar(pid)?.to_u32()?;
                 let cpusetsize = this.read_target_usize(cpusetsize)?;
                 let mask = this.read_pointer(mask)?;
 
-                // TODO: when https://github.com/rust-lang/miri/issues/3730 is fixed this should use its notion of tid/pid
-                let thread_id = match pid {
-                    0 => this.active_thread(),
-                    _ =>
-                        throw_unsup_format!(
-                            "`sched_setaffinity` is only supported with a pid of 0 (indicating the current thread)"
-                        ),
+                let thread_id = if pid == 0 {
+                    this.active_thread()
+                } else if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android) {
+                    // On Linux/Android, pid can be a TID as returned by `gettid`.
+                    let Some(thread_id) = this.get_thread_id_from_linux_tid(pid) else {
+                        this.set_last_error_and_return(LibcError("ESRCH"), dest)?;
+                        return interp_ok(EmulateItemResult::NeedsReturn);
+                    };
+                    thread_id
+                } else {
+                    throw_unsup_format!(
+                        "`sched_setaffinity` is only supported with a pid of 0 (indicating the current thread) on non-Linux platforms"
+                    )
                 };
 
                 if this.ptr_is_null(mask)? {
@@ -1103,6 +1148,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::Linux, Os::MacOs, Os::FreeBsd, Os::Illumos, Os::Solaris, Os::Android],
                     link_name,
                 )?;
+
                 let [buf, bufsize] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let buf = this.read_pointer(buf)?;
@@ -1135,6 +1181,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::Linux, Os::FreeBsd, Os::Illumos, Os::Solaris, Os::Android],
                     link_name,
                 )?;
+
                 let [ptr, len, flags] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let ptr = this.read_pointer(ptr)?;
@@ -1148,6 +1195,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // This function is non-standard but exists with the same signature and
                 // same behavior (eg never fails) on FreeBSD and Solaris/Illumos.
                 this.check_target_os(&[Os::FreeBsd, Os::Illumos, Os::Solaris], link_name)?;
+
                 let [ptr, len] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let ptr = this.read_pointer(ptr)?;
                 let len = this.read_target_usize(len)?;
@@ -1171,6 +1219,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     &[Os::Linux, Os::FreeBsd, Os::Illumos, Os::Solaris, Os::Android, Os::MacOs],
                     link_name,
                 )?;
+
                 // This function looks and behaves exactly like miri_start_unwind.
                 let [payload] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.handle_miri_start_unwind(payload)?;
