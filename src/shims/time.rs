@@ -247,6 +247,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let qpc = i64::try_from(duration.as_nanos()).map_err(|_| {
             err_unsup_format!("programs running longer than 2^63 nanoseconds are not supported")
         })?;
+        // We are allowed to offset this by an arbitrary constant, which will correspond to the
+        // value of this clock at program start time. We use that freedom to work around
+        // <https://github.com/rust-lang/rust/issues/156142>, caused by std casting the result of
+        // this function to `u64`. We pick an offset of `i64::MAX/2` instead of `i64::MAX` to avoid
+        // being too close to overflow for callers that actually do use signed integers.
+        let qpc = qpc.strict_add(i64::MAX / 2);
+
         this.write_scalar(
             Scalar::from_i64(qpc),
             &this.deref_pointer_as(lpPerformanceCount_op, this.machine.layouts.i64)?,
