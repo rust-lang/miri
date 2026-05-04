@@ -1548,15 +1548,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // would be returned on UNIX-like systems. We thus remap this error to an EWOULDBLOCK.
                 interp_ok(Err(IoError::HostError(io::ErrorKind::WouldBlock.into())))
             }
-            Err(IoError::HostError(e))
-                if cfg!(windows)
-                    && matches!(e.raw_os_error(), Some(/* WSAESHUTDOWN error code */ 10058)) =>
-            {
-                // FIXME: This is a temporary workaround for handling WSAESHUTDOWN errors
-                // on Windows. A discussion on how those errors should be handled can be found here:
-                // <https://rust-lang.zulipchat.com/#narrow/channel/219381-t-libs/topic/WSAESHUTDOWN.20error.20on.20Windows/near/591883531>
-                interp_ok(Err(IoError::HostError(io::ErrorKind::BrokenPipe.into())))
-            }
             result => interp_ok(result),
         }
     }
