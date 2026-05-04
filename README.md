@@ -432,14 +432,13 @@ to Miri failing to detect cases of undefined behavior in a program.
   be detected. Using this flag is **unsound** (but the affected soundness rules
   are experimental). Later flags take precedence: borrow tracking can be reactivated
   by `-Zmiri-tree-borrows`.
-* `-Zmiri-disable-validation` disables enforcing validity invariants, which are
-  enforced by default. This only disables these checks for typed copies; using
-  invalid values in any other operation will still cause an error. This is mostly useful 
-  to focus on other failures (such as out-of-bounds accesses) first. Setting this 
-  flag means Miri can miss bugs in your program. However, this can also help to 
-  make Miri run faster. Using this flag is **unsound**.
-* `-Zmiri-disable-weak-memory-emulation` disables the emulation of some C++11 weak
-  memory effects.
+* `-Zmiri-disable-validation` disables enforcing validity invariants, which are enforced by default.
+  This only disables these checks for typed copies; using invalid values in any other operation will
+  still cause an error. This also disables the aliasing model (Stacked/Tree Borrows). This is mostly
+  useful to focus on other failures (such as out-of-bounds accesses) first. Setting this flag means
+  Miri can miss bugs in your program. However, this can also help to make Miri run faster. Using
+  this flag is **unsound**.
+* `-Zmiri-disable-weak-memory-emulation` disables the emulation of some C++11 weak memory effects.
 * `-Zmiri-fixed-schedule` disables preemption (like `-Zmiri-preemption-rate=0.0`) and furthermore
   disables the randomization of the next thread to be picked, instead fixing a round-robin schedule.
   Note however that other aspects of Miri's concurrency behavior are still randomize; use
@@ -511,6 +510,8 @@ to Miri failing to detect cases of undefined behavior in a program.
   of Rust will be stricter than Tree Borrows. In other words, if you use Tree Borrows,
   even if your code is accepted today, it might be declared UB in the future.
   This is much less likely with Stacked Borrows.
+* `-Zmiri-tree-borrows-implicit-writes` enables implicit writes for all `&mut` function arguments.
+  This makes Tree Borrows less permissive.
 * `-Zmiri-tree-borrows-no-precise-interior-mut` makes Tree Borrows
   track interior mutable data on the level of references instead of on the
   byte-level as is done by default.  Therefore, with this flag, Tree
@@ -519,17 +520,6 @@ to Miri failing to detect cases of undefined behavior in a program.
   `4` is default for most targets. This value should always be a power of 2 and nonzero.
 
 [function ABI]: https://doc.rust-lang.org/reference/items/functions.html#extern-function-qualifier
-
-Some native rustc `-Z` flags are also very relevant for Miri:
-
-* `-Zmir-opt-level` controls how many MIR optimizations are performed.  Miri
-  overrides the default to be `0`; be advised that using any higher level can
-  make Miri miss bugs in your program because they got optimized away.
-* `-Zalways-encode-mir` makes rustc dump MIR even for completely monomorphic
-  functions.  This is needed so that Miri can execute such functions, so Miri
-  sets this flag per default.
-* `-Zmir-emit-retag` controls whether `Retag` statements are emitted. Miri
-  enables this per default because it is needed for [Stacked Borrows] and [Tree Borrows].
 
 Moreover, Miri recognizes some environment variables:
 

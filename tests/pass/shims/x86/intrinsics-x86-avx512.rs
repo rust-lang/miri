@@ -219,6 +219,57 @@ unsafe fn test_avx512() {
     }
     test_mm512_permutexvar_epi32();
 
+    #[target_feature(enable = "avx512f")]
+    unsafe fn test_mm512_permutexvar_epi64() {
+        let a = _mm512_setr_epi64(100, 200, 300, 400, 500, 600, 700, 800);
+
+        // Mirrors stdarch's basic sanity check.
+        let idx = _mm512_set1_epi64(1);
+        let r = _mm512_permutexvar_epi64(idx, a);
+        let e = _mm512_set1_epi64(200);
+        assert_eq_m512i(r, e);
+
+        // This must permute across the full 512-bit register, not within 128-bit lanes.
+        let idx = _mm512_setr_epi64(7, 0, 5, 2, 6, 1, 4, 3);
+        let r = _mm512_permutexvar_epi64(idx, a);
+        let e = _mm512_setr_epi64(800, 100, 600, 300, 700, 200, 500, 400);
+        assert_eq_m512i(r, e);
+
+        // Only the low 3 bits of each 64-bit index are used.
+        let idx = _mm512_setr_epi64(8, 15, -1, i64::MIN, 0, 1, 2, 3);
+        let r = _mm512_permutexvar_epi64(idx, a);
+        let e = _mm512_setr_epi64(100, 800, 800, 100, 100, 200, 300, 400);
+        assert_eq_m512i(r, e);
+    }
+    test_mm512_permutexvar_epi64();
+
+    #[target_feature(enable = "avx512f")]
+    unsafe fn test_mm512_permutex2var_epi64() {
+        // a[i] = (i+1) * 10, b[i] = (i+1) * 100.
+        let a = _mm512_set_epi64(80, 70, 60, 50, 40, 30, 20, 10);
+        let b = _mm512_set_epi64(800, 700, 600, 500, 400, 300, 200, 100);
+
+        // All from `a`: identity (bit 3 clear).
+        let idx = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0);
+        assert_eq_m512i(_mm512_permutex2var_epi64(a, idx, b), a);
+
+        // All from `b` (bit 3 set).
+        let idx = _mm512_set_epi64(15, 14, 13, 12, 11, 10, 9, 8);
+        assert_eq_m512i(_mm512_permutex2var_epi64(a, idx, b), b);
+
+        // Interleave: even elements from `a`, odd from `b`.
+        let idx = _mm512_set_epi64(15, 6, 13, 4, 11, 2, 9, 0);
+        let e = _mm512_set_epi64(800, 70, 600, 50, 400, 30, 200, 10);
+        assert_eq_m512i(_mm512_permutex2var_epi64(a, idx, b), e);
+
+        // Only the low 4 bits of each index are used: bits [2:0] pick the lane,
+        // bit 3 selects between `a` and `b`.
+        let idx = _mm512_set_epi64(0, -1, -128, i64::MIN, 15, 8, 128, i64::MAX);
+        let e = _mm512_set_epi64(10, 800, 10, 10, 800, 100, 10, 800);
+        assert_eq_m512i(_mm512_permutex2var_epi64(a, idx, b), e);
+    }
+    test_mm512_permutex2var_epi64();
+
     #[target_feature(enable = "avx512bw")]
     unsafe fn test_mm512_shuffle_epi8() {
         #[rustfmt::skip]
