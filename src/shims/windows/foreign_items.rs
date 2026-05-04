@@ -953,8 +953,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Handle::Pseudo(PseudoHandle::CurrentThread) => this.active_thread(),
                     _ => this.invalid_handle("GetThreadDescription")?,
                 };
-                let tid = this.get_tid(thread);
-                this.write_scalar(Scalar::from_u32(tid), dest)?;
+                this.write_scalar(Scalar::from_u32(thread.to_u32()), dest)?;
             }
             "GetCurrentThreadId" => {
                 let [] = this.check_shim_sig(
@@ -963,9 +962,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     abi,
                     args,
                 )?;
-                let thread = this.active_thread();
-                let tid = this.get_tid(thread);
-                this.write_scalar(Scalar::from_u32(tid), dest)?;
+                this.write_scalar(Scalar::from_u32(this.active_thread().to_u32()), dest)?;
             }
 
             // Miscellaneous

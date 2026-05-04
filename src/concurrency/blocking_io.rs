@@ -219,7 +219,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         this.machine.blocking_io.register(
             source_fd,
-            InterestReceiver::UnblockThread(this.machine.threads.active_thread()),
+            InterestReceiver::UnblockThread(this.active_thread()),
             interests,
         );
         this.block_thread(BlockReason::IO, timeout, callback);
