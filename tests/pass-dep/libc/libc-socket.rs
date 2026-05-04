@@ -41,6 +41,7 @@ fn main() {
     test_getsockname_ipv4();
     test_getsockname_ipv4_random_port();
     test_getsockname_ipv4_unbound();
+    test_getsockname_ipv4_connect();
     test_getsockname_ipv6();
 
     test_getpeername_ipv4();
@@ -425,6 +426,34 @@ fn test_getsockname_ipv4_unbound() {
     assert_eq!(addr.sin_family, sock_addr.sin_family);
     assert_eq!(addr.sin_port, sock_addr.sin_port);
     assert_eq!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+}
+
+/// Test the `getsockname` syscall on a connected IPv4 socket.
+fn test_getsockname_ipv4_connect() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || net::accept_ipv4(server_sockfd).unwrap());
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    let (_, sock_addr) = net::sockname_ipv4(|storage, len| unsafe {
+        libc::getsockname(client_sockfd, storage, len)
+    })
+    .unwrap();
+
+    // We want to ensure that the local address is not the unspecified address.
+    // Because the bound address could be of any local interface, we cannot
+    // test for localhost.
+    let addr = net::sock_addr_ipv4([0, 0, 0, 0], 0);
+
+    assert_eq!(addr.sin_family, sock_addr.sin_family);
+    assert_ne!(addr.sin_addr.s_addr, sock_addr.sin_addr.s_addr);
+    assert!(sock_addr.sin_port > 0);
+
+    server_thread.join().unwrap();
 }
 
 /// Test the `getsockname` syscall on an IPv6 socket which is bound.

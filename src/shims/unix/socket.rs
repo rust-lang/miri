@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::io::Read;
 use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::{io, iter};
 
@@ -975,9 +976,27 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     Ok(address) => address,
                     Err(e) => return this.set_last_error_and_return_i32(e),
                 },
+            SocketState::Connecting(stream) | SocketState::Connected(stream) => {
+                if cfg!(windows) && matches!(&*state, SocketState::Connecting(_)) {
+                    // FIXME: On Windows hosts `TcpStream::local_addr` returns `0.0.0.0:0` whilst
+                    // the socket is connecting:
+                    // <https://learn.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-getsockname#remarks>
+                    // This is problematic because UNIX targets could expect a real local address even
+                    // for a connecting non-blocking socket.
+
+                    static DEDUP: AtomicBool = AtomicBool::new(false);
+                    if !DEDUP.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        this.emit_diagnostic(NonHaltingDiagnostic::ConnectingSocketGetsockname);
+                    }
+                }
+                match stream.local_addr() {
+                    Ok(address) => address,
+                    Err(e) => return this.set_last_error_and_return_i32(e),
+                }
+            }
             // For non-bound sockets the POSIX manual says the returned address is unspecified.
             // Often this is 0.0.0.0:0 and thus we set it to this value.
-            _ => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+            SocketState::Initial => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
         };
 
         match this.write_socket_address(&address, address_ptr, address_len_ptr, "getsockname")? {
