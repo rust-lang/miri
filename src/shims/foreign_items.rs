@@ -459,7 +459,13 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
 
                 let thread = this.read_target_usize(thread_id)?;
-                if let Ok(thread) = this.thread_id_try_from(thread) {
+                // Joining a terminated thread is valid.
+                use crate::concurrency::thread::ThreadLookupError;
+                let thread = match this.thread_id_try_from(thread) {
+                    Ok(id) | Err(ThreadLookupError::Terminated(id)) => Some(id),
+                    Err(ThreadLookupError::InvalidId) => None,
+                };
+                if let Some(thread) = thread {
                     this.join_thread_exclusive(
                         thread,
                         /* success_retval */ Scalar::from_bool(true),

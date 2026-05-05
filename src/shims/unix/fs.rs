@@ -229,21 +229,26 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (access_sec, access_nsec) = metadata.accessed.unwrap_or((0, 0));
         let (created_sec, created_nsec) = metadata.created.unwrap_or((0, 0));
         let (modified_sec, modified_nsec) = metadata.modified.unwrap_or((0, 0));
-        let mode = metadata.mode.to_uint(this.libc_ty_layout("mode_t").size)?;
 
         // We do *not* use `deref_pointer_as` here since determining the right pointee type
         // is highly non-trivial: it depends on which exact alias of the function was invoked
         // (e.g. `fstat` vs `fstat64`), and then on FreeBSD it also depends on the ABI level
         // which can be different between the libc used by std and the libc used by everyone else.
         let buf = this.deref_pointer(buf_op)?;
+
+        // `libc::S_IF*` constants are of type `mode_t`, which varies in width across targets
+        // (`u16` on macOS, `u32` on Linux). Read the scalar using `mode_t`'s size on the target.
+        let mode_t_size = this.libc_ty_layout("mode_t").size;
+        let mode: u32 = metadata.mode.to_uint(mode_t_size)?.try_into().unwrap();
+
         this.write_int_fields_named(
             &[
-                ("st_dev", metadata.dev.into()),
-                ("st_mode", mode.try_into().unwrap()),
-                ("st_nlink", 0),
-                ("st_ino", 0),
-                ("st_uid", metadata.uid.into()),
-                ("st_gid", metadata.gid.into()),
+                ("st_dev", metadata.dev.unwrap_or(0).into()),
+                ("st_mode", mode.into()),
+                ("st_nlink", metadata.nlink.unwrap_or(0).into()),
+                ("st_ino", metadata.ino.unwrap_or(0).into()),
+                ("st_uid", metadata.uid.unwrap_or(0).into()),
+                ("st_gid", metadata.gid.unwrap_or(0).into()),
                 ("st_rdev", 0),
                 ("st_atime", access_sec.into()),
                 ("st_atime_nsec", access_nsec.into()),
@@ -252,8 +257,8 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ("st_ctime", 0),
                 ("st_ctime_nsec", 0),
                 ("st_size", metadata.size.into()),
-                ("st_blocks", 0),
-                ("st_blksize", 0),
+                ("st_blocks", metadata.blocks.unwrap_or(0).into()),
+                ("st_blksize", metadata.blksize.unwrap_or(0).into()),
             ],
             &buf,
         )?;
@@ -581,9 +586,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if !matches!(
             &this.tcx.sess.target.os,
-            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Android
+            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Android | Os::Linux
         ) {
-            panic!("`macos_fbsd_solaris_stat` should not be called on {}", this.tcx.sess.target.os);
+            panic!("`stat` should not be called on {}", this.tcx.sess.target.os);
         }
 
         let path_scalar = this.read_pointer(path_op)?;
@@ -610,12 +615,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if !matches!(
             &this.tcx.sess.target.os,
-            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Android
+            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Android | Os::Linux
         ) {
-            panic!(
-                "`macos_fbsd_solaris_lstat` should not be called on {}",
-                this.tcx.sess.target.os
-            );
+            panic!("`lstat` should not be called on {}", this.tcx.sess.target.os);
         }
 
         let path_scalar = this.read_pointer(path_op)?;
@@ -725,12 +727,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_last_error_and_return_i32(ecode);
         }
 
-        // the `_mask_op` parameter specifies the file information that the caller requested.
-        // However `statx` is allowed to return information that was not requested or to not
-        // return information that was requested. This `mask` represents the information we can
-        // actually provide for any target.
-        let mut mask = this.eval_libc_u32("STATX_TYPE") | this.eval_libc_u32("STATX_SIZE");
-
         // If the `AT_SYMLINK_NOFOLLOW` flag is set, we query the file's metadata without following
         // symbolic links.
         let follow_symlink = flags & this.eval_libc_i32("AT_SYMLINK_NOFOLLOW") == 0;
@@ -747,13 +743,35 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(err) => return this.set_last_error_and_return_i32(err),
         };
 
-        // The `mode` field specifies the type of the file and the permissions over the file for
-        // the owner, its group and other users. Given that we can only provide the file type
-        // without using platform specific methods, we only set the bits corresponding to the file
-        // type. This should be an `__u16` but `libc` provides its values as `u32`.
+        // The `_mask_op` parameter specifies the file information that the caller requested.
+        // However, `statx` is allowed to return information that was not requested or to not
+        // return information that was requested. This `mask` represents the information we can
+        // actually provide for any target.
+        let mut mask = this.eval_libc_u32("STATX_TYPE") | this.eval_libc_u32("STATX_SIZE");
+
+        // Check which pieces of metadata we acquired, and set the appropriate flags in the mask.
+        if metadata.ino.is_some() {
+            mask |= this.eval_libc_u32("STATX_INO");
+        }
+        if metadata.nlink.is_some() {
+            mask |= this.eval_libc_u32("STATX_NLINK");
+        }
+        if metadata.uid.is_some() {
+            mask |= this.eval_libc_u32("STATX_UID");
+        }
+        if metadata.gid.is_some() {
+            mask |= this.eval_libc_u32("STATX_GID");
+        }
+        if metadata.blocks.is_some() {
+            mask |= this.eval_libc_u32("STATX_BLOCKS");
+        }
+
+        // `statx.stx_mode` is `__u16`. `libc::S_IF*` are of type `mode_t`, which varies in
+        // width across targets (`u16` on macOS, `u32` on Linux). Read using `mode_t`'s size.
+        let mode_t_size = this.libc_ty_layout("mode_t").size;
         let mode: u16 = metadata
             .mode
-            .to_u32()?
+            .to_uint(mode_t_size)?
             .try_into()
             .unwrap_or_else(|_| bug!("libc contains bad value for constant"));
 
@@ -787,15 +805,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.write_int_fields_named(
             &[
                 ("stx_mask", mask.into()),
-                ("stx_blksize", 0),
+                ("stx_blksize", metadata.blksize.unwrap_or(0).into()),
                 ("stx_attributes", 0),
-                ("stx_nlink", 0),
-                ("stx_uid", 0),
-                ("stx_gid", 0),
+                ("stx_nlink", metadata.nlink.unwrap_or(0).into()),
+                ("stx_uid", metadata.uid.unwrap_or(0).into()),
+                ("stx_gid", metadata.gid.unwrap_or(0).into()),
                 ("stx_mode", mode.into()),
-                ("stx_ino", 0),
+                ("stx_ino", metadata.ino.unwrap_or(0).into()),
                 ("stx_size", metadata.size.into()),
-                ("stx_blocks", 0),
+                ("stx_blocks", metadata.blocks.unwrap_or(0).into()),
                 ("stx_attributes_mask", 0),
                 ("stx_rdev_major", 0),
                 ("stx_rdev_minor", 0),
@@ -1630,17 +1648,54 @@ fn extract_sec_and_nsec<'tcx>(
     }
 }
 
+fn file_type_to_mode_name(file_type: std::fs::FileType) -> &'static str {
+    #[cfg(unix)]
+    use std::os::unix::fs::FileTypeExt;
+
+    if file_type.is_file() {
+        "S_IFREG"
+    } else if file_type.is_dir() {
+        "S_IFDIR"
+    } else if file_type.is_symlink() {
+        "S_IFLNK"
+    } else {
+        // Certain file types are only available when the host is a Unix system.
+        #[cfg(unix)]
+        {
+            if file_type.is_socket() {
+                return "S_IFSOCK";
+            } else if file_type.is_fifo() {
+                return "S_IFIFO";
+            } else if file_type.is_char_device() {
+                return "S_IFCHR";
+            } else if file_type.is_block_device() {
+                return "S_IFBLK";
+            }
+        }
+        "S_IFREG"
+    }
+}
+
 /// Stores a file's metadata in order to avoid code duplication in the different metadata related
 /// shims.
+///
+/// Some fields are host/platform-specific. `None` means that Miri does not have a real value for
+/// this field, for example because the metadata is synthetic or because the host platform does not
+/// expose it. `statx` must only advertise the corresponding `STATX_*` bit when the field is `Some`;
+/// legacy `stat` writes zero for `None` to preserve the old fallback behavior.
 struct FileMetadata {
     mode: Scalar,
     size: u64,
     created: Option<(u64, u32)>,
     accessed: Option<(u64, u32)>,
     modified: Option<(u64, u32)>,
-    dev: u64,
-    uid: u32,
-    gid: u32,
+    dev: Option<u64>,
+    ino: Option<u64>,
+    nlink: Option<u64>,
+    uid: Option<u32>,
+    gid: Option<u32>,
+    blksize: Option<u64>,
+    blocks: Option<u64>,
 }
 
 impl FileMetadata {
@@ -1662,10 +1717,31 @@ impl FileMetadata {
         let Some(fd) = ecx.machine.fds.get(fd_num) else {
             return interp_ok(Err(LibcError("EBADF")));
         };
+        match fd.metadata()? {
+            Either::Left(host) => Self::from_meta(ecx, host),
+            Either::Right(name) => Self::synthetic(ecx, name),
+        }
+    }
 
-        let metadata = fd.metadata()?;
-        drop(fd);
-        FileMetadata::from_meta(ecx, metadata)
+    fn synthetic<'tcx>(
+        ecx: &mut MiriInterpCx<'tcx>,
+        mode_name: &str,
+    ) -> InterpResult<'tcx, Result<FileMetadata, IoError>> {
+        let mode = ecx.eval_libc(mode_name);
+        interp_ok(Ok(FileMetadata {
+            mode,
+            size: 0,
+            created: None,
+            accessed: None,
+            modified: None,
+            dev: None,
+            uid: None,
+            gid: None,
+            blksize: None,
+            blocks: None,
+            ino: None,
+            nlink: None,
+        }))
     }
 
     fn from_meta<'tcx>(
@@ -1680,16 +1756,7 @@ impl FileMetadata {
         };
 
         let file_type = metadata.file_type();
-
-        let mode_name = if file_type.is_file() {
-            "S_IFREG"
-        } else if file_type.is_dir() {
-            "S_IFDIR"
-        } else {
-            "S_IFLNK"
-        };
-
-        let mode = ecx.eval_libc(mode_name);
+        let mode = ecx.eval_libc(file_type_to_mode_name(file_type));
 
         let size = metadata.len();
 
@@ -1703,16 +1770,42 @@ impl FileMetadata {
             unix => {
                 use std::os::unix::fs::MetadataExt;
                 let dev = metadata.dev();
+                let ino = metadata.ino();
+                let nlink = metadata.nlink();
                 let uid = metadata.uid();
                 let gid = metadata.gid();
-            }
-            _ => {
-                let dev = 0;
-                let uid = 0;
-                let gid = 0;
-            }
-        }
+                let blksize = metadata.blksize();
+                let blocks = metadata.blocks();
 
-        interp_ok(Ok(FileMetadata { mode, size, created, accessed, modified, dev, uid, gid }))
+                interp_ok(Ok(FileMetadata {
+                    mode,
+                    size,
+                    created,
+                    accessed,
+                    modified,
+                    dev: Some(dev),
+                    ino: Some(ino),
+                    nlink: Some(nlink),
+                    uid: Some(uid),
+                    gid: Some(gid),
+                    blksize: Some(blksize),
+                    blocks: Some(blocks),
+                }))
+            }
+            _ => interp_ok(Ok(FileMetadata {
+                mode,
+                size,
+                created,
+                accessed,
+                modified,
+                dev: None,
+                ino: None,
+                nlink: None,
+                uid: None,
+                gid: None,
+                blksize: None,
+                blocks: None,
+            })),
+        }
     }
 }
