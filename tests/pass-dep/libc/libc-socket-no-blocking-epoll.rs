@@ -9,7 +9,7 @@
 #[path = "../../utils/libc.rs"]
 mod libc_utils;
 
-use std::io::ErrorKind;
+use std::io::{Error, ErrorKind};
 use std::thread;
 use std::time::Duration;
 
@@ -155,8 +155,8 @@ fn test_connect_nonblock_err() {
 
     let errno =
         net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR).unwrap();
-    // There should be an error but it might differ based on target or host.
-    assert!(errno != 0)
+    let err = Error::from_raw_os_error(errno);
+    assert_eq!(err.kind(), ErrorKind::ConnectionRefused)
 }
 
 /// Test receiving bytes from a connected stream without blocking.
