@@ -1,4 +1,4 @@
-//@ignore-target: windows # No libc socket on Windows
+//@ignore-target: windows # No socket support on Windows
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::io::{ErrorKind, Read, Write};
