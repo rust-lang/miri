@@ -227,6 +227,11 @@ fn test_connect_nonblock() {
     assert_eq!(err.kind(), ErrorKind::InProgress);
 
     loop {
+        // There should be no error during async connection.
+        let errno = net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR)
+            .unwrap();
+        assert_eq!(errno, 0);
+
         let result = net::sockname_ipv4(|storage, len| unsafe {
             libc::getpeername(client_sockfd, storage, len)
         });
@@ -698,6 +703,11 @@ fn test_getpeername_ipv4_nonblock_no_peer() {
     // Non-blocking connect should fail with EINPROGRESS.
     let err = net::connect_ipv4(client_sockfd, addr).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InProgress);
+
+    // There should be no error during async connection.
+    let errno =
+        net::getsockopt::<libc::c_int>(client_sockfd, libc::SOL_SOCKET, libc::SO_ERROR).unwrap();
+    assert_eq!(errno, 0);
 
     // Since we're never accepting the connection, the socket should never be
     // successfully connected and thus we should be unable to read the peername.
