@@ -188,7 +188,7 @@ fn make_miri_codegen_backend(sess: &Session) -> Box<dyn CodegenBackend> {
             cfg.has_reliable_f128 = true;
             // We always provide the f16 intrinsics, but some are provided via the host,
             // so forward its reliability.
-            cfg.has_reliable_f16_math = cfg!(target_has_reliable_f16);
+            cfg.has_reliable_f16_math = cfg!(target_has_reliable_f16_math);
             // Many f128 operations are still missing.
             cfg.has_reliable_f128_math = false;
             cfg
