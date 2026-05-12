@@ -303,7 +303,7 @@ fn ui(
     tmpdir: &Path,
 ) -> Result<()> {
     let msg = format!("## Running ui tests in {path} for {target}");
-    eprintln!("{}", msg.green().bold());
+    println!("{}", msg.green().bold());
 
     let with_dependencies = match with_dependencies {
         WithDependencies => true,
