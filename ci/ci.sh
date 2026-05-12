@@ -63,10 +63,9 @@ function run_tests {
 
   ## ui test suite
   if [ -n "${GC_STRESS-}" ]; then
-    time MIRIFLAGS="${MIRIFLAGS-} -Zmiri-provenance-gc=1" ./miri test $TARGET_FLAG
-  else
-    time ./miri test $FEATURES $TARGET_FLAG
+    MIRIFLAGS_EXTRA="-Zmiri-provenance-gc=1"
   fi
+  time MIRIFLAGS="${MIRIFLAGS-} ${MIRIFLAGS_EXTRA-}" ./miri test $FEATURES $TARGET_FLAG
 
   ## advanced tests
   if [ -n "${MIR_OPT-}" ]; then
