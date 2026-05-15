@@ -386,6 +386,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let Some(file_out) = fd_out.downcast::<FileHandle>() else {
             return this.set_last_error_and_return(LibcError("EINVAL"), dest);
         };
+        // Linux permits same-file copies when the source and destination ranges do not overlap.
+        // We conservatively reject all same-file copies for now.
         if file_in == file_out {
             return this.set_last_error_and_return(LibcError("EINVAL"), dest);
         }
