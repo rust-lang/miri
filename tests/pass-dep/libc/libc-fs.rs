@@ -152,6 +152,19 @@ fn test_copy_file_range() {
     assert_eq!(std::fs::read(&overflow_dst_path).unwrap(), b"");
 
     unsafe {
+        let ret = libc::copy_file_range(
+            src.as_raw_fd(),
+            ptr::null_mut(),
+            dst.as_raw_fd(),
+            ptr::null_mut(),
+            1,
+            1, // non-zero flags are rejected
+        );
+        assert_eq!(ret, -1);
+    }
+    assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::EINVAL));
+
+    unsafe {
         let ret = libc::copy_file_range(-1, ptr::null_mut(), -1, ptr::null_mut(), 1, 0);
         assert_eq!(ret, -1);
     }
