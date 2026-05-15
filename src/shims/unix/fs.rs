@@ -404,7 +404,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if offset < 0 {
                 return this.set_last_error_and_return(LibcError("EINVAL"), dest);
             }
-            Some((place, u64::try_from(offset).unwrap()))
+            Some((place, offset))
         };
         let mut off_out = if this.ptr_is_null(off_out_ptr)? {
             None
@@ -414,7 +414,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if offset < 0 {
                 return this.set_last_error_and_return(LibcError("EINVAL"), dest);
             }
-            Some((place, u64::try_from(offset).unwrap()))
+            Some((place, offset))
         };
 
         // The kernel is permitted to perform a partial copy. Keep the host allocation bounded;
@@ -452,12 +452,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         let mut bytes = vec![0; count];
-        let read_result = if let Some((_, offset)) = off_in {
+        let read_result = if let Some((_, offset)) = off_in.as_ref() {
             let cur = match src.stream_position() {
                 Ok(pos) => pos,
                 Err(err) => return this.set_last_error_and_return(err, dest),
             };
-            let result = src.seek(SeekFrom::Start(offset)).and_then(|_| src.read(&mut bytes));
+            let result = src
+                .seek(SeekFrom::Start(u64::try_from(*offset).unwrap()))
+                .and_then(|_| src.read(&mut bytes));
             src.seek(SeekFrom::Start(cur))
                 .expect("failed to restore file position, this shouldn't be possible");
             result
@@ -472,8 +474,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.write_null(dest)?;
             return interp_ok(());
         }
+        if let Some((_, offset)) = off_in.as_ref() {
+            if offset.checked_add(i64::try_from(read_size).unwrap()).is_none() {
+                return this.set_last_error_and_return(LibcError("EOVERFLOW"), dest);
+            }
+        }
+        if let Some((_, offset)) = off_out.as_ref() {
+            if offset.checked_add(i64::try_from(read_size).unwrap()).is_none() {
+                if let Some(src_start) = src_start {
+                    src.seek(SeekFrom::Start(src_start))
+                        .expect("failed to restore file position, this shouldn't be possible");
+                }
+                return this.set_last_error_and_return(LibcError("EOVERFLOW"), dest);
+            }
+        }
 
-        let write_result = if let Some((_, offset)) = off_out {
+        let write_result = if let Some((_, offset)) = off_out.as_ref() {
             let cur = match dst.stream_position() {
                 Ok(pos) => pos,
                 Err(err) => {
@@ -484,8 +500,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     return this.set_last_error_and_return(err, dest);
                 }
             };
-            let result =
-                dst.seek(SeekFrom::Start(offset)).and_then(|_| dst.write(&bytes[..read_size]));
+            let result = dst
+                .seek(SeekFrom::Start(u64::try_from(*offset).unwrap()))
+                .and_then(|_| dst.write(&bytes[..read_size]));
             dst.seek(SeekFrom::Start(cur))
                 .expect("failed to restore file position, this shouldn't be possible");
             result
@@ -514,14 +531,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
         if let Some((place, offset)) = off_in.as_mut() {
-            let Some(new_offset) = offset.checked_add(u64::try_from(write_size).unwrap()) else {
+            let Some(new_offset) = offset.checked_add(i64::try_from(write_size).unwrap()) else {
                 return this.set_last_error_and_return(LibcError("EOVERFLOW"), dest);
             };
             *offset = new_offset;
             this.write_int(*offset, place)?;
         }
         if let Some((place, offset)) = off_out.as_mut() {
-            let Some(new_offset) = offset.checked_add(u64::try_from(write_size).unwrap()) else {
+            let Some(new_offset) = offset.checked_add(i64::try_from(write_size).unwrap()) else {
                 return this.set_last_error_and_return(LibcError("EOVERFLOW"), dest);
             };
             *offset = new_offset;

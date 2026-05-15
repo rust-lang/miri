@@ -130,6 +130,27 @@ fn test_copy_file_range() {
     syscall_dst.sync_all().unwrap();
     assert_eq!(std::fs::read(&syscall_dst_path).unwrap(), bytes);
 
+    let overflow_dst_path =
+        utils::prepare("miri_test_libc_copy_file_range_overflow_destination.txt");
+    let overflow_dst = File::create(&overflow_dst_path).unwrap();
+    let mut overflow_off_out: libc::loff_t = i64::MAX as libc::loff_t;
+    unsafe {
+        assert_eq!(libc::lseek(src.as_raw_fd(), 0, libc::SEEK_SET), 0);
+        let ret = libc::copy_file_range(
+            src.as_raw_fd(),
+            ptr::null_mut(),
+            overflow_dst.as_raw_fd(),
+            &mut overflow_off_out,
+            1,
+            0,
+        );
+        assert_eq!(ret, -1);
+        assert_eq!(libc::lseek(src.as_raw_fd(), 0, libc::SEEK_CUR), 0);
+    }
+    assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::EOVERFLOW));
+    assert_eq!(overflow_off_out, i64::MAX as libc::loff_t);
+    assert_eq!(std::fs::read(&overflow_dst_path).unwrap(), b"");
+
     unsafe {
         let ret = libc::copy_file_range(-1, ptr::null_mut(), -1, ptr::null_mut(), 1, 0);
         assert_eq!(ret, -1);
@@ -140,6 +161,7 @@ fn test_copy_file_range() {
     remove_file(&dst_path).unwrap();
     remove_file(&explicit_dst_path).unwrap();
     remove_file(&syscall_dst_path).unwrap();
+    remove_file(&overflow_dst_path).unwrap();
 }
 
 #[cfg(target_os = "linux")]
