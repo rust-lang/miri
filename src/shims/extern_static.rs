@@ -41,7 +41,10 @@ impl<'tcx> MiriMachine<'tcx> {
 
         match &ecx.tcx.sess.target.os {
             Os::Linux => {
-                Self::weak_symbol_extern_statics(ecx, &["getrandom", "gettid", "statx", "strlen"])?;
+                Self::weak_symbol_extern_statics(
+                    ecx,
+                    &["copy_file_range", "getrandom", "gettid", "statx", "strlen"],
+                )?;
             }
             Os::Android => {
                 Self::weak_symbol_extern_statics(ecx, &["signal", "getrandom", "gettid"])?;

@@ -353,6 +353,185 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    fn copy_file_range(
+        &mut self,
+        fd_in_op: &OpTy<'tcx>,
+        off_in_op: &OpTy<'tcx>,
+        fd_out_op: &OpTy<'tcx>,
+        off_out_op: &OpTy<'tcx>,
+        len_op: &OpTy<'tcx>,
+        flags_op: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let fd_in = this.read_scalar(fd_in_op)?.to_i32()?;
+        let fd_out = this.read_scalar(fd_out_op)?.to_i32()?;
+        let len = this.read_target_usize(len_op)?;
+        let flags = this.read_scalar(flags_op)?.to_u32()?;
+
+        if flags != 0 {
+            return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+        }
+
+        let Some(fd_in) = this.machine.fds.get(fd_in) else {
+            return this.set_last_error_and_return(LibcError("EBADF"), dest);
+        };
+        let Some(fd_out) = this.machine.fds.get(fd_out) else {
+            return this.set_last_error_and_return(LibcError("EBADF"), dest);
+        };
+        let Some(file_in) = fd_in.downcast::<FileHandle>() else {
+            return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+        };
+        let Some(file_out) = fd_out.downcast::<FileHandle>() else {
+            return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+        };
+        if file_in == file_out {
+            return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+        }
+        if !file_out.writable {
+            return this.set_last_error_and_return(LibcError("EBADF"), dest);
+        }
+
+        let loff_t = this.libc_ty_layout("loff_t");
+        let off_in_ptr = this.read_pointer(off_in_op)?;
+        let off_out_ptr = this.read_pointer(off_out_op)?;
+        let mut off_in = if this.ptr_is_null(off_in_ptr)? {
+            None
+        } else {
+            let place = this.deref_pointer_as(off_in_op, loff_t)?;
+            let offset = this.read_scalar(&place)?.to_i64()?;
+            if offset < 0 {
+                return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+            }
+            Some((place, u64::try_from(offset).unwrap()))
+        };
+        let mut off_out = if this.ptr_is_null(off_out_ptr)? {
+            None
+        } else {
+            let place = this.deref_pointer_as(off_out_op, loff_t)?;
+            let offset = this.read_scalar(&place)?.to_i64()?;
+            if offset < 0 {
+                return this.set_last_error_and_return(LibcError("EINVAL"), dest);
+            }
+            Some((place, u64::try_from(offset).unwrap()))
+        };
+
+        // The kernel is permitted to perform a partial copy. Keep the host allocation bounded;
+        // std will keep calling this shim until EOF or an error is reached.
+        let count = len
+            .min(u64::try_from(this.target_isize_max()).unwrap())
+            .min(u64::try_from(isize::MAX).unwrap())
+            .min(1024 * 1024);
+        let count = usize::try_from(count).unwrap();
+        if count == 0 {
+            this.write_null(dest)?;
+            return interp_ok(());
+        }
+
+        let communicate = this.machine.communicate();
+        assert!(communicate, "isolation should have prevented even opening a file");
+
+        let mut src = &file_in.file;
+        let mut dst = &file_out.file;
+        let src_start = if off_in.is_none() {
+            match src.stream_position() {
+                Ok(pos) => Some(pos),
+                Err(err) => return this.set_last_error_and_return(err, dest),
+            }
+        } else {
+            None
+        };
+        let dst_start = if off_out.is_none() {
+            match dst.stream_position() {
+                Ok(pos) => Some(pos),
+                Err(err) => return this.set_last_error_and_return(err, dest),
+            }
+        } else {
+            None
+        };
+
+        let mut bytes = vec![0; count];
+        let read_result = if let Some((_, offset)) = off_in {
+            let cur = match src.stream_position() {
+                Ok(pos) => pos,
+                Err(err) => return this.set_last_error_and_return(err, dest),
+            };
+            let result = src.seek(SeekFrom::Start(offset)).and_then(|_| src.read(&mut bytes));
+            src.seek(SeekFrom::Start(cur))
+                .expect("failed to restore file position, this shouldn't be possible");
+            result
+        } else {
+            src.read(&mut bytes)
+        };
+        let read_size = match read_result {
+            Ok(read_size) => read_size,
+            Err(err) => return this.set_last_error_and_return(err, dest),
+        };
+        if read_size == 0 {
+            this.write_null(dest)?;
+            return interp_ok(());
+        }
+
+        let write_result = if let Some((_, offset)) = off_out {
+            let cur = match dst.stream_position() {
+                Ok(pos) => pos,
+                Err(err) => {
+                    if let Some(src_start) = src_start {
+                        src.seek(SeekFrom::Start(src_start))
+                            .expect("failed to restore file position, this shouldn't be possible");
+                    }
+                    return this.set_last_error_and_return(err, dest);
+                }
+            };
+            let result =
+                dst.seek(SeekFrom::Start(offset)).and_then(|_| dst.write(&bytes[..read_size]));
+            dst.seek(SeekFrom::Start(cur))
+                .expect("failed to restore file position, this shouldn't be possible");
+            result
+        } else {
+            dst.write(&bytes[..read_size])
+        };
+        let write_size = match write_result {
+            Ok(write_size) => write_size,
+            Err(err) => {
+                if let Some(src_start) = src_start {
+                    src.seek(SeekFrom::Start(src_start))
+                        .expect("failed to restore file position, this shouldn't be possible");
+                }
+                if let Some(dst_start) = dst_start {
+                    dst.seek(SeekFrom::Start(dst_start))
+                        .expect("failed to restore file position, this shouldn't be possible");
+                }
+                return this.set_last_error_and_return(err, dest);
+            }
+        };
+        if let Some(src_start) = src_start {
+            let copied = u64::try_from(write_size).unwrap();
+            if write_size < read_size {
+                src.seek(SeekFrom::Start(src_start.strict_add(copied)))
+                    .expect("failed to restore file position, this shouldn't be possible");
+            }
+        }
+        if let Some((place, offset)) = off_in.as_mut() {
+            let Some(new_offset) = offset.checked_add(u64::try_from(write_size).unwrap()) else {
+                return this.set_last_error_and_return(LibcError("EOVERFLOW"), dest);
+            };
+            *offset = new_offset;
+            this.write_int(*offset, place)?;
+        }
+        if let Some((place, offset)) = off_out.as_mut() {
+            let Some(new_offset) = offset.checked_add(u64::try_from(write_size).unwrap()) else {
+                return this.set_last_error_and_return(LibcError("EOVERFLOW"), dest);
+            };
+            *offset = new_offset;
+            this.write_int(*offset, place)?;
+        }
+
+        this.write_int(u64::try_from(write_size).unwrap(), dest)?;
+        interp_ok(())
+    }
+
     fn open(
         &mut self,
         path_raw: &OpTy<'tcx>,

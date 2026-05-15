@@ -42,6 +42,8 @@ fn main() {
     test_posix_fallocate::<libc::off64_t>(libc::posix_fallocate64);
     #[cfg(target_os = "linux")]
     test_sync_file_range();
+    #[cfg(target_os = "linux")]
+    test_copy_file_range();
     test_fstat();
     test_stat();
     test_lstat();
@@ -58,6 +60,86 @@ fn main() {
     test_statx_on_file_descriptor();
     #[cfg(target_os = "linux")]
     test_statx_empty_path_on_pipe();
+}
+
+#[cfg(target_os = "linux")]
+fn test_copy_file_range() {
+    use std::ptr;
+
+    let bytes = b"abcdef";
+    let src_path = utils::prepare_with_content("miri_test_libc_copy_file_range_source.txt", bytes);
+    let dst_path = utils::prepare("miri_test_libc_copy_file_range_destination.txt");
+    let src = File::open(&src_path).unwrap();
+    let dst = File::create(&dst_path).unwrap();
+
+    unsafe {
+        let ret = libc::copy_file_range(
+            src.as_raw_fd(),
+            ptr::null_mut(),
+            dst.as_raw_fd(),
+            ptr::null_mut(),
+            bytes.len(),
+            0,
+        );
+        assert_eq!(ret, bytes.len() as libc::ssize_t);
+    }
+    dst.sync_all().unwrap();
+    assert_eq!(std::fs::read(&dst_path).unwrap(), bytes);
+
+    let explicit_dst_path =
+        utils::prepare("miri_test_libc_copy_file_range_explicit_destination.txt");
+    let explicit_dst = File::create(&explicit_dst_path).unwrap();
+    let mut off_in: libc::loff_t = 2;
+    let mut off_out: libc::loff_t = 1;
+
+    unsafe {
+        let ret = libc::copy_file_range(
+            src.as_raw_fd(),
+            &mut off_in,
+            explicit_dst.as_raw_fd(),
+            &mut off_out,
+            3,
+            0,
+        );
+        assert_eq!(ret, 3);
+    }
+    assert_eq!(off_in, 5);
+    assert_eq!(off_out, 4);
+    assert_eq!(
+        unsafe { libc::lseek(src.as_raw_fd(), 0, libc::SEEK_CUR) },
+        bytes.len() as libc::off_t
+    );
+    explicit_dst.sync_all().unwrap();
+    assert_eq!(std::fs::read(&explicit_dst_path).unwrap(), b"\0cde");
+
+    let syscall_dst_path = utils::prepare("miri_test_libc_copy_file_range_syscall_destination.txt");
+    let syscall_dst = File::create(&syscall_dst_path).unwrap();
+    unsafe {
+        assert_eq!(libc::lseek(src.as_raw_fd(), 0, libc::SEEK_SET), 0);
+        let ret = libc::syscall(
+            libc::SYS_copy_file_range,
+            src.as_raw_fd(),
+            ptr::null_mut::<libc::loff_t>(),
+            syscall_dst.as_raw_fd(),
+            ptr::null_mut::<libc::loff_t>(),
+            bytes.len(),
+            0,
+        );
+        assert_eq!(ret, bytes.len() as libc::c_long);
+    }
+    syscall_dst.sync_all().unwrap();
+    assert_eq!(std::fs::read(&syscall_dst_path).unwrap(), bytes);
+
+    unsafe {
+        let ret = libc::copy_file_range(-1, ptr::null_mut(), -1, ptr::null_mut(), 1, 0);
+        assert_eq!(ret, -1);
+    }
+    assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::EBADF));
+
+    remove_file(&src_path).unwrap();
+    remove_file(&dst_path).unwrap();
+    remove_file(&explicit_dst_path).unwrap();
+    remove_file(&syscall_dst_path).unwrap();
 }
 
 #[cfg(target_os = "linux")]
