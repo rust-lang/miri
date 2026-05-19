@@ -279,10 +279,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let [flock] = check_min_vararg_count("fcntl(fd, F_SETFLK*, ...)", varargs)?;
                 let flock = this.deref_pointer_as(flock, this.libc_ty_layout("flock"))?;
-                let l_type = this.read_scalar(&this.project_field_named(&flock, "l_type")?)?.to_i16()?;
-                let l_whence = this.read_scalar(&this.project_field_named(&flock, "l_whence")?)?.to_i16()?;
-                let l_start = this.read_scalar(&this.project_field_named(&flock, "l_start")?)?.to_i64()?;
-                let l_len = this.read_scalar(&this.project_field_named(&flock, "l_len")?)?.to_i64()?;
+                let l_type =
+                    this.read_scalar(&this.project_field_named(&flock, "l_type")?)?.to_i16()?;
+                let l_whence =
+                    this.read_scalar(&this.project_field_named(&flock, "l_whence")?)?.to_i16()?;
+                let l_start =
+                    this.read_scalar(&this.project_field_named(&flock, "l_start")?)?.to_i64()?;
+                let l_len =
+                    this.read_scalar(&this.project_field_named(&flock, "l_len")?)?.to_i64()?;
 
                 // We call flock, which only supports full file locking unlike fcntl
                 let seek_set = this.eval_libc_i32("SEEK_SET");
