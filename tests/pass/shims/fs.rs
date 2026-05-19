@@ -38,7 +38,6 @@ fn main() {
     if cfg!(not(windows)) {
         test_directory();
         test_canonicalize();
-        #[cfg(not(target_os = "solaris"))]
         test_flock();
         #[cfg(not(target_os = "android"))]
         test_hard_link();
@@ -409,9 +408,6 @@ fn test_pread_pwrite() {
     assert_eq!(&buf1, b"  m");
 }
 
-// Miri does not support the way this is implemented on Solaris
-// (https://github.com/rust-lang/miri/issues/5038).
-#[cfg(not(target_os = "solaris"))]
 fn test_flock() {
     let bytes = b"Hello, World!\n";
     let path = utils::prepare_with_content("miri_test_fs_flock.txt", bytes);

@@ -192,6 +192,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let f_dupfd_cloexec = this.eval_libc_i32("F_DUPFD_CLOEXEC");
         let f_getfl = this.eval_libc_i32("F_GETFL");
         let f_setfl = this.eval_libc_i32("F_SETFL");
+        let f_setlk = this.eval_libc_i32("F_SETLK");
+        let f_setlkw = this.eval_libc_i32("F_SETLKW");
 
         // We only support getting the flags for a descriptor.
         match cmd {
@@ -267,6 +269,50 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
 
                 this.ffullsync_fd(fd_num)
+            }
+            cmd if this.tcx.sess.target.os == Os::Solaris
+                && (cmd == f_setlk || cmd == f_setlkw) =>
+            {
+                let Some(fd) = this.machine.fds.get(fd_num) else {
+                    return this.set_last_error_and_return_i32(LibcError("EBADF"));
+                };
+
+                let [flock] = check_min_vararg_count("fcntl(fd, F_SETFLK*, ...)", varargs)?;
+                let flock = this.deref_pointer_as(flock, this.libc_ty_layout("flock"))?;
+                let l_type = this.read_scalar(&this.project_field_named(&flock, "l_type")?)?.to_i16()?;
+                let l_whence = this.read_scalar(&this.project_field_named(&flock, "l_whence")?)?.to_i16()?;
+                let l_start = this.read_scalar(&this.project_field_named(&flock, "l_start")?)?.to_i64()?;
+                let l_len = this.read_scalar(&this.project_field_named(&flock, "l_len")?)?.to_i64()?;
+
+                // We call flock, which only supports full file locking unlike fcntl
+                let seek_set = this.eval_libc_i32("SEEK_SET");
+                if i32::from(l_whence) != seek_set || l_start != 0 || l_len != 0 {
+                    throw_unsup_format!(
+                        "fcntl: range locks are not supported (only whole-file: l_whence=SEEK_SET, l_start=0, l_len=0)"
+                    );
+                }
+
+                let f_rdlck = this.eval_libc("F_RDLCK").to_i16()?;
+                let f_wrlck = this.eval_libc("F_WRLCK").to_i16()?;
+                let f_unlck = this.eval_libc("F_UNLCK").to_i16()?;
+                // F_SETLK = non-blocking; F_SETLKW = blocking
+                let nonblocking = cmd == f_setlk;
+
+                use FlockOp::*;
+                let op = if l_type == f_rdlck {
+                    SharedLock { nonblocking }
+                } else if l_type == f_wrlck {
+                    ExclusiveLock { nonblocking }
+                } else if l_type == f_unlck {
+                    Unlock
+                } else {
+                    throw_unsup_format!("fcntl: unsupported l_type {l_type:#x}");
+                };
+
+                let result = fd.as_unix(this).flock(this.machine.communicate(), op)?;
+                // return `0` if flock is successful
+                let result = result.map(|()| 0i32);
+                interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
             }
             cmd => {
                 throw_unsup_format!("fcntl: unsupported command {cmd:#x}");

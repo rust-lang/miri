@@ -1,0 +1,12 @@
+error: unsupported operation: fcntl: range locks are not supported (only whole-file: l_whence=SEEK_SET, l_start=0, l_len=0)
+  --> tests/fail-dep/libc/fs/fcntl_setlk_range_solaris.rs:LL:CC
+   |
+LL |     unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &fl) };
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsupported operation occurred here
+   |
+   = help: this is likely not a bug in the program; it indicates that the program performed an operation that Miri does not support
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+
