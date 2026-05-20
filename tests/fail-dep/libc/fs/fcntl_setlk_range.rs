@@ -1,4 +1,4 @@
-//@only-target: solaris # We only implement fcntl(F_SETLK) on Solaris
+//@only-target: solaris illumos # fcntl(F_SETLK) locking shim is gated to Solaris and Illumos
 //@compile-flags: -Zmiri-disable-isolation
 
 use std::fs::OpenOptions;

@@ -270,14 +270,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 this.ffullsync_fd(fd_num)
             }
-            cmd if this.tcx.sess.target.os == Os::Solaris
+            cmd if matches!(this.tcx.sess.target.os, Os::Solaris | Os::Illumos)
                 && (cmd == f_setlk || cmd == f_setlkw) =>
             {
                 let Some(fd) = this.machine.fds.get(fd_num) else {
-                    return this.set_last_error_and_return_i32(LibcError("EBADF"));
+                    return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
                 };
 
-                let [flock] = check_min_vararg_count("fcntl(fd, F_SETFLK*, ...)", varargs)?;
+                let [flock] = check_min_vararg_count("fcntl(fd, F_SETLK*, ...)", varargs)?;
                 let flock = this.deref_pointer_as(flock, this.libc_ty_layout("flock"))?;
                 let l_type =
                     this.read_scalar(&this.project_field_named(&flock, "l_type")?)?.to_i16()?;
