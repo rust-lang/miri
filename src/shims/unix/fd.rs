@@ -288,7 +288,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let l_len =
                     this.read_scalar(&this.project_field_named(&flock, "l_len")?)?.to_i64()?;
 
-                // We call flock, which only supports full file locking unlike fcntl
+                // We call flock, which only supports whole-file locking unlike fcntl
                 let seek_set = this.eval_libc_i32("SEEK_SET");
                 if i32::from(l_whence) != seek_set || l_start != 0 || l_len != 0 {
                     throw_unsup_format!(
