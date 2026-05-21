@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::{fs, io};
 
@@ -235,6 +236,11 @@ pub trait FileDescription: std::fmt::Debug + FileDescriptionExt {
         panic!("Not a unix file descriptor: {}", self.name());
     }
 
+    /// Returns the path associated with this file description, if available
+    fn path(&self) -> Option<&Path> {
+        None
+    }
+
     /// Implementation of fcntl(F_GETFL) for this FD.
     fn get_flags<'tcx>(&self, _ecx: &mut MiriInterpCx<'tcx>) -> InterpResult<'tcx, Scalar> {
         throw_unsup_format!("fcntl: {} is not supported for F_GETFL", self.name());
@@ -363,6 +369,7 @@ impl FileDescription for io::Stderr {
 pub struct FileHandle {
     pub(crate) file: File,
     pub(crate) writable: bool,
+    pub(crate) path: Option<PathBuf>,
 }
 
 impl FileDescription for FileHandle {
@@ -466,6 +473,10 @@ impl FileDescription for FileHandle {
         );
         self
     }
+
+    fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
 }
 
 /// Like /dev/null
@@ -496,6 +507,35 @@ impl FileDescription for NullOutput {
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
         interp_ok(Ok(()))
+    }
+}
+
+/// Handle for directory that tracks path for fd-relative operations
+#[derive(Debug)]
+pub struct DirHandle {
+    pub(crate) path: PathBuf,
+}
+
+impl FileDescription for DirHandle {
+    fn name(&self) -> &'static str {
+        "directory"
+    }
+
+    fn metadata<'tcx>(&self) -> InterpResult<'tcx, Either<io::Result<fs::Metadata>, &'static str>> {
+        interp_ok(Either::Left(self.path.metadata()))
+    }
+
+    fn destroy<'tcx>(
+        self,
+        _self_id: FdId,
+        _communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, io::Result<()>> {
+        interp_ok(Ok(()))
+    }
+
+    fn path(&self) -> Option<&Path> {
+        Some(&self.path)
     }
 }
 
