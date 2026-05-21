@@ -583,10 +583,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             flag &= !o_creat;
             let [mode] = check_min_vararg_count("openat(pathname, O_CREAT, ...)", varargs)?;
             let mode = this.read_scalar(mode)?.to_u32()?;
+
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
                 options.mode(mode);
+            }
+            #[cfg(not(unix))]
+            {
+                if mode != 0o666 {
+                    throw_unsup_format!(
+                        "non-default mode 0o{:o} is not supported on non-Unix hosts",
+                        mode
+                    );
+                }
             }
             options.create(true);
         }
