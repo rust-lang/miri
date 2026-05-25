@@ -828,6 +828,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.munmap(addr, length)?;
                 this.write_scalar(result, dest)?;
             }
+            "mprotect" => {
+                let [_addr, _length, _prot] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                // We don't model permissions, so we don't need to do anything.
+                this.write_scalar(Scalar::from_i32(0), dest)?;
+            }
+            "madvise" => {
+                let [_addr, _length, _advice] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                // The only POSIX advise flag with semantic effects is MADV_DONTNEED (if you do read
+                // afterwards, you get the updated file contents), but we don't model file mappings.
+                // Therefore, we can just consider ourselves properly advised and return success.
+                this.write_scalar(Scalar::from_i32(0), dest)?;
+            }
 
             "reallocarray" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
@@ -1386,7 +1400,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [_, _] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.write_null(dest)?;
             }
-            "sigaction" | "mprotect" if this.frame_in_std() => {
+            "sigaction" if this.frame_in_std() => {
                 let [_, _, _] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.write_null(dest)?;
             }

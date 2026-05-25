@@ -35,7 +35,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // We do not support MAP_FIXED, so the addr argument is always ignored (except for the MacOS hack)
         let addr = this.read_target_usize(addr)?;
         let length = this.read_target_usize(length)?;
-        let prot = this.read_scalar(prot)?.to_i32()?;
+        // We ignore the prot argument and treat everything as PROT_READ|PROT_WRITE.
+        _ = prot;
         let flags = this.read_scalar(flags)?.to_i32()?;
         let fd = this.read_scalar(fd)?.to_i32()?;
 
@@ -52,9 +53,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         {
             return interp_ok(Scalar::from_maybe_pointer(Pointer::without_provenance(addr), this));
         }
-
-        let prot_read = this.eval_libc_i32("PROT_READ");
-        let prot_write = this.eval_libc_i32("PROT_WRITE");
 
         // First, we do some basic argument validation as required by mmap
         if (flags & (map_private | map_shared)).count_ones() != 1 {
@@ -77,14 +75,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if flags & map_fixed != 0 {
             throw_unsup_format!(
                 "Miri does not support calls to mmap with MAP_FIXED as part of the flags argument",
-            );
-        }
-
-        // Miri doesn't support protections other than PROT_READ|PROT_WRITE.
-        if prot != prot_read | prot_write {
-            throw_unsup_format!(
-                "Miri does not support calls to mmap with protections other than \
-                 PROT_READ|PROT_WRITE",
             );
         }
 

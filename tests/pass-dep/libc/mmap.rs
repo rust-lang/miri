@@ -141,10 +141,45 @@ fn test_mremap() {
     assert_eq!(Error::last_os_error().raw_os_error().unwrap(), libc::EINVAL);
 }
 
+fn test_mmap_reserve_commit() {
+    let page_size = page_size::get();
+
+    // Reserve three pages.
+    let ptr = unsafe {
+        libc::mmap(
+            ptr::null_mut(),
+            3 * page_size,
+            libc::PROT_NONE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    assert!(!ptr.is_null());
+
+    // Commit more and more of the reserved memory and start using it.
+    for i in 0..3 {
+        let ptr = unsafe { ptr.byte_add(i * page_size) };
+
+        let res = unsafe { libc::mprotect(ptr, page_size, libc::PROT_READ | libc::PROT_WRITE) };
+        assert_eq!(res, 0i32);
+
+        let res = unsafe { libc::madvise(ptr, page_size, libc::MADV_WILLNEED) };
+        assert_eq!(res, 0i32);
+
+        let slice = unsafe { slice::from_raw_parts_mut(ptr as *mut u8, page_size) };
+        slice.fill(i as u8);
+    }
+
+    let res = unsafe { libc::munmap(ptr, 3 * page_size) };
+    assert_eq!(res, 0i32);
+}
+
 fn main() {
     test_mmap(libc::mmap);
     #[cfg(target_os = "linux")]
     test_mmap(libc::mmap64);
     #[cfg(target_os = "linux")]
     test_mremap();
+    test_mmap_reserve_commit();
 }
