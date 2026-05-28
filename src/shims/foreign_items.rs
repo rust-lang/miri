@@ -850,9 +850,9 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 );
             }
             name if name.starts_with("llvm.aarch64.")
-                && this.tcx.sess.target.arch == Arch::AArch64
-                && this.tcx.sess.target.endian == Endian::Little =>
+                && this.tcx.sess.target.arch == Arch::AArch64 =>
             {
+                // We currently only test on little-endian, but big-endian aarch64 does exist.
                 return shims::aarch64::EvalContextExt::emulate_aarch64_intrinsic(
                     this, link_name, abi, args, dest,
                 );
