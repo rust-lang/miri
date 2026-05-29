@@ -829,18 +829,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "mprotect" => {
-                let [_addr, _length, _prot] =
+                let [addr, length, prot] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-                // We don't model permissions, so we don't need to do anything.
-                this.write_scalar(Scalar::from_i32(0), dest)?;
+                let result = this.mprotect(addr, length, prot)?;
+                this.write_scalar(result, dest)?;
             }
             "madvise" => {
-                let [_addr, _length, _advice] =
+                let [addr, length, advice] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
-                // The only POSIX advise flag with semantic effects is MADV_DONTNEED (if you do read
-                // afterwards, you get the updated file contents), but we don't model file mappings.
-                // Therefore, we can just consider ourselves properly advised and return success.
-                this.write_scalar(Scalar::from_i32(0), dest)?;
+                let result = this.madvise(addr, length, advice)?;
+                this.write_scalar(result, dest)?;
             }
 
             "reallocarray" => {
