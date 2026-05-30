@@ -1,4 +1,4 @@
-error: Undefined Behavior: in-bounds pointer arithmetic failed: attempting to offset pointer by 8192 bytes, but got ALLOC which is only 4096 bytes from the end of the allocation
+error: Undefined Behavior: in-bounds pointer arithmetic failed: attempting to offset pointer by OFFSET bytes, but got ALLOC which is only SIZE bytes from the end of the allocation
   --> tests/fail-dep/libc/madvise_out_of_bounds.rs:LL:CC
    |
 LL |         libc::madvise(ptr, page_size + 1, libc::MADV_NORMAL);

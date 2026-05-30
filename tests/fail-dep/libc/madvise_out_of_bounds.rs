@@ -1,5 +1,7 @@
 //@compile-flags: -Zmiri-disable-isolation
 //@ignore-target: windows # No mmap on Windows
+//@normalize-stderr-test: "by .*? bytes" -> "by OFFSET bytes"
+//@normalize-stderr-test: "only .*? bytes" -> "only SIZE bytes"
 
 fn main() {
     unsafe {
