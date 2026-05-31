@@ -259,20 +259,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 fd.set_flags(flag & !ignored_flags, this)
             }
-            cmd if this.tcx.sess.target.os == Os::MacOs
-                && cmd == this.eval_libc_i32("F_FULLFSYNC") =>
-            {
-                // Reject if isolation is enabled.
-                if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
-                    this.reject_in_isolation("`fcntl`", reject_with)?;
-                    return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
-                }
+            cmd if cmd == f_setlk || cmd == f_setlkw => {
+                // fcntl POSIX locks (per-process) and flock (per open file descriptor) are distinct
+                // here we reuse miri's flock implementation
 
-                this.ffullsync_fd(fd_num)
-            }
-            cmd if matches!(this.tcx.sess.target.os, Os::Solaris | Os::Illumos)
-                && (cmd == f_setlk || cmd == f_setlkw) =>
-            {
+                // Check if this is a valid open file descriptor.
                 let Some(fd) = this.machine.fds.get(fd_num) else {
                     return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
                 };
@@ -288,7 +279,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let l_len =
                     this.read_scalar(&this.project_field_named(&flock, "l_len")?)?.to_i64()?;
 
-                // We call flock, which only supports whole-file locking unlike fcntl
+                // flock only supports whole-file locking
                 let seek_set = this.eval_libc_i32("SEEK_SET");
                 if i32::from(l_whence) != seek_set || l_start != 0 || l_len != 0 {
                     throw_unsup_format!(
@@ -296,13 +287,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     );
                 }
 
-                let f_rdlck = this.eval_libc("F_RDLCK").to_i16()?;
-                let f_wrlck = this.eval_libc("F_WRLCK").to_i16()?;
-                let f_unlck = this.eval_libc("F_UNLCK").to_i16()?;
+                // These constants vary in size depending upon the platform
+                let const_ty_size = this.eval_libc("F_RDLCK").to_scalar_int()?.size();
+                let f_rdlck = this.eval_libc("F_RDLCK").to_int(const_ty_size)?;
+                let f_wrlck = this.eval_libc("F_WRLCK").to_int(const_ty_size)?;
+                let f_unlck = this.eval_libc("F_UNLCK").to_int(const_ty_size)?;
                 // F_SETLK = non-blocking; F_SETLKW = blocking
                 let nonblocking = cmd == f_setlk;
 
                 use FlockOp::*;
+                let l_type = i128::from(l_type);
                 let op = if l_type == f_rdlck {
                     SharedLock { nonblocking }
                 } else if l_type == f_wrlck {
@@ -317,6 +311,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // return `0` if flock is successful
                 let result = result.map(|()| 0i32);
                 interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+            }
+            cmd if this.tcx.sess.target.os == Os::MacOs
+                && cmd == this.eval_libc_i32("F_FULLFSYNC") =>
+            {
+                // Reject if isolation is enabled.
+                if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+                    this.reject_in_isolation("`fcntl`", reject_with)?;
+                    return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+                }
+
+                this.ffullsync_fd(fd_num)
             }
             cmd => {
                 throw_unsup_format!("fcntl: unsupported command {cmd:#x}");
