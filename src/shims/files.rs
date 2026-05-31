@@ -502,12 +502,21 @@ impl FileDescription for NullOutput {
 /// Internal type of a file-descriptor - this is what [`FdTable`] expects
 pub type FdNum = i32;
 
+/// State of a `flock` lock on a file description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlockState {
+    Shared,
+    Exclusive,
+}
+
 /// The file descriptor table
 #[derive(Debug)]
 pub struct FdTable {
     pub fds: BTreeMap<FdNum, DynFileDescriptionRef>,
     /// Unique identifier for file description, used to differentiate between various file description.
     next_file_description_id: FdId,
+    /// Tracked `flock` state per open file description
+    flock_states: BTreeMap<FdId, FlockState>,
 }
 
 impl VisitProvenance for FdTable {
@@ -518,7 +527,11 @@ impl VisitProvenance for FdTable {
 
 impl FdTable {
     fn new() -> Self {
-        FdTable { fds: BTreeMap::new(), next_file_description_id: FdId(0) }
+        FdTable {
+            fds: BTreeMap::new(),
+            next_file_description_id: FdId(0),
+            flock_states: BTreeMap::new(),
+        }
     }
     pub(crate) fn init(mute_stdout_stderr: bool) -> FdTable {
         let mut fds = FdTable::new();
@@ -592,6 +605,17 @@ impl FdTable {
 
     pub fn is_fd_num(&self, fd_num: FdNum) -> bool {
         self.fds.contains_key(&fd_num)
+    }
+
+    pub fn flock_state(&self, id: FdId) -> Option<FlockState> {
+        self.flock_states.get(&id).copied()
+    }
+
+    pub fn set_flock_state(&mut self, id: FdId, state: Option<FlockState>) {
+        match state {
+            Some(state) => self.flock_states.insert(id, state),
+            None => self.flock_states.remove(&id),
+        };
     }
 }
 
