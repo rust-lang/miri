@@ -274,10 +274,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(&this.project_field_named(&flock, "l_type")?)?.to_i16()?;
                 let l_whence =
                     this.read_scalar(&this.project_field_named(&flock, "l_whence")?)?.to_i16()?;
-                let l_start =
-                    this.read_scalar(&this.project_field_named(&flock, "l_start")?)?.to_i64()?;
-                let l_len =
-                    this.read_scalar(&this.project_field_named(&flock, "l_len")?)?.to_i64()?;
+                let l_start = this.project_field_named(&flock, "l_start")?;
+                let l_start = this.read_scalar(&l_start)?.to_int(l_start.layout.size)?;
+                let l_len = this.project_field_named(&flock, "l_len")?;
+                let l_len = this.read_scalar(&l_len)?.to_int(l_len.layout.size)?;
 
                 // flock only supports whole-file locking
                 let seek_set = this.eval_libc_i32("SEEK_SET");
