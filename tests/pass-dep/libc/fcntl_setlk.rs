@@ -31,7 +31,16 @@ fn main() {
 
     errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
 
-    // Attempting to take a second exclusive lock should fail, due to flock-backed emulation
+    // Re-acquiring the same lock on the same FD should succeed (no-op).
+    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
+
+    // Downgrading to a read lock on the same FD should also succeed.
+    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &rdlck) });
+
+    // Upgrade back to an exclusive lock
+    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
+
+    // Attempting to take an exclusive lock from a different FD should fail, due to flock-backed emulation.
     unsafe {
         let err = errno_result(libc::fcntl(fd2, libc::F_SETLK, &wrlck)).unwrap_err();
         assert_eq!(err.raw_os_error(), Some(libc::EAGAIN));
@@ -44,4 +53,7 @@ fn main() {
 
     errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &unlck) });
     errno_check(unsafe { libc::fcntl(fd2, libc::F_SETLK, &unlck) });
+
+    // Unlocking an already-unlocked FD should succeed (no-op).
+    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &unlck) });
 }
