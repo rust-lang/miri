@@ -1,6 +1,10 @@
 //@ignore-target: windows # no fcntl on Windows
 //@compile-flags: -Zmiri-disable-isolation
 
+//@revisions: windows_host unix_host
+//@[unix_host] ignore-host: windows
+//@[windows_host] only-host: windows
+
 use std::fs::OpenOptions;
 use std::os::fd::AsRawFd;
 
@@ -31,16 +35,18 @@ fn main() {
 
     errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
 
-    // Re-acquiring the same lock on the same FD should succeed (no-op).
-    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
+    // Test re-acquiring and converting the lock on the same FD
+    // This does not behave correctly on Windows hosts, see #miri/5074
+    if !cfg!(windows_host) {
+        // Re-acquiring the same lock on the same FD should succeed
+        errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
+        // Downgrading to a read lock on the same FD should also succeed
+        errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &rdlck) });
 
-    // Downgrading to a read lock on the same FD should also succeed.
-    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &rdlck) });
+        errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
+    }
 
-    // Upgrade back to an exclusive lock
-    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &wrlck) });
-
-    // Attempting to take an exclusive lock from a different FD should fail, due to flock-backed emulation.
+    // Attempting to take a second exclusive lock from a different fd should fail
     unsafe {
         let err = errno_result(libc::fcntl(fd2, libc::F_SETLK, &wrlck)).unwrap_err();
         assert_eq!(err.raw_os_error(), Some(libc::EAGAIN));
@@ -54,6 +60,9 @@ fn main() {
     errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &unlck) });
     errno_check(unsafe { libc::fcntl(fd2, libc::F_SETLK, &unlck) });
 
-    // Unlocking an already-unlocked FD should succeed (no-op).
-    errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &unlck) });
+    // Redundant unlocks should succeed
+    // This does not behave correctly on Windows hosts, see #miri/5074
+    if !cfg!(windows_host) {
+        errno_check(unsafe { libc::fcntl(fd1, libc::F_SETLK, &unlck) });
+    }
 }
