@@ -385,6 +385,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.unlink(path)?;
                 this.write_scalar(result, dest)?;
             }
+            "openat" => {
+                let ([dirfd, path_raw, flag], varargs) =
+                    this.check_shim_sig_variadic_lenient(abi, CanonAbi::C, link_name, args)?;
+                let result = this.openat(dirfd, path_raw, flag, varargs)?;
+                this.write_scalar(result, dest)?;
+            }
+            "unlinkat" => {
+                let [dirfd, path, flag] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *const _, i32) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                let result = this.unlinkat(dirfd, path, flag)?;
+                this.write_scalar(result, dest)?;
+            }
             "symlink" => {
                 // FIXME: This does not have a direct test (#3179).
                 let [target, linkpath] = this.check_shim_sig(
@@ -493,6 +509,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
                 let result = this.closedir(dirp)?;
                 this.write_scalar(result, dest)?;
+            }
+            "fdopendir" => {
+                let [fd] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32) -> *mut _),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                this.fdopendir(fd, dest)?;
             }
             "readdir" => {
                 let [dirp] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;

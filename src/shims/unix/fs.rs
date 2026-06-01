@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, File, FileType, OpenOptions, TryLockError};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
-use std::path::{self, Path};
+use std::path::{self, Path, PathBuf};
 use std::time::SystemTime;
 
 use rustc_abi::Size;
@@ -13,7 +13,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_target::spec::Os;
 
 use self::shims::time::system_time_to_duration;
-use crate::shims::files::FileHandle;
+use crate::shims::files::{DirHandle, FileHandle};
 use crate::shims::os_str::bytes_to_os_str;
 use crate::shims::sig::check_min_vararg_count;
 use crate::shims::unix::fd::{FlockOp, UnixFileDescription};
@@ -461,6 +461,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
 
+        let o_directory = this.eval_libc_i32("O_DIRECTORY");
+        let is_directory = flag & o_directory == o_directory;
+        if is_directory {
+            flag &= !o_directory;
+        }
+
         let o_nofollow = this.eval_libc_i32("O_NOFOLLOW");
         if flag & o_nofollow == o_nofollow {
             flag &= !o_nofollow;
@@ -493,11 +499,234 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
         }
 
-        let fd = options
-            .open(path)
-            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable }));
+        let fd = match options.open(&path) {
+            Ok(file) if is_directory =>
+                match file.metadata() {
+                    Ok(meta) if meta.is_dir() =>
+                        this.machine.fds.insert_new(DirHandle { path: path.to_path_buf() }),
+                    _ => {
+                        return this.set_errno_and_return_neg1_i32(LibcError("ENOTDIR"));
+                    }
+                },
+            Ok(file) =>
+                this.machine.fds.insert_new(FileHandle {
+                    file,
+                    writable,
+                    path: Some(path.to_path_buf()),
+                }),
+            Err(e) => {
+                return this.set_errno_and_return_neg1_i32(e);
+            }
+        };
 
-        interp_ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
+        interp_ok(Scalar::from_i32(fd))
+    }
+
+    fn openat(
+        &mut self,
+        dirfd_op: &OpTy<'tcx>,
+        path_raw: &OpTy<'tcx>,
+        flag: &OpTy<'tcx>,
+        varargs: &[OpTy<'tcx>],
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let dirfd = this.read_scalar(dirfd_op)?.to_i32()?;
+        let path_raw = this.read_pointer(path_raw)?;
+        let mut flag = this.read_scalar(flag)?.to_i32()?;
+
+        let path = this.read_path_from_c_str(path_raw)?;
+
+        // Resolve relative path against directory fd
+        let path: PathBuf = if dirfd == this.eval_libc_i32("AT_FDCWD") {
+            path.into_owned()
+        } else {
+            let base_dir =
+                this.machine.fds.get(dirfd).ok_or_else(|| {
+                    err_ub_format!("file descriptor passed to openat does not exist")
+                })?;
+            let base_path = base_dir
+                .path()
+                .ok_or_else(|| err_ub_format!("openat called on file descriptor without path"))?;
+            base_path.join(&path).to_owned()
+        };
+
+        // Check O_DIRECTORY flag
+        let o_directory = this.eval_libc_i32("O_DIRECTORY");
+        let is_directory = flag & o_directory == o_directory;
+        if is_directory {
+            flag &= !o_directory;
+        }
+
+        // Process access mode
+        let o_rdonly = this.eval_libc_i32("O_RDONLY");
+        let o_wronly = this.eval_libc_i32("O_WRONLY");
+        let o_rdwr = this.eval_libc_i32("O_RDWR");
+
+        let access_mode = flag & 0b11;
+        let mut writable = true;
+        let mut options = OpenOptions::new();
+
+        if access_mode == o_rdonly {
+            writable = false;
+            options.read(true);
+        } else if access_mode == o_wronly {
+            options.write(true);
+        } else if access_mode == o_rdwr {
+            options.read(true).write(true);
+        } else {
+            throw_unsup_format!("unsupported access mode {:#x}", access_mode);
+        }
+
+        let o_creat = this.eval_libc_i32("O_CREAT");
+        if flag & o_creat == o_creat {
+            flag &= !o_creat;
+            let [mode] = check_min_vararg_count("openat(pathname, O_CREAT, ...)", varargs)?;
+            let mode = this.read_scalar(mode)?.to_u32()?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(mode);
+            }
+            #[cfg(not(unix))]
+            {
+                if mode != 0o666 {
+                    throw_unsup_format!(
+                        "non-default mode 0o{:o} is not supported on non-Unix hosts",
+                        mode
+                    );
+                }
+            }
+            options.create(true);
+        }
+
+        let o_excl = this.eval_libc_i32("O_EXCL");
+        if flag & o_excl == o_excl {
+            flag &= !o_excl;
+            options.create_new(true);
+        }
+
+        let o_trunc = this.eval_libc_i32("O_TRUNC");
+        if flag & o_trunc == o_trunc {
+            flag &= !o_trunc;
+            options.truncate(true);
+        }
+
+        let o_append = this.eval_libc_i32("O_APPEND");
+        if flag & o_append == o_append {
+            flag &= !o_append;
+            options.append(true);
+        }
+
+        if flag != 0 {
+            throw_unsup_format!("unsupported flags {:#x}", flag);
+        }
+
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`openat`", reject_with)?;
+            return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+        }
+
+        let fd = match options.open(&path) {
+            Ok(file) if is_directory =>
+                match file.metadata() {
+                    Ok(meta) if meta.is_dir() =>
+                        this.machine.fds.insert_new(DirHandle { path: path.clone() }),
+                    _ => {
+                        return this.set_errno_and_return_neg1_i32(LibcError("ENOTDIR"));
+                    }
+                },
+            Ok(file) =>
+                this.machine.fds.insert_new(FileHandle { file, writable, path: Some(path.clone()) }),
+            Err(e) => {
+                return this.set_errno_and_return_neg1_i32(e);
+            }
+        };
+
+        interp_ok(Scalar::from_i32(fd))
+    }
+
+    fn unlinkat(
+        &mut self,
+        dirfd_op: &OpTy<'tcx>,
+        path_op: &OpTy<'tcx>,
+        flag_op: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let dirfd = this.read_scalar(dirfd_op)?.to_i32()?;
+        let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+        let flag = this.read_scalar(flag_op)?.to_i32()?;
+
+        // Resolve relative path against directory fd
+        let path: PathBuf = if dirfd == this.eval_libc_i32("AT_FDCWD") {
+            path.into_owned()
+        } else {
+            let base_dir = this.machine.fds.get(dirfd).ok_or_else(|| {
+                err_ub_format!("file descriptor passed to unlinkat does not exist")
+            })?;
+            let base_path = base_dir
+                .path()
+                .ok_or_else(|| err_ub_format!("unlinkat called on file descriptor without path"))?;
+            base_path.join(&path).to_owned()
+        };
+
+        let at_remove = this.eval_libc_i32("AT_REMOVEDIR");
+        let is_rmdir = flag & at_remove == at_remove;
+
+        if flag & !at_remove != 0 {
+            throw_unsup_format!("unsupported flags {:#x}", flag);
+        }
+
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`unlinkat`", reject_with)?;
+            return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+        }
+
+        let result = if is_rmdir { fs::remove_dir(&path) } else { fs::remove_file(&path) };
+
+        match result {
+            Ok(()) => interp_ok(Scalar::from_i32(0)),
+            Err(e) => this.set_errno_and_return_neg1_i32(e),
+        }
+    }
+
+    fn fdopendir(&mut self, fd_op: &OpTy<'tcx>, dest: &MPlaceTy<'tcx>) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let fd = this.read_scalar(fd_op)?.to_i32()?;
+
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`fdopendir`", reject_with)?;
+            this.write_null(dest)?;
+            return interp_ok(());
+        }
+
+        let file_desc = this
+            .machine
+            .fds
+            .get(fd)
+            .ok_or_else(|| err_ub_format!("the fd passed to fdopendir does not exist"))?;
+
+        let path = file_desc
+            .path()
+            .ok_or_else(|| err_ub_format!("fdopendir called on file descriptor without path"))?;
+
+        let result = fs::read_dir(path);
+
+        match result {
+            Ok(dir_iter) => {
+                let id = this.machine.dirs.insert_new(dir_iter);
+                this.write_scalar(Scalar::from_target_usize(id, this), dest)?;
+            }
+            Err(e) => {
+                this.set_last_error(e)?;
+                this.write_null(dest)?;
+            }
+        }
+
+        interp_ok(())
     }
 
     fn lseek(
@@ -1711,10 +1940,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.write_bytes_ptr(template_ptr, template_bytes.iter().copied())?;
 
             // See if we can create and open this file.
-            let file = fopts.open(bytes_to_os_str(template_bytes)?);
+            let path = PathBuf::from(bytes_to_os_str(template_bytes)?);
+            let file = fopts.open(&path);
             match file {
                 Ok(f) => {
-                    let fd = this.machine.fds.insert_new(FileHandle { file: f, writable: true });
+                    let fd = this.machine.fds.insert_new(FileHandle {
+                        file: f,
+                        writable: true,
+                        path: Some(path),
+                    });
                     return interp_ok(Scalar::from_i32(fd));
                 }
                 Err(e) =>

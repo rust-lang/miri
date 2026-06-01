@@ -272,9 +272,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
             }
 
-            options.open(file_name).map(|file| {
-                let fd_num =
-                    this.machine.fds.insert_new(FileHandle { file, writable: desired_write });
+            options.open(file_name.clone()).map(|file| {
+                let fd_num = this.machine.fds.insert_new(FileHandle {
+                    file,
+                    writable: desired_write,
+                    path: Some(file_name),
+                });
                 Handle::File(fd_num)
             })
         };
