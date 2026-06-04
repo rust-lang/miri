@@ -4,7 +4,7 @@ use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
 
-use crate::shims::math::compute_crc32;
+use crate::shims::math::{compute_crc32, sha256_round, sigma0, sigma1};
 use crate::*;
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -358,7 +358,6 @@ fn write<'c>(
 // https://github.com/RustCrypto/hashes/blob/3d2bc57db40fd6aeb25d6c6da98d67e2784c2985/sha2/src/sha256/soft/compact.rs
 
 fn sha256su0(v0: [u32; 4], v1: [u32; 4]) -> [u32; 4] {
-    let sigma0 = |x: u32| x.rotate_right(7) ^ x.rotate_right(18) ^ (x >> 3);
     [
         v0[0].wrapping_add(sigma0(v0[1])),
         v0[1].wrapping_add(sigma0(v0[2])),
@@ -368,7 +367,6 @@ fn sha256su0(v0: [u32; 4], v1: [u32; 4]) -> [u32; 4] {
 }
 
 fn sha256su1(v0: [u32; 4], v1: [u32; 4], v2: [u32; 4]) -> [u32; 4] {
-    let sigma1 = |x: u32| x.rotate_right(17) ^ x.rotate_right(19) ^ (x >> 10);
     let r0 = v0[0].wrapping_add(v1[1]).wrapping_add(sigma1(v2[2]));
     let r1 = v0[1].wrapping_add(v1[2]).wrapping_add(sigma1(v2[3]));
     let r2 = v0[2].wrapping_add(v1[3]).wrapping_add(sigma1(r0));
@@ -376,28 +374,14 @@ fn sha256su1(v0: [u32; 4], v1: [u32; 4], v2: [u32; 4]) -> [u32; 4] {
     [r0, r1, r2, r3]
 }
 
+// SHA256H/SHA256H2 do four compression rounds on the abcd/efgh layout.
+// https://developer.arm.com/architectures/instruction-sets/intrinsics/#f:@navigationhierarchiesinstructiongroup=[Cryptography,SHA256]
 fn sha256hash(abcd: [u32; 4], efgh: [u32; 4], wk: [u32; 4]) -> ([u32; 4], [u32; 4]) {
-    let [mut a, mut b, mut c, mut d] = abcd;
-    let [mut e, mut f, mut g, mut h] = efgh;
+    let mut state = [abcd[0], abcd[1], abcd[2], abcd[3], efgh[0], efgh[1], efgh[2], efgh[3]];
     for &wk_i in &wk {
-        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let ch = (e & f) ^ ((!e) & g);
-        let t1 = s1.wrapping_add(ch).wrapping_add(wk_i).wrapping_add(h);
-
-        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let t2 = s0.wrapping_add(maj);
-
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(t1);
-        d = c;
-        c = b;
-        b = a;
-        a = t1.wrapping_add(t2);
+        state = sha256_round(state, wk_i);
     }
-    ([a, b, c, d], [e, f, g, h])
+    ([state[0], state[1], state[2], state[3]], [state[4], state[5], state[6], state[7]])
 }
 
 fn sha256h(abcd: [u32; 4], efgh: [u32; 4], wk: [u32; 4]) -> [u32; 4] {
