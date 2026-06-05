@@ -148,25 +148,31 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let length = this.read_target_usize(length)?;
         let prot = this.read_scalar(prot)?.to_i32()?;
 
-        // addr must be a multiple of the page size
+        // addr must be a multiple of the page size.
         if !addr.addr().bytes().is_multiple_of(this.machine.page_size) {
             return this.set_errno_and_return_neg1_i32(LibcError("EINVAL"));
         }
 
         verify_prot(this, prot)?;
 
-        // the pages from `[addr, addr + length)` must be mapped, so length definitely must not overflow
+        // The pages from `[addr, addr + length)` must be mapped, so length definitely must not overflow.
         let Some(length) = round_up_to_page_size(this, length) else {
             return this.set_errno_and_return_neg1_i32(LibcError("ENOMEM"));
         };
-        // we do pointer arithmetic, so it would be UB to go out of bounds
+        // We do pointer arithmetic, so it would be UB to go out of bounds.
         this.check_ptr_access(
             addr,
             Size::from_bytes(length),
             CheckInAllocMsg::InboundsPointerArithmetic,
         )?;
 
-        // We only support `PROT_READ|PROT_WRITE`, so there is nothing to do here.
+        // If the memory comes from memory the Rust program has allocated with mmap, we only support
+        // `PROT_READ|PROT_WRITE`, so this `mprotect` is a no-op. If the memory was mmaped by the
+        // runtime (e.g. if it's the stack, executable memory, or static memory), POSIX also allows
+        // us to remap it. In those cases, such a call to `PROT_READ|PROT_WRITE` might actually change the permissions,
+        // but treating them as the new permissions is still UB. Therefore, we just pretend that we
+        // did the permission change by returning success, and will still reject if you try to use
+        // it with the "new" permissions.
         interp_ok(Scalar::from_i32(0))
     }
 
@@ -182,12 +188,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let length = this.read_target_usize(length)?;
         let advise = this.read_scalar(advice)?.to_i32()?;
 
-        // addr must be a multiple of the page size
+        // addr must be a multiple of the page size.
         if !addr.addr().bytes().is_multiple_of(this.machine.page_size) {
             return this.set_errno_and_return_neg1_i32(LibcError("EINVAL"));
         }
 
-        // advise must be supported
+        // advise must be supported.
         let madv_normal = this.eval_libc_i32("MADV_NORMAL");
         let madv_random = this.eval_libc_i32("MADV_RANDOM");
         let madv_sequential = this.eval_libc_i32("MADV_SEQUENTIAL");
@@ -202,11 +208,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
-        // the pages from `[addr, addr + length)` must be mapped, so length definitely must not overflow
+        // The pages from `[addr, addr + length)` must be mapped, so length definitely must not overflow.
         let Some(length) = round_up_to_page_size(this, length) else {
             return this.set_errno_and_return_neg1_i32(LibcError("ENOMEM"));
         };
-        // we do pointer arithmetic, so it would be UB to go out of bounds
+        // We do pointer arithmetic, so it would be UB to go out of bounds.
         this.check_ptr_access(
             addr,
             Size::from_bytes(length),
@@ -221,7 +227,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 fn round_up_to_page_size(this: &MiriInterpCx<'_>, length: u64) -> Option<u64> {
     length
         .checked_next_multiple_of(this.machine.page_size)
-        .filter(|length| *length <= this.target_usize_max())
+        .filter(|length| *length <= this.target_isize_max().try_into().unwrap())
 }
 
 fn verify_prot<'tcx>(this: &mut MiriInterpCx<'tcx>, prot: i32) -> InterpResult<'tcx> {
