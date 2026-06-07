@@ -541,8 +541,7 @@ pub struct MiriMachine<'tcx> {
     /// Handles blocking I/O and polling for completion.
     pub(crate) blocking_io: BlockingIoManager,
 
-    /// Stores the interests in I/O readiness events of file
-    /// descriptions and executes them when they are fulfilled.
+    /// Stores interests in I/O readiness changes of file descriptions.
     pub(crate) readiness: ReadinessManager,
 
     /// Stores which thread is eligible to run on which CPUs.

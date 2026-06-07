@@ -6,7 +6,6 @@ use std::time::Duration;
 use rustc_abi::FieldIdx;
 
 use crate::concurrency::VClock;
-use crate::concurrency::readiness::ReadinessConsumer;
 use crate::shims::files::{
     FdId, FdNum, FileDescription, FileDescriptionRef, WeakFileDescriptionRef,
 };
@@ -113,8 +112,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let fd = this.machine.fds.insert_new(Epoll::default());
-        // For registering the epfd to the readiness manager, we need a `WeakFileDescriptionRef` to
-        // the `Epoll` instance.
+        // We need a `WeakFileDescriptionRef` to the `Epoll` instance for
+        // registering the epfd to the readiness manager.
         let epfd = this.machine.fds.get(fd).unwrap().downcast::<Epoll>().unwrap();
         let readiness_consumer_id =
             this.machine.readiness.register_consumer(FileDescriptionRef::downgrade(&epfd));
@@ -277,8 +276,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             if let Some(idx) = ready_events.iter().position(|k| k == &epoll_key) {
                 ready_events.remove(idx);
             }
-            // If this was the last interest in this FD, we remove the interest from
-            // the readiness manager.
+            // If this was the last interest in this FD, we also need to remove
+            // the interest from the readiness manager.
             if interest_list.range(range_for_id(id)).next().is_none() {
                 this.machine.readiness.deregister_interest(id, readiness_consumer_id);
             }
@@ -552,17 +551,19 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let mut num_of_events: i32 = 0;
         let mut array_iter = this.project_array_fields(events)?;
 
-        // // Sanity-check to ensure that all event info is up-to-date.
-        // if cfg!(debug_assertions) {
-        //     for (key, interest) in interest_list.iter() {
-        //         // Ensure this matches the latest readiness of this FD.
-        //         // We have to do an FD lookup by ID for this. The FdNum might be already closed.
-        //         let fd = this.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
-        //         let readiness = fd.readiness()?;
-        //         let current_active = this.readiness_to_epoll_bitflag(&readiness);
-        //         assert_eq!(interest.active_events, current_active & interest.relevant_events);
-        //     }
-        // }
+        // Sanity-check to ensure that all event info is up-to-date.
+        if cfg!(debug_assertions) {
+            for (key, interest) in interest_list.iter() {
+                // Ensure this matches the latest readiness of this FD.
+                // We have to do an FD lookup by ID for this. The FdNum might be already closed.
+                let fd = this.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
+                let readiness = fd.readiness()?;
+                assert_eq!(
+                    interest.active_events,
+                    readiness.as_ref() & interest.relevant_events.as_ref()
+                );
+            }
+        }
 
         // We will fill at most the first `ready_events_len` slots of the array.
         // Bounding the iterator this way ensures that we can re-add events

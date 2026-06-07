@@ -82,7 +82,7 @@ struct BlockingIoSource {
 /// on a registered source, its internal epoll readiness gets updated -- even
 /// when the source isn't part of an active epoll instance. Also, for the entire
 /// lifespan of the source, threads can be added which should be unblocked
-/// once a certain [`BlockingIoSourceReadiness`] for an I/O source is satisfied.
+/// once a certain [`Readiness`] for an I/O source is satisfied.
 ///
 /// Since blocking host I/O is inherently non-deterministic, no method on this
 /// manager should be called when isolation is enabled. The only exception is

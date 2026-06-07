@@ -143,7 +143,7 @@ pub use crate::concurrency::data_race::{
 };
 pub use crate::concurrency::init_once::{EvalContextExt as _, InitOnceRef};
 pub use crate::concurrency::readiness::{
-    EvalContextExt as _, Readiness, ReadinessConsumerId, ReadinessManager,
+    EvalContextExt as _, Readiness, ReadinessConsumer, ReadinessConsumerId, ReadinessManager,
 };
 pub use crate::concurrency::sync::{CondvarRef, EvalContextExt as _, MutexRef, RwLockRef};
 pub use crate::concurrency::thread::{

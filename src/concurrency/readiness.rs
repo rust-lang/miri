@@ -78,9 +78,9 @@ pub trait ReadinessConsumer {
 
     // The file description with id `fd_id` for which this consumer has
     // an interest has been closed.
-    // The corresponding [`EventInterestId`] has been invalidated and
-    // the interest has been removed from the readiness manager.
-    fn fd_closed(&self, fd_id: FdId);
+    // All interests for this file description have been removed from
+    // the readiness manager.
+    fn fd_closed(&self, _fd_id: FdId) {}
 }
 
 /// The identifier of a registered [`ReadinessConsumer`].
@@ -89,7 +89,15 @@ pub trait ReadinessConsumer {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct ReadinessConsumerId(usize);
 
-/// Struct storing the interests in file description readiness events.
+/// Manager storing readiness consumers and their interests in readiness
+/// events from different file descriptions.
+///
+/// The lifecycle is thought that consumers are registered to this manager
+/// directly after their creation. They can then register and deregister
+/// interests for different file descriptions such that they get notified
+/// when the readiness of those file descriptions changes (or when edges are
+/// forced). When the consumers are destroyed, they should deregister
+/// themselves from the manager.
 pub struct ReadinessManager {
     /// The id with which the next readiness consumer will be registered.
     next_consumer_id: usize,
@@ -105,8 +113,9 @@ impl ReadinessManager {
     }
 
     /// Register a [`ReadinessConsumer`] to the readiness manager.
-    /// The consumer gets assigned a [`ReadinessConsumerId`] which then can
-    /// be used to add FD interests to this consumer using [`register_interest`].
+    /// The consumer gets assigned a [`ReadinessConsumerId`] which can then
+    /// be used to add file description interests to this consumer using
+    /// [`ReadinessManager::register_interest`].
     pub fn register_consumer(
         &mut self,
         consumer: impl ReadinessConsumer + 'static,
@@ -125,8 +134,8 @@ impl ReadinessManager {
         self.interests.values_mut().for_each(|consumers| consumers.retain(|id| id != &consumer_id));
     }
 
-    /// Add an interest to the file description with id `fd_id` for the consumer
-    /// with id `consumer_id`.
+    /// Add an interest to the consumer with id `consumer_id` for the file
+    /// description with id `fd_id`.
     ///
     /// Whilst this interest is registered, the consumer receives updates through
     /// [`ReadinessConsumer::ready_event`] when the readiness of the file description
@@ -151,6 +160,9 @@ impl ReadinessManager {
     }
 
     /// Remove all readiness interests for the file description with id `fd_id`.
+    ///
+    /// [`ReadinessConsumer::fd_closed`] will be called on all consumers which
+    /// have a registered interest in `fd_id`.
     pub fn deregister_fd_interests(&mut self, fd_id: FdId) {
         let consumers = self.interests.remove(&fd_id).unwrap_or_default();
         for consumer_id in consumers {
