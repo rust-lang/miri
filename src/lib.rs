@@ -135,14 +135,16 @@ pub use crate::borrow_tracker::{
 };
 pub use crate::clock::{Deadline, Instant, MonotonicClock, TimeoutClock, TimeoutStyle};
 pub use crate::concurrency::blocking_io::{
-    BlockingIoInterest, BlockingIoManager, BlockingIoSourceReadiness, EvalContextExt as _,
-    SourceFileDescription,
+    BlockingIoInterest, BlockingIoManager, EvalContextExt as _, SourceFileDescription,
 };
 pub use crate::concurrency::cpu_affinity::MAX_CPUS;
 pub use crate::concurrency::data_race::{
     AtomicFenceOrd, AtomicReadOrd, AtomicRwOrd, AtomicWriteOrd, EvalContextExt as _,
 };
 pub use crate::concurrency::init_once::{EvalContextExt as _, InitOnceRef};
+pub use crate::concurrency::readiness::{
+    EvalContextExt as _, Readiness, ReadinessConsumerId, ReadinessManager,
+};
 pub use crate::concurrency::sync::{CondvarRef, EvalContextExt as _, MutexRef, RwLockRef};
 pub use crate::concurrency::thread::{
     BlockReason, DynUnblockCallback, EvalContextExt as _, StackEmptyCallback, ThreadId,

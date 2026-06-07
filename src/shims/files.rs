@@ -126,8 +126,9 @@ impl<T: FileDescription + 'static> FileDescriptionExt for T {
     ) -> InterpResult<'tcx, io::Result<()>> {
         match Rc::into_inner(self.0) {
             Some(fd) => {
-                // There might have been epolls interested in this FD. Remove that.
-                ecx.machine.epoll_interests.remove_epolls(fd.id);
+                // There might have been readiness interests for this FD
+                // which we need to remove.
+                ecx.machine.readiness.deregister_fd_interests(fd.id);
 
                 fd.inner.destroy(fd.id, communicate_allowed, ecx)
             }
@@ -247,6 +248,11 @@ pub trait FileDescription: std::fmt::Debug + FileDescriptionExt {
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, Scalar> {
         throw_unsup_format!("fcntl: {} is not supported for F_SETFL", self.name());
+    }
+
+    /// Get the current I/O readiness of the file description.
+    fn readiness<'tcx>(&self) -> InterpResult<'tcx, Readiness> {
+        throw_unsup_format!("{}: this file description doesn't support I/O readiness", self.name());
     }
 }
 
