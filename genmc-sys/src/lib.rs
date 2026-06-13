@@ -5,6 +5,28 @@ pub use cxx::UniquePtr;
 
 pub use self::ffi::*;
 
+/// The result of a GenMC handle operation, after converting the raw C++ result struct into an
+/// idiomatic Rust type.
+///
+/// The payload type `T` is operation-specific:
+/// - [`LoadResult`]:           `T = GenmcScalar`                      (the value read)
+/// - [`NonAtomicResult`]:      `T = ()`                               (no payload)
+/// - [`StoreResult`]:          `T = bool`                             (is the write co-max)
+/// - [`ReadModifyWriteResult`]:`T = (GenmcScalar, GenmcScalar, bool)` (old, new, is_co_max)
+///
+/// For operations with more than one success mode ([`CompareExchangeResult`],
+/// [`MutexLockResult`]) the status enums carry sufficient information and should be
+/// matched directly.
+#[must_use]
+pub enum GenmcHandleResult<T> {
+    /// This execution should be dropped.
+    Invalid,
+    /// A verification error occurred; the message is formatted as a string.
+    Error(String),
+    /// The operation completed successfully.
+    Ok(T),
+}
+
 /// Defined in "genmc/src/Support/SAddr.hpp".
 /// The first bit of all global addresses must be set to `1`.
 /// This means the mask, interpreted as an address, is the lower bound of where the global address space starts.
@@ -19,7 +41,7 @@ pub const GENMC_GLOBAL_ADDRESSES_MASK: u64 = 1 << 63;
 pub const GENMC_MAIN_THREAD_ID: i32 = 0;
 
 /// Changing GenMC's log level is not thread safe, so we limit it to only be set once to prevent any data races.
-/// This value will be initialized when the first `MiriGenmcShim` is created.
+/// This value will be initialized when the first `MiriGenMCInterface` is created.
 static GENMC_LOG_LEVEL: OnceLock<LogLevel> = OnceLock::new();
 
 // Create a new handle to the GenMC model checker.
@@ -28,11 +50,11 @@ pub fn create_genmc_driver_handle(
     params: &GenmcParams,
     genmc_log_level: LogLevel,
     do_estimation: bool,
-) -> UniquePtr<MiriGenmcShim> {
+) -> UniquePtr<MiriGenMCInterface> {
     // SAFETY: Only setting the GenMC log level once is guaranteed by the `OnceLock`.
     // No other place calls `set_log_level_raw`, so the `logLevel` value in GenMC will not change once we initialize it once.
-    // All functions that use GenMC's `logLevel` can only be accessed in safe Rust through a `MiriGenmcShim`.
-    // There is no way to get `MiriGenmcShim` other than through `create_handle`, and we only call it *after* setting the log level, preventing any possible data races.
+    // All functions that use GenMC's `logLevel` can only be accessed in safe Rust through a `MiriGenMCInterface`.
+    // There is no way to get `MiriGenMCInterface` other than through `create_handle`, and we only call it *after* setting the log level, preventing any possible data races.
     assert_eq!(
         &genmc_log_level,
         GENMC_LOG_LEVEL.get_or_init(|| {
@@ -41,7 +63,82 @@ pub fn create_genmc_driver_handle(
         }),
         "Attempt to change the GenMC log level after it was already set"
     );
-    unsafe { MiriGenmcShim::create_handle(params, do_estimation) }
+    unsafe { MiriGenMCInterface::create_handle(params, do_estimation) }
+}
+
+fn cxx_string_to_owned(s: &cxx::UniquePtr<cxx::CxxString>) -> String {
+    s.as_ref().unwrap().to_string_lossy().into_owned()
+}
+
+impl LoadResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<GenmcScalar> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(self.read_value),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl NonAtomicResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<()> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(()),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl StoreResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<bool> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(self.is_coherence_order_maximal_write),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl ReadModifyWriteResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<(GenmcScalar, GenmcScalar, bool)> {
+        match self.status {
+            OperationStatus::Ok =>
+                GenmcHandleResult::Ok((
+                    self.old_value,
+                    self.new_value,
+                    self.is_coherence_order_maximal_write,
+                )),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl MallocResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<u64> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(self.address),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
+}
+
+impl FreeResult {
+    pub fn into_genmc_result(self) -> GenmcHandleResult<()> {
+        match self.status {
+            OperationStatus::Ok => GenmcHandleResult::Ok(()),
+            OperationStatus::Error => GenmcHandleResult::Error(cxx_string_to_owned(&self.error)),
+            OperationStatus::Invalid => GenmcHandleResult::Invalid,
+            _ => unreachable!("unexpected OperationStatus"),
+        }
+    }
 }
 
 impl GenmcScalar {
@@ -209,78 +306,129 @@ mod ffi {
         blocked_execs: u64,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    /// Status tag shared by operations with a single success mode
+    /// (atomic loads/stores, non-atomic loads/stores, and FAIs.
+    /// For operations with multiple success modes, see [`CasStatus`] and [`MutexLockStatus`].
+    enum OperationStatus {
+        /// This execution should be dropped.
+        Invalid,
+        /// A verification error occurred; the `error` field is valid.
+        Error,
+        /// The operation completed; check the result struct's payload fields.
+        Ok,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    /// Status tag for [`CompareExchangeResult`]: CAS has two distinct success modes.
+    enum CasStatus {
+        /// This execution should be dropped.
+        Invalid,
+        /// A verification error occurred; the `error` field is valid.
+        Error,
+        /// CAS failed: `old_value` was read but did not equal expected; no write should occur.
+        Failed,
+        /// CAS succeeded: `old_value` equals expected; the write should occur,
+        /// `is_coherence_order_maximal_write` is valid.
+        Succeeded,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    /// Status tag for [`MutexLockResult`]: mutex lock has three distinct success modes.
+    enum MutexLockStatus {
+        /// This execution should be dropped.
+        Invalid,
+        /// A verification error occurred; the `error` field is valid.
+        Error,
+        /// GenMC wants Miri to retry the lock once this thread is rescheduled.
+        Reset,
+        /// The lock was successfully acquired by this thread.
+        Acquired,
+        /// The lock is already held; this thread has been blocked on the GenMC side.
+        NotAcquired,
+    }
+
     #[must_use]
     #[derive(Debug)]
+    /// Result from an atomic load. When `status == Ok`, `read_value` is valid.
     struct LoadResult {
-        /// If `true`, exploration should be dropped, **and all other fields are invalid**.
-        invalid: bool,
-        /// If not null, contains the error encountered during the handling of the load.
+        status: OperationStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// The value that was read. Should not be used if `has_value` is `false`.
+        /// Valid when `status == Ok`.
         read_value: GenmcScalar,
     }
 
     #[must_use]
     #[derive(Debug)]
-    struct StoreResult {
-        /// If `true`, exploration should be dropped, **and all other fields are invalid**.
-        invalid: bool,
-        /// If not null, contains the error encountered during the handling of the store.
+    /// Result from a non-atomic load or store. GenMC uses these only for data-race detection;
+    /// no value is communicated back to Miri. When `status == Ok` there is no payload.
+    struct NonAtomicResult {
+        status: OperationStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// `true` if the write should also be reflected in Miri's memory representation.
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct StoreResult {
+        status: OperationStatus,
+        /// Valid when `status == Error`.
+        error: UniquePtr<CxxString>,
+        /// Valid when `status == Ok`. `true` if the write should be reflected in Miri's memory.
         is_coherence_order_maximal_write: bool,
     }
 
     #[must_use]
     #[derive(Debug)]
     struct ReadModifyWriteResult {
-        /// If `true`, exploration should be dropped, **and all other fields are invalid**.
-        invalid: bool,
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        status: OperationStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// The value that was read by the RMW operation as the left operand.
+        /// Valid when `status == Ok`. The value read by the RMW.
         old_value: GenmcScalar,
-        /// The value that was produced by the RMW operation.
+        /// Valid when `status == Ok`. The value written by the RMW.
         new_value: GenmcScalar,
-        /// `true` if the write should also be reflected in Miri's memory representation.
+        /// Valid when `status == Ok`. `true` if the write should be reflected in Miri's memory.
         is_coherence_order_maximal_write: bool,
     }
 
     #[must_use]
     #[derive(Debug)]
     struct CompareExchangeResult {
-        /// If `true`, exploration should be dropped, **and all other fields are invalid**.
-        invalid: bool,
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        status: CasStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// The value that was read by the compare-exchange.
+        /// Valid when `status == Failed` or `status == Succeeded`.
         old_value: GenmcScalar,
-        /// `true` if compare_exchange op was successful.
-        is_success: bool,
-        /// `true` if the write should also be reflected in Miri's memory representation.
+        /// Valid when `status == Succeeded`. `true` if the write should be reflected in Miri's memory.
         is_coherence_order_maximal_write: bool,
     }
 
     #[must_use]
     #[derive(Debug)]
     struct MutexLockResult {
-        /// If `true`, exploration should be dropped, **and all other fields are invalid**.
-        invalid: bool,
-        /// If there was an error, it will be stored in `error`, otherwise it is `None`.
+        status: MutexLockStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// If true, GenMC determined that we should retry the mutex lock operation once the thread attempting to lock is scheduled again.
-        is_reset: bool,
-        /// Indicate whether the lock was acquired by this thread.
-        is_lock_acquired: bool,
     }
 
     #[must_use]
     #[derive(Debug)]
     struct MallocResult {
-        /// If not null, contains the error encountered during the handling of malloc.
+        status: OperationStatus,
+        /// Valid when `status == Error`.
         error: UniquePtr<CxxString>,
-        /// The allocated address.
+        /// Valid when `status == Ok`. The allocated address.
         address: u64,
+    }
+
+    #[must_use]
+    #[derive(Debug)]
+    struct FreeResult {
+        status: OperationStatus,
+        /// Valid when `status == Error`.
+        error: UniquePtr<CxxString>,
     }
 
     /**** These are GenMC types that we have to copy-paste here since cxx does not support
@@ -346,14 +494,14 @@ mod ffi {
     // This block is unsafe to allow defining safe methods inside.
     //
     // `get_global_alloc_static_mask` is safe since it just returns a constant.
-    // All methods on `MiriGenmcShim` are safe by the correct usage of the two unsafe functions
-    // `set_log_level_raw` and `MiriGenmcShim::create_handle`.
+    // All methods on `MiriGenMCInterface` are safe by the correct usage of the two unsafe functions
+    // `set_log_level_raw` and `MiriGenMCInterface::create_handle`.
     // See the doc comment on those two functions for their safety requirements.
     unsafe extern "C++" {
         include!("MiriInterface.hpp");
 
         /**** Types shared between Miri/Rust and Miri/C++: ****/
-        type MiriGenmcShim;
+        type MiriGenMCInterface;
 
         /**** Types shared between Miri/Rust and GenMC/C++:
         (This tells cxx that the enums defined above are already defined on the C++ side;
@@ -374,36 +522,36 @@ mod ffi {
         /// Never calling this function is safe, GenMC will fall back to its default log level.
         unsafe fn set_log_level_raw(log_level: LogLevel);
 
-        /// Create a new `MiriGenmcShim`, which wraps a `GenMCDriver`.
+        /// Create a new `MiriGenMCInterface`, which wraps a `GenMCDriver`.
         ///
         /// # Safety
         ///
         /// This function is marked as unsafe since the `logLevel` global variable is non-atomic.
         /// This function should not be called in an unsynchronized way with `set_log_level_raw`, since
-        /// this function and any methods on the returned `MiriGenmcShim` may read the `logLevel`,
+        /// this function and any methods on the returned `MiriGenMCInterface` may read the `logLevel`,
         /// causing a data race.
         /// The safest way to use these functions is to call `set_log_level_raw` once, and only then
         /// start creating handles.
-        /// There should not be any other (safe) way to create a `MiriGenmcShim`.
-        #[Self = "MiriGenmcShim"]
+        /// There should not be any other (safe) way to create a `MiriGenMCInterface`.
+        #[Self = "MiriGenMCInterface"]
         unsafe fn create_handle(
             params: &GenmcParams,
             estimation_mode: bool,
-        ) -> UniquePtr<MiriGenmcShim>;
+        ) -> UniquePtr<MiriGenMCInterface>;
         /// Get the bit mask that GenMC expects for global memory allocations.
         fn get_global_alloc_static_mask() -> u64;
 
         /// This function must be called at the start of any execution, before any events are reported to GenMC.
-        fn handle_execution_start(self: Pin<&mut MiriGenmcShim>);
+        fn handle_execution_start(self: Pin<&mut MiriGenMCInterface>);
         /// This function must be called at the end of any execution, even if an error was found during the execution.
         /// Returns `null`, or a string containing an error message if an error occurred.
-        fn handle_execution_end(self: Pin<&mut MiriGenmcShim>) -> UniquePtr<CxxString>;
+        fn handle_execution_end(self: Pin<&mut MiriGenMCInterface>) -> UniquePtr<CxxString>;
 
         /***** Functions for handling events encountered during program execution. *****/
 
         /**** Memory access handling ****/
         fn handle_atomic_load(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
@@ -411,13 +559,13 @@ mod ffi {
             old_value: GenmcScalar,
         ) -> LoadResult;
         fn handle_non_atomic_load(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
-        ) -> LoadResult;
+        ) -> NonAtomicResult;
         fn handle_read_modify_write(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
@@ -427,7 +575,7 @@ mod ffi {
             old_value: GenmcScalar,
         ) -> ReadModifyWriteResult;
         fn handle_compare_exchange(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
@@ -439,7 +587,7 @@ mod ffi {
             can_fail_spuriously: bool,
         ) -> CompareExchangeResult;
         fn handle_atomic_store(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
@@ -448,62 +596,62 @@ mod ffi {
             memory_ordering: MemOrdering,
         ) -> StoreResult;
         fn handle_non_atomic_store(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
-        ) -> StoreResult;
+        ) -> NonAtomicResult;
         fn handle_fence(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             memory_ordering: MemOrdering,
         );
 
         /**** Memory (de)allocation ****/
         fn handle_malloc(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             size: u64,
             alignment: u64,
         ) -> MallocResult;
         /// Returns true if an error was found.
         fn handle_free(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
-        ) -> UniquePtr<CxxString>;
+        ) -> FreeResult;
 
         /**** Thread management ****/
-        fn handle_thread_create(self: Pin<&mut MiriGenmcShim>, thread_id: i32, parent_id: i32);
-        fn handle_thread_join(self: Pin<&mut MiriGenmcShim>, thread_id: i32, child_id: i32);
-        fn handle_thread_finish(self: Pin<&mut MiriGenmcShim>, thread_id: i32, ret_val: u64);
-        fn handle_thread_kill(self: Pin<&mut MiriGenmcShim>, thread_id: i32);
+        fn handle_thread_create(self: Pin<&mut MiriGenMCInterface>, thread_id: i32, parent_id: i32);
+        fn handle_thread_join(self: Pin<&mut MiriGenMCInterface>, thread_id: i32, child_id: i32);
+        fn handle_thread_finish(self: Pin<&mut MiriGenMCInterface>, thread_id: i32, ret_val: u64);
+        fn handle_thread_kill(self: Pin<&mut MiriGenMCInterface>, thread_id: i32);
 
         /**** Blocking instructions ****/
         /// Inform GenMC that the thread should be blocked.
         /// Note: this function is currently hardcoded for `AssumeType::User`, corresponding to user supplied assume statements.
         /// This can become a parameter once more types of assumes are added.
         fn handle_assume_block(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             assume_type: AssumeType,
         );
 
         /**** Mutex handling ****/
         fn handle_mutex_lock(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
         ) -> MutexLockResult;
         fn handle_mutex_try_lock(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
         ) -> MutexLockResult;
         fn handle_mutex_unlock(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             thread_id: i32,
             address: u64,
             size: u64,
@@ -515,14 +663,14 @@ mod ffi {
         /// return whether the execution is finished, blocked, or can continue.
         /// Updates the next instruction kind for the given thread id.
         fn schedule_next(
-            self: Pin<&mut MiriGenmcShim>,
+            self: Pin<&mut MiriGenMCInterface>,
             curr_thread_id: i32,
             curr_thread_next_instr_kind: ActionKind,
         ) -> SchedulingResult;
 
         /// Check whether there are more executions to explore.
         /// If there are more executions, this method prepares for the next execution and returns `true`.
-        fn is_exploration_done(self: Pin<&mut MiriGenmcShim>) -> bool;
+        fn is_exploration_done(self: Pin<&mut MiriGenMCInterface>) -> bool;
 
         /**** Result querying functionality. ****/
 
@@ -530,24 +678,24 @@ mod ffi {
         // is very large, uses features that CXX.rs doesn't support and may change as GenMC changes.
         // Instead, we only use the result on the C++ side, and only expose these getter function to
         // the Rust side.
-        // Each `GenMCDriver` contains one `VerificationResult`, and each `MiriGenmcShim` contains on `GenMCDriver`.
+        // Each `GenMCDriver` contains one `VerificationResult`, and each `MiriGenMCInterface` contains on `GenMCDriver`.
         // GenMC builds up the content of the `struct VerificationResult` over the course of an exploration,
-        // but it's safe to look at it at any point, since it is only accessible through exactly one `MiriGenmcShim`.
+        // but it's safe to look at it at any point, since it is only accessible through exactly one `MiriGenMCInterface`.
         // All these functions for querying the result can be safely called repeatedly and at any time,
         // though the results may be incomplete if called before `handle_execution_end`.
 
         /// Get the number of blocked executions encountered by GenMC (cast into a fixed with integer)
-        fn get_blocked_execution_count(self: &MiriGenmcShim) -> u64;
+        fn get_blocked_execution_count(self: &MiriGenMCInterface) -> u64;
         /// Get the number of executions explored by GenMC (cast into a fixed with integer)
-        fn get_explored_execution_count(self: &MiriGenmcShim) -> u64;
+        fn get_explored_execution_count(self: &MiriGenMCInterface) -> u64;
         /// Get all messages that GenMC produced (errors, warnings), combined into one string.
-        fn get_result_message(self: &MiriGenmcShim) -> UniquePtr<CxxString>;
+        fn get_result_message(self: &MiriGenMCInterface) -> UniquePtr<CxxString>;
         /// If an error occurred, return a string describing the error, otherwise, return `nullptr`.
-        fn get_error_string(self: &MiriGenmcShim) -> UniquePtr<CxxString>;
+        fn get_error_string(self: &MiriGenMCInterface) -> UniquePtr<CxxString>;
 
         /**** Printing functionality. ****/
 
         /// Get the results of a run in estimation mode.
-        fn get_estimation_results(self: &MiriGenmcShim) -> EstimationResult;
+        fn get_estimation_results(self: &MiriGenMCInterface) -> EstimationResult;
     }
 }
