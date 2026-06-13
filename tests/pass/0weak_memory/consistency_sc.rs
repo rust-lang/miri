@@ -348,6 +348,71 @@ fn test_sc_relaxed() {
     assert!(!bad);
 }
 
+/// Test that coherence-ordered-before established by modification order prevents
+/// an SC load from reading before the last-in-mo store.
+/// Test by Joseph Perez (https://github.com/rust-lang/miri/issues/5104#issue-4644401606)
+fn test_cob_due_to_mo() {
+    let x = static_atomic(0);
+    let y = static_atomic(0);
+    x.store(0, Relaxed);
+    y.store(0, Relaxed);
+
+    let t1 = spawn(move || x.store(1, Release));
+    let t2 = spawn(move || {
+        let r0 = x.load(Relaxed);
+        x.store(2, SeqCst);
+        let r1 = y.load(SeqCst);
+        (r0, r1)
+    });
+    let t3 = spawn(move || {
+        y.store(1, SeqCst);
+        let r2 = x.load(SeqCst);
+        r2
+    });
+    let (r0, r1) = t2.join().unwrap();
+    let r2 = t3.join().unwrap();
+    t1.join().unwrap();
+    let bad = r0 == 1 && r1 == 0 && r2 == 1;
+    assert!(!bad);
+}
+
+/// Variant of the test above, where the modification order is established by
+/// happens-before across three threads (t1, t2, and t3).
+fn test_cob_due_to_mo_hb() {
+    let x = static_atomic(0);
+    let y = static_atomic(0);
+    let gate = static_atomic(0);
+    x.store(0, Relaxed);
+    y.store(0, Relaxed);
+    gate.store(0, Relaxed);
+
+    let t1 = spawn(move || x.store(1, Release));
+    let t2 = spawn(move || {
+        let r0 = x.load(Acquire);
+        gate.store(1, Release);
+        r0
+    });
+
+    let t3 = spawn(move || {
+        while gate.load(Acquire) == 0 {}
+        x.store(2, SeqCst);
+        let r1 = y.load(SeqCst);
+        r1
+    });
+    let t4 = spawn(move || {
+        y.store(1, SeqCst);
+        let r2 = x.load(SeqCst);
+        r2
+    });
+
+    let r0 = t2.join().unwrap();
+    let r1 = t3.join().unwrap();
+    let r2 = t4.join().unwrap();
+    t1.join().unwrap();
+    let bad = r0 == 1 && r1 == 0 && r2 == 1;
+    assert!(!bad);
+}
+
 fn main() {
     for _ in 0..32 {
         test_sc_store_buffering();
@@ -359,5 +424,7 @@ fn main() {
         test_sc_fence_access_relacq();
         test_sc_multi_fence();
         test_sc_relaxed();
+        test_cob_due_to_mo();
+        test_cob_due_to_mo_hb();
     }
 }
