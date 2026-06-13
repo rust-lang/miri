@@ -157,7 +157,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     {
                         return interp_ok(());
                     }
-
+                    if tcx.generics_of(def_id).requires_monomorphization(tcx) {
+                        // Skip generic functions: while they can have #[no_mangle] (resulting in a compiler warning),
+                        // foreign items cannot be generic, so this definition cannot match the foreign item we're looking for.
+                        return interp_ok(());
+                    }
                     let instance = Instance::mono(tcx, def_id);
                     let symbol_name = tcx.symbol_name(instance).name;
                     let is_weak = attrs.linkage == Some(Linkage::WeakAny);
