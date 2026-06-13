@@ -1,0 +1,25 @@
+error: Undefined Behavior: in-bounds pointer arithmetic failed: attempting to offset pointer by OFFSET bytes, but got ALLOC which is only SIZE bytes from the end of the allocation
+  --> tests/fail-dep/libc/mprotect_out_of_bounds.rs:LL:CC
+   |
+LL |         libc::mprotect(ptr, page_size + 1, libc::PROT_READ | libc::PROT_WRITE);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
+   |
+   = help: this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior
+   = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
+help: ALLOC was allocated here:
+  --> tests/fail-dep/libc/mprotect_out_of_bounds.rs:LL:CC
+   |
+LL |           let ptr = libc::mmap(
+   |  ___________________^
+LL | |             std::ptr::null_mut(),
+LL | |             page_size,
+LL | |             libc::PROT_READ | libc::PROT_WRITE,
+...  |
+LL | |             0,
+LL | |         );
+   | |_________^
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+
