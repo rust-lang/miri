@@ -4,7 +4,6 @@
 
 use std::arch::aarch64::*;
 use std::arch::is_aarch64_feature_detected;
-use std::mem::transmute;
 
 fn main() {
     assert!(is_aarch64_feature_detected!("neon"));
@@ -46,27 +45,30 @@ unsafe fn test_vpmaxq_u8() {
 #[target_feature(enable = "neon")]
 fn test_tbl1_v16i8_basic() {
     unsafe {
-        // table = 0..15
-        let table: uint8x16_t =
-            transmute::<[u8; 16], _>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
-        // indices
-        let idx: uint8x16_t =
-            transmute::<[u8; 16], _>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        let incrementing = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let table = vld1q_u8(incrementing.as_ptr());
+        let idx = vld1q_u8(incrementing.as_ptr());
+
         let got = vqtbl1q_u8(table, idx);
-        let got_arr: [u8; 16] = transmute(got);
-        assert_eq!(got_arr, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        let mut got_arr = [0u8; 16];
+        vst1q_u8(got_arr.as_mut_ptr(), got);
+
+        assert_eq!(got_arr, incrementing);
 
         // Also try different order and out-of-range indices (16, 255).
-        let idx2: uint8x16_t =
-            transmute::<[u8; 16], _>([15, 16, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let idx2 = vld1q_u8([15, 16, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].as_ptr());
+
         let got2 = vqtbl1q_u8(table, idx2);
-        let got2_arr: [u8; 16] = transmute(got2);
+        let mut got2_arr = [0u8; 16];
+        vst1q_u8(got2_arr.as_mut_ptr(), got2);
+
         assert_eq!(got2_arr[0], 15);
         assert_eq!(got2_arr[1], 0); // out-of-range
         assert_eq!(got2_arr[2], 0); // out-of-range
         assert_eq!(&got2_arr[3..16], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12][..]);
     }
 }
+
 #[target_feature(enable = "neon")]
 unsafe fn test_vpadd() {
     let a = vld1_s8([1, 2, 3, 4, 5, 6, 7, 8].as_ptr());
