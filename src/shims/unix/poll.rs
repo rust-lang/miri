@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
+use rustc_target::spec::Os;
+
 use crate::shims::files::FdNum;
 use crate::shims::{DynFileDescriptionRef, FdId};
 use crate::*;
@@ -191,7 +193,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let pollin = this.eval_libc_u16("POLLIN");
         let pollout = this.eval_libc_u16("POLLOUT");
-        let pollrdhup = this.eval_libc_u16("POLLRDHUP");
         let pollhup = this.eval_libc_u16("POLLHUP");
         let pollerr = this.eval_libc_u16("POLLERR");
 
@@ -202,14 +203,19 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if readiness.writable {
             bitflag |= pollout;
         }
-        if readiness.read_closed {
-            bitflag |= pollrdhup;
-        }
         if readiness.write_closed {
             bitflag |= pollhup;
         }
         if readiness.error {
             bitflag |= pollerr;
+        }
+
+        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::FreeBsd | Os::Illumos) {
+            // POLLRDHUP only exists on Linux, Android, FreeBSD, and Illumos.
+            let pollrdhup = this.eval_libc_u16("POLLRDHUP");
+            if readiness.read_closed {
+                bitflag |= pollrdhup;
+            }
         }
 
         bitflag
@@ -222,7 +228,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let pollin = this.eval_libc_u16("POLLIN");
         let pollout = this.eval_libc_u16("POLLOUT");
-        let pollrdhup = this.eval_libc_u16("POLLRDHUP");
         let pollhup = this.eval_libc_u16("POLLHUP");
         let pollerr = this.eval_libc_u16("POLLERR");
 
@@ -235,10 +240,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             readiness.writable = true;
             bitflag &= !pollout;
         }
-        if bitflag & pollrdhup == pollrdhup {
-            readiness.read_closed = true;
-            bitflag &= !pollrdhup;
-        }
         if bitflag & pollhup == pollhup {
             readiness.write_closed = true;
             bitflag &= !pollhup;
@@ -246,6 +247,15 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if bitflag & pollerr == pollerr {
             readiness.error = true;
             bitflag &= !pollerr;
+        }
+
+        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::FreeBsd | Os::Illumos) {
+            // POLLRDHUP only exists on Linux, Android, FreeBSD, and Illumos.
+            let pollrdhup = this.eval_libc_u16("POLLRDHUP");
+            if bitflag & pollrdhup == pollrdhup {
+                readiness.read_closed = true;
+                bitflag &= !pollrdhup;
+            }
         }
 
         if bitflag != 0 {
