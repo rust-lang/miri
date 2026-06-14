@@ -604,6 +604,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.mkstemp(template)?;
                 this.write_scalar(result, dest)?;
             }
+            // Polls
+            "poll" => {
+                let [fds, nfds, timeout] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*mut _, libc::nfds_t, i32) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                this.poll(fds, nfds, timeout, dest)?;
+            }
 
             // Sockets and pipes
             "socketpair" => {
