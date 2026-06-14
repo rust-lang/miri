@@ -535,6 +535,11 @@ fn test_readiness_after_short_read_after_shutdown() {
         unsafe {
             errno_check(libc::shutdown(peerfd, libc::SHUT_WR));
         }
+
+        // Add client socket with "read closed" interest to epoll.
+        epoll_ctl_add(epfd, client_sockfd, EPOLLET | EPOLLRDHUP).unwrap();
+        // Wait until the read end of the client socket is closed.
+        check_epoll_wait(epfd, &[Ev { events: EPOLLRDHUP, data: client_sockfd }], -1);
     });
 
     net::connect_ipv4(client_sockfd, addr).unwrap();
@@ -544,11 +549,19 @@ fn test_readiness_after_short_read_after_shutdown() {
         errno_check(libc::fcntl(client_sockfd, libc::F_SETFL, libc::O_NONBLOCK));
     }
 
-    // Add client socket with readable interest to epoll.
-    epoll_ctl_add(epfd, client_sockfd, EPOLLET | EPOLLIN | EPOLLRDHUP).unwrap();
+    server_thread.join().unwrap();
+
+    // Update client socket interest to also include readable interest.
+    epoll_ctl(
+        epfd,
+        EPOLL_CTL_MOD,
+        client_sockfd,
+        Ev { events: EPOLLET | EPOLLIN | EPOLLRDHUP, data: client_sockfd },
+    )
+    .unwrap();
 
     // Wait until the socket becomes readable.
-    check_epoll_wait(epfd, &[Ev { events: EPOLLIN, data: client_sockfd }], -1);
+    check_epoll_wait(epfd, &[Ev { events: EPOLLIN | EPOLLRDHUP, data: client_sockfd }], -1);
 
     let mut buffer = [0u8; 1024];
 
@@ -596,8 +609,6 @@ fn test_readiness_after_short_read_after_shutdown() {
         current_epoll_readiness::<8>(client_sockfd, EPOLLIN | EPOLLET | EPOLLRDHUP),
         EPOLLIN | EPOLLRDHUP
     );
-
-    server_thread.join().unwrap();
 }
 
 /// Test that Miri doesn't remove the readable readiness after a short peek.
