@@ -26,6 +26,7 @@ fn main() {
     test_shutdown_read();
     test_shutdown_write();
     test_readiness_after_short_read();
+    test_readiness_after_short_read_after_shutdown();
     test_readiness_after_short_peek();
     test_readiness_after_short_write();
 }
@@ -512,6 +513,102 @@ fn test_readiness_after_short_read() {
         )
         .unwrap()
     };
+}
+
+/// Test that Miri correctly keeps the readable readiness when the read end of the socket has been
+/// closed -- even after a short read.
+fn test_readiness_after_short_read_after_shutdown() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let epfd = errno_result(unsafe { libc::epoll_create1(0) }).unwrap();
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || {
+        let (peerfd, _) = net::accept_ipv4(server_sockfd).unwrap();
+
+        // Write `TEST_BYTES` into the stream.
+        libc_utils::write_all(peerfd, TEST_BYTES).unwrap();
+
+        // Shutting down the write end of the peer socket should close
+        // the read end of the client socket.
+        unsafe {
+            errno_check(libc::shutdown(peerfd, libc::SHUT_WR));
+        }
+
+        // Add client socket with "read closed" interest to epoll.
+        epoll_ctl_add(epfd, client_sockfd, EPOLLET | EPOLLRDHUP).unwrap();
+        // Wait until the read end of the client socket is closed.
+        check_epoll_wait(epfd, &[Ev { events: EPOLLRDHUP, data: client_sockfd }], -1);
+    });
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    unsafe {
+        // Change client socket to be non-blocking.
+        errno_check(libc::fcntl(client_sockfd, libc::F_SETFL, libc::O_NONBLOCK));
+    }
+
+    server_thread.join().unwrap();
+
+    // Update client socket interest to also include readable interest.
+    epoll_ctl(
+        epfd,
+        EPOLL_CTL_MOD,
+        client_sockfd,
+        Ev { events: EPOLLET | EPOLLIN | EPOLLRDHUP, data: client_sockfd },
+    )
+    .unwrap();
+
+    // Wait until the socket becomes readable.
+    check_epoll_wait(epfd, &[Ev { events: EPOLLIN | EPOLLRDHUP, data: client_sockfd }], -1);
+
+    let mut buffer = [0u8; 1024];
+
+    // We want to read in chunks of 16 bytes. To ensure we get a short read, `TEST_BYTES.len()`
+    // must not be dividable by 16.
+    assert!(TEST_BYTES.len() % 16 != 0);
+
+    let mut total_bytes_read = 0;
+    // Read everything from the socket until we get a short read.
+    // We don't want to provide `TEST_BYTES.len()` as `count` because then we won't trigger
+    // a short read.
+    loop {
+        let bytes_read = unsafe {
+            errno_result(libc::read(
+                client_sockfd,
+                buffer.as_mut_ptr().byte_add(total_bytes_read).cast(),
+                // Read a chunk of 16 bytes.
+                16,
+            ))
+            .unwrap()
+        };
+
+        total_bytes_read += bytes_read as usize;
+        if bytes_read < 16 {
+            // We had a short read; we thus assume the read buffer is empty.
+            break;
+        }
+    }
+    assert_eq!(total_bytes_read, TEST_BYTES.len());
+
+    // We had a short read because `buffer` is bigger than `TEST_BYTES`.
+    // Because the read end of the socket is closed, we should still be able to
+    // read to detect EOFs.
+
+    let mut buffer = [1u8; 16];
+    let bytes_read = unsafe {
+        errno_result(libc::read(client_sockfd, buffer.as_mut_ptr().cast(), buffer.len())).unwrap()
+    };
+    // The read should return 0, indicating EOF.
+    assert_eq!(bytes_read, 0);
+
+    // Ensure that the "readable" and "read closed" readiness flags
+    // are still set.
+    assert_eq!(
+        current_epoll_readiness::<8>(client_sockfd, EPOLLIN | EPOLLET | EPOLLRDHUP),
+        EPOLLIN | EPOLLRDHUP
+    );
 }
 
 /// Test that Miri doesn't remove the readable readiness after a short peek.
