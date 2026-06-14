@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use crate::shims::{DynFileDescriptionRef, FdId};
 use crate::*;
@@ -102,7 +103,7 @@ pub struct ReadinessManager {
     /// The id with which the next readiness consumer will be registered.
     next_consumer_id: usize,
     /// The set of registered readiness consumers indexed by their ids.
-    consumers: BTreeMap<ReadinessConsumerId, Box<dyn ReadinessConsumer>>,
+    consumers: BTreeMap<ReadinessConsumerId, Rc<Box<dyn ReadinessConsumer>>>,
     /// The registered interests indexed by file description ids.
     interests: BTreeMap<FdId, BTreeSet<ReadinessConsumerId>>,
 }
@@ -122,7 +123,7 @@ impl ReadinessManager {
     ) -> ReadinessConsumerId {
         let id = ReadinessConsumerId(self.next_consumer_id);
         self.next_consumer_id = id.0.strict_add(1);
-        self.consumers.insert(id, Box::new(consumer));
+        self.consumers.insert(id, Rc::new(Box::new(consumer)));
         id
     }
 
@@ -186,31 +187,22 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         let fd_id = fd.id();
 
-        // We temporarily remove the consumers from the map such that we can pass
-        // a mutable reference to `this` to `consumer.ready_event` in the loop below.
-        let Some(consumers) = this.machine.readiness.interests.remove(&fd_id) else {
+        let Some(consumers) = this.machine.readiness.interests.get(&fd_id).cloned() else {
             return interp_ok(());
         };
 
         let current_readiness = fd.readiness()?;
         for consumer_id in &consumers {
-            // We temporarily remove the consumer from the map such that we can pass
-            // a mutable reference to `this` to `consumer.ready_event`.
             let consumer = this
                 .machine
                 .readiness
                 .consumers
-                .remove(consumer_id)
-                .expect("consumer should be registered");
+                .get(consumer_id)
+                .expect("consumer should be registered")
+                .clone();
 
             consumer.ready_event(fd_id, current_readiness.clone(), force_edge, this)?;
-
-            // Re-insert the consumer into the map.
-            this.machine.readiness.consumers.insert(*consumer_id, consumer);
         }
-
-        // Re-insert the consumers into the map.
-        this.machine.readiness.interests.insert(fd_id, consumers);
 
         interp_ok(())
     }
