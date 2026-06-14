@@ -210,7 +210,11 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             bitflag |= pollerr;
         }
 
-        if this.tcx.sess.target.os != Os::MacOs {
+        if matches!(
+            this.tcx.sess.target.os,
+            Os::Linux | Os::Android | Os::FreeBsd | Os::MacOs | Os::Illumos
+        ) {
+            // POLLRDHUP only exists on Linux, Android, FreeBSD, MacOS, and Illumos.
             let pollrdhup = this.eval_libc_u16("POLLRDHUP");
             if readiness.read_closed {
                 bitflag |= pollrdhup;
@@ -248,7 +252,11 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             bitflag &= !pollerr;
         }
 
-        if this.tcx.sess.target.os != Os::MacOs {
+        if matches!(
+            this.tcx.sess.target.os,
+            Os::Linux | Os::Android | Os::FreeBsd | Os::MacOs | Os::Illumos
+        ) {
+            // POLLRDHUP only exists on Linux, Android, FreeBSD, MacOS, and Illumos.
             let pollrdhup = this.eval_libc_u16("POLLRDHUP");
             if bitflag & pollrdhup == pollrdhup {
                 readiness.read_closed = true;
