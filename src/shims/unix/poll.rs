@@ -145,10 +145,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     poll: Rc<Poll>,
                     revents: BTreeMap<FdNum, MPlaceTy<'tcx>>,
                     dest: MPlaceTy<'tcx>,
-                } |this, _reason: UnblockKind| {
+                } |this, reason: UnblockKind| {
                     // Ensure the `Poll` instance no longer receives any ready events
                     // which would cause duplicate thread unblocks.
                     this.machine.readiness.deregister_consumer(readiness_consumer_id);
+
+                    if let UnblockKind::TimedOut = reason {
+                        return this.write_null(&dest);
+                    }
 
                     let mut fulfilled_interests = 0u32;
 
