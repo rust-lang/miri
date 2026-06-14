@@ -109,6 +109,8 @@ pub enum BlockReason {
     InitOnce,
     /// Blocked on epoll.
     Epoll { epfd: FileDescriptionRef<Epoll> },
+    /// Blocked on poll.
+    Poll,
     /// Blocked on eventfd.
     Eventfd,
     /// Blocked on virtual socket.

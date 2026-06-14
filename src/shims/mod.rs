@@ -24,10 +24,13 @@ pub mod time;
 pub mod tls;
 pub mod unwind;
 
-pub use self::files::{FdId, FdTable, FileDescription, FileDescriptionRef, WeakFileDescriptionRef};
+pub use self::files::{
+    DynFileDescriptionRef, FdId, FdTable, FileDescription, FileDescriptionRef,
+    WeakFileDescriptionRef,
+};
 #[cfg(all(feature = "native-lib", unix))]
 pub use self::native_lib::trace::{init_sv, register_retcode_sv};
-pub use self::unix::{DirTable, Epoll, EpollEvalContextExt, EpollInterestTable};
+pub use self::unix::{DirTable, Epoll, EpollEvalContextExt};
 
 /// What needs to be done after emulating an item (a shim or an intrinsic) is done.
 pub enum EmulateItemResult {
