@@ -19,9 +19,11 @@ fn main() {
 /// Test that the `poll` call unblocks when one of the
 /// provided interests is fulfilled.
 fn test_poll_unblock_with_events() {
-    let fd = errno_result(unsafe { libc::eventfd(0, 0) }).unwrap();
+    let mut fds = [-1, -1];
+    unsafe { errno_check(libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr())) };
 
-    let mut interests = [libc::pollfd { fd, events: libc::POLLIN | libc::POLLOUT, revents: 0 }];
+    let mut interests =
+        [libc::pollfd { fd: fds[0], events: libc::POLLIN | libc::POLLOUT, revents: 0 }];
     let ready = unsafe {
         errno_result(libc::poll(interests.as_mut_ptr(), interests.len() as libc::nfds_t, -1))
             .unwrap()
@@ -34,9 +36,10 @@ fn test_poll_unblock_with_events() {
 /// Test that the `poll` blocks and returns zero when
 /// none of the provided interests get fulfilled.
 fn test_poll_block_without_events() {
-    let fd = errno_result(unsafe { libc::eventfd(0, 0) }).unwrap();
+    let mut fds = [-1, -1];
+    unsafe { errno_check(libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr())) };
 
-    let mut interests = [libc::pollfd { fd, events: libc::POLLIN, revents: 0 }];
+    let mut interests = [libc::pollfd { fd: fds[0], events: libc::POLLIN, revents: 0 }];
     let before = Instant::now();
     let ready = unsafe {
         errno_result(libc::poll(interests.as_mut_ptr(), interests.len() as libc::nfds_t, 50))
@@ -76,11 +79,12 @@ fn test_poll_readiness_update() {
 /// interest array. This should set the `revents` for both entries in the
 /// interest array.
 fn test_poll_duplicate_fd_interest() {
-    let fd = errno_result(unsafe { libc::eventfd(0, 0) }).unwrap();
+    let mut fds = [-1, -1];
+    unsafe { errno_check(libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr())) };
 
     let mut interests = [
-        libc::pollfd { fd, events: libc::POLLIN | libc::POLLOUT, revents: 0 },
-        libc::pollfd { fd, events: libc::POLLIN | libc::POLLOUT, revents: 0 },
+        libc::pollfd { fd: fds[0], events: libc::POLLIN | libc::POLLOUT, revents: 0 },
+        libc::pollfd { fd: fds[0], events: libc::POLLIN | libc::POLLOUT, revents: 0 },
     ];
     let ready = unsafe {
         errno_result(libc::poll(interests.as_mut_ptr(), interests.len() as libc::nfds_t, -1))
