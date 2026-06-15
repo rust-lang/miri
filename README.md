@@ -237,6 +237,7 @@ degree documented below):
   - `solaris` / `illumos`: maintained by @devnexen. Supports the entire test suite.
   - `freebsd`: maintained by @YohDeadfall and @LorrensP-2158466. Supports the entire test suite.
   - `android`: **maintainer wanted**. Supports the entire test suite.
+  - `netbsd`: maintained by @joboet. Supports the entire test suite.
 - For targets on other operating systems, Miri might fail before even reaching the `main` function.
 
 However, even for targets that we do support, the degree of support for accessing platform APIs
@@ -662,6 +663,7 @@ Violations of [Stacked Borrows] found that are likely bugs (but Stacked Borrows 
 * [`VecDeque::iter_mut` creating overlapping mutable references](https://github.com/rust-lang/rust/issues/74029)
 * [Various standard library aliasing issues involving raw pointers](https://github.com/rust-lang/rust/pull/78602)
 * [`<[T]>::copy_within` using a loan after invalidating it](https://github.com/rust-lang/rust/pull/85610)
+* [`libc` had a wrong definition of `_lwp_park`, causing `std` to pass an immutable pointer because of coercion](https://github.com/rust-lang/libc/pull/5169)
 
 ## Scientific papers employing Miri
 

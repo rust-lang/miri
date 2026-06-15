@@ -648,6 +648,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(())
     }
 
+    /// Helper function used inside shims of foreign functions to check that an
+    /// alias name for a function is used on all `target_oses`, but not anywhere
+    /// else. It returns a hopefully helpful error message if this is not the case.
+    fn check_alias_used_on(
+        &self,
+        alias: &str,
+        target_oses: &[Os],
+        name: Symbol,
+    ) -> InterpResult<'tcx> {
+        let target_os = &self.eval_context_ref().tcx.sess.target.os;
+        let in_list = target_oses.contains(target_os);
+        let alias_used = name.as_str() == alias;
+        match (alias_used, in_list) {
+            (true, true) => interp_ok(()),
+            (false, false) => interp_ok(()),
+            (true, false) => throw_unsup_format!("`{name}` is not supported on {target_os}"),
+            (false, true) => throw_unsup_format!("`{name}` is named `{alias}` on {target_os}"),
+        }
+    }
+
     /// Helper function used inside the shims of foreign functions to assert that the target OS
     /// is part of the UNIX family. It panics showing a message with the `name` of the foreign function
     /// if this is not the case.

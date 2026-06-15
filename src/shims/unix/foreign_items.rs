@@ -12,6 +12,7 @@ use self::shims::unix::android::foreign_items as android;
 use self::shims::unix::freebsd::foreign_items as freebsd;
 use self::shims::unix::linux::foreign_items as linux;
 use self::shims::unix::macos::foreign_items as macos;
+use self::shims::unix::netbsd::foreign_items as netbsd;
 use self::shims::unix::solarish::foreign_items as solarish;
 use crate::concurrency::cpu_affinity::CpuAffinityMask;
 use crate::shims::alloc::EvalContextExt as _;
@@ -34,6 +35,7 @@ pub fn is_dyn_sym(name: &str, target_os: &Os) -> bool {
                 Os::FreeBsd => freebsd::is_dyn_sym(name),
                 Os::Linux => linux::is_dyn_sym(name),
                 Os::MacOs => macos::is_dyn_sym(name),
+                Os::NetBsd => netbsd::is_dyn_sym(name),
                 Os::Solaris | Os::Illumos => solarish::is_dyn_sym(name),
                 _ => false,
             },
@@ -49,7 +51,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let name = this.read_scalar(val)?.to_i32()?;
         // FIXME: Which of these are POSIX, and which are GNU/Linux?
         // At least the names seem to all also exist on macOS.
-        let sysconfs: &[(&str, fn(&MiriInterpCx<'_>) -> Scalar)] = &[
+        let common_sysconfs: &[(&str, fn(&MiriInterpCx<'_>) -> Scalar)] = &[
             ("_SC_PAGESIZE", |this| Scalar::from_int(this.machine.page_size, this.pointer_size())),
             ("_SC_PAGE_SIZE", |this| Scalar::from_int(this.machine.page_size, this.pointer_size())),
             ("_SC_NPROCESSORS_CONF", |this| {
@@ -67,7 +69,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // The spec imposes a minimum of `_POSIX_OPEN_MAX` (20).
             ("_SC_OPEN_MAX", |this| Scalar::from_int(2_i32.pow(16), this.pointer_size())),
         ];
-        for &(sysconf_name, value) in sysconfs {
+
+        let os_sysconfs: &[(&str, fn(&MiriInterpCx<'_>) -> Scalar)] = match this.tcx.sess.target.os
+        {
+            // While this constant is in the UNIX standard, it isn't implemented on GNU/Linux.
+            // So, only support it where we use it.
+            //
+            // NetBSD uses the page size as minimum, see
+            // https://github.com/NetBSD/src/blob/a024c3d4c2b19510732467992412cf6e07ab0b6d/lib/libc/gen/sysconf.c#L414.
+            Os::NetBsd =>
+                &[("_SC_THREAD_STACK_MIN", |this| {
+                    Scalar::from_int(this.machine.page_size, this.pointer_size())
+                })],
+            _ => &[],
+        };
+
+        for &(sysconf_name, value) in common_sysconfs.iter().chain(os_sysconfs) {
             let sysconf_name = this.eval_libc_i32(sysconf_name);
             if sysconf_name == name {
                 return interp_ok(value(this));
@@ -132,7 +149,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.getenv(name)?;
                 this.write_pointer(result, dest)?;
             }
-            "unsetenv" => {
+            "unsetenv" | "__unsetenv13" => {
+                this.check_alias_used_on("__unsetenv13", &[Os::NetBsd], link_name)?;
+
                 let [name] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*const _) -> i32),
                     link_name,
@@ -343,7 +362,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "flock" => {
                 // Currently this function does not exist on all Unixes, e.g. on Solaris.
                 this.check_target_os(
-                    &[Os::Linux, Os::Android, Os::FreeBsd, Os::MacOs, Os::Illumos],
+                    &[Os::Linux, Os::Android, Os::FreeBsd, Os::MacOs, Os::Illumos, Os::NetBsd],
                     link_name,
                 )?;
 
@@ -406,17 +425,23 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.linkat(oldfd, oldpath, newfd, newpath, flags)?;
                 this.write_scalar(result, dest)?;
             }
-            "fstat" => {
+            "fstat" | "__fstat50" => {
+                this.check_alias_used_on("__fstat50", &[Os::NetBsd], link_name)?;
+
                 let [fd, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.fstat(fd, buf)?;
                 this.write_scalar(result, dest)?;
             }
-            "lstat" => {
+            "lstat" | "__lstat50" => {
+                this.check_alias_used_on("__lstat50", &[Os::NetBsd], link_name)?;
+
                 let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.lstat(path, buf)?;
                 this.write_scalar(result, dest)?;
             }
-            "stat" => {
+            "stat" | "__stat50" => {
+                this.check_alias_used_on("__stat50", &[Os::NetBsd], link_name)?;
+
                 let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let result = this.stat(path, buf)?;
                 this.write_scalar(result, dest)?;
@@ -474,7 +499,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.rmdir(path)?;
                 this.write_scalar(result, dest)?;
             }
-            "opendir" => {
+            "opendir" | "__opendir30" => {
+                this.check_alias_used_on("__opendir30", &[Os::NetBsd], link_name)?;
+
                 let [name] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*const _) -> *mut _),
                     link_name,
@@ -497,6 +524,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "readdir" => {
                 let [dirp] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.readdir(dirp, dest)?;
+            }
+            "readdir_r" | "readdir_r$INODE64" | "__readdir_r30" => {
+                this.check_target_os(&[Os::MacOs, Os::NetBsd], link_name)?;
+
+                this.check_alias_used_on("__readdir_r30", &[Os::NetBsd], link_name)?;
+                // FIXME: check that readdir_r$INODE64 is only used on Intel macOS.
+
+                let [dirp, entry, result] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let result = this.readdir_r(dirp, entry, result)?;
+                this.write_scalar(result, dest)?;
             }
             "lseek" => {
                 // FIXME: This does not have a direct test (#3179).
@@ -639,7 +677,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "pipe2" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(
-                    &[Os::Linux, Os::Android, Os::FreeBsd, Os::Solaris, Os::Illumos],
+                    &[Os::Linux, Os::Android, Os::FreeBsd, Os::Solaris, Os::Illumos, Os::NetBsd],
                     link_name,
                 )?;
 
@@ -654,7 +692,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             // Network sockets
-            "socket" => {
+            "socket" | "__socket30" => {
+                this.check_alias_used_on("__socket30", &[Os::NetBsd], link_name)?;
+
                 let [domain, type_, protocol] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, i32, i32) -> i32),
                     link_name,
@@ -821,7 +861,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.localtime_r(timep, result_op)?;
                 this.write_pointer(result, dest)?;
             }
-            "clock_gettime" => {
+            "clock_gettime" | "__clock_gettime50" => {
+                this.check_alias_used_on("__clock_gettime50", &[Os::NetBsd], link_name)?;
+
                 let [clk_id, tp] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(libc::clockid_t, *mut _) -> i32),
                     link_name,
@@ -1116,7 +1158,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let res = this.pthread_self()?;
                 this.write_scalar(res, dest)?;
             }
-            "sched_yield" => {
+            "sched_yield" | "__libc_thr_yield" => {
+                this.check_alias_used_on("__libc_thr_yield", &[Os::NetBsd], link_name)?;
+
                 // FIXME: This does not have a direct test (#3179).
                 let [] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.sched_yield()?;
@@ -1131,7 +1175,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "clock_nanosleep" => {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(
-                    &[Os::FreeBsd, Os::Linux, Os::Android, Os::Solaris, Os::Illumos],
+                    &[Os::FreeBsd, Os::Linux, Os::Android, Os::Solaris, Os::Illumos, Os::NetBsd],
                     link_name,
                 )?;
 
@@ -1269,10 +1313,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
             "getentropy" => {
-                // This function is non-standard but exists with the same signature and behavior on
-                // Linux, macOS, FreeBSD and Solaris/Illumos.
+                // This function is in the POSIX standard, but does not exist
+                // everywhere yet.
                 this.check_target_os(
-                    &[Os::Linux, Os::MacOs, Os::FreeBsd, Os::Illumos, Os::Solaris, Os::Android],
+                    &[
+                        Os::Linux,
+                        Os::MacOs,
+                        Os::FreeBsd,
+                        Os::Illumos,
+                        Os::Solaris,
+                        Os::Android,
+                        Os::NetBsd,
+                    ],
                     link_name,
                 )?;
 
@@ -1320,8 +1372,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "arc4random_buf" => {
                 // This function is non-standard but exists with the same signature and
-                // same behavior (eg never fails) on FreeBSD and Solaris/Illumos.
-                this.check_target_os(&[Os::FreeBsd, Os::Illumos, Os::Solaris], link_name)?;
+                // same behavior (eg never fails) on FreeBSD, Solaris/Illumos and NetBSD.
+                this.check_target_os(
+                    &[Os::FreeBsd, Os::Illumos, Os::Solaris, Os::NetBsd],
+                    link_name,
+                )?;
 
                 let [ptr, len] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 let ptr = this.read_pointer(ptr)?;
@@ -1343,7 +1398,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // `_Unwind_RaiseException` impl in miri should work:
                 // https://github.com/ARM-software/abi-aa/blob/main/ehabi32/ehabi32.rst
                 this.check_target_os(
-                    &[Os::Linux, Os::FreeBsd, Os::Illumos, Os::Solaris, Os::Android, Os::MacOs],
+                    &[
+                        Os::Linux,
+                        Os::FreeBsd,
+                        Os::Illumos,
+                        Os::Solaris,
+                        Os::Android,
+                        Os::MacOs,
+                        Os::NetBsd,
+                    ],
                     link_name,
                 )?;
 
@@ -1415,8 +1478,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
 
-            "getpwuid_r" | "__posix_getpwuid_r" if this.frame_in_std() => {
+            "getpwuid_r" | "__posix_getpwuid_r" | "__getpwuid_r50" if this.frame_in_std() => {
                 // getpwuid_r is the standard name, __posix_getpwuid_r is used on solarish
+                this.check_alias_used_on(
+                    "__posix_getpwuid_r",
+                    &[Os::Illumos, Os::Solaris],
+                    link_name,
+                )?;
+                this.check_alias_used_on("__getpwuid_r50", &[Os::NetBsd], link_name)?;
+
                 let [uid, pwd, buf, buflen, result] =
                     this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.check_no_isolation("`getpwuid_r`")?;
@@ -1470,6 +1540,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         ),
                     Os::MacOs =>
                         macos::EvalContextExt::emulate_foreign_item_inner(
+                            this, link_name, abi, args, dest,
+                        ),
+                    Os::NetBsd =>
+                        netbsd::EvalContextExt::emulate_foreign_item_inner(
                             this, link_name, abi, args, dest,
                         ),
                     Os::Solaris | Os::Illumos =>
