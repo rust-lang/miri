@@ -526,6 +526,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
+        machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
         self.perform_access(
             prov,
@@ -535,6 +536,7 @@ impl<'tcx> Tree {
             global,
             alloc_id,
             span,
+            machine,
         )?;
 
         let start_idx = match prov {
@@ -629,6 +631,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
+        machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 || matches!(prov, ProvenanceExtra::Wildcard) {
@@ -657,6 +660,7 @@ impl<'tcx> Tree {
                 ChildrenVisitMode::VisitChildrenOfAccessed,
                 &diagnostics,
                 /* min_exposed_child */ None, // only matters for protector end access,
+                machine,
             )?;
         }
         interp_ok(())
@@ -674,6 +678,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
+        machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 {
@@ -720,6 +725,7 @@ impl<'tcx> Tree {
                     ChildrenVisitMode::SkipChildrenOfAccessed,
                     &diagnostics,
                     min_exposed_child,
+                    machine,
                 )?;
             }
         }
@@ -920,6 +926,7 @@ impl<'tcx> LocationTree {
         visit_children: ChildrenVisitMode,
         diagnostics: &DiagnosticInfo,
         min_exposed_child: Option<BorTag>,
+        machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
         let accessed_root = if let Some(idx) = access_source {
             Some(self.perform_normal_access(
@@ -929,6 +936,7 @@ impl<'tcx> LocationTree {
                 global,
                 visit_children,
                 diagnostics,
+                machine,
             )?)
         } else {
             // `SkipChildrenOfAccessed` only gets set on protector release, which only
@@ -977,6 +985,7 @@ impl<'tcx> LocationTree {
                 global,
                 diagnostics,
                 /*is_wildcard_tree*/ i != 0,
+                machine,
             )?;
         }
         interp_ok(())
@@ -996,6 +1005,7 @@ impl<'tcx> LocationTree {
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
         diagnostics: &DiagnosticInfo,
+        machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx, UniIndex> {
         // Performs the per-node work:
         // - insert the permission if it does not exist
@@ -1015,6 +1025,7 @@ impl<'tcx> LocationTree {
             old_state.skip_if_known_noop(access_kind, args.rel_pos)
         };
         let node_app = |args: NodeAppArgs<'_, LocationTree>| {
+            machine.visits_since_gc.set(machine.visits_since_gc.get().saturating_add(1));
             let node = args.nodes.get_mut(args.idx).unwrap();
             let mut perm = args.data.perms.entry(args.idx);
 
@@ -1045,13 +1056,14 @@ impl<'tcx> LocationTree {
         };
 
         let visitor = TreeVisitor { nodes, data: self };
-        match visit_children {
+        let result = match visit_children {
             ChildrenVisitMode::VisitChildrenOfAccessed =>
                 visitor.traverse_this_parents_children_other(access_source, node_skipper, node_app),
             ChildrenVisitMode::SkipChildrenOfAccessed =>
                 visitor.traverse_nonchildren(access_source, node_skipper, node_app),
-        }
-        .into()
+        };
+        
+        result.into()
     }
 
     /// Performs a wildcard access on the tree with root `root`. Takes the `access_relatedness`
@@ -1071,6 +1083,7 @@ impl<'tcx> LocationTree {
         global: &GlobalState,
         diagnostics: &DiagnosticInfo,
         is_wildcard_tree: bool,
+        machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
         let get_relatedness = |idx: UniIndex, node: &Node, loc: &LocationTree| {
             // If the tag is larger than `max_local_tag` then the access can only be foreign.
@@ -1122,6 +1135,7 @@ impl<'tcx> LocationTree {
                 }
             },
             |args| {
+                machine.visits_since_gc.set(machine.visits_since_gc.get().saturating_add(1));
                 let node = args.nodes.get_mut(args.idx).unwrap();
 
                 let protected = global.borrow().protected_tags.contains_key(&node.tag);

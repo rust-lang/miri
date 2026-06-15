@@ -260,7 +260,7 @@ impl GlobalStateInner {
                     id, alloc_size, self, kind, machine,
                 )))),
             BorrowTrackerMethod::TreeBorrows { .. } =>
-                AllocState::TreeBorrows(Box::new(RefCell::new(Tree::new_allocation(
+                AllocState::TreeBorrows(Box::new(RefCell::new(tree_borrows::AllocState::new_allocation(
                     id, alloc_size, self, kind, machine,
                 )))),
         }

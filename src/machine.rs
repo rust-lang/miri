@@ -646,6 +646,11 @@ pub struct MiriMachine<'tcx> {
     /// The number of blocks that passed since the last BorTag GC pass.
     pub(crate) since_gc: u32,
 
+    /// Run a garbage collector for TreeBorrows every N visited nodes.
+    pub(crate) visit_gc_interval: u32,
+    /// Number of nodes visited since the last GC pass.
+    pub(crate) visits_since_gc: Cell<u32>,
+
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
 
@@ -846,6 +851,8 @@ impl<'tcx> MiriMachine<'tcx> {
             }).collect(),
             gc_interval: config.gc_interval,
             since_gc: 0,
+            visit_gc_interval: config.visit_gc_interval,
+            visits_since_gc: Cell::new(0),
             num_cpus: config.num_cpus,
             page_size,
             stack_addr,
@@ -1076,6 +1083,8 @@ impl VisitProvenance for MiriMachine<'_> {
             native_lib_ecx_interchange: _,
             gc_interval: _,
             since_gc: _,
+            visit_gc_interval: _,
+            visits_since_gc: _,
             num_cpus: _,
             page_size: _,
             stack_addr: _,
@@ -1943,8 +1952,22 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         // table and closed source file descriptions in the blocking I/O manager.
         // When debug assertions are enabled, run the GC as often as possible so that any cases
         // where it mistakenly removes an important tag become visible.
-        if ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval {
+        let gc_cond = if let Some(borrow_tracker) = &ecx.machine.borrow_tracker {
+            match borrow_tracker.borrow().borrow_tracker_method() {
+                crate::borrow_tracker::BorrowTrackerMethod::TreeBorrows(_) => {
+                    ecx.machine.visit_gc_interval > 0 && ecx.machine.visits_since_gc.get() >= ecx.machine.visit_gc_interval
+                },
+                crate::borrow_tracker::BorrowTrackerMethod::StackedBorrows => {
+                    ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval
+                },
+            }
+        } else {
+            false
+        };
+
+        if gc_cond {
             ecx.machine.since_gc = 0;
+            ecx.machine.visits_since_gc.set(0);
             ecx.run_provenance_gc();
             ecx.machine.blocking_io.run_gc();
         }

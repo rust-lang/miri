@@ -150,6 +150,8 @@ pub struct MiriConfig {
     pub native_lib_enable_tracing: bool,
     /// Run a garbage collector for BorTags every N basic blocks.
     pub gc_interval: u32,
+    /// Run a garbage collector for TreeBorrows every N visited nodes.
+    pub visit_gc_interval: u32,
     /// The number of CPUs to be reported by miri.
     pub num_cpus: u32,
     /// Requires Miri to emulate pages of a certain size.
@@ -202,6 +204,7 @@ impl Default for MiriConfig {
             native_lib: vec![],
             native_lib_enable_tracing: false,
             gc_interval: 10_000,
+            visit_gc_interval: 20_000,
             num_cpus: 1,
             page_size: None,
             collect_leak_backtraces: true,
