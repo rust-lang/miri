@@ -20,16 +20,16 @@ fn main() {
     let bytes = b"Hello, World!\n";
     let path = utils::prepare_with_content("miri_test_fs_shared_lock.txt", bytes);
 
-    let files: Vec<File> = (0..3).map(|_| File::open(&path).unwrap()).collect();
+    let files: Vec<File> = (0..4).map(|_| File::open(&path).unwrap()).collect();
 
     // Test that we can apply many shared locks.
-    for file in files.iter() {
+    for file in files.iter().take(3) {
         errno_check(unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) });
     }
 
-    // Test that shared lock prevents exclusive lock.
+    // Test that shared lock prevents exclusive lock on another fd.
     {
-        let fd = files[0].as_raw_fd();
+        let fd = files[3].as_raw_fd();
         let err =
             errno_result(unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) }).unwrap_err();
         assert_eq!(err.raw_os_error().unwrap(), libc::EWOULDBLOCK);
@@ -64,10 +64,7 @@ fn main() {
         let fd = files[0].as_raw_fd();
         errno_check(unsafe { libc::flock(fd, libc::LOCK_UN) });
         // Redundant unlock also works.
-        // FIXME(#miri/5074): except on Windows hosts...
-        if !cfg!(windows_host) {
-            errno_check(unsafe { libc::flock(fd, libc::LOCK_UN) });
-        }
+        errno_check(unsafe { libc::flock(fd, libc::LOCK_UN) });
     }
 
     // Test behavior when we acquire multiple locks on the same FD.
