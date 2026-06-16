@@ -1,6 +1,7 @@
 use std::any::Any;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fs::{Dir, File};
+use std::fs::File;
 use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
@@ -365,6 +366,7 @@ pub struct FileHandle {
     pub(crate) file: File,
     pub(crate) readable: bool,
     pub(crate) writable: bool,
+    pub(crate) flock_state: RefCell<Option<FlockState>>,
 }
 
 impl FileDescription for FileHandle {
@@ -476,9 +478,6 @@ impl FileDescription for FileHandle {
 
 #[derive(Debug)]
 pub struct DirHandle {
-    #[cfg_attr(bootstrap, allow(unused))]
-    pub(crate) dir: Dir,
-    /// Fallback used under `cfg(bootstrap)`.
     #[cfg_attr(not(bootstrap), allow(unused))]
     pub(crate) path: PathBuf,
 }
@@ -492,7 +491,7 @@ impl FileDescription for DirHandle {
         &self,
     ) -> InterpResult<'tcx, Either<io::Result<std::fs::Metadata>, &'static str>> {
         #[cfg(not(bootstrap))]
-        return interp_ok(Either::Left(self.dir.metadata()));
+        return interp_ok(Either::Left(std::fs::metadata(&self.path)));
         #[cfg(bootstrap)]
         return interp_ok(Either::Left(std::fs::metadata(&self.path)));
     }
@@ -504,6 +503,16 @@ impl FileDescription for DirHandle {
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
         interp_ok(Ok(()))
+    }
+}
+
+impl FileHandle {
+    pub(crate) fn flock_state(&self) -> Option<FlockState> {
+        *self.flock_state.borrow()
+    }
+
+    pub(crate) fn set_flock_state(&self, state: Option<FlockState>) {
+        *self.flock_state.borrow_mut() = state;
     }
 }
 
@@ -554,8 +563,6 @@ pub struct FdTable {
     pub fds: BTreeMap<FdNum, DynFileDescriptionRef>,
     /// Unique identifier for file description, used to differentiate between various file description.
     next_file_description_id: FdId,
-    /// Tracked `flock` state per open file description
-    flock_states: BTreeMap<FdId, FlockState>,
 }
 
 impl VisitProvenance for FdTable {
@@ -566,11 +573,7 @@ impl VisitProvenance for FdTable {
 
 impl FdTable {
     fn new() -> Self {
-        FdTable {
-            fds: BTreeMap::new(),
-            next_file_description_id: FdId(0),
-            flock_states: BTreeMap::new(),
-        }
+        FdTable { fds: BTreeMap::new(), next_file_description_id: FdId(0) }
     }
     pub(crate) fn init(mute_stdout_stderr: bool) -> FdTable {
         let mut fds = FdTable::new();
@@ -644,17 +647,6 @@ impl FdTable {
 
     pub fn is_fd_num(&self, fd_num: FdNum) -> bool {
         self.fds.contains_key(&fd_num)
-    }
-
-    pub fn flock_state(&self, id: FdId) -> Option<FlockState> {
-        self.flock_states.get(&id).copied()
-    }
-
-    pub fn set_flock_state(&mut self, id: FdId, state: Option<FlockState>) {
-        match state {
-            Some(state) => self.flock_states.insert(id, state),
-            None => self.flock_states.remove(&id),
-        };
     }
 }
 

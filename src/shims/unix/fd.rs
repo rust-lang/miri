@@ -8,7 +8,7 @@ use rand::RngExt;
 use rustc_abi::{Align, Size};
 use rustc_target::spec::Os;
 
-use crate::shims::files::{DynFileDescriptionRef, FileDescription, FlockState};
+use crate::shims::files::{DynFileDescriptionRef, FileDescription};
 use crate::shims::sig::check_min_vararg_count;
 use crate::shims::unix::linux_like::epoll::EpollReadiness;
 use crate::shims::unix::*;
@@ -137,38 +137,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             throw_unsup_format!("unsupported flags {:#x}", op);
         };
 
-        // Windows `File` locks differ from POSIX `flock`
-        // like no lock conversion and redundant Unlock
-        // we track state for proper unsupported errors
-        let fd_id = fd.id();
-        if cfg!(windows) {
-            let current_state = this.machine.fds.flock_state(fd_id);
-            match (current_state, parsed_op) {
-                (Some(FlockState::Shared), SharedLock { nonblocking: _ })
-                | (Some(FlockState::Exclusive), ExclusiveLock { nonblocking: _ }) =>
-                    return interp_ok(Scalar::from_i32(0)),
-                (None, Unlock) => return interp_ok(Scalar::from_i32(0)),
-                (Some(FlockState::Exclusive), SharedLock { nonblocking: _ }) =>
-                    throw_unsup_format!(
-                        "converting exclusive `flock` to shared is not supported on Windows hosts"
-                    ),
-                (Some(FlockState::Shared), ExclusiveLock { nonblocking: _ }) =>
-                    throw_unsup_format!(
-                        "converting shared `flock` to exclusive is not supported on Windows hosts"
-                    ),
-                _ => {}
-            }
-        }
-
         let result = fd.as_unix(this).flock(this.machine.communicate(), parsed_op)?;
-        if cfg!(windows) && result.is_ok() {
-            let new_state = match parsed_op {
-                SharedLock { nonblocking: _ } => Some(FlockState::Shared),
-                ExclusiveLock { nonblocking: _ } => Some(FlockState::Exclusive),
-                Unlock => None,
-            };
-            this.machine.fds.set_flock_state(fd_id, new_state);
-        }
         let result = result.map(|()| 0i32);
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
     }
