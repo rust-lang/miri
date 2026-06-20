@@ -12,7 +12,8 @@ use crate::shims::unix::*;
 use crate::*;
 
 pub fn is_dyn_sym(name: &str) -> bool {
-    matches!(name, "gettid")
+    // `futimens` is a weak symbol on Android (std's `File::set_times` resolves it at runtime).
+    matches!(name, "gettid" | "futimens")
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}

@@ -545,6 +545,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.fdatasync(fd)?;
                 this.write_scalar(result, dest)?;
             }
+            "futimens" => {
+                let [fd, times] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *const _) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                let result = this.futimens(fd, times)?;
+                this.write_scalar(result, dest)?;
+            }
             "readlink" => {
                 let [pathname, buf, bufsize] = this.check_shim_sig(
                     shim_sig!(extern "C" fn(*const _, *mut _, usize) -> isize),
