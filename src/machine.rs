@@ -650,6 +650,8 @@ pub struct MiriMachine<'tcx> {
     pub(crate) visit_gc_interval: u32,
     /// Number of nodes visited since the last GC pass.
     pub(crate) visits_since_gc: Cell<u32>,
+    /// Only garbage collect TreeBorrows trees that have more than this many nodes.
+    pub(crate) tree_gc_min_nodes: usize,
 
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
@@ -853,6 +855,7 @@ impl<'tcx> MiriMachine<'tcx> {
             since_gc: 0,
             visit_gc_interval: config.visit_gc_interval,
             visits_since_gc: Cell::new(0),
+            tree_gc_min_nodes: config.tree_gc_min_nodes,
             num_cpus: config.num_cpus,
             page_size,
             stack_addr,
@@ -1085,6 +1088,7 @@ impl VisitProvenance for MiriMachine<'_> {
             since_gc: _,
             visit_gc_interval: _,
             visits_since_gc: _,
+            tree_gc_min_nodes: _,
             num_cpus: _,
             page_size: _,
             stack_addr: _,

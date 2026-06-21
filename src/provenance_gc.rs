@@ -240,9 +240,15 @@ impl LiveAllocs<'_, '_> {
 fn remove_unreachable_tags<'tcx>(ecx: &mut MiriInterpCx<'tcx>, tags: FxHashSet<BorTag>) {
     // Avoid iterating all allocations if there's no borrow tracker anyway.
     if ecx.machine.borrow_tracker.is_some() {
+        let tree_gc_min_nodes = ecx.machine.tree_gc_min_nodes;
         ecx.memory.alloc_map().iter(|it| {
             for (_id, (_kind, alloc)) in it {
-                alloc.extra.borrow_tracker.as_ref().unwrap().remove_unreachable_tags(&tags);
+                alloc
+                    .extra
+                    .borrow_tracker
+                    .as_ref()
+                    .unwrap()
+                    .remove_unreachable_tags(&tags, tree_gc_min_nodes);
             }
         });
     }

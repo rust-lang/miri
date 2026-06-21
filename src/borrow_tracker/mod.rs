@@ -494,11 +494,12 @@ impl AllocState {
         }
     }
 
-    pub fn remove_unreachable_tags(&self, tags: &FxHashSet<BorTag>) {
+    pub fn remove_unreachable_tags(&self, tags: &FxHashSet<BorTag>, tree_gc_min_nodes: usize) {
         let _trace = enter_trace_span!(borrow_tracker::remove_unreachable_tags);
         match self {
             AllocState::StackedBorrows(sb) => sb.borrow_mut().remove_unreachable_tags(tags),
-            AllocState::TreeBorrows(tb) => tb.borrow_mut().remove_unreachable_tags(tags),
+            AllocState::TreeBorrows(tb) =>
+                tb.borrow_mut().remove_unreachable_tags(tags, tree_gc_min_nodes),
         }
     }
 

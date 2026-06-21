@@ -735,7 +735,11 @@ impl<'tcx> Tree {
 
 /// Integration with the BorTag garbage collector
 impl Tree {
-    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
+    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>, min_nodes: usize) {
+        // Only bother garbage collecting trees that are large enough
+        if self.tag_mapping.len() <= min_nodes {
+            return;
+        }
         for i in 0..(self.roots.len()) {
             self.remove_useless_children(self.roots[i], live_tags);
         }

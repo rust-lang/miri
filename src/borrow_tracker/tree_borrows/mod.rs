@@ -152,9 +152,9 @@ impl AllocState {
     }
 
     /// Wrapper for Tree::remove_unreachable_tags
-    pub fn remove_unreachable_tags(&mut self, tags: &FxHashSet<BorTag>) {
-        if let AllocState::Init(tree) = self { 
-            tree.remove_unreachable_tags(tags);
+    pub fn remove_unreachable_tags(&mut self, tags: &FxHashSet<BorTag>, min_nodes: usize) {
+        if let AllocState::Init(tree) = self {
+            tree.remove_unreachable_tags(tags, min_nodes);
         }
     }
 
