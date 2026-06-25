@@ -56,7 +56,7 @@ enum SocketState {
 }
 
 #[derive(Debug)]
-struct Socket {
+struct TcpSocket {
     /// Family of the socket, used to ensure socket only binds/connects to address of
     /// same family.
     family: SocketFamily,
@@ -82,7 +82,7 @@ struct Socket {
     write_timeout: Cell<Option<Duration>>,
 }
 
-impl FileDescription for Socket {
+impl FileDescription for TcpSocket {
     fn name(&self) -> &'static str {
         "socket"
     }
@@ -93,7 +93,7 @@ impl FileDescription for Socket {
         communicate_allowed: bool,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
-        assert!(communicate_allowed, "cannot have `Socket` with isolation enabled!");
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
 
         if matches!(
             &*self.state.borrow(),
@@ -118,7 +118,7 @@ impl FileDescription for Socket {
         ecx: &mut MiriInterpCx<'tcx>,
         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
-        assert!(communicate_allowed, "cannot have `Socket` with isolation enabled!");
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
 
         let socket = self;
         let deadline = ecx.action_deadline(socket.is_non_block.get(), socket.read_timeout.get());
@@ -129,7 +129,7 @@ impl FileDescription for Socket {
             "read",
             callback!(
                 @capture<'tcx> {
-                    socket: FileDescriptionRef<Socket>,
+                    socket: FileDescriptionRef<TcpSocket>,
                     deadline: Option<Deadline>,
                     ptr: Pointer,
                     len: usize,
@@ -165,7 +165,7 @@ impl FileDescription for Socket {
         ecx: &mut MiriInterpCx<'tcx>,
         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
-        assert!(communicate_allowed, "cannot have `Socket` with isolation enabled!");
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
 
         let socket = self;
         let deadline = ecx.action_deadline(socket.is_non_block.get(), socket.write_timeout.get());
@@ -176,7 +176,7 @@ impl FileDescription for Socket {
             "write",
             callback!(
                 @capture<'tcx> {
-                    socket: FileDescriptionRef<Socket>,
+                    socket: FileDescriptionRef<TcpSocket>,
                     deadline: Option<Deadline>,
                     ptr: Pointer,
                     len: usize,
@@ -250,14 +250,14 @@ impl FileDescription for Socket {
     }
 }
 
-impl UnixFileDescription for Socket {
+impl UnixFileDescription for TcpSocket {
     fn ioctl<'tcx>(
         &self,
         op: Scalar,
         arg: Option<&OpTy<'tcx>>,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, i32> {
-        assert!(ecx.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(ecx.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
 
         let fionbio = ecx.eval_libc("FIONBIO");
 
@@ -364,7 +364,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let fds = &mut this.machine.fds;
-        let fd = fds.new_ref(Socket {
+        let fd = fds.new_ref(TcpSocket {
             family,
             state: RefCell::new(SocketState::Initial),
             is_non_block: Cell::new(is_sock_nonblock),
@@ -396,12 +396,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1_i32(LibcError("ENOTSOCK"));
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
         this.ensure_not_failed(&socket, "bind")?;
 
         let mut state = socket.state.borrow_mut();
@@ -459,12 +459,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1_i32(LibcError("ENOTSOCK"));
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
         this.ensure_not_failed(&socket, "listen")?;
 
         let mut state = socket.state.borrow_mut();
@@ -522,12 +522,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
         this.ensure_not_failed(&socket, "accept4")?;
 
         if !matches!(*socket.state.borrow(), SocketState::Listening(_)) {
@@ -628,12 +628,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket
             return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
         this.ensure_not_failed(&socket, "connect")?;
 
         match &*socket.state.borrow() {
@@ -692,7 +692,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 "connect",
                 callback!(
                     @capture<'tcx> {
-                        socket: FileDescriptionRef<Socket>,
+                        socket: FileDescriptionRef<TcpSocket>,
                         dest: MPlaceTy<'tcx>
                     } |this, result: Result<(), ()>| {
                         if result.is_err() {
@@ -733,7 +733,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket
             return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
         };
@@ -778,7 +778,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "send",
             callback!(
                 @capture<'tcx> {
-                    socket: FileDescriptionRef<Socket>,
+                    socket: FileDescriptionRef<TcpSocket>,
                     deadline: Option<Deadline>,
                     flags: i32,
                     buffer_ptr: Pointer,
@@ -843,7 +843,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket
             return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
         };
@@ -900,7 +900,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "recv",
             callback!(
                 @capture<'tcx> {
-                    socket: FileDescriptionRef<Socket>,
+                    socket: FileDescriptionRef<TcpSocket>,
                     deadline: Option<Deadline>,
                     buffer_ptr: Pointer,
                     length: usize,
@@ -965,7 +965,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1_i32(LibcError("ENOTSOCK"));
         };
@@ -1124,7 +1124,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1_i32(LibcError("ENOTSOCK"));
         };
@@ -1309,12 +1309,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1_i32(LibcError("ENOTSOCK"));
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
         this.ensure_not_failed(&socket, "getsockname")?;
 
         let state = socket.state.borrow();
@@ -1385,12 +1385,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
 
         let dest = dest.clone();
 
@@ -1403,7 +1403,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "getpeername",
             callback!(
                 @capture<'tcx> {
-                    socket: FileDescriptionRef<Socket>,
+                    socket: FileDescriptionRef<TcpSocket>,
                     address_ptr: Pointer,
                     address_len_ptr: Pointer,
                     dest: MPlaceTy<'tcx>,
@@ -1444,12 +1444,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
         };
 
-        let Some(socket) = fd.downcast::<Socket>() else {
+        let Some(socket) = fd.downcast::<TcpSocket>() else {
             // Man page specifies to return ENOTSOCK if `fd` is not a socket.
             return this.set_errno_and_return_neg1_i32(LibcError("ENOTSOCK"));
         };
 
-        assert!(this.machine.communicate(), "cannot have `Socket` with isolation enabled!");
+        assert!(this.machine.communicate(), "cannot have `TcpSocket` with isolation enabled!");
         this.ensure_not_failed(&socket, "shutdown")?;
 
         let state = socket.state.borrow();
@@ -1532,7 +1532,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// that the socket is in [`SocketState::Listening`].
     fn block_for_accept(
         &mut self,
-        socket: FileDescriptionRef<Socket>,
+        socket: FileDescriptionRef<TcpSocket>,
         address_ptr: Pointer,
         address_len_ptr: Pointer,
         is_client_sock_nonblock: bool,
@@ -1544,7 +1544,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             BlockingIoInterest::Read,
             /* deadline */ None,
             callback!(@capture<'tcx> {
-                socket: FileDescriptionRef<Socket>,
+                socket: FileDescriptionRef<TcpSocket>,
                 address_ptr: Pointer,
                 address_len_ptr: Pointer,
                 is_client_sock_nonblock: bool,
@@ -1584,7 +1584,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// that the socket is in [`SocketState::Listening`].
     fn try_non_block_accept(
         &mut self,
-        socket: &FileDescriptionRef<Socket>,
+        socket: &FileDescriptionRef<TcpSocket>,
         address_ptr: Pointer,
         address_len_ptr: Pointer,
         is_client_sock_nonblock: bool,
@@ -1622,7 +1622,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?;
         }
 
-        let fd = this.machine.fds.new_ref(Socket {
+        let fd = this.machine.fds.new_ref(TcpSocket {
             family,
             state: RefCell::new(SocketState::Connected(stream)),
             is_non_block: Cell::new(is_client_sock_nonblock),
@@ -1647,7 +1647,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// that the socket is in [`SocketState::Connected`].
     fn block_for_send(
         &mut self,
-        socket: FileDescriptionRef<Socket>,
+        socket: FileDescriptionRef<TcpSocket>,
         deadline: Option<Deadline>,
         buffer_ptr: Pointer,
         length: usize,
@@ -1659,7 +1659,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             BlockingIoInterest::Write,
             deadline.clone(),
             callback!(@capture<'tcx> {
-                socket: FileDescriptionRef<Socket>,
+                socket: FileDescriptionRef<TcpSocket>,
                 deadline: Option<Deadline>,
                 buffer_ptr: Pointer,
                 length: usize,
@@ -1691,7 +1691,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// that the socket is in [`SocketState::Connected`].
     fn try_non_block_send(
         &mut self,
-        socket: &FileDescriptionRef<Socket>,
+        socket: &FileDescriptionRef<TcpSocket>,
         buffer_ptr: Pointer,
         length: usize,
     ) -> InterpResult<'tcx, Result<usize, IoError>> {
@@ -1767,7 +1767,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// that the socket is in [`SocketState::Connected`].
     fn block_for_recv(
         &mut self,
-        socket: FileDescriptionRef<Socket>,
+        socket: FileDescriptionRef<TcpSocket>,
         deadline: Option<Deadline>,
         buffer_ptr: Pointer,
         length: usize,
@@ -1780,7 +1780,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             BlockingIoInterest::Read,
             deadline.clone(),
             callback!(@capture<'tcx> {
-                socket: FileDescriptionRef<Socket>,
+                socket: FileDescriptionRef<TcpSocket>,
                 deadline: Option<Deadline>,
                 buffer_ptr: Pointer,
                 length: usize,
@@ -1813,7 +1813,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// that the socket is in [`SocketState::Connected`].
     fn try_non_block_recv(
         &mut self,
-        socket: &FileDescriptionRef<Socket>,
+        socket: &FileDescriptionRef<TcpSocket>,
         buffer_ptr: Pointer,
         length: usize,
         should_peek: bool,
@@ -1903,7 +1903,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// the socket reached the [`SocketState::Connected`] state.
     fn ensure_connected(
         &mut self,
-        socket: FileDescriptionRef<Socket>,
+        socket: FileDescriptionRef<TcpSocket>,
         deadline: Option<Deadline>,
         foreign_name: &'static str,
         action: DynMachineCallback<'tcx, Result<(), ()>>,
@@ -1935,7 +1935,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             deadline,
             callback!(
                 @capture<'tcx> {
-                    socket: FileDescriptionRef<Socket>,
+                    socket: FileDescriptionRef<TcpSocket>,
                     foreign_name: &'static str,
                     action: DynMachineCallback<'tcx, Result<(), ()>>,
                 } |this, kind: UnblockKind| {
@@ -2016,7 +2016,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// error is thrown.
     fn ensure_not_failed(
         &self,
-        socket: &FileDescriptionRef<Socket>,
+        socket: &FileDescriptionRef<TcpSocket>,
         foreign_name: &'static str,
     ) -> InterpResult<'tcx> {
         if let SocketState::ConnectionFailed(_) = &*socket.state.borrow() {
@@ -2036,7 +2036,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// an error on the host socket, we transition into the [`SocketState::ConnectionFailed`]
     /// state because we know that `socket` can no longer successfully establish a
     /// connection.
-    fn update_last_error(&self, socket: &FileDescriptionRef<Socket>) {
+    fn update_last_error(&self, socket: &FileDescriptionRef<TcpSocket>) {
         let mut state = socket.state.borrow_mut();
 
         let new_error = match &*state {
@@ -2070,13 +2070,13 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 }
 
-impl VisitProvenance for FileDescriptionRef<Socket> {
+impl VisitProvenance for FileDescriptionRef<TcpSocket> {
     // A socket doesn't contain any references to machine memory
     // and thus we don't need to propagate the visit.
     fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
-impl SourceFileDescription for Socket {
+impl SourceFileDescription for TcpSocket {
     fn with_source(&self, f: &mut dyn FnMut(&mut dyn Source) -> io::Result<()>) -> io::Result<()> {
         let mut state = self.state.borrow_mut();
         match &mut *state {
