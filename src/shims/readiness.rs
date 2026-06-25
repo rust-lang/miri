@@ -89,6 +89,10 @@ impl ReadinessInterest {
     }
 }
 
+/// A struct which stores [`ReadinessInterest`]s for a file description
+/// together with which interests are currently satisfied, and a list of
+/// threads which should be unblocked once a [`ReadinessInterest`] of the
+/// watcher is fulfilled.
 #[derive(Debug)]
 pub struct ReadinessWatcher {
     /// Globally unique identifier of the watcher.
@@ -106,11 +110,13 @@ pub struct ReadinessWatcher {
 }
 
 impl ReadinessWatcher {
+    /// Get a reference to the map of registered interests of the watcher
+    /// together with their keys.
     pub fn interests(&self) -> Ref<'_, BTreeMap<ReadinessInterestKey, ReadinessInterest>> {
         self.interests.borrow()
     }
 
-    /// Add an interest for the [`ReadinessInterestKey`].
+    /// Add an interest for the with `key`.
     /// `relevant` contains the readiness mask of relevant events.
     /// `is_edge_triggered` specifies whether the interest is edge-triggered
     /// ([`true`]) or level-triggered ([`false`]).
@@ -160,7 +166,7 @@ impl ReadinessWatcher {
         interp_ok(Ok(()))
     }
 
-    /// Update the interested which is registered for `key`.
+    /// Update the interest which is registered for `key`.
     /// `cb` gets invoked with a mutable reference to the registered
     /// [`ReadinessInterest`].
     ///
@@ -195,6 +201,7 @@ impl ReadinessWatcher {
     }
 
     /// Remove the interest registered for `key`.
+    ///
     /// This function returns [`None`] when no interest is registered
     /// for the specified `key`.
     pub fn remove_interest<'tcx>(
@@ -210,14 +217,10 @@ impl ReadinessWatcher {
             ready.remove(idx);
         }
 
-        // Even when this was the last interest in this FD, we cannot remove it from
-        // the global interest table since watchers don't have an identifier.
-        // Stale watchers will be removed from the global interest table over time
-        // since they are only stored as `Weak<ReadinessWatcher>`s and are removed
-        // once a `Weak::upgrade` fails.
-
         let is_last = self.interests.borrow().range(range_for_id(key.0)).next().is_none();
         if is_last {
+            // If this was the last interest in this FD, we remove the watcher from
+            // the global list of who is interested in this FD.
             ecx.machine.readiness_interests.remove(key.0, self);
         }
 
@@ -244,6 +247,13 @@ impl ReadinessWatcher {
         self.ready.borrow().len()
     }
 
+    /// Get the next ready interest from the ready queue.
+    ///
+    /// If the interest is a level-triggered interest, it's automatically
+    /// added to the end of the queue again such that it will only be reported
+    /// after all other ready interest have been returned.
+    ///
+    /// Returns [`None`] when no interest is currently ready.
     pub fn next_ready(&self) -> Option<(ReadinessInterestKey, Ref<'_, ReadinessInterest>)> {
         let mut ready = self.ready.borrow_mut();
         let next = ready.pop_front()?;
@@ -252,14 +262,11 @@ impl ReadinessWatcher {
         });
 
         if !interest.is_edge_triggered {
-            // TODO: Make the comment non-epoll specific
             // This is a level-triggered interest, so we need to re-add the event
-            // at the end of the ready queue:
+            // at the end of the ready queue like Linux does with epoll:
             // <https://github.com/torvalds/linux/blob/HEAD/fs/eventpoll.c#L1835-L1847>
             ready.push_back(next);
         }
-
-        // TODO: Do we already want to synchronize the interest clock here?
 
         Some((next, interest))
     }
@@ -273,9 +280,16 @@ impl PartialEq for ReadinessWatcher {
 
 impl Eq for ReadinessWatcher {}
 
+/// The table with all [`ReadinessWatcher`]s.
+/// This tracks, for each file description, which watchers have an interest in events
+/// for this file description.
 pub struct ReadinessInterestTable {
-    interests: BTreeMap<FdId, Vec<Weak<ReadinessWatcher>>>,
+    /// The id of the next [`ReadinessWatcher`] created through
+    /// [`ReadinessInterestTable::new_watcher`].
     next_watcher_id: usize,
+    /// Map with registered watchers indexed by the file description
+    /// they're interested in.
+    interests: BTreeMap<FdId, Vec<Weak<ReadinessWatcher>>>,
 }
 
 impl ReadinessInterestTable {
@@ -301,7 +315,7 @@ impl ReadinessInterestTable {
     fn insert(&mut self, fd_id: FdId, watcher: &Rc<ReadinessWatcher>) {
         let watchers = self.interests.entry(fd_id).or_default();
         if watchers.iter().any(|stored| stored.upgrade().is_some_and(|stored| &stored == watcher)) {
-            panic!("watcher has already a registered interest in the provided fd");
+            panic!("watcher already has a registered interest in the provided fd");
         }
         watchers.push(Rc::downgrade(watcher));
     }
@@ -322,7 +336,7 @@ impl ReadinessInterestTable {
 
     /// Get all watchers which have a registered interest in the file description
     /// with id `fd_id`.
-    fn get_watchers(&mut self, fd_id: &FdId) -> Option<Vec<Rc<ReadinessWatcher>>> {
+    fn get_watchers_for_fd(&mut self, fd_id: &FdId) -> Option<Vec<Rc<ReadinessWatcher>>> {
         let watchers = self.interests.get_mut(fd_id)?;
         Some(
             watchers
@@ -332,7 +346,7 @@ impl ReadinessInterestTable {
         )
     }
 
-    /// Remove all interests for the file description with id `fd_id`.
+    /// Remove all watchers for the file description with id `fd_id`.
     pub fn remove_watchers_for_fd(&mut self, fd_id: FdId) {
         let Some(watchers) = self.interests.remove(&fd_id) else {
             return;
@@ -347,7 +361,7 @@ impl ReadinessInterestTable {
                 .extract_if(range_for_id(fd_id), |_, _| true)
                 // Consume the iterator.
                 .for_each(drop);
-            // Remove the ready events for this file description.
+            // Remove the ready interests for this file description.
             watcher.ready.borrow_mut().retain(|(id, _)| id != &fd_id);
         }
     }
@@ -366,9 +380,9 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         })
     }
 
-    /// For a specific file description, get its currently readiness and send it to everyone who
+    /// For a specific file description, get its current readiness and send it to everyone who
     /// registered interest in this FD. This function must be called whenever the result of
-    /// [`FileDescription::readiness`] might change.
+    /// `FileDescription::readiness` might change.
     ///
     /// If `force_edge` is set, edge-triggered interests will be triggered even if the set of
     /// ready events did not change. This can lead to spurious wakeups. Use with caution!
@@ -380,7 +394,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         let this = self.eval_context_mut();
         let fd_id = fd.id();
 
-        let Some(watchers) = this.machine.readiness_interests.get_watchers(&fd_id) else {
+        let Some(watchers) = this.machine.readiness_interests.get_watchers_for_fd(&fd_id) else {
             return interp_ok(());
         };
         let active_readiness = fd.readiness()?;
@@ -405,8 +419,8 @@ pub trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     /// to `active`. The list is provided indirectly via the `for_each_interest` closure, which
     /// will call its argument closure for each relevant interest.
     ///
-    /// Any [`RefCell`] should be released by the time `for_each_interest` returns since we will then
-    /// be waking up threads which might require access to those [`RefCell`].
+    /// Any [`RefCell`]s should be released by the time `for_each_interest` returns since we will then
+    /// be waking up threads which might require access to those [`RefCell`]s.
     fn update_readiness(
         &mut self,
         watcher: &Rc<ReadinessWatcher>,
@@ -430,9 +444,8 @@ pub trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
                 // Either we force an "edge" to be detected or there's a bit set in `new_readiness`
                 // that was not set in `prev_readiness`. In both cases, this is ready now.
 
-                // TODO: How to update this comment to make it not epoll-specific
                 // We need to ensure that this event is not already part of the `ready` queue
-                // before enqueueing:
+                // before enqueueing, as Linux does it with epoll:
                 // <https://github.com/torvalds/linux/blob/HEAD/fs/eventpoll.c#L1292-L1296>
                 if !ready.contains(&key) {
                     ready.push_back(key);

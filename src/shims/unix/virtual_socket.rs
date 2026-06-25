@@ -325,7 +325,7 @@ fn virtual_socket_write<'tcx>(
         for thread_id in waiting_threads {
             ecx.unblock_thread(thread_id, BlockReason::VirtualSocket)?;
         }
-        // Notify readiness waiters: we might be no longer writable, peer might now be readable.
+        // Notify readiness watchers: we might be no longer writable, peer might now be readable.
         // The notification to the peer seems to be always sent on Linux, even if the
         // FD was readable before.
         ecx.update_fd_readiness(self_ref, /* force_edge */ false)?;
@@ -422,13 +422,13 @@ fn virtual_socket_read<'tcx>(
             for thread_id in waiting_threads {
                 ecx.unblock_thread(thread_id, BlockReason::VirtualSocket)?;
             }
-            // Notify readiness waiters: peer is now writable.
+            // Notify readiness watchers: peer is now writable.
             // Linux seems to always notify the peer if the read buffer is now empty.
             // (Linux also does that if this was a "big" read, but to avoid some arbitrary
             // threshold, we do not match that.)
             ecx.update_fd_readiness(peer_fd, /* force_edge */ readbuf_now_empty)?;
         };
-        // Notify readiness waiters: we might be no longer readable.
+        // Notify readiness watchers: we might be no longer readable.
         ecx.update_fd_readiness(self_ref, /* force_edge */ false)?;
 
         return finish.call(ecx, Ok(read_size));

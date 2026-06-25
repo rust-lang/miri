@@ -79,10 +79,10 @@ struct BlockingIoSource {
 ///
 /// The semantics of this manager are that host I/O sources are registered
 /// to a [`Poll`] for their entire lifespan. Once host readiness events happen
-/// on a registered source, its internal epoll readiness gets updated -- even
-/// when the source isn't part of an active epoll instance. Also, for the entire
+/// on a registered source, its internal readiness gets updated -- even when
+/// the source isn't part of an active [`ReadinessWatcher`]. Also, for the entire
 /// lifespan of the source, threads can be added which should be unblocked
-/// once a certain [`BlockingIoSourceReadiness`] for an I/O source is satisfied.
+/// once a certain [`Readiness`] for an I/O source is satisfied.
 ///
 /// Since blocking host I/O is inherently non-deterministic, no method on this
 /// manager should be called when isolation is enabled. The only exception is
@@ -115,7 +115,7 @@ impl BlockingIoManager {
 
     /// Poll for new I/O events from the OS or wait until the timeout expired.
     /// The timeout semantics are the same as described in [`Poll::poll`].
-    /// The events also immediately get processed: threads get unblocked, and epoll readiness gets updated.
+    /// The events also immediately get processed: threads get unblocked, and fd readiness gets updated.
     fn poll<'tcx>(
         ecx: &mut MiriInterpCx<'tcx>,
         timeout: Option<Duration>,

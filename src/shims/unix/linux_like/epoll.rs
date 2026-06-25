@@ -7,7 +7,6 @@ use std::time::Duration;
 use rustc_abi::FieldIdx;
 
 use crate::shims::files::{FdId, FileDescription, FileDescriptionRef};
-use crate::shims::readiness::{ReadinessInterestKey, ReadinessWatcher};
 use crate::shims::unix::UnixFileDescription;
 use crate::*;
 
@@ -201,11 +200,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let prev_data = epfd.interest_data.borrow_mut().insert(interest_key, data);
 
             if op == epoll_ctl_add {
+                // Add a new interest to the watcher.
                 let result =
                     epfd.watcher.add_interest(interest_key, relevant, is_edge_triggered, this)?;
                 if result.is_err() {
                     // We already had an interest in this.
-                    // We need to restore the previously stored data.
+                    // We need to restore the previously stored data for this interest.
                     epfd.interest_data.borrow_mut().insert(interest_key, prev_data.unwrap());
                     return this.set_errno_and_return_neg1_i32(LibcError("EEXIST"));
                 }
@@ -221,7 +221,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
                 if result.is_none() {
                     // There is no interest registered for the specified key.
-                    // We need to remove the newly stored data.
+                    // We need to remove the newly stored data for this interest.
                     epfd.interest_data.borrow_mut().remove(&interest_key);
                     return this.set_errno_and_return_neg1_i32(LibcError("ENOENT"));
                 }
