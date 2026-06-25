@@ -15,16 +15,9 @@ use rustc_target::spec::Os;
 use crate::shims::files::{EvalContextExt as _, FdId, FileDescription, FileDescriptionRef};
 use crate::shims::unix::UnixFileDescription;
 use crate::shims::unix::linux_like::epoll::{EpollReadiness, EvalContextExt as _};
+use crate::shims::unix::socket::{SocketFamily, UnixSocketFileDescription};
 use crate::shims::unix::socket_address::EvalContextExt as _;
 use crate::*;
-
-#[derive(Debug, PartialEq)]
-enum SocketFamily {
-    // IPv4 internet protocols
-    IPv4,
-    // IPv6 internet protocols
-    IPv6,
-}
 
 #[derive(Debug)]
 enum SocketState {
@@ -56,7 +49,7 @@ enum SocketState {
 }
 
 #[derive(Debug)]
-struct TcpSocket {
+pub struct TcpSocket {
     /// Family of the socket, used to ensure socket only binds/connects to address of
     /// same family.
     family: SocketFamily,
@@ -80,6 +73,20 @@ struct TcpSocket {
     /// for relative timeouts).
     /// This is ignored when the socket is non-blocking.
     write_timeout: Cell<Option<Duration>>,
+}
+
+impl TcpSocket {
+    pub fn new(family: SocketFamily, is_non_block: bool) -> Self {
+        TcpSocket {
+            family,
+            state: RefCell::new(SocketState::Initial),
+            is_non_block: Cell::new(is_non_block),
+            io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
+            error: RefCell::new(None),
+            read_timeout: Cell::new(None),
+            write_timeout: Cell::new(None),
+        }
+    }
 }
 
 impl FileDescription for TcpSocket {
@@ -118,42 +125,14 @@ impl FileDescription for TcpSocket {
         ecx: &mut MiriInterpCx<'tcx>,
         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
-        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
-
-        let socket = self;
-        let deadline = ecx.action_deadline(socket.is_non_block.get(), socket.read_timeout.get());
-
-        ecx.ensure_connected(
-            socket.clone(),
-            deadline.clone(),
-            "read",
-            callback!(
-                @capture<'tcx> {
-                    socket: FileDescriptionRef<TcpSocket>,
-                    deadline: Option<Deadline>,
-                    ptr: Pointer,
-                    len: usize,
-                    finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
-                } |this, result: Result<(), ()>| {
-                    if result.is_err() {
-                        return finish.call(this, Err(LibcError("ENOTCONN")))
-                    }
-
-                    // Since `read` is the same as `recv` with no flags, we just treat
-                    // the `read` as a `recv` here.
-
-                    if socket.is_non_block.get() {
-                        // We have a non-blocking socket and thus don't want to block until
-                        // we can read.
-                        let result = this.try_non_block_recv(&socket, ptr, len, /* should_peek */ false)?;
-                        finish.call(this, result)
-                    } else {
-                        // The socket is in blocking mode and thus the read call should block
-                        // until we can read some bytes from the socket or the timeout exceeded.
-                        this.block_for_recv(socket, deadline, ptr, len, /* should_peek */ false, finish)
-                    }
-                }
-            ),
+        self.recv(
+            communicate_allowed,
+            ptr,
+            len,
+            /* is_peek */ false,
+            /* is_non_block */ false,
+            ecx,
+            finish,
         )
     }
 
@@ -165,43 +144,7 @@ impl FileDescription for TcpSocket {
         ecx: &mut MiriInterpCx<'tcx>,
         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
-        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
-
-        let socket = self;
-        let deadline = ecx.action_deadline(socket.is_non_block.get(), socket.write_timeout.get());
-
-        ecx.ensure_connected(
-            socket.clone(),
-            deadline.clone(),
-            "write",
-            callback!(
-                @capture<'tcx> {
-                    socket: FileDescriptionRef<TcpSocket>,
-                    deadline: Option<Deadline>,
-                    ptr: Pointer,
-                    len: usize,
-                    finish: DynMachineCallback<'tcx, Result<usize, IoError>>
-                } |this, result: Result<(), ()>| {
-                    if result.is_err() {
-                        return finish.call(this, Err(LibcError("ENOTCONN")))
-                    }
-
-                    // Since `write` is the same as `send` with no flags, we just treat
-                    // the `write` as a `send` here.
-
-                    if socket.is_non_block.get() {
-                        // We have a non-blocking socket and thus don't want to block until
-                        // we can write.
-                        let result = this.try_non_block_send(&socket, ptr, len)?;
-                        return finish.call(this, result)
-                    } else {
-                        // The socket is in blocking mode and thus the write call should block
-                        // until we can write some bytes into the socket or the timeout exceeded.
-                        this.block_for_send(socket, deadline, ptr, len, finish)
-                    }
-                }
-            ),
-        )
+        self.send(communicate_allowed, ptr, len, /* is_non_block */ false, ecx, finish)
     }
 
     fn short_fd_operations(&self) -> bool {
@@ -212,7 +155,10 @@ impl FileDescription for TcpSocket {
         false
     }
 
-    fn as_unix<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
+    fn as_unix<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _ecx: &MiriInterpCx<'tcx>,
+    ) -> FileDescriptionRef<dyn UnixFileDescription> {
         self
     }
 
@@ -291,6 +237,726 @@ impl UnixFileDescription for TcpSocket {
     fn epoll_active_events<'tcx>(&self) -> InterpResult<'tcx, EpollReadiness> {
         interp_ok(EpollReadiness::from(&*self.io_readiness.borrow()))
     }
+
+    fn as_socket<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _ecx: &MiriInterpCx<'tcx>,
+    ) -> FileDescriptionRef<dyn UnixSocketFileDescription> {
+        self
+    }
+}
+
+impl UnixSocketFileDescription for TcpSocket {
+    fn bind<'tcx>(
+        self: FileDescriptionRef<TcpSocket>,
+        communicate_allowed: bool,
+        address: SocketAddr,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+        ecx.ensure_not_failed(&self, "bind")?;
+
+        let mut state = self.state.borrow_mut();
+
+        match *state {
+            SocketState::Initial => {
+                let address_family = match &address {
+                    SocketAddr::V4(_) => SocketFamily::IPv4,
+                    SocketAddr::V6(_) => SocketFamily::IPv6,
+                };
+
+                if self.family != address_family {
+                    // Attempted to bind an address from a family that doesn't match
+                    // the family of the socket.
+                    let err = if matches!(ecx.tcx.sess.target.os, Os::Linux | Os::Android) {
+                        // Linux man page states that `EINVAL` is used when there is an address family mismatch.
+                        // See <https://man7.org/linux/man-pages/man2/bind.2.html>
+                        LibcError("EINVAL")
+                    } else {
+                        // POSIX man page states that `EAFNOSUPPORT` should be used when there is an address
+                        // family mismatch.
+                        // See <https://man7.org/linux/man-pages/man3/bind.3p.html>
+                        LibcError("EAFNOSUPPORT")
+                    };
+                    return interp_ok(Err(err));
+                }
+
+                *state = SocketState::Bound(address);
+            }
+            SocketState::Connecting(_) | SocketState::Connected(_) =>
+                throw_unsup_format!(
+                    "bind: tcp socket is already connected and binding a
+                   connected socket is unsupported"
+                ),
+            SocketState::Bound(_) | SocketState::Listening(_) =>
+                throw_unsup_format!(
+                    "bind: tcp socket is already bound and binding a socket \
+                   multiple times is unsupported"
+                ),
+            SocketState::ConnectionFailed(_) => unreachable!(),
+        }
+
+        interp_ok(Ok(()))
+    }
+
+    fn listen<'tcx>(
+        self: FileDescriptionRef<TcpSocket>,
+        communicate_allowed: bool,
+        // Since the backlog value is just a performance hint we can ignore it.
+        _backlog: i32,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+        ecx.ensure_not_failed(&self, "listen")?;
+
+        let mut state = self.state.borrow_mut();
+
+        match *state {
+            SocketState::Bound(socket_addr) =>
+                match TcpListener::bind(socket_addr) {
+                    Ok(listener) => {
+                        *state = SocketState::Listening(listener);
+                        drop(state);
+                        // Register the socket to the blocking I/O manager because
+                        // we now have an associated host socket.
+                        ecx.machine.blocking_io.register(self);
+                    }
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                },
+            SocketState::Initial => {
+                throw_unsup_format!(
+                    "listen: listening on a tcp socket which isn't bound is unsupported"
+                )
+            }
+            SocketState::Listening(_) => {
+                throw_unsup_format!(
+                    "listen: listening on a tcp socket multiple times is unsupported"
+                )
+            }
+            SocketState::Connecting(_) | SocketState::Connected(_) => {
+                throw_unsup_format!("listen: listening on a connected tcp socket is unsupported")
+            }
+            SocketState::ConnectionFailed(_) => unreachable!(),
+        }
+
+        interp_ok(Ok(()))
+    }
+
+    fn accept<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        is_client_sock_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<(i32, SocketAddr), IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+
+        if !matches!(*self.state.borrow(), SocketState::Listening(_)) {
+            throw_unsup_format!(
+                "accept: accepting incoming connections is only allowed when tcp socket is listening"
+            )
+        };
+
+        if self.is_non_block.get() {
+            // We have a non-blocking socket and thus don't want to block until
+            // we can accept an incoming connection.
+            let result = ecx.try_non_block_accept(&self, is_client_sock_non_block)?;
+            finish.call(ecx, result)
+        } else {
+            // The socket is in blocking mode and thus the accept call should block
+            // until an incoming connection is ready.
+
+            if self.read_timeout.get().is_some() {
+                // Some Unixes like Linux also apply the SO_RCVTIMEO socket option
+                // to `accept` calls:
+                // <https://github.com/torvalds/linux/blob/HEAD/net/ipv4/inet_connection_sock.c#L668-L675>
+                // This is currently not supported by Miri.
+                throw_unsup_format!(
+                    "accept: blocking tcp accept is not supported when SO_RCVTIMEO is non-zero"
+                )
+            }
+
+            ecx.block_for_accept(self, is_client_sock_non_block, finish)
+        }
+    }
+
+    fn connect<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        address: SocketAddr,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<(), IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+        ecx.ensure_not_failed(&self, "connect")?;
+
+        match &*self.state.borrow() {
+            SocketState::Initial => { /* fall-through to below */ }
+            // The socket is already in a connecting state.
+            SocketState::Connecting(_) => return finish.call(ecx, Err(LibcError("EALREADY"))),
+            // We don't return EISCONN for already connected sockets, for which we're
+            // sure that the connection is established, since TCP sockets are usually
+            // allowed to be connected multiple times.
+            _ =>
+                throw_unsup_format!(
+                    "connect: connecting is only supported for tcp sockets which are neither \
+                   bound, listening nor already connected"
+                ),
+        }
+
+        // This begins establishing the connection, but does not block until the stream is fully connected.
+        // We deal with that below.
+        match TcpStream::connect(address) {
+            Ok(stream) => {
+                *self.state.borrow_mut() = SocketState::Connecting(stream);
+                // Register the socket to the blocking I/O manager because
+                // we now have an associated host socket.
+                ecx.machine.blocking_io.register(self.clone());
+            }
+            Err(e) => return finish.call(ecx, Err(IoError::HostError(e))),
+        };
+
+        if self.is_non_block.get() {
+            // We have a non-blocking socket and thus don't want to block until
+            // the connection is established.
+
+            // Since the [`TcpStream::connect`] function of mio hides the EINPROGRESS
+            // we just always return EINPROGRESS and check whether the connection succeeded
+            // once we want to use the connected socket.
+            finish.call(ecx, Err(LibcError("EINPROGRESS")))
+        } else {
+            // The socket is in blocking mode and thus the connect call should block
+            // until the connection with the server is established.
+
+            if self.write_timeout.get().is_some() {
+                // Some Unixes like Linux also apply the SO_SNDTIMEO socket option
+                // to `connect` calls:
+                // <https://github.com/torvalds/linux/blob/HEAD/net/ipv4/af_inet.c#L701-L710>
+                // This is currently not supported by Miri.
+                throw_unsup_format!(
+                    "connect: blocking connect is not supported when SO_SNDTIMEO is non-zero"
+                )
+            }
+
+            let socket = self;
+            ecx.ensure_connected(
+                socket.clone(),
+                /* deadline */ None,
+                "connect",
+                callback!(
+                    @capture<'tcx> {
+                        socket: FileDescriptionRef<TcpSocket>,
+                        finish: DynMachineCallback<'tcx, Result<(), IoError>>,
+                    } |this, result: Result<(), ()>| {
+                        if result.is_err() {
+                            // An error occurred whilst connecting. We know
+                            // that it has been consumed by `ensure_connected`
+                            // and is now stored in `socket.error`.
+                            let err = socket.error.take().unwrap();
+                            finish.call(this, Err(IoError::HostError(err)))
+                        } else {
+                            finish.call(this, Ok(()))
+                        }
+                    }
+                ),
+            )
+        }
+    }
+
+    fn recv<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_peek: bool,
+        is_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+
+        let is_non_block = is_non_block || self.is_non_block.get();
+        let deadline = ecx.action_deadline(is_non_block, self.read_timeout.get());
+
+        let socket = self;
+        ecx.ensure_connected(
+            socket.clone(),
+            deadline.clone(),
+            "recv",
+            callback!(
+                @capture<'tcx> {
+                    socket: FileDescriptionRef<TcpSocket>,
+                    deadline: Option<Deadline>,
+                    ptr: Pointer,
+                    len: usize,
+                    is_peek: bool,
+                    is_non_block: bool,
+                    finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+                } |this, result: Result<(), ()>| {
+                    if result.is_err() {
+                        return finish.call(this, Err(LibcError("ENOTCONN")))
+                    }
+
+                    if is_non_block {
+                        // We have a non-blocking operation or a non-blocking socket and
+                        // thus don't want to block until we can receive.
+                        let result = this.try_non_block_recv(&socket, ptr, len, is_peek)?;
+                        finish.call(this, result)
+                    } else {
+                        // The socket is in blocking mode and thus the receive call should block
+                        // until we can receive some bytes from the socket or the timeout exceeded.
+                        this.block_for_recv(socket, deadline, ptr, len, is_peek, finish)
+                    }
+                }
+            ),
+        )
+    }
+
+    fn send<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+
+        let is_non_block = is_non_block || self.is_non_block.get();
+        let deadline = ecx.action_deadline(is_non_block, self.write_timeout.get());
+
+        let socket = self;
+        ecx.ensure_connected(
+            socket.clone(),
+            deadline.clone(),
+            "send",
+            callback!(
+                @capture<'tcx> {
+                    socket: FileDescriptionRef<TcpSocket>,
+                    deadline: Option<Deadline>,
+                    ptr: Pointer,
+                    len: usize,
+                    is_non_block: bool,
+                    finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+                } |this, result: Result<(), ()>| {
+                    if result.is_err() {
+                        return finish.call(this, Err(LibcError("ENOTCONN")))
+                    }
+
+                    if is_non_block {
+                        // We have a non-blocking operation or a non-blocking socket and
+                        // thus don't want to block until we can send.
+                        let result = this.try_non_block_send(&socket, ptr, len)?;
+                        finish.call(this, result)
+                    } else {
+                        // The socket is in blocking mode and thus the send call should block
+                        // until we can send some bytes into the socket or the timeout exceeded.
+                        this.block_for_send(socket, deadline, ptr, len, finish)
+                    }
+                }
+            ),
+        )
+    }
+
+    fn setsockopt<'tcx>(
+        self: FileDescriptionRef<Self>,
+        level: i32,
+        option: i32,
+        value_ptr: Pointer,
+        value_len: u64,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        if level == ecx.eval_libc_i32("SOL_SOCKET") {
+            let opt_so_rcvtimeo = ecx.eval_libc_i32("SO_RCVTIMEO");
+            let opt_so_sndtimeo = ecx.eval_libc_i32("SO_SNDTIMEO");
+            let opt_so_reuseaddr = ecx.eval_libc_i32("SO_REUSEADDR");
+
+            if matches!(ecx.tcx.sess.target.os, Os::MacOs | Os::FreeBsd | Os::NetBsd) {
+                // SO_NOSIGPIPE only exists on MacOS, FreeBSD, and NetBSD.
+                let opt_so_nosigpipe = ecx.eval_libc_i32("SO_NOSIGPIPE");
+
+                if option == opt_so_nosigpipe {
+                    if value_len != 4 {
+                        // Option value should be C-int which is usually 4 bytes.
+                        return interp_ok(Err(LibcError("EINVAL")));
+                    }
+                    let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.i32);
+                    let _val = ecx.read_scalar(&option_value)?.to_i32()?;
+                    // We entirely ignore this value since we do not support signals anyway.
+
+                    return interp_ok(Ok(()));
+                }
+            }
+
+            if option == opt_so_rcvtimeo || option == opt_so_sndtimeo {
+                let timeval_layout = ecx.libc_ty_layout("timeval");
+                let option_value = ecx.ptr_to_mplace(value_ptr, timeval_layout);
+
+                let timeout = match ecx.read_timeval(&option_value)? {
+                    None => return interp_ok(Err(LibcError("EINVAL"))),
+                    Some(Duration::ZERO) => None,
+                    Some(duration) => Some(duration),
+                };
+
+                if option == opt_so_rcvtimeo {
+                    self.read_timeout.set(timeout);
+                } else {
+                    self.write_timeout.set(timeout);
+                }
+
+                return interp_ok(Ok(()));
+            }
+
+            if option == opt_so_reuseaddr {
+                if value_len != 4 {
+                    // Option value should be C-int which is usually 4 bytes.
+                    return interp_ok(Err(LibcError("EINVAL")));
+                }
+                let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.i32);
+                let _val = ecx.read_scalar(&option_value)?.to_i32()?;
+                // We entirely ignore this: std always sets REUSEADDR for us, and in the end it's more of a
+                // hint to bypass some arbitrary timeout anyway.
+                return interp_ok(Ok(()));
+            } else {
+                throw_unsup_format!(
+                    "setsockopt: option {option:#x} is unsupported for level SOL_SOCKET",
+                );
+            }
+        } else if level == ecx.eval_libc_i32("IPPROTO_IP") {
+            let opt_ip_ttl = ecx.eval_libc_i32("IP_TTL");
+
+            if option == opt_ip_ttl {
+                if value_len != 4 {
+                    // Option value should be C-uint which is usually 4 bytes.
+                    return interp_ok(Err(LibcError("EINVAL")));
+                }
+                let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.u32);
+                let ttl = ecx.read_scalar(&option_value)?.to_u32()?;
+
+                let result = match &*self.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) =>
+                        throw_unsup_format!(
+                            "setsockopt: setting option IP_TTL on level IPPROTO_IP is only supported \
+                           on connected and listening tcp sockets"
+                        ),
+                    SocketState::Listening(listener) => listener.set_ttl(ttl),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.set_ttl(ttl),
+                    SocketState::ConnectionFailed(_) => unreachable!(),
+                };
+
+                return match result {
+                    Ok(_) => interp_ok(Ok(())),
+                    Err(e) => interp_ok(Err(IoError::HostError(e))),
+                };
+            } else {
+                throw_unsup_format!(
+                    "setsockopt: option {option:#x} is unsupported for level IPPROTO_IP",
+                );
+            }
+        } else if level == ecx.eval_libc_i32("IPPROTO_TCP") {
+            let opt_tcp_nodelay = ecx.eval_libc_i32("TCP_NODELAY");
+
+            if option == opt_tcp_nodelay {
+                if value_len != 4 {
+                    // Option value should be C-int which is usually 4 bytes.
+                    return interp_ok(Err(LibcError("EINVAL")));
+                }
+                let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.i32);
+                let nodelay = ecx.read_scalar(&option_value)?.to_i32()? != 0;
+
+                let result = match &*self.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) | SocketState::Listening(_) =>
+                        throw_unsup_format!(
+                            "setsockopt: setting option TCP_NODELAY on level IPPROTO_TCP is only supported \
+                           on connected tcp sockets"
+                        ),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.set_nodelay(nodelay),
+                    SocketState::ConnectionFailed(_) => unreachable!(),
+                };
+
+                return match result {
+                    Ok(_) => interp_ok(Ok(())),
+                    Err(e) => interp_ok(Err(IoError::HostError(e))),
+                };
+            } else {
+                throw_unsup_format!(
+                    "setsockopt: option {option:#x} is unsupported for level IPPROTO_TCP"
+                );
+            }
+        }
+
+        throw_unsup_format!(
+            "setsockopt: level {level:#x} is unsupported, only SOL_SOCKET, IPPROTO_IP \
+           and IPPROTO_TCP are allowed"
+        );
+    }
+
+    fn getsockopt<'tcx>(
+        self: FileDescriptionRef<Self>,
+        level: i32,
+        option: i32,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<MPlaceTy<'tcx>, IoError>> {
+        if level == ecx.eval_libc_i32("SOL_SOCKET") {
+            let opt_so_error = ecx.eval_libc_i32("SO_ERROR");
+            let opt_so_rcvtimeo = ecx.eval_libc_i32("SO_RCVTIMEO");
+            let opt_so_sndtimeo = ecx.eval_libc_i32("SO_SNDTIMEO");
+
+            if option == opt_so_error {
+                // Reading SO_ERROR should always return the latest async error. Because our stored
+                // `socket.error` could be outdated, we attempt to update it here.
+                ecx.update_last_error(&self);
+
+                let return_value = match self.error.take() {
+                    Some(err) => ecx.io_error_to_errnum(err)?.to_i32()?,
+                    // If there is no error, we return 0 as the option value.
+                    None => 0,
+                };
+
+                // Clear our own stored error -- it was either `take`n above or it is outdated.
+                self.error.replace(None);
+
+                // We know there is no longer an async error and thus we need to update the
+                // I/O and epoll readiness of the socket.
+                self.io_readiness.borrow_mut().error = false;
+                ecx.update_epoll_active_events(self, /* force_edge */ false)?;
+
+                // Allocate new buffer on the stack with the `i32` layout.
+                let value_buffer = ecx.allocate(ecx.machine.layouts.i32, MemoryKind::Stack)?;
+                ecx.write_int(return_value, &value_buffer)?;
+                interp_ok(Ok(value_buffer))
+            } else if option == opt_so_rcvtimeo || option == opt_so_sndtimeo {
+                let timeout = if option == opt_so_rcvtimeo {
+                    self.read_timeout.get()
+                } else {
+                    self.write_timeout.get()
+                }
+                .unwrap_or_default();
+
+                let secs = timeout.as_secs();
+                let usecs = timeout.subsec_micros();
+
+                let timeval_layout = ecx.libc_ty_layout("timeval");
+                // Allocate new buffer on the stack with the `timeval` layout.
+                let timeval_buffer = ecx.allocate(timeval_layout, MemoryKind::Stack)?;
+
+                let sec_field = ecx.project_field_named(&timeval_buffer, "tv_sec")?;
+                ecx.write_int(secs, &sec_field)?;
+
+                let usec_field = ecx.project_field_named(&timeval_buffer, "tv_usec")?;
+                ecx.write_int(usecs, &usec_field)?;
+
+                interp_ok(Ok(timeval_buffer))
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option:#x} is unsupported for level SOL_SOCKET",
+                );
+            }
+        } else if level == ecx.eval_libc_i32("IPPROTO_IP") {
+            let opt_ip_ttl = ecx.eval_libc_i32("IP_TTL");
+
+            if option == opt_ip_ttl {
+                let ttl = match &*self.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) =>
+                        throw_unsup_format!(
+                            "getsockopt: reading option IP_TTL on level IPPROTO_IP is only supported \
+                           on connected and listening sockets"
+                        ),
+                    SocketState::Listening(listener) => listener.ttl(),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.ttl(),
+                    SocketState::ConnectionFailed(_) => unreachable!(),
+                };
+
+                let ttl = match ttl {
+                    Ok(ttl) => ttl,
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                };
+
+                // Allocate new buffer on the stack with the `u32` layout.
+                let value_buffer = ecx.allocate(ecx.machine.layouts.u32, MemoryKind::Stack)?;
+                ecx.write_int(ttl, &value_buffer)?;
+                interp_ok(Ok(value_buffer))
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option:#x} is unsupported for level IPPROTO_IP",
+                );
+            }
+        } else if level == ecx.eval_libc_i32("IPPROTO_TCP") {
+            let opt_tcp_nodelay = ecx.eval_libc_i32("TCP_NODELAY");
+
+            if option == opt_tcp_nodelay {
+                let nodelay = match &*self.state.borrow() {
+                    SocketState::Initial | SocketState::Bound(_) | SocketState::Listening(_) =>
+                        throw_unsup_format!(
+                            "getsockopt: reading option TCP_NODELAY on level IPPROTO_TCP is only supported \
+                           on connected sockets"
+                        ),
+                    SocketState::Connecting(stream) | SocketState::Connected(stream) =>
+                        stream.nodelay(),
+                    SocketState::ConnectionFailed(_) => unreachable!(),
+                };
+
+                let nodelay = match nodelay {
+                    Ok(nodelay) => nodelay,
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                };
+
+                // Allocate new buffer on the stack with the `i32` layout.
+                let value_buffer = ecx.allocate(ecx.machine.layouts.i32, MemoryKind::Stack)?;
+                ecx.write_int(i32::from(nodelay), &value_buffer)?;
+                interp_ok(Ok(value_buffer))
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option:#x} is unsupported for level IPPROTO_TCP"
+                );
+            }
+        } else {
+            throw_unsup_format!(
+                "getsockopt: level {level:#x} is unsupported, only SOL_SOCKET, IPPROTO_IP \
+               and IPPROTO_TCP are allowed"
+            )
+        }
+    }
+
+    fn getsockname<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<SocketAddr, IoError>> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+        ecx.ensure_not_failed(&self, "getsockname")?;
+
+        let state = self.state.borrow();
+
+        let address = match &*state {
+            SocketState::Bound(address) => {
+                if address.port() == 0 {
+                    // The socket is bound to a zero-port which means it gets assigned a random
+                    // port. Since we don't yet have an underlying socket, we don't know what this
+                    // random port will be and thus this is unsupported.
+                    throw_unsup_format!(
+                        "getsockname: when the port is 0, getting the tcp socket address before \
+                       calling `listen` or `connect` is unsupported"
+                    )
+                }
+
+                *address
+            }
+            SocketState::Listening(listener) =>
+                match listener.local_addr() {
+                    Ok(address) => address,
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                },
+            SocketState::Connecting(stream) | SocketState::Connected(stream) => {
+                if cfg!(windows) && matches!(&*state, SocketState::Connecting(_)) {
+                    // FIXME: On Windows hosts `TcpStream::local_addr` returns `0.0.0.0:0` whilst
+                    // the socket is connecting:
+                    // <https://learn.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-getsockname#remarks>
+                    // This is problematic because UNIX targets could expect a real local address even
+                    // for a connecting non-blocking socket.
+
+                    static DEDUP: AtomicBool = AtomicBool::new(false);
+                    if !DEDUP.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        ecx.emit_diagnostic(NonHaltingDiagnostic::ConnectingSocketGetsockname);
+                    }
+                }
+                match stream.local_addr() {
+                    Ok(address) => address,
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                }
+            }
+            // For non-bound sockets the POSIX manual says the returned address is unspecified.
+            // Often this is 0.0.0.0:0 and thus we set it to this value.
+            SocketState::Initial => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+            SocketState::ConnectionFailed(_) => unreachable!(),
+        };
+
+        interp_ok(Ok(address))
+    }
+
+    fn getpeername<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<SocketAddr, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+
+        let socket = self;
+        // It's only safe to call [`TcpStream::peer_addr`] after the socket is connected since
+        // UNIX targets should return ENOTCONN when the connection is not yet established.
+        ecx.ensure_connected(
+            socket.clone(),
+            // Check whether the socket is connected without blocking.
+            Some(ecx.machine.monotonic_clock.now().into()),
+            "getpeername",
+            callback!(
+                @capture<'tcx> {
+                    socket: FileDescriptionRef<TcpSocket>,
+                    finish: DynMachineCallback<'tcx, Result<SocketAddr, IoError>>,
+                } |this, result: Result<(), ()>| {
+                    if result.is_err() {
+                        return finish.call(this, Err(LibcError("ENOTCONN")))
+                    };
+
+                    let SocketState::Connected(stream) = &*socket.state.borrow() else {
+                        unreachable!()
+                    };
+
+                    let result = stream.peer_addr().map_err(IoError::HostError);
+                    finish.call(this, result)
+                }
+            ),
+        )
+    }
+
+    fn shutdown<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        how: Shutdown,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        assert!(communicate_allowed, "cannot have `TcpSocket` with isolation enabled!");
+        ecx.ensure_not_failed(&self, "shutdown")?;
+
+        let state = self.state.borrow();
+
+        let (SocketState::Connecting(stream) | SocketState::Connected(stream)) = &*state else {
+            return interp_ok(Err(LibcError("ENOTCONN")));
+        };
+
+        if let Err(e) = stream.shutdown(how) {
+            return interp_ok(Err(IoError::HostError(e)));
+        };
+
+        drop(state);
+
+        // Because we map cross platform mio readiness to epoll readiness and
+        // the different platforms don't treat `shutdown` the same way, we set
+        // the readiness after a `shutdown` manually to achieve more consistent
+        // epoll readiness. Otherwise we do not generate enough epoll events
+        // on partial shutdowns on Windows hosts.
+        let mut readiness = self.io_readiness.borrow_mut();
+        // Closing the read end of a socket causes an EPOLLRDHUP event.
+        readiness.read_closed |= matches!(how, Shutdown::Read | Shutdown::Both);
+        // Only shutting down the write end doesn't cause an EPOLLHUP event
+        // and thus we won't set the `write_closed` readiness for it here.
+        readiness.write_closed |= matches!(how, Shutdown::Both);
+        // The Linux kernel also sets EPOLLIN when both ends of a socket are closed:
+        // <https://github.com/torvalds/linux/blob/HEAD/net/ipv4/tcp.c#L584-L588>
+        readiness.readable |= matches!(how, Shutdown::Both);
+
+        drop(readiness);
+
+        // Update the epoll readiness for the socket.
+        ecx.update_epoll_active_events(self, /* force_edge */ false)?;
+
+        interp_ok(Ok(()))
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -364,15 +1030,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         let fds = &mut this.machine.fds;
-        let fd = fds.new_ref(TcpSocket {
-            family,
-            state: RefCell::new(SocketState::Initial),
-            is_non_block: Cell::new(is_sock_nonblock),
-            io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
-            error: RefCell::new(None),
-            read_timeout: Cell::new(None),
-            write_timeout: Cell::new(None),
-        });
+        let fd = fds.new_ref(TcpSocket::new(family, is_sock_nonblock));
 
         interp_ok(Scalar::from_i32(fds.insert(fd)))
     }
@@ -568,6 +1226,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if socket.is_non_block.get() {
             // We have a non-blocking socket and thus don't want to block until
             // we can accept an incoming connection.
+            //
+            // FIXME: This invalid signature will be resolved once the foreign
+            // function is implemented in the socket trait.
             match this.try_non_block_accept(
                 &socket,
                 address_ptr,
@@ -597,6 +1258,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )
             }
 
+            // FIXME: This invalid signature will be resolved once the foreign
+            // function is implemented in the socket trait.
             this.block_for_accept(
                 socket,
                 address_ptr,
@@ -1533,10 +2196,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn block_for_accept(
         &mut self,
         socket: FileDescriptionRef<TcpSocket>,
-        address_ptr: Pointer,
-        address_len_ptr: Pointer,
         is_client_sock_nonblock: bool,
-        dest: MPlaceTy<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<(i32, SocketAddr), IoError>>,
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         this.block_thread_for_io(
@@ -1545,10 +2206,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             /* deadline */ None,
             callback!(@capture<'tcx> {
                 socket: FileDescriptionRef<TcpSocket>,
-                address_ptr: Pointer,
-                address_len_ptr: Pointer,
                 is_client_sock_nonblock: bool,
-                dest: MPlaceTy<'tcx>,
+                finish: DynMachineCallback<'tcx, Result<(i32, SocketAddr), IoError>>,
             } |this, kind: UnblockKind| {
                 // Remove the blocking I/O interest for unblocking this thread.
                 this.machine.blocking_io.remove_blocked_thread(socket.id(), this.machine.threads.active_thread());
@@ -1556,22 +2215,16 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 match kind {
                     UnblockKind::Ready => { /* fall-through to below */ },
                     // When the read timeout is exceeded EAGAIN/EWOULDBLOCK is returned.
-                    UnblockKind::TimedOut => return this.set_errno_and_return_neg1(LibcError("EWOULDBLOCK"), &dest)
+                    UnblockKind::TimedOut => return finish.call(this, Err(LibcError("EWOULDBLOCK")))
                 }
 
-                match this.try_non_block_accept(&socket, address_ptr, address_len_ptr, is_client_sock_nonblock)? {
-                    Ok(sockfd) => {
-                        // We need to create the scalar using the destination size since
-                        // `syscall(SYS_accept4, ...)` returns a long which doesn't match
-                        // the int returned from the `accept`/`accept4` syscalls.
-                        // See <https://man7.org/linux/man-pages/man2/syscall.2.html>.
-                        this.write_scalar(Scalar::from_int(sockfd, dest.layout.size), &dest)
-                    },
+                match this.try_non_block_accept(&socket, is_client_sock_nonblock)? {
+                    Ok((sockfd, addr)) => finish.call(this, Ok((sockfd, addr))),
                     Err(IoError::HostError(e)) if e.kind() == io::ErrorKind::WouldBlock => {
                         // We need to block the thread again as it would still block.
-                        this.block_for_accept(socket, address_ptr, address_len_ptr, is_client_sock_nonblock, dest)
+                        this.block_for_accept(socket, is_client_sock_nonblock, finish)
                     }
-                    Err(e) => this.set_errno_and_return_neg1(e, &dest),
+                    Err(e) => finish.call(this, Err(e)),
                 }
             }),
         )
@@ -1585,10 +2238,8 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn try_non_block_accept(
         &mut self,
         socket: &FileDescriptionRef<TcpSocket>,
-        address_ptr: Pointer,
-        address_len_ptr: Pointer,
-        is_client_sock_nonblock: bool,
-    ) -> InterpResult<'tcx, Result<i32, IoError>> {
+        is_client_sock_non_block: bool,
+    ) -> InterpResult<'tcx, Result<(i32, SocketAddr), IoError>> {
         let this = self.eval_context_mut();
 
         let state = socket.state.borrow();
@@ -1615,17 +2266,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             SocketAddr::V6(_) => SocketFamily::IPv6,
         };
 
-        if address_ptr != Pointer::null() {
-            // We only attempt a write if the address pointer is not a null pointer.
-            // If the address pointer is a null pointer the user isn't interested in the
-            // address and we don't need to write anything.
-            this.write_socket_address(&addr, address_ptr, address_len_ptr, "accept4")?;
-        }
-
         let fd = this.machine.fds.new_ref(TcpSocket {
             family,
             state: RefCell::new(SocketState::Connected(stream)),
-            is_non_block: Cell::new(is_client_sock_nonblock),
+            is_non_block: Cell::new(is_client_sock_non_block),
             io_readiness: RefCell::new(BlockingIoSourceReadiness::empty()),
             error: RefCell::new(None),
             read_timeout: Cell::new(None),
@@ -1635,7 +2279,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // there is an associated host socket.
         this.machine.blocking_io.register(fd.clone());
         let sockfd = this.machine.fds.insert(fd);
-        interp_ok(Ok(sockfd))
+        interp_ok(Ok((sockfd, addr)))
     }
 
     /// Block the thread until we can send bytes into the connected socket
