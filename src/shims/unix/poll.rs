@@ -1,12 +1,10 @@
-use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use rustc_target::spec::Os;
 
-use crate::shims::files::FdNum;
-use crate::shims::{DynFileDescriptionRef, FdId};
+use crate::shims::files::{DynFileDescriptionRef, FdNum};
 use crate::*;
 
 /// An interest into a file descriptor together with its
@@ -17,40 +15,10 @@ struct PollInterest {
     /// The file description to which the file descriptor belongs.
     fd: DynFileDescriptionRef,
     /// The readiness events this interest is interested in.
-    relevant_events: Readiness,
+    relevant: Readiness,
 }
 
-/// Struct used for receiving readiness event updates from the
-/// readiness manager.
-struct Poll {
-    /// The thread which is blocked by this poll instance.
-    thread: Cell<ThreadId>,
-    /// The readiness interests of this poll instance.
-    interests: Vec<PollInterest>,
-}
-
-impl ReadinessConsumer for Rc<Poll> {
-    fn ready_event<'tcx>(
-        &self,
-        fd_id: FdId,
-        readiness: Readiness,
-        _force_edge: bool,
-        ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx> {
-        let is_any_fulfilled =
-            self.interests.iter().filter(|interest| interest.fd.id() == fd_id).any(|interest| {
-                interest.relevant_events.as_ref() & readiness.as_ref() != Readiness::EMPTY
-            });
-
-        if is_any_fulfilled {
-            ecx.unblock_thread(self.thread.get(), BlockReason::Poll)?;
-        }
-
-        interp_ok(())
-    }
-}
-
-impl VisitProvenance for Poll {
+impl VisitProvenance for PollInterest {
     fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
 }
 
@@ -99,7 +67,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             let revents_field = this.project_field_named(&pollfd, "revents")?;
 
             let relevant_events = this.poll_bitflag_to_readiness(events)?;
-            let active_events = relevant_events.as_ref() & fd.readiness()?.as_ref();
+            let active_events = relevant_events.clone() & fd.readiness()?.clone();
             if active_events != Readiness::EMPTY {
                 // The interest in this file description is currently fulfilled.
                 fulfilled_interests = fulfilled_interests.strict_add(1);
@@ -112,45 +80,47 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(&revents_field)?;
             }
 
-            interests.push(PollInterest { fd, fd_num, relevant_events });
+            interests.push(PollInterest { fd, fd_num, relevant: relevant_events });
             revents.insert(fd_num, revents_field.clone());
         }
 
         if fulfilled_interests > 0 {
             // Some interests are already fulfilled. We thus don't need to
-            // create a `Poll` instance and add it to the readiness manager,
-            // and can just return here.
+            // block the thread and can just return here.
             return this.write_scalar(Scalar::from_u32(fulfilled_interests), dest);
         }
 
-        // None of the interests are currently fulfilled.
-        // We create a `Poll` instance and add it to the readiness manager
-        // to get notified about readiness changes for our interested FDs.
+        // None of the interests are currently fulfilled; we thus need to
+        // create a readiness watcher and block the thread until any
+        // interest gets fulfilled.
 
-        let poll =
-            Rc::new(Poll { interests, thread: Cell::new(this.machine.threads.active_thread()) });
-        let readiness_consumer_id = this.machine.readiness.register_consumer(poll.clone());
-        poll.interests
-            .iter()
-            .map(|interest| interest.fd.id())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .for_each(|fd| this.machine.readiness.register_interest(fd, readiness_consumer_id));
+        let watcher = Rc::new(this.machine.readiness_interests.new_watcher());
+        for interest in interests.iter() {
+            // We don't care whether an interest for the same file descriptor
+            // has already been added to the watcher.
+            watcher
+                .add_interest(
+                    (interest.fd.id(), interest.fd_num),
+                    interest.relevant.clone(),
+                    /* is_edge_triggered */ false,
+                    this,
+                )?
+                .ok();
+        }
+        watcher.add_thread(this.machine.threads.active_thread());
 
         let dest = dest.clone();
         this.block_thread(
-            BlockReason::Poll,
+            BlockReason::Readiness { watcher: watcher.clone() },
             deadline,
             callback!(
                 @capture<'tcx> {
-                    readiness_consumer_id: ReadinessConsumerId,
-                    poll: Rc<Poll>,
+                    watcher: Rc<ReadinessWatcher>,
+                    interests: Vec<PollInterest>,
                     revents: BTreeMap<FdNum, MPlaceTy<'tcx>>,
                     dest: MPlaceTy<'tcx>,
                 } |this, reason: UnblockKind| {
-                    // Ensure the `Poll` instance no longer receives any ready events
-                    // which would cause duplicate thread unblocks.
-                    this.machine.readiness.deregister_consumer(readiness_consumer_id);
+                    watcher.remove_thread(this.machine.threads.active_thread());
 
                     if let UnblockKind::TimedOut = reason {
                         return this.write_null(&dest);
@@ -158,8 +128,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                     let mut fulfilled_interests = 0u32;
 
-                    for interest in &poll.interests {
-                        let active_events = interest.relevant_events.as_ref() & interest.fd.readiness()?.as_ref();
+                    for interest in &interests {
+                        let active_events = interest.relevant.clone() & interest.fd.readiness()?;
                         if active_events != Readiness::EMPTY {
                             // The interest in this file description is fulfilled.
                             fulfilled_interests = fulfilled_interests.strict_add(1);
