@@ -41,6 +41,7 @@ use crate::concurrency::{
     AllocDataRaceHandler, GenmcCtx, GenmcEvalContextExt as _, GlobalDataRaceHandler, weak_memory,
 };
 use crate::helpers::is_no_core;
+use crate::shims::readiness::ReadinessInterestTable;
 use crate::*;
 
 /// First real-time signal.
