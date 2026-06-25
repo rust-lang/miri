@@ -280,6 +280,10 @@ impl PartialEq for ReadinessWatcher {
 
 impl Eq for ReadinessWatcher {}
 
+impl VisitProvenance for ReadinessWatcher {
+    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
+}
+
 /// The table with all [`ReadinessWatcher`]s.
 /// This tracks, for each file description, which watchers have an interest in events
 /// for this file description.
@@ -432,6 +436,7 @@ pub trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         let mut ready = watcher.ready.borrow_mut();
+        let mut queue = watcher.queue.borrow_mut();
         for_each_interest(&mut |key, interest| {
             let new_readiness = interest.relevant.clone() & active.clone();
             let prev_readiness = std::mem::replace(&mut interest.active, new_readiness.clone());
@@ -462,10 +467,12 @@ pub trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // While there are events ready to be delivered, wake up a thread to receive them.
         while !ready.is_empty()
-            && let Some(thread_id) = watcher.queue.borrow_mut().pop_front()
+            && let Some(thread_id) = queue.pop_front()
         {
+            drop(queue);
             drop(ready);
             this.unblock_thread(thread_id, BlockReason::Readiness { watcher: watcher.clone() })?;
+            queue = watcher.queue.borrow_mut();
             ready = watcher.ready.borrow_mut();
         }
         interp_ok(())
