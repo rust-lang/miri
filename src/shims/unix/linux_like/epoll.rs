@@ -158,7 +158,10 @@ impl FileDescription for Epoll {
         interp_ok(Ok(()))
     }
 
-    fn as_unix<'tcx>(&self, _ecx: &MiriInterpCx<'tcx>) -> &dyn UnixFileDescription {
+    fn as_unix<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _ecx: &MiriInterpCx<'tcx>,
+    ) -> FileDescriptionRef<dyn UnixFileDescription> {
         self
     }
 }
@@ -656,7 +659,7 @@ fn return_ready_list<'tcx>(
         for (key, interest) in interest_list.iter() {
             // Ensure this matches the latest readiness of this FD.
             // We have to do an FD lookup by ID for this. The FdNum might be already closed.
-            let fd = ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
+            let fd = ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap().clone();
             let current_active = fd.as_unix(ecx).epoll_active_events()?.get_event_bitmask(ecx);
             assert_eq!(interest.active_events, current_active & interest.relevant_events);
         }
