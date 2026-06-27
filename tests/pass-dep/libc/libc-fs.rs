@@ -47,6 +47,7 @@ fn main() {
     test_fstat();
     test_stat();
     test_lstat();
+    test_futimens();
     test_isatty();
     test_read_and_uninit();
     test_nofollow_not_symlink();
@@ -716,6 +717,63 @@ fn test_lstat() {
     check_stat_fields(stat);
 
     remove_file(&symlink_path).unwrap();
+    remove_file(&path).unwrap();
+}
+
+fn test_futimens() {
+    use std::mem::MaybeUninit;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let path = utils::prepare_with_content("miri_test_libc_futimens.txt", b"hello");
+    let file = File::options().write(true).open(&path).unwrap();
+    let fd = file.as_raw_fd();
+
+    // Reads back the file's (access, modification) times as `(sec, nsec)` pairs via `fstat`.
+    let get_times = || {
+        let mut stat = MaybeUninit::<libc::stat>::uninit();
+        assert_eq!(unsafe { libc::fstat(fd, stat.as_mut_ptr()) }, 0);
+        let stat = unsafe { stat.assume_init_ref() };
+        ((stat.st_atime, stat.st_atime_nsec), (stat.st_mtime, stat.st_mtime_nsec))
+    };
+
+    // Setting both timestamps round-trips. Whole seconds only: some hosts (Windows/NTFS) round
+    // sub-second precision.
+    let times = [
+        libc::timespec { tv_sec: 1_000_000_000, tv_nsec: 0 },
+        libc::timespec { tv_sec: 1_234_567_890, tv_nsec: 0 },
+    ];
+    assert_eq!(unsafe { libc::futimens(fd, times.as_ptr()) }, 0);
+    assert_eq!(get_times(), ((1_000_000_000, 0), (1_234_567_890, 0)));
+
+    // `UTIME_OMIT` leaves the access time unchanged while updating the modification time.
+    let times = [
+        libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT },
+        libc::timespec { tv_sec: 2_000_000_000, tv_nsec: 0 },
+    ];
+    assert_eq!(unsafe { libc::futimens(fd, times.as_ptr()) }, 0);
+    assert_eq!(get_times(), ((1_000_000_000, 0), (2_000_000_000, 0)));
+
+    // `UTIME_NOW` sets a timestamp to the current time (here for access, alongside `UTIME_OMIT`).
+    let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let times = [
+        libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_NOW },
+        libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT },
+    ];
+    assert_eq!(unsafe { libc::futimens(fd, times.as_ptr()) }, 0);
+    let (atime, mtime) = get_times();
+    assert!(atime.0 as u64 >= before);
+    assert_eq!(mtime, (2_000_000_000, 0));
+
+    // A NULL `times` pointer sets both timestamps to the current time.
+    assert_eq!(unsafe { libc::futimens(fd, std::ptr::null()) }, 0);
+    let (atime, mtime) = get_times();
+    assert!(atime.0 as u64 >= before);
+    assert!(mtime.0 as u64 >= before);
+
+    // A bad file descriptor fails with `EBADF`.
+    assert_eq!(unsafe { libc::futimens(-1, times.as_ptr()) }, -1);
+    assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::EBADF));
+
     remove_file(&path).unwrap();
 }
 
