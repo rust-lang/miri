@@ -5,6 +5,7 @@ use rustc_target::callconv::FnAbi;
 
 use crate::shims::sig::check_min_vararg_count;
 use crate::shims::unix::env::EvalContextExt;
+use crate::shims::unix::fs::EvalContextExt as _;
 use crate::shims::unix::linux_like::eventfd::EvalContextExt as _;
 use crate::shims::unix::linux_like::sync::futex;
 use crate::shims::unix::socket::EvalContextExt as _;
@@ -28,6 +29,7 @@ pub fn syscall<'tcx>(
     let sys_eventfd2 = ecx.eval_libc("SYS_eventfd2").to_target_usize(ecx)?;
     let sys_gettid = ecx.eval_libc("SYS_gettid").to_target_usize(ecx)?;
     let sys_accept4 = ecx.eval_libc("SYS_accept4").to_target_usize(ecx)?;
+    let sys_copy_file_range = ecx.eval_libc("SYS_copy_file_range").to_target_usize(ecx)?;
 
     match ecx.read_target_usize(op)? {
         // `libc::syscall(NR_GETRANDOM, buf.as_mut_ptr(), buf.len(), GRND_NONBLOCK)`
@@ -66,6 +68,11 @@ pub fn syscall<'tcx>(
             let [socket, address, address_len, flags] =
                 check_min_vararg_count("syscall(SYS_accept4, ...)", varargs)?;
             ecx.accept4(socket, address, address_len, Some(flags), dest)?;
+        }
+        num if num == sys_copy_file_range => {
+            let [fd_in, off_in, fd_out, off_out, len, flags] =
+                check_min_vararg_count("syscall(SYS_copy_file_range, ...)", varargs)?;
+            ecx.copy_file_range(fd_in, off_in, fd_out, off_out, len, flags, dest)?;
         }
         num => {
             throw_unsup_format!("syscall: unsupported syscall number {num}");

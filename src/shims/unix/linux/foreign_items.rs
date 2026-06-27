@@ -18,7 +18,7 @@ use crate::*;
 const TASK_COMM_LEN: u64 = 16;
 
 pub fn is_dyn_sym(name: &str) -> bool {
-    matches!(name, "gettid" | "statx")
+    matches!(name, "copy_file_range" | "gettid" | "statx")
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -112,6 +112,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let result = this.posix_fallocate(fd, offset, len)?;
                 this.write_scalar(result, dest)?;
+            }
+            "copy_file_range" => {
+                let [fd_in, off_in, fd_out, off_out, len, flags] = this.check_shim_sig(
+                    shim_sig!(
+                        extern "C" fn(
+                            i32,
+                            *mut _,
+                            i32,
+                            *mut _,
+                            libc::size_t,
+                            libc::c_uint,
+                        ) -> libc::ssize_t
+                    ),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+                this.copy_file_range(fd_in, off_in, fd_out, off_out, len, flags, dest)?;
             }
             "readdir64" => {
                 let [dirp] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
@@ -240,7 +258,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 this.write_int(SIGRTMAX, dest)?;
             }
-
             // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
             // These shims are enabled only when the caller is in the standard library.
             "pthread_getattr_np" if this.frame_in_std() => {
