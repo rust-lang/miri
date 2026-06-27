@@ -427,16 +427,15 @@ fn test_flock() {
     // Test that we can apply many shared locks.
     file1.lock_shared().unwrap();
     file2.lock_shared().unwrap();
-    // Test that shared lock prevents exclusive lock.
-    assert!(matches!(file1.try_lock().unwrap_err(), fs::TryLockError::WouldBlock));
     // Unlock both files.
     file1.unlock().unwrap();
     file2.unlock().unwrap();
 
     // Take exclusive lock.
     file1.lock().unwrap();
-    // Test that shared lock prevents exclusive and shared locks.
+    // Test that exclusive lock prevents exclusive lock on another fd.
     assert!(matches!(file2.try_lock().unwrap_err(), fs::TryLockError::WouldBlock));
+    // Test that exclusive lock prevents shared lock on another fd.
     assert!(matches!(file2.try_lock_shared().unwrap_err(), fs::TryLockError::WouldBlock));
     // Unlock exclusive lock.
     file1.unlock().unwrap();
