@@ -683,7 +683,7 @@ Violations of [Stacked Borrows] found that are likely bugs (but Stacked Borrows 
 * [SyRust: Automatic Testing of Rust Libraries with Semantic-Aware Program Synthesis](https://dl.acm.org/doi/10.1145/3453483.3454084)
 * [Crabtree: Rust API Test Synthesis Guided by Coverage and Type](https://dl.acm.org/doi/10.1145/3689733)
 * [Rustlantis: Randomized Differential Testing of the Rust Compiler](https://dl.acm.org/doi/10.1145/3689780)
-* [A Study of Undefined Behavior Across Foreign Function Boundaries in Rust Libraries](https://arxiv.org/abs/2404.11671)
+* [A Study of Undefined Behavior Across Foreign Function Boundaries in Rust Libraries](https://dl.acm.org/doi/10.1109/ICSE55347.2025.00167)
 * [Tree Borrows](https://plf.inf.ethz.ch/research/pldi25-tree-borrows.html)
 * [Miri: Practical Undefined Behavior Detection for Rust](https://plf.inf.ethz.ch/research/popl26-miri.html) **(this paper describes Miri itself)**
 
