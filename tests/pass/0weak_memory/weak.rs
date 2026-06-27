@@ -236,6 +236,27 @@ fn old_release_store() {
     });
 }
 
+fn sc_with_cob() {
+    check_all_outcomes([0, 1, 2], || {
+        let x = static_atomic(0);
+        x.store(0, Relaxed);
+
+        let t1 = spawn(move || x.store(1, Relaxed));
+        let t2 = spawn(move || {
+            while x.load(Relaxed) != 1 {}
+            x.store(2, SeqCst);
+        });
+        let t3 = spawn(move || {
+            let r0 = x.load(SeqCst);
+            r0
+        });
+        t1.join().unwrap();
+        t2.join().unwrap();
+        let r0 = t3.join().unwrap();
+        r0
+    })
+}
+
 fn main() {
     relaxed();
     seq_cst();
@@ -245,4 +266,5 @@ fn main() {
     release_sequence();
     weaker_release_sequences();
     old_release_store();
+    sc_with_cob();
 }
