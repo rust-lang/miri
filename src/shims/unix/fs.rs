@@ -1397,6 +1397,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    fn linux_fallocate(
+        &mut self,
+        fd: i32,
+        mode: i32,
+        offset: i64,
+        size: i64,
+    ) -> InterpResult<'tcx, Scalar> {
+        todo!()
+    }
+
     fn fsync(&mut self, fd_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         // On macOS, `fsync` (unlike `fcntl(F_FULLFSYNC)`) does not wait for the
         // underlying disk to finish writing. In the interest of host compatibility,

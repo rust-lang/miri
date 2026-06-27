@@ -113,6 +113,41 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.posix_fallocate(fd, offset, len)?;
                 this.write_scalar(result, dest)?;
             }
+
+            "fallocate" => {
+                let [fd, mode, offset, len] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, i32, libc::off_t, libc::off_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+
+                let fd = this.read_scalar(fd)?.to_i32()?;
+                let mode = this.read_scalar(mode)?.to_i32()?;
+                let offset = i64::from(this.read_scalar(offset)?.to_i32()?);
+                let len = i64::from(this.read_scalar(len)?.to_i32()?);
+
+                let result = this.linux_fallocate(fd, mode, offset, len)?;
+                this.write_scalar(result, dest)?;
+            }
+
+            "fallocate64" => {
+                let [fd, mode, offset, len] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, i32, libc::off64_t, libc::off64_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
+
+                let fd = this.read_scalar(fd)?.to_i32()?;
+                let mode = this.read_scalar(mode)?.to_i32()?;
+                let offset = this.read_scalar(offset)?.to_i64()?;
+                let len = this.read_scalar(len)?.to_i64()?;
+
+                let result = this.linux_fallocate(fd, mode, offset, len)?;
+                this.write_scalar(result, dest)?;
+            }
+
             "readdir64" => {
                 let [dirp] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
                 this.readdir(dirp, dest)?;
