@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Datelike, Offset, Timelike, Utc};
 use chrono_tz::Tz;
+use rustc_middle::ty::ScalarInt;
 use rustc_target::spec::Os;
 
 use crate::*;
@@ -481,6 +482,31 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             Duration::new(seconds, nanoseconds)
         })
+    }
+
+    /// Formats `duration` as a `timespec` and writes it to `tp`.
+    ///
+    /// This will stop the machine if the duration is too large to fit in a
+    /// `timespec` (which should never happen for realistic durations).
+    fn write_timespec(&mut self, duration: Duration, tp: &MPlaceTy<'tcx>) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let sec_field = this.project_field_named(tp, "tv_sec")?;
+        let Some(secs) = i64::try_from(duration.as_secs())
+            .ok()
+            .and_then(|secs| ScalarInt::try_from_int(secs, sec_field.layout.size))
+        else {
+            throw_machine_stop!(TerminationInfo::Abort(
+                "tried to write a very large duration".to_owned()
+            ));
+        };
+        this.write_scalar(secs, &sec_field)?;
+
+        let nsec_field = this.project_field_named(tp, "tv_nsec")?;
+        let nsecs = Scalar::from_uint(duration.subsec_nanos(), nsec_field.layout.size);
+        this.write_scalar(nsecs, &nsec_field)?;
+
+        interp_ok(())
     }
 
     /// Parse a `timeval` struct and return it as a [`Duration`]. It returns [`None`]
