@@ -107,7 +107,8 @@ pub struct ReadinessWatcher {
     /// The subset of interests that is currently considered "ready". Stored separately so we
     /// can access it more efficiently.
     /// This is implemented as a queue so that with level-triggered interests, all events eventually
-    /// get returned from [`ReadinessWatcher::next_ready`]. The queue does not contain any duplicates.
+    /// get returned from [`ReadinessWatcher::get_ready_interests`]. The queue does not contain any
+    /// duplicates.
     ready: RefCell<VecDeque<ReadinessInterestKey>>,
     /// The queue of threads blocked on this watcher.
     queue: RefCell<VecDeque<ThreadId>>,
