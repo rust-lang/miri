@@ -73,6 +73,10 @@ pub struct ReadinessInterest {
     /// Boolean whether this is an edge-triggered interest.
     /// When [`false`] it's a level-triggered interest instead.
     pub is_edge_triggered: bool,
+    /// Data attached to the interest.
+    // FIXME: In the future we might want to support more data types,
+    // then this should no longer be a `u64` but a `dyn Any` instead.
+    pub data: u64,
     /// The currently active readiness for this file descriptor.
     active: Readiness,
     /// The vector clock for wakeups.
@@ -89,7 +93,7 @@ impl ReadinessInterest {
     }
 }
 
-/// A struct which stores [`ReadinessInterest`]s for a file description
+/// A struct which stores [`ReadinessInterest`]s for a set of file descriptions
 /// together with which interests are currently satisfied, and a list of
 /// threads which should be unblocked once a [`ReadinessInterest`] of the
 /// watcher is fulfilled.
@@ -116,42 +120,48 @@ impl ReadinessWatcher {
         self.interests.borrow()
     }
 
-    /// Add an interest for the with `key`.
+    /// Add an interest for the file description to which the file descriptor
+    /// `fd_num` belongs.
     /// `relevant` contains the readiness mask of relevant events.
     /// `is_edge_triggered` specifies whether the interest is edge-triggered
     /// ([`true`]) or level-triggered ([`false`]).
+    /// `data` is the user-data which is associated with the interest.
     ///
     /// The function returns `Ok(())` when the interest was successfully
     /// added, and `Err(())` when an interest with this key was already registered.
     pub fn add_interest<'tcx>(
         self: &Rc<Self>,
-        key: ReadinessInterestKey,
+        fd_num: FdNum,
         relevant: Readiness,
         is_edge_triggered: bool,
+        data: u64,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, Result<(), ()>> {
+        let fd_ref = ecx.machine.fds.get(fd_num).expect("File description should exist");
+        let fd_id = fd_ref.id();
+        let key = (fd_id, fd_num);
+
         let interest = ReadinessInterest {
             active: Readiness::EMPTY,
             clock: VClock::default(),
             relevant,
             is_edge_triggered,
+            data,
         };
         let mut interests = self.interests.borrow_mut();
-        let is_first = interests.range(range_for_id(key.0)).next().is_none();
-        if interests.try_insert(key, interest).is_err() {
-            return interp_ok(Err(()));
-        }
-        if is_first {
+        if interests.range(range_for_id(fd_id)).next().is_none() {
             // This is the first time this FD got added to the watcher.
             // We need to remember that in the global list such that we
             // get notified about FD events.
-            ecx.machine.readiness_interests.insert(key.0, self);
+            ecx.machine.readiness_interests.insert(fd_id, self);
+        }
+        if interests.try_insert(key, interest).is_err() {
+            return interp_ok(Err(()));
         }
 
         // After adding a new interest for a fd, we need to forcefully update
         // the readiness of this fd.
 
-        let fd_ref = ecx.machine.fds.get(key.1).expect("File description should exist");
         ecx.update_readiness(
             self,
             fd_ref.readiness()?,
@@ -175,8 +185,8 @@ impl ReadinessWatcher {
     pub fn update_interest<'tcx>(
         self: &Rc<Self>,
         key: ReadinessInterestKey,
-        cb: impl FnOnce(&mut ReadinessInterest),
         ecx: &mut MiriInterpCx<'tcx>,
+        cb: impl FnOnce(&mut ReadinessInterest),
     ) -> InterpResult<'tcx, Option<()>> {
         let mut interests = self.interests.borrow_mut();
         let Some(interest) = interests.get_mut(&key) else { return interp_ok(None) };
@@ -247,28 +257,52 @@ impl ReadinessWatcher {
         self.ready.borrow().len()
     }
 
-    /// Get the next ready interest from the ready queue.
+    /// Get at most the first `count` ready interests from the ready queue.
     ///
     /// If the interest is a level-triggered interest, it's automatically
     /// added to the end of the queue again such that it will only be reported
     /// after all other ready interest have been returned.
     ///
-    /// Returns [`None`] when no interest is currently ready.
-    pub fn next_ready(&self) -> Option<(ReadinessInterestKey, Ref<'_, ReadinessInterest>)> {
+    /// This method returns at most every event from the ready queue once.
+    /// This ensures that every returned interest is unique, even when there
+    /// are level-triggered interests.
+    pub fn get_ready_interests(&self, count: usize) -> Vec<Ref<'_, ReadinessInterest>> {
         let mut ready = self.ready.borrow_mut();
-        let next = ready.pop_front()?;
-        let interest = Ref::map(self.interests.borrow(), |interests| {
-            interests.get(&next).expect("non-existing interest in ready set")
-        });
+        let count = count.min(ready.len());
+        let mut interests = Vec::with_capacity(count);
 
-        if !interest.is_edge_triggered {
-            // This is a level-triggered interest, so we need to re-add the event
-            // at the end of the ready queue like Linux does with epoll:
-            // <https://github.com/torvalds/linux/blob/HEAD/fs/eventpoll.c#L1835-L1847>
-            ready.push_back(next);
+        let mut i = 0;
+        while i < count
+            && let Some(next) = ready.pop_front()
+        {
+            i = i.strict_add(1);
+            let interest = Ref::map(self.interests.borrow(), |interests| {
+                interests.get(&next).expect("non-existing interest in ready set")
+            });
+
+            if !interest.is_edge_triggered {
+                // This is a level-triggered interest, so we need to re-add the event
+                // at the end of the ready queue like Linux does with epoll:
+                // <https://github.com/torvalds/linux/blob/HEAD/fs/eventpoll.c#L1835-L1847>
+                ready.push_back(next);
+            }
+
+            interests.push(interest);
         }
 
-        Some((next, interest))
+        interests
+    }
+
+    /// Destroy the watcher instance.
+    ///
+    /// This also deregisters all interests of the watcher
+    /// from the global readiness interest table.
+    pub fn destroy<'tcx>(self, ecx: &mut MiriInterpCx<'tcx>) {
+        let mut ids = self.interests.borrow().keys().map(|(id, _num)| *id).collect::<Vec<_>>();
+        ids.dedup();
+        for id in ids {
+            ecx.machine.readiness_interests.remove(id, &self);
+        }
     }
 }
 
@@ -291,9 +325,9 @@ pub struct ReadinessInterestTable {
     /// The id of the next [`ReadinessWatcher`] created through
     /// [`ReadinessInterestTable::new_watcher`].
     next_watcher_id: usize,
-    /// Map with registered watchers indexed by the file description
-    /// they're interested in.
-    interests: BTreeMap<FdId, Vec<Weak<ReadinessWatcher>>>,
+    /// Maps each file description (identified by its ID) to the list of watchers that are
+    /// interested in that FD.
+    interests: BTreeMap<FdId, Vec<(usize, Weak<ReadinessWatcher>)>>,
 }
 
 impl ReadinessInterestTable {
@@ -318,24 +352,19 @@ impl ReadinessInterestTable {
     /// Add an interest for `watcher` for the file description with id `fd_id`.
     fn insert(&mut self, fd_id: FdId, watcher: &Rc<ReadinessWatcher>) {
         let watchers = self.interests.entry(fd_id).or_default();
-        if watchers.iter().any(|stored| stored.upgrade().is_some_and(|stored| &stored == watcher)) {
-            panic!("watcher already has a registered interest in the provided fd");
-        }
-        watchers.push(Rc::downgrade(watcher));
+        let idx = watchers
+            .binary_search_by_key(&watcher.id, |&(id, _)| id)
+            .expect_err("watcher already has a registered interest in the provided fd");
+        watchers.insert(idx, (watcher.id, Rc::downgrade(watcher)));
     }
 
     /// Remove the interest of `watcher` for the file description with id `fd_id`.
-    pub fn remove(&mut self, fd_id: FdId, watcher: &Rc<ReadinessWatcher>) {
+    fn remove(&mut self, fd_id: FdId, watcher: &ReadinessWatcher) {
         let watchers = self.interests.entry(fd_id).or_default();
         let idx = watchers
-            .iter()
-            .position(|stored| stored.upgrade().is_some_and(|stored| &stored == watcher));
-
-        if let Some(idx) = idx {
-            watchers.remove(idx);
-        } else {
-            panic!("watcher has no registered interest in the provided fd");
-        }
+            .binary_search_by_key(&watcher.id, |&(id, _)| id)
+            .expect("watcher has no registered interest in the provided fd");
+        watchers.remove(idx);
     }
 
     /// Get all watchers which have a registered interest in the file description
@@ -345,7 +374,9 @@ impl ReadinessInterestTable {
         Some(
             watchers
                 .iter()
-                .map(|watcher| watcher.upgrade().expect("watcher has not been removed correctly"))
+                .map(|(_id, watcher)| {
+                    watcher.upgrade().expect("watcher has not been removed correctly")
+                })
                 .collect(),
         )
     }
@@ -356,7 +387,7 @@ impl ReadinessInterestTable {
             return;
         };
 
-        for watcher in watchers.iter().filter_map(Weak::upgrade) {
+        for watcher in watchers.iter().filter_map(|(_id, watcher)| Weak::upgrade(watcher)) {
             // This is a still-live watcher with interest in this FD. Remove all
             // relevant interests (including from the ready set).
             watcher
@@ -436,7 +467,6 @@ pub trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
         let mut ready = watcher.ready.borrow_mut();
-        let mut queue = watcher.queue.borrow_mut();
         for_each_interest(&mut |key, interest| {
             let new_readiness = interest.relevant.clone() & active.clone();
             let prev_readiness = std::mem::replace(&mut interest.active, new_readiness.clone());
@@ -467,12 +497,10 @@ pub trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
 
         // While there are events ready to be delivered, wake up a thread to receive them.
         while !ready.is_empty()
-            && let Some(thread_id) = queue.pop_front()
+            && let Some(thread_id) = watcher.queue.borrow_mut().pop_front()
         {
-            drop(queue);
             drop(ready);
             this.unblock_thread(thread_id, BlockReason::Readiness { watcher: watcher.clone() })?;
-            queue = watcher.queue.borrow_mut();
             ready = watcher.ready.borrow_mut();
         }
         interp_ok(())

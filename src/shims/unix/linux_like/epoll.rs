@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::io;
 use std::rc::Rc;
 use std::time::Duration;
@@ -16,11 +14,6 @@ pub struct Epoll {
     /// Watcher used for registering interests in the global readiness
     /// interest table.
     watcher: Rc<ReadinessWatcher>,
-    /// Map from interests to their user-defined data.
-    /// libc's `data` field in `epoll_event` can store integer or pointer,
-    /// but only [`u64`] is supported for now.
-    /// <https://man7.org/linux/man-pages/man3/epoll_event.3type.html>
-    interest_data: RefCell<BTreeMap<ReadinessInterestKey, u64>>,
 }
 
 impl VisitProvenance for Epoll {
@@ -47,12 +40,9 @@ impl FileDescription for Epoll {
         _communicate_allowed: bool,
         ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
-        // If we were interested in some FDs, we can remove that now.
-        let mut ids = self.watcher.interests().keys().map(|(id, _num)| *id).collect::<Vec<_>>();
-        ids.dedup(); // they come out of the map sorted
-        for id in ids {
-            ecx.machine.readiness_interests.remove(id, &self.watcher);
-        }
+        let watcher = Rc::into_inner(self.watcher)
+            .expect("Epoll instance should contain the only strong reference to the watcher");
+        watcher.destroy(ecx);
         interp_ok(Ok(()))
     }
 
@@ -85,10 +75,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             );
         }
 
-        let fd = this.machine.fds.insert_new(Epoll {
-            watcher: Rc::new(this.machine.readiness_interests.new_watcher()),
-            interest_data: RefCell::new(BTreeMap::new()),
-        });
+        let fd = this
+            .machine
+            .fds
+            .insert_new(Epoll { watcher: Rc::new(this.machine.readiness_interests.new_watcher()) });
         interp_ok(Scalar::from_i32(fd))
     }
 
@@ -192,37 +182,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             let relevant = this.epoll_bitflag_to_readiness(relevant_bitflag);
-            // Update the data which is associated with the interest.
-            // This needs to be done before adding/updating an interest
-            // on the watcher. This is because those operations force a
-            // new edge on the file description which could lead to the
-            // watcher becoming ready and `return_ready_list` being called.
-            let prev_data = epfd.interest_data.borrow_mut().insert(interest_key, data);
 
             if op == epoll_ctl_add {
                 // Add a new interest to the watcher.
                 let result =
-                    epfd.watcher.add_interest(interest_key, relevant, is_edge_triggered, this)?;
+                    epfd.watcher.add_interest(fd, relevant, is_edge_triggered, data, this)?;
                 if result.is_err() {
                     // We already had an interest in this.
-                    // We need to restore the previously stored data for this interest.
-                    epfd.interest_data.borrow_mut().insert(interest_key, prev_data.unwrap());
                     return this.set_errno_and_return_neg1_i32(LibcError("EEXIST"));
                 }
             } else {
                 // Modify the existing interest.
-                let result = epfd.watcher.update_interest(
-                    interest_key,
-                    |interest| {
-                        interest.is_edge_triggered = is_edge_triggered;
-                        interest.relevant = relevant;
-                    },
-                    this,
-                )?;
+                let result = epfd.watcher.update_interest(interest_key, this, |interest| {
+                    interest.is_edge_triggered = is_edge_triggered;
+                    interest.relevant = relevant;
+                    interest.data = data;
+                })?;
                 if result.is_none() {
                     // There is no interest registered for the specified key.
-                    // We need to remove the newly stored data for this interest.
-                    epfd.interest_data.borrow_mut().remove(&interest_key);
                     return this.set_errno_and_return_neg1_i32(LibcError("ENOENT"));
                 }
             }
@@ -231,9 +208,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // We did not have interest in this.
                 return this.set_errno_and_return_neg1_i32(LibcError("ENOENT"));
             };
-
-            // Remove the data which is associated with the interest.
-            epfd.interest_data.borrow_mut().remove(&interest_key);
         } else {
             throw_unsup_format!("unsupported epoll_ctl operation: {op}");
         }
@@ -424,13 +398,19 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx, i32> {
         let this = self.eval_context_mut();
 
-        let interests = epfd.watcher.interests();
         let mut num_of_events = 0i32;
         let mut array_iter = this.project_array_fields(events)?;
 
+        #[expect(rustc::usage_of_ty_tykind)]
+        let rustc_middle::ty::TyKind::Array(_, events_len) = events.layout.ty.kind() else {
+            unreachable!("`events` needs to be an array type")
+        };
+        let max_events_num: usize =
+            events_len.try_to_target_usize(this.tcx.tcx).unwrap().try_into().unwrap();
+
         // Sanity-check to ensure that all event info is up-to-date.
         if cfg!(debug_assertions) {
-            for (key, interest) in interests.iter() {
+            for (key, interest) in epfd.watcher.interests().iter() {
                 // Ensure this matches the latest readiness of this FD.
                 // We have to do an FD lookup by ID for this. The FdNum might be already closed.
                 let fd = this.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
@@ -439,26 +419,17 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
 
-        // We will fill at most the first `ready_events_len` slots of the array.
-        // Bounding the iterator this way ensures that we can re-add events
-        // to the end of the queue during the loop without having them show up in the array.
-        let ready_events_len = u64::try_from(epfd.watcher.ready_count()).unwrap();
-        while let Some((idx, slot)) = array_iter.next(this)?
-            && idx < ready_events_len
-            && let Some((key, interest)) = epfd.watcher.next_ready()
+        // We get up to the first `max_events_num` ready events from the
+        // watcher and fill them into the slots of the array.
+        let mut ready_interests_iter = epfd.watcher.get_ready_interests(max_events_num).into_iter();
+        while let Some((_idx, slot)) = array_iter.next(this)?
+            && let Some(interest) = ready_interests_iter.next()
         {
-            let data = epfd
-                .interest_data
-                .borrow()
-                .get(&key)
-                .copied()
-                .expect("non-existing data for ready epoll interest");
-
             // Deliver event to caller.
             this.write_int_fields_named(
                 &[
                     ("events", this.readiness_to_epoll_bitflag(interest.active()).into()),
-                    ("u64", data.into()),
+                    ("u64", interest.data.into()),
                 ],
                 &slot,
             )?;
