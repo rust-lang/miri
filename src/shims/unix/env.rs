@@ -6,7 +6,7 @@ use rustc_abi::{FieldIdx, Size};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_index::IndexVec;
 use rustc_middle::ty::Ty;
-use rustc_target::spec::Os;
+use rustc_target::spec::{Env, Os};
 
 use crate::*;
 
@@ -217,6 +217,52 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         interp_ok(Pointer::null())
+    }
+
+    fn gethostname(
+        &mut self,
+        name_op: &OpTy<'tcx>,
+        len_op: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        this.assert_target_os_is_unix("gethostname");
+
+        let name = this.read_pointer(name_op)?;
+        let len = this.read_target_usize(len_op)?;
+
+        if this.ptr_is_null(name)? {
+            return this.set_errno_and_return_neg1_i32(LibcError("EFAULT"));
+        }
+
+        let hostname = b"Miri";
+        if len > u64::try_from(hostname.len()).unwrap() {
+            let (written, _) = this.write_c_str(hostname, name, len)?;
+            assert!(written); // Value should fit.
+            return interp_ok(Scalar::from_i32(0));
+        }
+
+        match (&this.tcx.sess.target.os, &this.tcx.sess.target.env) {
+            (Os::Android, _) => this.set_errno_and_return_neg1_i32(LibcError("ENAMETOOLONG")),
+            (Os::Linux, Env::Gnu) | (Os::FreeBsd, _) => {
+                let len: usize = len.try_into().unwrap();
+                this.write_bytes_ptr(name, hostname[..len].iter().copied())?;
+                this.set_errno_and_return_neg1_i32(LibcError("ENAMETOOLONG"))
+            }
+            (Os::Linux, _) | (Os::MacOs, _) | (Os::Solaris, _) | (Os::Illumos, _) => {
+                if len > 0 {
+                    let len: usize = len.try_into().unwrap();
+                    let copy_len = len.checked_sub(1).unwrap();
+                    this.write_bytes_ptr(
+                        name,
+                        hostname[..copy_len].iter().copied().chain(std::iter::once(0)),
+                    )?;
+                }
+                interp_ok(Scalar::from_i32(0))
+            }
+            _ => {
+                throw_unsup_format!("`gethostname` is not supported on {}", this.tcx.sess.target.os)
+            }
+        }
     }
 
     fn chdir(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
