@@ -1,4 +1,5 @@
 //@ignore-target: windows # no libc
+//@compile-flags: -Zmiri-deterministic-concurrency
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -82,9 +83,16 @@ fn test_poll_duplicate_fd_interest() {
     let mut fds = [-1, -1];
     unsafe { errno_check(libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr())) };
 
+    let t1 = thread::spawn(move || {
+        unsafe {
+            errno_result(libc::write(fds[1], TEST_BYTES.as_ptr().cast(), TEST_BYTES.len()))
+                .unwrap();
+        }
+    });
+
     let mut interests = [
-        libc::pollfd { fd: fds[0], events: libc::POLLIN | libc::POLLOUT, revents: 0 },
-        libc::pollfd { fd: fds[0], events: libc::POLLIN | libc::POLLOUT, revents: 0 },
+        libc::pollfd { fd: fds[0], events: libc::POLLIN, revents: 0 },
+        libc::pollfd { fd: fds[0], events: libc::POLLIN, revents: 0 },
     ];
     let ready = unsafe {
         errno_result(libc::poll(interests.as_mut_ptr(), interests.len() as libc::nfds_t, -1))
@@ -92,6 +100,8 @@ fn test_poll_duplicate_fd_interest() {
     };
     assert_eq!(ready, 2);
     // Ensure that both `revents` have been set.
-    assert_eq!(interests[0].revents, libc::POLLOUT);
-    assert_eq!(interests[1].revents, libc::POLLOUT);
+    assert_eq!(interests[0].revents, libc::POLLIN);
+    assert_eq!(interests[1].revents, libc::POLLIN);
+
+    t1.join().unwrap();
 }

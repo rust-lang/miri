@@ -4,22 +4,24 @@ use std::time::Duration;
 
 use rustc_target::spec::Os;
 
-use crate::shims::files::{DynFileDescriptionRef, FdNum};
+use crate::shims::files::FdNum;
 use crate::*;
 
 /// An interest into a file descriptor together with its
 /// relevant readiness events.
-struct PollInterest {
-    /// The file descriptor for which this interest is for.
-    fd_num: FdNum,
-    /// The file description to which the file descriptor belongs.
-    fd: DynFileDescriptionRef,
+#[derive(Debug)]
+struct PollInterest<'tcx> {
+    /// Place whether the ready events of the interests should
+    /// be written to.
+    revents_place: MPlaceTy<'tcx>,
     /// The readiness events this interest is interested in.
     relevant: Readiness,
 }
 
-impl VisitProvenance for PollInterest {
-    fn visit_provenance(&self, _visit: &mut VisitWith<'_>) {}
+impl VisitProvenance for PollInterest<'_> {
+    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+        self.revents_place.visit_provenance(visit);
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -48,8 +50,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let fds_arr_mplace = this.deref_pointer_as(fds, fds_arr_layout)?;
         let mut fds_arr_iter = this.project_array_fields(&fds_arr_mplace)?;
 
-        let mut interests = Vec::new();
-        let mut revents = BTreeMap::new();
+        // Because `poll` allows adding multiple interests for the same file descriptor
+        // we need to store the interests in a map of vectors.
+        let mut interests = BTreeMap::<FdNum, Vec<PollInterest<'tcx>>>::new();
         let mut fulfilled_interests = 0u32;
 
         // We iterate over the fds array of the `poll` syscall. For each fd, we check its
@@ -66,7 +69,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             let revents_field = this.project_field_named(&pollfd, "revents")?;
 
-            let relevant_events = this.poll_bitflag_to_readiness(events)?;
+            let mut relevant_events = this.poll_bitflag_to_readiness(events)?;
+            // The POLLHUP and POLLERR interests are always set.
+            relevant_events.write_closed = true;
+            relevant_events.error = true;
             let active_events = relevant_events.clone() & fd.readiness()?.clone();
             if active_events != Readiness::EMPTY {
                 // The interest in this file description is currently fulfilled.
@@ -80,8 +86,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(&revents_field)?;
             }
 
-            interests.push(PollInterest { fd, fd_num, relevant: relevant_events });
-            revents.insert(fd_num, revents_field.clone());
+            let entry = interests.entry(fd_num).or_default();
+            entry.push(PollInterest {
+                relevant: relevant_events,
+                revents_place: revents_field.clone(),
+            });
         }
 
         if fulfilled_interests > 0 {
@@ -95,15 +104,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // interest gets fulfilled.
 
         let watcher = Rc::new(this.machine.readiness_interests.new_watcher());
-        for interest in interests.iter() {
-            // We don't care whether an interest for the same file descriptor
-            // has already been added to the watcher.
+        for (fd_num, interests) in interests.iter() {
+            // Because a readiness watcher can only have one interest per
+            // file descriptor, we calculate the "maximal" relevant readiness
+            // for the file descriptor and add an interest with this readiness.
+            let relevant = interests.iter().fold(Readiness::EMPTY, |mut relevant, interest| {
+                relevant |= interest.relevant.clone();
+                relevant
+            });
+
             watcher
                 .add_interest(
-                    interest.fd_num,
-                    interest.relevant.clone(),
+                    *fd_num,
+                    relevant,
                     /* is_edge_triggered */ false,
-                    /* data */ 0,
+                    u64::try_from(*fd_num).unwrap(),
                     this,
                 )?
                 .ok();
@@ -117,8 +132,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             callback!(
                 @capture<'tcx> {
                     watcher: Rc<ReadinessWatcher>,
-                    interests: Vec<PollInterest>,
-                    revents: BTreeMap<FdNum, MPlaceTy<'tcx>>,
+                    interests: BTreeMap<FdNum, Vec<PollInterest<'tcx>>>,
                     dest: MPlaceTy<'tcx>,
                 } |this, reason: UnblockKind| {
                     if let UnblockKind::TimedOut = reason {
@@ -127,14 +141,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                     let mut fulfilled_interests = 0u32;
 
-                    for interest in &interests {
-                        let active_events = interest.relevant.clone() & interest.fd.readiness()?;
-                        if active_events != Readiness::EMPTY {
-                            // The interest in this file description is fulfilled.
+                    // Iterate over all ready interests of the watcher and
+                    // write the output readiness of all related poll interests.
+                    for ready in watcher.get_ready_interests(watcher.ready_count(), this)? {
+                        let fd_num = FdNum::try_from(ready.data).expect("Data is always a file descriptor");
+                        for interest in interests.get(&fd_num).unwrap() {
+                            let events = ready.active().clone() & interest.relevant.clone();
+                            if events == Readiness::EMPTY {
+                                // The interest isn't fulfilled; we already wrote zero to the
+                                // `revents` field, so we can skip it.
+                                continue;
+                            }
+
+                            // The interest is fulfilled; we need to write write the
+                            // masked `events` into the `revents` field of the interest.
+
                             fulfilled_interests = fulfilled_interests.strict_add(1);
-                            let poll_events = this.readiness_to_poll_bitflag(&active_events);
-                            let revents_place = revents.get(&interest.fd_num).unwrap();
-                            this.write_scalar(Scalar::from_u16(poll_events), revents_place)?;
+                            let poll_events = this.readiness_to_poll_bitflag(&events);
+                            this.write_scalar(Scalar::from_u16(poll_events), &interest.revents_place)?;
                         }
                     }
 
@@ -144,12 +168,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         );
 
         interp_ok(())
-    }
-}
-
-impl<'tcx> VisitProvenance for BTreeMap<FdNum, MPlaceTy<'tcx>> {
-    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
-        self.values().for_each(|place| place.visit_provenance(visit));
     }
 }
 
