@@ -400,31 +400,12 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let mut num_of_events = 0i32;
         let mut array_iter = this.project_array_fields(events)?;
-
-        #[expect(rustc::usage_of_ty_tykind)]
-        let rustc_middle::ty::TyKind::Array(_, events_len) = events.layout.ty.kind() else {
-            unreachable!("`events` needs to be an array type")
-        };
-        let max_events_num: usize =
-            events_len.try_to_target_usize(this.tcx.tcx).unwrap().try_into().unwrap();
-
-        // Sanity-check to ensure that all event info is up-to-date.
-        if cfg!(debug_assertions) {
-            for (key, interest) in epfd.watcher.interests().iter() {
-                // Ensure this matches the latest readiness of this FD.
-                // We have to do an FD lookup by ID for this. The FdNum might be already closed.
-                let fd = this.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
-                let current_active = fd.readiness()?;
-                assert_eq!(interest.active(), &(current_active & interest.relevant.clone()));
-            }
-        }
+        let max_events_num: usize = events.len(this)?.try_into().unwrap();
 
         // We get up to the first `max_events_num` ready events from the
         // watcher and fill them into the slots of the array.
-        let mut ready_interests_iter = epfd.watcher.get_ready_interests(max_events_num).into_iter();
-        while let Some((_idx, slot)) = array_iter.next(this)?
-            && let Some(interest) = ready_interests_iter.next()
-        {
+        for interest in epfd.watcher.get_ready_interests(max_events_num, this)? {
+            let (_idx, slot) = array_iter.next(this)?.expect("Array should have slot for interest");
             // Deliver event to caller.
             this.write_int_fields_named(
                 &[

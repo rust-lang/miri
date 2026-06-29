@@ -267,7 +267,11 @@ impl ReadinessWatcher {
     /// This method returns at most every event from the ready queue once.
     /// This ensures that every returned interest is unique, even when there
     /// are level-triggered interests.
-    pub fn get_ready_interests(&self, count: usize) -> Vec<Ref<'_, ReadinessInterest>> {
+    pub fn get_ready_interests<'tcx>(
+        &self,
+        count: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Vec<Ref<'_, ReadinessInterest>>> {
         let mut ready = self.ready.borrow_mut();
         let count = count.min(ready.len());
         let mut interests = Vec::with_capacity(count);
@@ -291,7 +295,18 @@ impl ReadinessWatcher {
             interests.push(interest);
         }
 
-        interests
+        // Sanity-check to ensure that all event info is up-to-date.
+        if cfg!(debug_assertions) {
+            for (key, interest) in self.interests.borrow().iter() {
+                // Ensure this matches the latest readiness of this FD.
+                // We have to do an FD lookup by ID for this. The FdNum might be already closed.
+                let fd = ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
+                let current_active = fd.readiness()?;
+                assert_eq!(interest.active(), &(current_active & interest.relevant.clone()));
+            }
+        }
+
+        interp_ok(interests)
     }
 
     /// Destroy the watcher instance.
@@ -299,7 +314,10 @@ impl ReadinessWatcher {
     /// This also deregisters all interests of the watcher
     /// from the global readiness interest table.
     pub fn destroy<'tcx>(self, ecx: &mut MiriInterpCx<'tcx>) {
+        // If we were interested in some FDs, we can remove that now.
         let mut ids = self.interests.borrow().keys().map(|(id, _num)| *id).collect::<Vec<_>>();
+        // Because the ids come out of the map sorted,
+        // deduping only keeps all unique entries.
         ids.dedup();
         for id in ids {
             ecx.machine.readiness_interests.remove(id, &self);
@@ -326,8 +344,10 @@ pub struct ReadinessInterestTable {
     /// The id of the next [`ReadinessWatcher`] created through
     /// [`ReadinessInterestTable::new_watcher`].
     next_watcher_id: usize,
-    /// Maps each file description (identified by its ID) to the list of watchers that are
-    /// interested in that FD.
+    /// Maps each file description (identified by its [`FdId`]) to the list of watchers that are
+    /// interested in that FD. We also store the [`ReadinessWatcher`]s ID
+    /// separately so we can access it without calling `upgrade`. The list
+    /// is sorted by that id.
     interests: BTreeMap<FdId, Vec<(usize, Weak<ReadinessWatcher>)>>,
 }
 
