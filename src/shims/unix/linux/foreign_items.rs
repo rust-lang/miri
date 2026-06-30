@@ -124,8 +124,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 let fd = this.read_scalar(fd)?.to_i32()?;
                 let mode = this.read_scalar(mode)?.to_i32()?;
-                let offset = i64::from(this.read_scalar(offset)?.to_i32()?);
-                let len = i64::from(this.read_scalar(len)?.to_i32()?);
+                // We don't support platforms which have libc::off_t bigger than 64 bits.
+                let offset =
+                    i64::try_from(this.read_scalar(offset)?.to_int(offset.layout.size)?).unwrap();
+                let len = i64::try_from(this.read_scalar(len)?.to_int(len.layout.size)?).unwrap();
 
                 let result = this.linux_fallocate(fd, mode, offset, len)?;
                 this.write_scalar(result, dest)?;

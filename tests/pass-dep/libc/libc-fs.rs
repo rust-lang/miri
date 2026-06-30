@@ -624,24 +624,32 @@ fn test_fallocate<T: From<i32>>(
     let test_errors = || {
         // invalid fd
         let ret = unsafe { fallocate(42, 0, T::from(0), T::from(10)) };
-        assert_eq!(ret, libc::EBADF);
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EBADF);
 
         let path = utils::prepare("miri_test_libc_fallocate_errors.txt");
         let file = File::create(&path).unwrap();
 
         // invalid offset
         let ret = unsafe { fallocate(file.as_raw_fd(), 0, T::from(-10), T::from(10)) };
-        assert_eq!(ret, libc::EINVAL);
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EINVAL);
 
         // invalid len
         let ret = unsafe { fallocate(file.as_raw_fd(), 0, T::from(0), T::from(-10)) };
-        assert_eq!(ret, libc::EINVAL);
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EINVAL);
 
         // fd not writable
         let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString::new failed");
         let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY) };
         let ret = unsafe { fallocate(fd, 0, T::from(0), T::from(10)) };
-        assert_eq!(ret, libc::EBADF);
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EBADF);
     };
 
     let test = || {
