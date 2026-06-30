@@ -299,7 +299,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             };
 
             // Record this thread as blocked.
-            epfd.watcher.add_thread(this.active_thread());
+            epfd.watcher.add_blocked_thread(this.active_thread());
             // And block it.
             let dest = dest.clone();
             // We keep a strong ref to the underlying `ReadinessWatcher` to make sure it sticks around.
@@ -323,7 +323,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             },
                             UnblockKind::TimedOut => {
                                 // Remove the current active thread id from the blocked threads list.
-                                epfd.watcher.remove_thread(this.active_thread());
+                                epfd.watcher.remove_blocked_thread(this.active_thread());
                                 this.write_int(0, &dest)?;
                                 interp_ok(())
                             },

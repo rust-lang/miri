@@ -241,14 +241,14 @@ impl ReadinessWatcher {
     /// Add the thread with id `thread_id` to the queue of
     /// blocked threads which will be unblocked when the
     /// watcher becomes ready.
-    pub fn add_thread(&self, thread_id: ThreadId) {
+    pub fn add_blocked_thread(&self, thread_id: ThreadId) {
         self.queue.borrow_mut().push_back(thread_id);
     }
 
-    /// Remove the thread with id `thread_id` from the queue
+    /// Remove all threads with id `thread_id` from the queue
     /// of blocked threads which will be unblocked when the
     /// watcher becomes ready.
-    pub fn remove_thread(&self, thread_id: ThreadId) {
+    pub fn remove_blocked_thread(&self, thread_id: ThreadId) {
         self.queue.borrow_mut().retain(|id| id != &thread_id);
     }
 
@@ -274,7 +274,18 @@ impl ReadinessWatcher {
     ) -> InterpResult<'tcx, Vec<Ref<'_, ReadinessInterest>>> {
         let mut ready = self.ready.borrow_mut();
         let count = count.min(ready.len());
-        let mut interests = Vec::with_capacity(count);
+        let mut ready_interests = Vec::with_capacity(count);
+
+        // Sanity-check to ensure that all event info is up-to-date.
+        if cfg!(debug_assertions) {
+            for (key, interest) in self.interests.borrow().iter() {
+                // Ensure this matches the latest readiness of this FD.
+                // We have to do an FD lookup by ID for this. The FdNum might be already closed.
+                let fd = ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
+                let current_active = fd.readiness()?;
+                assert_eq!(interest.active(), &(current_active & interest.relevant.clone()));
+            }
+        }
 
         let mut i = 0;
         while i < count
@@ -292,21 +303,10 @@ impl ReadinessWatcher {
                 ready.push_back(next);
             }
 
-            interests.push(interest);
+            ready_interests.push(interest);
         }
 
-        // Sanity-check to ensure that all event info is up-to-date.
-        if cfg!(debug_assertions) {
-            for (key, interest) in self.interests.borrow().iter() {
-                // Ensure this matches the latest readiness of this FD.
-                // We have to do an FD lookup by ID for this. The FdNum might be already closed.
-                let fd = ecx.machine.fds.fds.values().find(|fd| fd.id() == key.0).unwrap();
-                let current_active = fd.readiness()?;
-                assert_eq!(interest.active(), &(current_active & interest.relevant.clone()));
-            }
-        }
-
-        interp_ok(interests)
+        interp_ok(ready_interests)
     }
 
     /// Destroy the watcher instance.
@@ -396,7 +396,9 @@ impl ReadinessInterestTable {
             watchers
                 .iter()
                 .map(|(_id, watcher)| {
-                    watcher.upgrade().expect("watcher has not been removed correctly")
+                    watcher.upgrade().expect(
+                        "someone forgot to remove the garbage from `machine.readiness_interests`",
+                    )
                 })
                 .collect(),
         )
