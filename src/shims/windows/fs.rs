@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs::{self, Dir};
 use std::io;
 use std::io::SeekFrom;
@@ -202,7 +203,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Open this as a directory.
                 // FIXME: shouldn't we check `creation_disposition` here? We do know that it already
                 // exists.
-                let dir = match Dir::open(&file_name) {
+                let _dir = match Dir::open(&file_name) {
                     Ok(dir) => dir,
                     Err(e) => {
                         if e.kind() == io::ErrorKind::NotADirectory {
@@ -214,7 +215,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                 };
                 #[cfg(not(bootstrap))]
-                if !dir.metadata().unwrap().is_dir() {
+                if !std::fs::metadata(&file_name).unwrap().is_dir() {
                     // This changed from a directory to a file. Retry.
                     continue;
                 }
@@ -224,7 +225,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.set_last_error(IoError::WindowsError("ERROR_ALREADY_EXISTS"))?;
                 }
 
-                let fd_num = this.machine.fds.insert_new(DirHandle { dir, path: file_name });
+                let fd_num = this.machine.fds.insert_new(DirHandle { path: file_name });
                 return interp_ok(Handle::File(fd_num));
             } else {
                 // Per the documentation:
@@ -317,6 +318,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     file,
                     writable: desired_write,
                     readable: desired_read,
+                    flock_state: RefCell::new(None),
                 });
                 return interp_ok(Handle::File(fd_num));
             }

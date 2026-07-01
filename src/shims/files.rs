@@ -1,6 +1,7 @@
 use std::any::Any;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fs::{Dir, File};
+use std::fs::File;
 use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
@@ -365,6 +366,7 @@ pub struct FileHandle {
     pub(crate) file: File,
     pub(crate) readable: bool,
     pub(crate) writable: bool,
+    pub(crate) flock_state: RefCell<Option<FlockState>>,
 }
 
 impl FileDescription for FileHandle {
@@ -476,9 +478,6 @@ impl FileDescription for FileHandle {
 
 #[derive(Debug)]
 pub struct DirHandle {
-    #[cfg_attr(bootstrap, allow(unused))]
-    pub(crate) dir: Dir,
-    /// Fallback used under `cfg(bootstrap)`.
     #[cfg_attr(not(bootstrap), allow(unused))]
     pub(crate) path: PathBuf,
 }
@@ -492,7 +491,7 @@ impl FileDescription for DirHandle {
         &self,
     ) -> InterpResult<'tcx, Either<io::Result<std::fs::Metadata>, &'static str>> {
         #[cfg(not(bootstrap))]
-        return interp_ok(Either::Left(self.dir.metadata()));
+        return interp_ok(Either::Left(std::fs::metadata(&self.path)));
         #[cfg(bootstrap)]
         return interp_ok(Either::Left(std::fs::metadata(&self.path)));
     }
@@ -504,6 +503,16 @@ impl FileDescription for DirHandle {
         _ecx: &mut MiriInterpCx<'tcx>,
     ) -> InterpResult<'tcx, io::Result<()>> {
         interp_ok(Ok(()))
+    }
+}
+
+impl FileHandle {
+    pub(crate) fn flock_state(&self) -> Option<FlockState> {
+        *self.flock_state.borrow()
+    }
+
+    pub(crate) fn set_flock_state(&self, state: Option<FlockState>) {
+        *self.flock_state.borrow_mut() = state;
     }
 }
 
@@ -540,6 +549,13 @@ impl FileDescription for NullOutput {
 
 /// Internal type of a file-descriptor - this is what [`FdTable`] expects
 pub type FdNum = i32;
+
+/// State of a `flock` lock on a file description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlockState {
+    Shared,
+    Exclusive,
+}
 
 /// The file descriptor table
 #[derive(Debug)]
