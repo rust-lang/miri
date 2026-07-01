@@ -241,6 +241,8 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // which can be different between the libc used by std and the libc used by everyone else.
         let buf = this.deref_pointer(buf_op)?;
 
+        let netbsd = this.tcx.sess.target.os == Os::NetBsd;
+
         this.write_int_fields_named(
             &[
                 ("st_dev", metadata.dev.unwrap_or(0).into()),
@@ -251,11 +253,11 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ("st_gid", metadata.gid.unwrap_or(0).into()),
                 ("st_rdev", 0),
                 ("st_atime", access_sec.into()),
-                ("st_atime_nsec", access_nsec.into()),
+                (if netbsd { "st_atimensec" } else { "st_atime_nsec" }, access_nsec.into()),
                 ("st_mtime", modified_sec.into()),
-                ("st_mtime_nsec", modified_nsec.into()),
+                (if netbsd { "st_mtimensec" } else { "st_mtime_nsec" }, modified_nsec.into()),
                 ("st_ctime", 0),
-                ("st_ctime_nsec", 0),
+                (if netbsd { "st_ctimensec" } else { "st_ctime_nsec" }, 0),
                 ("st_size", metadata.size.into()),
                 ("st_blocks", metadata.blocks.unwrap_or(0).into()),
                 ("st_blksize", metadata.blksize.unwrap_or(0).into()),
@@ -263,11 +265,14 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
             &buf,
         )?;
 
-        if matches!(&this.tcx.sess.target.os, Os::MacOs | Os::FreeBsd) {
+        if matches!(&this.tcx.sess.target.os, Os::MacOs | Os::FreeBsd | Os::NetBsd) {
             this.write_int_fields_named(
                 &[
                     ("st_birthtime", created_sec.into()),
-                    ("st_birthtime_nsec", created_nsec.into()),
+                    (
+                        if netbsd { "st_birthtimensec" } else { "st_birthtime_nsec" },
+                        created_nsec.into(),
+                    ),
                     ("st_flags", 0),
                     ("st_gen", 0),
                 ],
@@ -652,7 +657,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if !matches!(
             &this.tcx.sess.target.os,
-            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Android | Os::Linux
+            Os::MacOs
+                | Os::FreeBsd
+                | Os::Solaris
+                | Os::Illumos
+                | Os::Android
+                | Os::Linux
+                | Os::NetBsd
         ) {
             panic!("`stat` should not be called on {}", this.tcx.sess.target.os);
         }
@@ -681,7 +692,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if !matches!(
             &this.tcx.sess.target.os,
-            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Android | Os::Linux
+            Os::MacOs
+                | Os::FreeBsd
+                | Os::Solaris
+                | Os::Illumos
+                | Os::Android
+                | Os::Linux
+                | Os::NetBsd
         ) {
             panic!("`lstat` should not be called on {}", this.tcx.sess.target.os);
         }
@@ -708,7 +725,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         if !matches!(
             &this.tcx.sess.target.os,
-            Os::MacOs | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::Linux | Os::Android
+            Os::MacOs
+                | Os::FreeBsd
+                | Os::Solaris
+                | Os::Illumos
+                | Os::Linux
+                | Os::Android
+                | Os::NetBsd
         ) {
             panic!("`fstat` should not be called on {}", this.tcx.sess.target.os);
         }
@@ -1208,7 +1231,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(())
     }
 
-    fn macos_readdir_r(
+    fn readdir_r(
         &mut self,
         dirp_op: &OpTy<'tcx>,
         entry_op: &OpTy<'tcx>,
@@ -1216,7 +1239,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        this.assert_target_os(Os::MacOs, "readdir_r");
+        if !matches!(&this.tcx.sess.target.os, Os::MacOs | Os::NetBsd) {
+            panic!("`readdir_r` should not be called on {}", this.tcx.sess.target.os);
+        }
 
         let dirp = this.read_target_usize(dirp_op)?;
         let result_place = this.deref_pointer_as(result_op, this.machine.layouts.mut_raw_ptr)?;
@@ -1238,7 +1263,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // The name is written with write_os_str_to_c_str, while the rest of the
                 // dirent struct is written using write_int_fields.
 
-                // For reference, on macOS this looks like:
+                // For reference:
+                // On macOS:
                 // pub struct dirent {
                 //     pub d_ino: u64,
                 //     pub d_seekoff: u64,
@@ -1247,6 +1273,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 //     pub d_type: u8,
                 //     pub d_name: [c_char; 1024],
                 // }
+                //
+                // On NetBSD:
+                // pub struct dirent {
+                //    pub d_fileno: ino_t,
+                //    pub d_reclen: u16,
+                //    pub d_namlen: u16,
+                //    pub d_type: u8,
+                //    pub d_name: [c_char; 512],
+                //}
 
                 let entry_place = this.deref_pointer_as(entry_op, this.libc_ty_layout("dirent"))?;
 
@@ -1269,11 +1304,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         ("d_reclen", entry_place.layout.size.bytes().into()),
                         ("d_namlen", file_name_buf_len.strict_sub(1).into()),
                         ("d_type", dir_entry.d_type.into()),
-                        ("d_ino", dir_entry.ino.into()),
-                        ("d_seekoff", 0),
                     ],
                     &entry_place,
                 )?;
+
+                if this.tcx.sess.target.os == Os::MacOs {
+                    this.write_int_fields_named(
+                        &[("d_ino", dir_entry.ino.into()), ("d_seekoff", 0)],
+                        &entry_place,
+                    )?;
+                } else if this.tcx.sess.target.os == Os::NetBsd {
+                    this.write_int_fields_named(
+                        &[("d_fileno", dir_entry.ino.into())],
+                        &entry_place,
+                    )?;
+                } else {
+                    panic!("remember to check for extra fields!");
+                }
+
                 this.write_scalar(this.read_scalar(entry_op)?, &result_place)?;
 
                 Scalar::from_i32(0)

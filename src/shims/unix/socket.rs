@@ -264,8 +264,10 @@ impl UnixFileDescription for Socket {
         if op == fionbio {
             // On these OSes, Rust uses the ioctl, so we trust that it is reasonable and controls
             // the same internal flag as fcntl.
-            if !matches!(ecx.tcx.sess.target.os, Os::Linux | Os::Android | Os::MacOs | Os::FreeBsd)
-            {
+            if !matches!(
+                ecx.tcx.sess.target.os,
+                Os::Linux | Os::Android | Os::MacOs | Os::FreeBsd | Os::NetBsd
+            ) {
                 // FIONBIO cannot be used to change the blocking mode of a socket on solarish targets:
                 // <https://github.com/rust-lang/rust/commit/dda5c97675b4f5b1f6fdab64606c8a1f21021b0a>
                 // Since there might be more targets which do weird things with this option, we use
@@ -321,10 +323,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // if there is anything left at the end, that's an unsupported flag.
         if matches!(
             this.tcx.sess.target.os,
-            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
+            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::NetBsd
         ) {
             // SOCK_NONBLOCK and SOCK_CLOEXEC only exist on Linux, Android, FreeBSD,
-            // Solaris, and Illumos targets.
+            // Solaris, Illumos and NetBSD targets.
             let sock_nonblock = this.eval_libc_i32("SOCK_NONBLOCK");
             let sock_cloexec = this.eval_libc_i32("SOCK_CLOEXEC");
             if flags & sock_nonblock == sock_nonblock {
@@ -542,10 +544,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // if there is anything left at the end, that's an unsupported flag.
         if matches!(
             this.tcx.sess.target.os,
-            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
+            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::NetBsd
         ) {
             // SOCK_NONBLOCK and SOCK_CLOEXEC only exist on Linux, Android, FreeBSD,
-            // Solaris, and Illumos targets.
+            // Solaris, Illumos and NetBSD targets.
             let sock_nonblock = this.eval_libc_i32("SOCK_NONBLOCK");
             let sock_cloexec = this.eval_libc_i32("SOCK_CLOEXEC");
             if flags & sock_nonblock == sock_nonblock {
@@ -744,10 +746,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         // if there is anything left at the end, that's an unsupported flag.
         if matches!(
             this.tcx.sess.target.os,
-            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
+            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos | Os::NetBsd
         ) {
             // MSG_NOSIGNAL and MSG_DONTWAIT only exist on Linux, Android, FreeBSD,
-            // Solaris, and Illumos targets.
+            // Solaris, Illumos and NetBSD targets.
             let msg_nosignal = this.eval_libc_i32("MSG_NOSIGNAL");
             let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
             if flags & msg_nosignal == msg_nosignal {

@@ -245,6 +245,24 @@ struct FutexWaiter {
     bitset: u32,
 }
 
+/// The set of threads that should wake immediately from `thread_park`.
+#[derive(Default, Clone, Debug)]
+pub struct ThreadTokens {
+    /// The set of thread tokens, each being associated with the vclock of the
+    /// thread that added the token to establish a happens-before edge between
+    /// `thread_unpark` and `thread_park`.
+    tokens: FxHashMap<ThreadId, Option<VClock>>,
+}
+
+/// The result of a `thread_park`.
+pub enum ParkResult {
+    /// The token was already made available, and hence the thread should continue
+    /// running.
+    Already,
+    /// The thread was put to sleep.
+    Parked,
+}
+
 // Private extension trait for local helper methods
 impl<'tcx> EvalContextExtPriv<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub(super) trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
@@ -829,5 +847,73 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         interp_ok(woken)
+    }
+
+    /// Parks the current thread, to be unparked by `thread_unpark`.
+    ///
+    /// If `thread_unpark` is called before `thread_park`, this call will return
+    /// `ParkResult::Already` and `callback` is never invoked. Otherwise, the
+    /// current thread is blocked, and `callback` will be invoked upon the next
+    /// call to `thread_unpark`.
+    fn thread_park(
+        &mut self,
+        deadline: Option<Deadline>,
+        callback: DynUnblockCallback<'tcx>,
+    ) -> InterpResult<'tcx, ParkResult> {
+        let this = self.eval_context_mut();
+        let thread_id = this.active_thread();
+
+        if let Some(vclock) = this.machine.thread_tokens.tokens.remove(&thread_id) {
+            if let Some(vclock) = vclock {
+                this.acquire_clock(&vclock)?;
+            }
+
+            interp_ok(ParkResult::Already)
+        } else {
+            this.block_thread(BlockReason::Park, deadline,
+            callback!(
+                @capture<'tcx> {
+                    callback: DynUnblockCallback<'tcx>,
+                }
+                |this, unblock: UnblockKind| {
+                    match unblock {
+                        UnblockKind::Ready => {
+                            let thread = this.active_thread();
+                            let token = this.machine.thread_tokens.tokens.remove(&thread).expect("
+                                can only be unblocked by thread_unpark, which sets a token
+                            ");
+
+                            if let Some(vclock) = token {
+                                this.acquire_clock(&vclock)?;
+                            }
+                        },
+                        UnblockKind::TimedOut => {}
+                    }
+
+                    callback.call(this, unblock)
+                }
+            ));
+            interp_ok(ParkResult::Parked)
+        }
+    }
+
+    /// Unparks `thread`.
+    ///
+    /// If `thread` is blocked through `thread_unpark`, then unblock it. Otherwise
+    /// add the threads token to the thread token set, so that the next `thread_park`
+    /// returns immediately.
+    fn thread_unpark(&mut self, thread: ThreadId) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let mut vclock = None;
+        this.release_clock(|c| vclock = Some(c.clone()))?;
+        this.machine.thread_tokens.tokens.insert(thread, vclock);
+
+        if this.machine.threads.thread_ref(thread).is_blocked_on(&BlockReason::Park) {
+            // Only unblock threads that are currently parked.
+            this.unblock_thread(thread, BlockReason::Park)?;
+        }
+
+        interp_ok(())
     }
 }
