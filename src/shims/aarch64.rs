@@ -4,7 +4,7 @@ use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
 
-use crate::shims::math::compute_crc32;
+use crate::shims::math::{compute_crc32, sha256_round, sigma0, sigma1};
 use crate::*;
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -275,8 +275,159 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(Scalar::from_u128(result), &dest)?;
             }
 
+            "crypto.sha256h" => {
+                this.expect_target_feature_for_intrinsic(link_name, "sha2")?;
+
+                let [abcd, efgh, wk] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+
+                let (abcd_reg, abcd_len) = this.project_to_simd(abcd)?;
+                let (efgh_reg, efgh_len) = this.project_to_simd(efgh)?;
+                let (wk_reg, wk_len) = this.project_to_simd(wk)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+
+                assert_eq!(abcd_len, 4);
+                assert_eq!(efgh_len, 4);
+                assert_eq!(wk_len, 4);
+                assert_eq!(dest_len, 4);
+
+                let abcd: [u32; 4] = read(this, &abcd_reg)?;
+                let efgh: [u32; 4] = read(this, &efgh_reg)?;
+                let wk: [u32; 4] = read(this, &wk_reg)?;
+
+                let result = sha256h(abcd, efgh, wk);
+
+                write(this, &dest, result)?;
+            }
+            "crypto.sha256h2" => {
+                this.expect_target_feature_for_intrinsic(link_name, "sha2")?;
+
+                let [efgh, abcd, wk] =
+                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+
+                let (efgh_reg, efgh_len) = this.project_to_simd(efgh)?;
+                let (abcd_reg, abcd_len) = this.project_to_simd(abcd)?;
+                let (wk_reg, wk_len) = this.project_to_simd(wk)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+
+                assert_eq!(efgh_len, 4);
+                assert_eq!(abcd_len, 4);
+                assert_eq!(wk_len, 4);
+                assert_eq!(dest_len, 4);
+
+                let efgh: [u32; 4] = read(this, &efgh_reg)?;
+                let abcd: [u32; 4] = read(this, &abcd_reg)?;
+                let wk: [u32; 4] = read(this, &wk_reg)?;
+
+                let result = sha256h2(efgh, abcd, wk);
+
+                write(this, &dest, result)?;
+            }
+            "crypto.sha256su0" => {
+                this.expect_target_feature_for_intrinsic(link_name, "sha2")?;
+
+                let [a, b] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+
+                let (a_reg, a_len) = this.project_to_simd(a)?;
+                let (b_reg, b_len) = this.project_to_simd(b)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+
+                assert_eq!(a_len, 4);
+                assert_eq!(b_len, 4);
+                assert_eq!(dest_len, 4);
+
+                let a: [u32; 4] = read(this, &a_reg)?;
+                let b: [u32; 4] = read(this, &b_reg)?;
+
+                let result = sha256su0(a, b);
+
+                write(this, &dest, result)?;
+            }
+            "crypto.sha256su1" => {
+                this.expect_target_feature_for_intrinsic(link_name, "sha2")?;
+
+                let [a, b, c] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+
+                let (a_reg, a_len) = this.project_to_simd(a)?;
+                let (b_reg, b_len) = this.project_to_simd(b)?;
+                let (c_reg, c_len) = this.project_to_simd(c)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+
+                assert_eq!(a_len, 4);
+                assert_eq!(b_len, 4);
+                assert_eq!(c_len, 4);
+                assert_eq!(dest_len, 4);
+
+                let a: [u32; 4] = read(this, &a_reg)?;
+                let b: [u32; 4] = read(this, &b_reg)?;
+                let c: [u32; 4] = read(this, &c_reg)?;
+
+                let result = sha256su1(a, b, c);
+
+                write(this, &dest, result)?;
+            }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
     }
+}
+
+fn read<'c>(ecx: &mut MiriInterpCx<'c>, reg: &OpTy<'c>) -> InterpResult<'c, [u32; 4]> {
+    let mut res = [0; 4];
+    for (i, dst) in res.iter_mut().enumerate() {
+        let projected = &ecx.project_index(reg, i.try_into().unwrap())?;
+        *dst = ecx.read_scalar(projected)?.to_u32()?;
+    }
+    interp_ok(res)
+}
+
+fn write<'c>(
+    ecx: &mut MiriInterpCx<'c>,
+    dest: &MPlaceTy<'c>,
+    val: [u32; 4],
+) -> InterpResult<'c, ()> {
+    for (i, part) in val.into_iter().enumerate() {
+        let projected = &ecx.project_index(dest, i.to_u64())?;
+        ecx.write_scalar(Scalar::from_u32(part), projected)?;
+    }
+    interp_ok(())
+}
+
+// SHA-256 math helpers adapted from RustCrypto's sha256 soft implementation:
+// https://github.com/RustCrypto/hashes/blob/3d2bc57db40fd6aeb25d6c6da98d67e2784c2985/sha2/src/sha256/soft/compact.rs
+
+fn sha256su0(v0: [u32; 4], v1: [u32; 4]) -> [u32; 4] {
+    [
+        v0[0].wrapping_add(sigma0(v0[1])),
+        v0[1].wrapping_add(sigma0(v0[2])),
+        v0[2].wrapping_add(sigma0(v0[3])),
+        v0[3].wrapping_add(sigma0(v1[0])),
+    ]
+}
+
+fn sha256su1(v0: [u32; 4], v1: [u32; 4], v2: [u32; 4]) -> [u32; 4] {
+    let r0 = v0[0].wrapping_add(v1[1]).wrapping_add(sigma1(v2[2]));
+    let r1 = v0[1].wrapping_add(v1[2]).wrapping_add(sigma1(v2[3]));
+    let r2 = v0[2].wrapping_add(v1[3]).wrapping_add(sigma1(r0));
+    let r3 = v0[3].wrapping_add(v2[0]).wrapping_add(sigma1(r1));
+    [r0, r1, r2, r3]
+}
+
+// SHA256H/SHA256H2 do four compression rounds on the abcd/efgh layout.
+// https://developer.arm.com/architectures/instruction-sets/intrinsics/#f:@navigationhierarchiesinstructiongroup=[Cryptography,SHA256]
+fn sha256hash(abcd: [u32; 4], efgh: [u32; 4], wk: [u32; 4]) -> ([u32; 4], [u32; 4]) {
+    let mut state = [abcd[0], abcd[1], abcd[2], abcd[3], efgh[0], efgh[1], efgh[2], efgh[3]];
+    for &wk_i in &wk {
+        state = sha256_round(state, wk_i);
+    }
+    ([state[0], state[1], state[2], state[3]], [state[4], state[5], state[6], state[7]])
+}
+
+fn sha256h(abcd: [u32; 4], efgh: [u32; 4], wk: [u32; 4]) -> [u32; 4] {
+    sha256hash(abcd, efgh, wk).0
+}
+
+// sha256h2 takes efgh as the first argument. abcd and efgh are swapped when calling sha256hash.
+fn sha256h2(efgh: [u32; 4], abcd: [u32; 4], wk: [u32; 4]) -> [u32; 4] {
+    sha256hash(abcd, efgh, wk).1
 }
