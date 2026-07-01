@@ -1397,6 +1397,82 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    fn linux_fallocate(
+        &mut self,
+        fd: i32,
+        mode: i32,
+        offset: i64,
+        size: i64,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        // Reject if isolation is enabled.
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`fallocate`", reject_with)?;
+            // Set error code "EBADF" (bad fd).
+            return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+        }
+
+        // EINVAL is set when: "offset was less than 0, or len was less than or equal to 0".
+        if offset < 0 || size <= 0 {
+            return this.set_errno_and_return_neg1_i32(LibcError("EINVAL"));
+        }
+
+        // Get the file handle.
+        let Some(fd) = this.machine.fds.get(fd) else {
+            return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+        };
+        let Some(file) = fd.downcast::<FileHandle>() else {
+            // Man page specifies to set ENODEV if `fd` is not a regular file.
+            return this.set_errno_and_return_neg1_i32(LibcError("ENODEV"));
+        };
+
+        if !file.writable {
+            // The file is not writable.
+            return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+        }
+
+        // We only support `fallocate` as a replacement for `posix_fallocate` on linux,
+        // a number of additional features are not yet supported. These are:
+        //
+        // - FALLOC_FL_KEEP_SIZE: allocates blocks in memory for the file but does
+        //   not increase the size
+        //
+        // The rest of the flags require specific file system support and I have no
+        // idea how we could mimic this in Miri:
+        // - FALLOC_FL_UNSHARE_RANGE
+        // - FALLOC_FL_PUNCH_HOLE
+        // - FALLOC_FL_COLLAPSE_RANGE
+        // - FALLOC_FL_INSERT_RANGE
+
+        // `mode` == `0` is the same behaviour as `posix_fallocate`, so anything other
+        // than `0` is not supported (per above).
+        if mode != 0 {
+            throw_unsup_format!("unsupported flags for `fallocate` in `mode` argument: {mode}")
+        }
+
+        let current_size = match file.file.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(err) => return this.io_error_to_errnum(err),
+        };
+        // Checked i64 addition, to ensure the result does not exceed the max file size.
+        let new_size = match offset.checked_add(size) {
+            // `new_size` is definitely non-negative, so we can cast to `u64`.
+            Some(new_size) => u64::try_from(new_size).unwrap(),
+            None => return this.set_errno_and_return_neg1_i32(LibcError("EFBIG")), // new size too big
+        };
+        // If the size of the file is less than offset+size, then the file is increased to this size;
+        // otherwise the file size is left unchanged.
+        if current_size < new_size {
+            interp_ok(match file.file.set_len(new_size) {
+                Ok(()) => Scalar::from_i32(0),
+                Err(e) => this.set_errno_and_return_neg1_i32(this.io_error_to_errnum(e)?)?,
+            })
+        } else {
+            interp_ok(Scalar::from_i32(0))
+        }
+    }
+
     fn fsync(&mut self, fd_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
         // On macOS, `fsync` (unlike `fcntl(F_FULLFSYNC)`) does not wait for the
         // underlying disk to finish writing. In the interest of host compatibility,

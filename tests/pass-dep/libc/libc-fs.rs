@@ -43,6 +43,10 @@ fn main() {
     #[cfg(target_os = "linux")]
     test_posix_fallocate::<libc::off64_t>(libc::posix_fallocate64);
     #[cfg(target_os = "linux")]
+    test_fallocate::<libc::off_t>(libc::fallocate);
+    #[cfg(target_os = "linux")]
+    test_fallocate::<libc::off64_t>(libc::fallocate64);
+    #[cfg(target_os = "linux")]
     test_sync_file_range();
     test_fstat();
     test_stat();
@@ -595,6 +599,87 @@ fn test_posix_fallocate<T: From<i32>>(
 
         // Allocate from offset
         res = unsafe { posix_fallocate(fd, T::from(7), T::from(7)) };
+        assert_eq!(res, 0);
+        assert_eq!(file.metadata().unwrap().len(), 14);
+
+        remove_file(&path).unwrap();
+    };
+
+    test_errors();
+    test();
+}
+
+#[cfg(target_os = "linux")]
+fn test_fallocate<T: From<i32>>(
+    fallocate: unsafe extern "C" fn(
+        fd: libc::c_int,
+        mode: libc::c_int,
+        offset: T,
+        len: T,
+    ) -> libc::c_int,
+) {
+    // libc::off_t is i32 in target i686-unknown-linux-gnu
+    // https://docs.rs/libc/latest/i686-unknown-linux-gnu/libc/type.off_t.html
+
+    let test_errors = || {
+        // invalid fd
+        let ret = unsafe { fallocate(42, 0, T::from(0), T::from(10)) };
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EBADF);
+
+        let path = utils::prepare("miri_test_libc_fallocate_errors.txt");
+        let file = File::create(&path).unwrap();
+
+        // invalid offset
+        let ret = unsafe { fallocate(file.as_raw_fd(), 0, T::from(-10), T::from(10)) };
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EINVAL);
+
+        // invalid len
+        let ret = unsafe { fallocate(file.as_raw_fd(), 0, T::from(0), T::from(-10)) };
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EINVAL);
+
+        // fd not writable
+        let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString::new failed");
+        let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY) };
+        let ret = unsafe { fallocate(fd, 0, T::from(0), T::from(10)) };
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        assert_eq!(ret, -1);
+        assert_eq!(errno, libc::EBADF);
+    };
+
+    let test = || {
+        let bytes = b"hello";
+        let path = utils::prepare("miri_test_libc_fallocate.txt");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(bytes).unwrap();
+        file.sync_all().unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 5);
+
+        let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString::new failed");
+        let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR) };
+
+        // Allocate to a bigger size from offset 0
+        let mut res = unsafe { fallocate(fd, 0, T::from(0), T::from(10)) };
+        assert_eq!(res, 0);
+        assert_eq!(file.metadata().unwrap().len(), 10);
+
+        // Write after allocation
+        file.write(b"dup").unwrap();
+        file.sync_all().unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 10);
+
+        // Can't truncate to a smaller size with fallocate
+        res = unsafe { fallocate(fd, 0, T::from(0), T::from(3)) };
+        assert_eq!(res, 0);
+        assert_eq!(file.metadata().unwrap().len(), 10);
+
+        // Allocate from offset
+        res = unsafe { fallocate(fd, 0, T::from(7), T::from(7)) };
         assert_eq!(res, 0);
         assert_eq!(file.metadata().unwrap().len(), 14);
 
