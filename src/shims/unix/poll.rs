@@ -1,0 +1,257 @@
+use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::time::Duration;
+
+use rustc_target::spec::Os;
+
+use crate::shims::files::FdNum;
+use crate::*;
+
+/// An interest into a file descriptor together with its
+/// relevant readiness events.
+#[derive(Debug)]
+struct PollInterest<'tcx> {
+    /// Place whether the ready events of the interests should
+    /// be written to.
+    revents_place: MPlaceTy<'tcx>,
+    /// The readiness events this interest is interested in.
+    relevant: Readiness,
+}
+
+impl VisitProvenance for PollInterest<'_> {
+    fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+        self.revents_place.visit_provenance(visit);
+    }
+}
+
+impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    fn poll(
+        &mut self,
+        fds: &OpTy<'tcx>,
+        nfds: &OpTy<'tcx>,
+        timeout: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let nfds_layout = this.libc_ty_layout("nfds_t");
+        let nfds: u64 = this.read_scalar(nfds)?.to_int(nfds_layout.size)?.try_into().unwrap();
+        let timeout = this.read_scalar(timeout)?.to_i32()?;
+
+        let deadline = if timeout.is_positive() {
+            let timeout_duration = Duration::from_millis(u64::try_from(timeout).unwrap());
+            Some(this.machine.monotonic_clock.now().add_lossy(timeout_duration).into())
+        } else {
+            None
+        };
+
+        let fds_arr_layout = this.libc_array_ty_layout("pollfd", nfds);
+        let fds_arr_mplace = this.deref_pointer_as(fds, fds_arr_layout)?;
+        let mut fds_arr_iter = this.project_array_fields(&fds_arr_mplace)?;
+
+        // Because `poll` allows adding multiple interests for the same file descriptor
+        // we need to store the interests in a map of vectors.
+        let mut interests = BTreeMap::<FdNum, Vec<PollInterest<'tcx>>>::new();
+        let mut fulfilled_interests = 0u32;
+
+        // We iterate over the fds array of the `poll` syscall. For each fd, we check its
+        // output field, the relevant events, and whether they are currently fulfilled.
+        while let Some((_idx, pollfd)) = fds_arr_iter.next(this)? {
+            let fd_field = this.project_field_named(&pollfd, "fd")?;
+            let fd_num = this.read_scalar(&fd_field)?.to_i32()?;
+            let Some(fd) = this.machine.fds.get(fd_num) else {
+                return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
+            };
+
+            let events_field = this.project_field_named(&pollfd, "events")?;
+            let events = this.read_scalar(&events_field)?.to_u16()?;
+
+            let revents_field = this.project_field_named(&pollfd, "revents")?;
+
+            let mut relevant_events = this.poll_bitflag_to_readiness(events)?;
+            // The POLLHUP and POLLERR interests are always set.
+            relevant_events.write_closed = true;
+            relevant_events.error = true;
+            let active_events = relevant_events.clone() & fd.readiness()?.clone();
+            if active_events != Readiness::EMPTY {
+                // The interest in this file description is currently fulfilled.
+                fulfilled_interests = fulfilled_interests.strict_add(1);
+                let poll_events = this.readiness_to_poll_bitflag(&active_events);
+                this.write_scalar(Scalar::from_u16(poll_events), &revents_field)?;
+            } else {
+                // The interest in this file description is currently not fulfilled.
+                // Since we later only update the `revents` field for FDs which receive
+                // an event, we initially zero this field.
+                this.write_null(&revents_field)?;
+            }
+
+            let entry = interests.entry(fd_num).or_default();
+            entry.push(PollInterest {
+                relevant: relevant_events,
+                revents_place: revents_field.clone(),
+            });
+        }
+
+        if fulfilled_interests > 0 {
+            // Some interests are already fulfilled. We thus don't need to
+            // block the thread and can just return here.
+            return this.write_scalar(Scalar::from_u32(fulfilled_interests), dest);
+        }
+
+        // None of the interests are currently fulfilled; we thus need to
+        // create a readiness watcher and block the thread until any
+        // interest gets fulfilled.
+
+        let watcher = Rc::new(this.machine.readiness_interests.new_watcher());
+        for (fd_num, interests) in interests.iter() {
+            // Because a readiness watcher can only have one interest per
+            // file descriptor, we calculate the "maximal" relevant readiness
+            // for the file descriptor and add an interest with this readiness.
+            let relevant = interests.iter().fold(Readiness::EMPTY, |mut relevant, interest| {
+                relevant |= interest.relevant.clone();
+                relevant
+            });
+
+            watcher
+                .add_interest(
+                    *fd_num,
+                    relevant,
+                    /* is_edge_triggered */ false,
+                    u64::try_from(*fd_num).unwrap(),
+                    this,
+                )?
+                .ok();
+        }
+        watcher.add_thread(this.machine.threads.active_thread());
+
+        let dest = dest.clone();
+        this.block_thread(
+            BlockReason::Readiness { watcher: watcher.clone() },
+            deadline,
+            callback!(
+                @capture<'tcx> {
+                    watcher: Rc<ReadinessWatcher>,
+                    interests: BTreeMap<FdNum, Vec<PollInterest<'tcx>>>,
+                    dest: MPlaceTy<'tcx>,
+                } |this, reason: UnblockKind| {
+                    if let UnblockKind::TimedOut = reason {
+                        return this.write_null(&dest);
+                    }
+
+                    let mut fulfilled_interests = 0u32;
+
+                    // Iterate over all ready interests of the watcher and
+                    // write the output readiness of all related poll interests.
+                    for ready in watcher.get_ready_interests(watcher.ready_count(), this)? {
+                        let fd_num = FdNum::try_from(ready.data).expect("Data is always a file descriptor");
+                        for interest in interests.get(&fd_num).unwrap() {
+                            let events = ready.active().clone() & interest.relevant.clone();
+                            if events == Readiness::EMPTY {
+                                // The interest isn't fulfilled; we already wrote zero to the
+                                // `revents` field, so we can skip it.
+                                continue;
+                            }
+
+                            // The interest is fulfilled; we need to write write the
+                            // masked `events` into the `revents` field of the interest.
+
+                            fulfilled_interests = fulfilled_interests.strict_add(1);
+                            let poll_events = this.readiness_to_poll_bitflag(&events);
+                            this.write_scalar(Scalar::from_u16(poll_events), &interest.revents_place)?;
+                        }
+                    }
+
+                    this.write_scalar(Scalar::from_u32(fulfilled_interests), &dest)
+                }
+            ),
+        );
+
+        interp_ok(())
+    }
+}
+
+impl<'tcx> EvalContextPrivExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Convert a [`Readiness`] instance into the corresponding poll
+    /// readiness bitflag.
+    fn readiness_to_poll_bitflag(&self, readiness: &Readiness) -> u16 {
+        let this = self.eval_context_ref();
+
+        let pollin = this.eval_libc_u16("POLLIN");
+        let pollout = this.eval_libc_u16("POLLOUT");
+        let pollhup = this.eval_libc_u16("POLLHUP");
+        let pollerr = this.eval_libc_u16("POLLERR");
+
+        let mut bitflag = 0;
+        if readiness.readable {
+            bitflag |= pollin;
+        }
+        if readiness.writable {
+            bitflag |= pollout;
+        }
+        if readiness.write_closed {
+            bitflag |= pollhup;
+        }
+        if readiness.error {
+            bitflag |= pollerr;
+        }
+
+        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::FreeBsd | Os::Illumos) {
+            // POLLRDHUP only exists on Linux, Android, FreeBSD, and Illumos.
+            let pollrdhup = this.eval_libc_u16("POLLRDHUP");
+            if readiness.read_closed {
+                bitflag |= pollrdhup;
+            }
+        }
+
+        bitflag
+    }
+
+    /// Convert a poll readiness bitflag into the corresponding
+    /// [`Readiness`] instance.
+    fn poll_bitflag_to_readiness(&self, mut bitflag: u16) -> InterpResult<'tcx, Readiness> {
+        let this = self.eval_context_ref();
+
+        let pollin = this.eval_libc_u16("POLLIN");
+        let pollout = this.eval_libc_u16("POLLOUT");
+        let pollhup = this.eval_libc_u16("POLLHUP");
+        let pollerr = this.eval_libc_u16("POLLERR");
+
+        let mut readiness = Readiness::EMPTY;
+        if bitflag & pollin == pollin {
+            readiness.readable = true;
+            bitflag &= !pollin;
+        }
+        if bitflag & pollout == pollout {
+            readiness.writable = true;
+            bitflag &= !pollout;
+        }
+        if bitflag & pollhup == pollhup {
+            readiness.write_closed = true;
+            bitflag &= !pollhup;
+        }
+        if bitflag & pollerr == pollerr {
+            readiness.error = true;
+            bitflag &= !pollerr;
+        }
+
+        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::FreeBsd | Os::Illumos) {
+            // POLLRDHUP only exists on Linux, Android, FreeBSD, and Illumos.
+            let pollrdhup = this.eval_libc_u16("POLLRDHUP");
+            if bitflag & pollrdhup == pollrdhup {
+                readiness.read_closed = true;
+                bitflag &= !pollrdhup;
+            }
+        }
+
+        if bitflag != 0 {
+            throw_unsup_format!(
+                "poll: poll event {bitflag:#x} is unsupported. Only POLLIN, \
+                POLLOUT, POLLERR, POLLHUP, and POLLRDHUP are supported."
+            );
+        }
+
+        interp_ok(readiness)
+    }
+}
