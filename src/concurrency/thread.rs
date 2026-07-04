@@ -105,6 +105,8 @@ pub enum BlockReason {
     RwLock,
     /// Blocked on a Futex variable.
     Futex,
+    /// Blocked by a thread park operation.
+    Park,
     /// Blocked on an InitOnce.
     InitOnce,
     /// Blocked on epoll.
@@ -226,6 +228,11 @@ impl<'tcx> Thread<'tcx> {
     /// Return whether this thread is enabled or not.
     pub fn is_enabled(&self) -> bool {
         self.state.is_enabled()
+    }
+
+    /// Return whether this thread is blocked for `reason`.
+    pub fn is_blocked_on(&self, reason: &BlockReason) -> bool {
+        self.state.is_blocked_on(reason)
     }
 
     /// Get the name of the current thread for display purposes; will include thread ID if not set.

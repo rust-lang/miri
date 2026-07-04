@@ -337,7 +337,7 @@ where
 #[inline]
 fn condattr_clock_offset<'tcx>(ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, u64> {
     interp_ok(match &ecx.tcx.sess.target.os {
-        Os::Linux | Os::Illumos | Os::Solaris | Os::FreeBsd | Os::Android => 0,
+        Os::Linux | Os::Illumos | Os::Solaris | Os::FreeBsd | Os::Android | Os::NetBsd => 0,
         // macOS does not have a clock attribute.
         os => throw_unsup_format!("`pthread_condattr` clock field is not supported on {os}"),
     })
@@ -376,8 +376,8 @@ fn condattr_set_clock_id<'tcx>(
 fn cond_init_offset<'tcx>(ecx: &MiriInterpCx<'tcx>) -> InterpResult<'tcx, Size> {
     let offset = match &ecx.tcx.sess.target.os {
         Os::Linux | Os::Illumos | Os::Solaris | Os::FreeBsd | Os::Android => 0,
-        // macOS stores a signature in the first bytes, so we move to offset 4.
-        Os::MacOs => 4,
+        // macOS and NetBSD store a signature in the first bytes, so we move to offset 4.
+        Os::MacOs | Os::NetBsd => 4,
         os => throw_unsup_format!("`pthread_cond` is not supported on {os}"),
     };
     let offset = Size::from_bytes(offset);

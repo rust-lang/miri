@@ -36,7 +36,7 @@ use rustc_target::spec::{Arch, Os};
 use crate::alloc_addresses::EvalContextExt;
 use crate::concurrency::cpu_affinity::{self, CpuAffinityMask};
 use crate::concurrency::data_race::{self, NaReadType, NaWriteType};
-use crate::concurrency::sync::SyncObj;
+use crate::concurrency::sync::{SyncObj, ThreadTokens};
 use crate::concurrency::{
     AllocDataRaceHandler, GenmcCtx, GenmcEvalContextExt as _, GlobalDataRaceHandler, weak_memory,
 };
@@ -541,6 +541,9 @@ pub struct MiriMachine<'tcx> {
     /// The set of threads.
     pub(crate) threads: ThreadManager<'tcx>,
 
+    /// The list of threads that should wake immediately from a `thread_park`.
+    pub(crate) thread_tokens: ThreadTokens,
+
     /// Handles blocking I/O and polling for completion.
     pub(crate) blocking_io: BlockingIoManager,
 
@@ -774,6 +777,7 @@ impl<'tcx> MiriMachine<'tcx> {
             dirs: Default::default(),
             layouts,
             threads,
+            thread_tokens: Default::default(),
             thread_cpu_affinity,
             blocking_io,
             static_roots: Vec::new(),
@@ -1020,6 +1024,7 @@ impl VisitProvenance for MiriMachine<'_> {
         #[rustfmt::skip]
         let MiriMachine {
             threads,
+            thread_tokens: _,
             thread_cpu_affinity: _,
             tls,
             env_vars,
