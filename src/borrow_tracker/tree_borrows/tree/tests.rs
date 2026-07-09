@@ -137,6 +137,61 @@ fn tree_compacting_is_sound() {
     }
 }
 
+/// Test that compacting a node with *several* children is sound.
+///
+/// `tree_compacting_is_sound` only checks `can_be_replaced_by_child` under the *same* relatedness
+/// for parent and child, which suffices for a single child (parent and child share one root-path).
+/// With siblings, an access through one child's subtree is a *child* access to the parent but a
+/// *foreign* access to its siblings, so parent and sibling evolve under different relatednesses.
+///
+/// `can_be_replaced_by_children` must therefore be a simulation that is *closed* under
+/// every relatedness pairing reachable for an (ancestor, descendant) pair: both local,
+/// both foreign, and local to parent but foreign to sibling. (The fourth pairing,
+/// foreign to parent but local to sibling, is impossible.)
+/// 
+/// If both survive an access, the results must remain in the relation. Child UB is
+/// always fine, and parent-only UB means the access came from a sibling subtree that
+/// `tree_compacting_is_sound` already shows causes the same UB without the parent.
+#[test]
+fn tree_multi_child_compacting_is_sound() {
+    // The parent is unprotected
+    let parent_protected = false;
+    for ([parent, child], child_protected) in <([LocationState; 2], bool)>::exhaustive() {
+        // Start with the same preconditions as single-child compaction, but instead apply the multi-child rule.
+        if child_protected {
+            precondition!(child.compatible_with_protector())
+        }
+        precondition!(parent.permission().can_be_replaced_by_children(child.permission()));
+        for kind in AccessKind::exhaustive() {
+            for [rel_parent, rel_child] in <[AccessRelatedness; 2]>::exhaustive() {
+                // Any local access to a child must also be local to the parent.
+                // A local access to a child with a foreign access to the parent is impossible.
+                // Therefore, and we can skip this configuration.
+                if !rel_child.is_foreign() && rel_parent.is_foreign() {
+                    continue;
+                }
+                let new_parent = parent.perform_access_no_fluff(kind, rel_parent, parent_protected);
+                let new_child = child.perform_access_no_fluff(kind, rel_child, child_protected);
+                if let (Some(np), Some(nc)) = (new_parent, new_child) {
+                    assert!(
+                        np.permission().can_be_replaced_by_children(nc.permission()),
+                        "`can_be_replaced_by_children` is not preserved: on a {} {} to the parent and {} {} to a {} {}{} child, the parent becomes {}, the child becomes {}, and these are no longer replaceable!",
+                        as_foreign_or_child(rel_parent),
+                        kind,
+                        as_foreign_or_child(rel_child),
+                        kind,
+                        as_lazy_or_accessed(child.accessed()),
+                        child.permission(),
+                        as_protected(child_protected),
+                        np.permission(),
+                        nc.permission()
+                    )
+                }
+            }
+        }
+    }
+}
+
 #[test]
 #[rustfmt::skip]
 // Ensure that of 2 accesses happen, one foreign and one a child, and we are protected, that we

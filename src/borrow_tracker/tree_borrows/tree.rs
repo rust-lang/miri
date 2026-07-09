@@ -757,45 +757,59 @@ impl Tree {
         node.children.is_empty() && !live.contains(&node.tag)
     }
 
-    /// Checks whether a node can be replaced by its only child.
-    /// If so, returns the index of said only child.
-    /// If not, returns none.
-    fn can_be_replaced_by_single_child(
-        &self,
-        idx: UniIndex,
-        live: &FxHashSet<BorTag>,
-    ) -> Option<UniIndex> {
+    /// Checks whether a node can be spliced out of the tree, reparenting all of its
+    /// children directly onto its own parent. This is sound exactly when, on every
+    /// location, `can_be_replaced_by_child` holds between the node's permission and
+    /// the permission of *each* of its children: the simulation argument applies to
+    /// each child subtree independently, since removing the (dead) node does not
+    /// change the access-relatedness of anything outside of it.
+    fn can_be_replaced_by_children(&self, idx: UniIndex, live: &FxHashSet<BorTag>) -> bool {
         let node = self.nodes.get(idx).unwrap();
-
-        let [child_idx] = node.children[..] else { return None };
 
         // We never want to replace the root node, as it is also kept in `root_ptr_tags`.
         if live.contains(&node.tag) || node.parent.is_none() {
-            return None;
+            return false;
         }
         // Since protected nodes are never GC'd (see `borrow_tracker::FrameExtra::visit_provenance`),
         // we know that `node` is not protected because otherwise `live` would
         // have contained `node.tag`.
-        let child = self.nodes.get(child_idx).unwrap();
+
         // Check that for that one child, `can_be_replaced_by_child` holds for the permission
         // on all locations.
-        for (_range, loc) in self.locations.iter_all() {
-            let parent_perm = loc
-                .perms
-                .get(idx)
-                .map(|x| x.permission)
-                .unwrap_or_else(|| node.default_initial_perm);
-            let child_perm = loc
-                .perms
-                .get(child_idx)
-                .map(|x| x.permission)
-                .unwrap_or_else(|| child.default_initial_perm);
-            if !parent_perm.can_be_replaced_by_child(child_perm) {
-                return None;
-            }
+        if node.children.len() <= 1 {
+            return node.children.iter().all(|&child_idx| {
+                let child = self.nodes.get(child_idx).unwrap();
+                self.locations.iter_all().all(|(_range, loc)| {
+                    let parent_perm =
+                        loc.perms.get(idx).map(|x| x.permission).unwrap_or(node.default_initial_perm);
+                    let child_perm = loc
+                        .perms
+                        .get(child_idx)
+                        .map(|x| x.permission)
+                        .unwrap_or(child.default_initial_perm);
+                    parent_perm.can_be_replaced_by_child(child_perm)
+                })
+            });
         }
 
-        Some(child_idx)
+        // With several children, each sees the others' accesses as foreign, so the stricter
+        // `can_be_replaced_by_children` applies. Cache each child's index and fallback permission
+        // once, and iterate locations on the outside, so we look up neither the child node nor the
+        // parent's permission once per (child, location).
+        let children: SmallVec<[(UniIndex, Permission); 4]> = node
+            .children
+            .iter()
+            .map(|&child_idx| (child_idx, self.nodes.get(child_idx).unwrap().default_initial_perm))
+            .collect();
+        self.locations.iter_all().all(|(_range, loc)| {
+            let parent_perm =
+                loc.perms.get(idx).map(|x| x.permission).unwrap_or(node.default_initial_perm);
+            children.iter().all(|&(child_idx, child_default)| {
+                let child_perm =
+                    loc.perms.get(child_idx).map(|x| x.permission).unwrap_or(child_default);
+                parent_perm.can_be_replaced_by_children(child_perm)
+            })
+        })
     }
 
     /// Properly removes a node.
@@ -855,31 +869,29 @@ impl Tree {
                 // First, get the current children of `node`. To appease the borrow checker,
                 // we have to temporarily move the list out of the node, and then put the
                 // list of remaining children back in.
-                let mut children_of_node =
-                    mem::take(&mut self.nodes.get_mut(*tag).unwrap().children);
-                // Remove all useless children.
-                children_of_node.retain_mut(|idx| {
-                    if self.is_useless(*idx, live) {
-                        // Delete `idx` node everywhere else.
-                        self.remove_useless_node(*idx);
-                        // And delete it from children_of_node.
-                        false
-                    } else {
-                        if let Some(nextchild) = self.can_be_replaced_by_single_child(*idx, live) {
-                            // `nextchild` is our grandchild, and will become our direct child.
-                            // Delete the in-between node, `idx`.
-                            self.remove_useless_node(*idx);
-                            // Set the new child's parent.
-                            self.nodes.get_mut(nextchild).unwrap().parent = Some(*tag);
-                            // Save the new child in children_of_node.
-                            *idx = nextchild;
+                let old_children = mem::take(&mut self.nodes.get_mut(*tag).unwrap().children);
+                let mut new_children = SmallVec::<[UniIndex; 4]>::with_capacity(old_children.len());
+                for idx in old_children {
+                    if self.is_useless(idx, live) {
+                        // Delete `idx` node everywhere else, and drop it from the children.
+                        self.remove_useless_node(idx);
+                    } else if self.can_be_replaced_by_children(idx, live) {
+                        // Splice out the in-between node `idx`: its children (our grandchildren)
+                        // all become our direct children. They have already been processed, so
+                        // they need no further compacting.
+                        let grandchildren =
+                            mem::take(&mut self.nodes.get_mut(idx).unwrap().children);
+                        for &grandchild in &grandchildren {
+                            self.nodes.get_mut(grandchild).unwrap().parent = Some(*tag);
                         }
-                        // retain it
-                        true
+                        self.remove_useless_node(idx);
+                        new_children.extend(grandchildren);
+                    } else {
+                        new_children.push(idx);
                     }
-                });
-                // Put back the now-filtered vector.
-                self.nodes.get_mut(*tag).unwrap().children = children_of_node;
+                }
+                // Put back the now-rebuilt vector.
+                self.nodes.get_mut(*tag).unwrap().children = new_children;
 
                 // We are done, the parent can continue.
                 stack.pop();
