@@ -58,6 +58,7 @@ pub enum TerminationInfo {
         extra: Option<&'static str>,
         retag_explain: bool,
     },
+    Recursion,
     UnsupportedForeignItem(String),
 }
 
@@ -100,6 +101,7 @@ impl fmt::Display for TerminationInfo {
                     op2.thread_info
                 ),
             UnsupportedForeignItem(msg) => write!(f, "{msg}"),
+            Recursion => Ok(()),
         }
     }
 }
@@ -292,6 +294,7 @@ pub fn report_result<'tcx>(
                 }
                 return None;
             }
+            Recursion => Some("recursive call"),
             MultipleSymbolDefinitions { .. } | SymbolShimClashing { .. } => None,
         };
         #[rustfmt::skip]
@@ -360,8 +363,34 @@ pub fn report_result<'tcx>(
                 helps.push(note!("this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior"));
                 helps.push(note!("see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information"));
                 helps
-            }
-                ,
+            },
+            Recursion => {
+                let mut helps = vec![];
+                let stacktrace = ecx.generate_stacktrace();
+                let mut frames = stacktrace.iter();
+                if let Some(frame) = frames.next() {
+                    labels.push(format!("recursive call of function `{}`", frame.instance));
+                }
+                if let Some(frame) = frames.next() {
+                    helps.push(note_span!(frame.span.data(), "(1) called from function `{}`", frame.instance));
+                }
+                if let Some(frame) = frames.next() {
+                    helps.push(note_span!(frame.span.data(), "... which itself was called from function `{}`", frame.instance));
+                }
+                let mut frames = stacktrace.iter().skip(1);
+                for stackframe in frames.by_ref() {
+                    if stacktrace.first().unwrap().instance == stackframe.instance {
+                        break;
+                    }
+                }
+                if let Some(frame) = frames.next() {
+                    helps.push(note_span!(frame.span.data(), "(2) originally called from function `{}`", frame.instance));
+                }
+                if let Some(frame) = frames.next() && ecx.machine.is_local(frame.instance) {
+                    helps.push(note_span!(frame.span.data(), "... which itself was called from function `{}`", frame.instance));
+                }
+                helps
+            },
             _ => vec![],
         };
         (title, helps)

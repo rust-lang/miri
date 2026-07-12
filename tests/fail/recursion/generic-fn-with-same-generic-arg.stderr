@@ -1,0 +1,34 @@
+recurse @ 0
+error: recursive call: 
+  --> tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+   |
+LL | fn recurse<T>(depth: u64) {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ recursive call of function `recurse::<Foo>`
+   |
+help: (1) called from function `recurse::<Foo>`
+  --> tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+   |
+LL |     recurse::<Foo>(depth + 1);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+help: ... which itself was called from function `main`
+  --> tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+   |
+LL |     recurse::<Foo>(0);
+   |     ^^^^^^^^^^^^^^^^^
+help: (2) originally called from function `main`
+  --> tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+   |
+LL |     recurse::<Foo>(0);
+   |     ^^^^^^^^^^^^^^^^^
+   = note: stack backtrace:
+           0: recurse::<Foo>
+               at tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+           1: recurse::<Foo>
+               at tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+           2: main
+               at tests/fail/recursion/generic-fn-with-same-generic-arg.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+

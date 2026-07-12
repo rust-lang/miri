@@ -170,6 +170,8 @@ pub struct MiriConfig {
     pub short_fd_operations: bool,
     /// A list of crates that are considered user-relevant.
     pub user_relevant_crates: Vec<String>,
+    /// Should recursion be disallowed, and diagnosed.
+    pub diagnose_recursion: bool,
 }
 
 impl Default for MiriConfig {
@@ -212,6 +214,7 @@ impl Default for MiriConfig {
             float_rounding_error: FloatRoundingErrorMode::Random,
             short_fd_operations: true,
             user_relevant_crates: vec![],
+            diagnose_recursion: false,
         }
     }
 }

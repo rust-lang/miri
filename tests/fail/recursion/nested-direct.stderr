@@ -1,0 +1,41 @@
+recurse @ 0
+error: recursive call: 
+  --> tests/fail/recursion/nested-direct.rs:LL:CC
+   |
+LL | fn recurse(depth: u64) {
+   | ^^^^^^^^^^^^^^^^^^^^^^ recursive call of function `recurse`
+   |
+help: (1) called from function `recurse`
+  --> tests/fail/recursion/nested-direct.rs:LL:CC
+   |
+LL |     recurse(depth + 1);
+   |     ^^^^^^^^^^^^^^^^^^
+help: ... which itself was called from function `wrapper`
+  --> tests/fail/recursion/nested-direct.rs:LL:CC
+   |
+LL |     recurse(0);
+   |     ^^^^^^^^^^
+help: (2) originally called from function `wrapper`
+  --> tests/fail/recursion/nested-direct.rs:LL:CC
+   |
+LL |     recurse(0);
+   |     ^^^^^^^^^^
+help: ... which itself was called from function `main`
+  --> tests/fail/recursion/nested-direct.rs:LL:CC
+   |
+LL |     wrapper();
+   |     ^^^^^^^^^
+   = note: stack backtrace:
+           0: recurse
+               at tests/fail/recursion/nested-direct.rs:LL:CC
+           1: recurse
+               at tests/fail/recursion/nested-direct.rs:LL:CC
+           2: wrapper
+               at tests/fail/recursion/nested-direct.rs:LL:CC
+           3: main
+               at tests/fail/recursion/nested-direct.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+

@@ -167,6 +167,8 @@ pub struct Thread<'tcx> {
     /// The virtual call stack.
     stack: Vec<Frame<'tcx, Provenance, FrameExtra<'tcx>>>,
 
+    zz: Option<rustc_data_structures::fx::FxHashSet<rustc_middle::ty::Instance<'tcx>>>,
+
     /// A span that explains where the thread (or more specifically, its current root
     /// frame) "comes from".
     pub(crate) origin_span: Span,
@@ -308,6 +310,7 @@ impl<'tcx> Thread<'tcx> {
             state: ThreadState::Enabled,
             thread_name: name.map(|name| Vec::from(name.as_bytes())),
             stack: Vec::new(),
+            zz: None,
             origin_span: DUMMY_SP,
             top_user_relevant_frame: None,
             join_status: ThreadJoinStatus::Joinable,
@@ -324,6 +327,7 @@ impl VisitProvenance for Thread<'_> {
             unwind_payloads: panic_payload,
             last_error,
             stack,
+            zz: _,
             origin_span: _,
             top_user_relevant_frame: _,
             state: _,
@@ -487,6 +491,12 @@ impl<'tcx> ThreadManager<'tcx> {
         &mut self,
     ) -> &mut Vec<Frame<'tcx, Provenance, FrameExtra<'tcx>>> {
         &mut self.threads[self.active_thread].stack
+    }
+
+    pub fn active_thread_zz_mut(
+        &mut self,
+    ) -> &mut Option<rustc_data_structures::fx::FxHashSet<rustc_middle::ty::Instance<'tcx>>> {
+        &mut self.threads[self.active_thread].zz
     }
 
     pub(super) fn all_threads(&self) -> impl Iterator<Item = (ThreadId, &Thread<'tcx>)> {
@@ -1073,6 +1083,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> &'a mut Vec<Frame<'tcx, Provenance, FrameExtra<'tcx>>> {
         let this = self.eval_context_mut();
         this.machine.threads.active_thread_stack_mut()
+    }
+
+    fn active_thread_zz_mut(
+        &mut self,
+    ) -> &mut Option<rustc_data_structures::fx::FxHashSet<rustc_middle::ty::Instance<'tcx>>> {
+        let this = self.eval_context_mut();
+        this.machine.threads.active_thread_zz_mut()
     }
 
     /// Set the name of the current thread. The buffer must not include the null terminator.

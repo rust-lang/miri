@@ -683,6 +683,8 @@ fn main() -> ExitCode {
             miri_config.page_size = Some(page_size);
         } else if let Some(param) = arg.strip_prefix("-Zmiri-user-relevant-crates=") {
             miri_config.user_relevant_crates.extend(param.split(',').map(|s| s.to_owned()));
+        } else if arg == "-Zno-recursion" {
+            miri_config.diagnose_recursion = true;
         } else {
             // Forward to rustc.
             rustc_args.push(arg);

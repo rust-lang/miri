@@ -1,0 +1,34 @@
+recurse @ 0
+error: recursive call: 
+  --> tests/fail/recursion/associated-fn.rs:LL:CC
+   |
+LL |     fn recurse(&mut self) {
+   |     ^^^^^^^^^^^^^^^^^^^^^ recursive call of function `Foo::recurse`
+   |
+help: (1) called from function `Foo::recurse`
+  --> tests/fail/recursion/associated-fn.rs:LL:CC
+   |
+LL |         self.recurse();
+   |         ^^^^^^^^^^^^^^
+help: ... which itself was called from function `main`
+  --> tests/fail/recursion/associated-fn.rs:LL:CC
+   |
+LL |     Foo { depth: 0 }.recurse();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: (2) originally called from function `main`
+  --> tests/fail/recursion/associated-fn.rs:LL:CC
+   |
+LL |     Foo { depth: 0 }.recurse();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: stack backtrace:
+           0: Foo::recurse
+               at tests/fail/recursion/associated-fn.rs:LL:CC
+           1: Foo::recurse
+               at tests/fail/recursion/associated-fn.rs:LL:CC
+           2: main
+               at tests/fail/recursion/associated-fn.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+

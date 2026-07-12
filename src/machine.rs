@@ -670,6 +670,9 @@ pub struct MiriMachine<'tcx> {
 
     /// Whether Miri artificially introduces short reads/writes on file descriptors.
     pub short_fd_operations: bool,
+
+    /// Whether Miri disallows recursion, and diagnoses when it happens.
+    pub diagnose_recursion: bool,
 }
 
 impl<'tcx> MiriMachine<'tcx> {
@@ -841,6 +844,7 @@ impl<'tcx> MiriMachine<'tcx> {
             float_nondet: config.float_nondet,
             float_rounding_error: config.float_rounding_error,
             short_fd_operations: config.short_fd_operations,
+            diagnose_recursion: config.diagnose_recursion,
         }
     }
 
@@ -1071,6 +1075,7 @@ impl VisitProvenance for MiriMachine<'_> {
             float_nondet: _,
             float_rounding_error: _,
             short_fd_operations: _,
+            diagnose_recursion: _,
         } = self;
 
         threads.visit_provenance(visit);
@@ -1940,6 +1945,14 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
 
     #[inline(always)]
     fn after_stack_push(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
+        if ecx.machine.diagnose_recursion
+            && ecx.machine.is_local(ecx.frame().instance())
+            && let frame_instance = ecx.frame().instance()
+            && !ecx.active_thread_zz_mut().get_or_insert_default().insert(frame_instance)
+        {
+            throw_machine_stop!(TerminationInfo::Recursion);
+        }
+
         if ecx.frame().extra.user_relevance >= ecx.active_thread_ref().current_user_relevance() {
             // We just pushed a frame that's at least as relevant as the so-far most relevant frame.
             // That means we are now the most relevant frame.
@@ -1986,12 +1999,19 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             // Move `frame` into a sub-scope so we control when it will be dropped.
             let mut frame = frame;
             let timing = frame.extra.timing.take();
+            if ecx.machine.diagnose_recursion
+                && ecx.machine.is_local(frame.instance())
+                && let zz = ecx.active_thread_zz_mut().as_mut().expect("ZZ should exist")
+            {
+                assert!(zz.remove(&frame.instance()), "??");
+            }
             let res = ecx.handle_stack_pop_unwind(frame.extra, unwinding);
             if let Some(profiler) = ecx.machine.profiler.as_ref() {
                 profiler.finish_recording_interval_event(timing.unwrap());
             }
             res
         };
+
         // Needs to be done after dropping frame to show up on the right nesting level.
         // (Cc https://github.com/rust-lang/miri/issues/2266)
         if !ecx.active_thread_stack().is_empty() {

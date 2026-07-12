@@ -1,0 +1,43 @@
+recurse @ 0
+error: recursive call: 
+  --> tests/fail/recursion/nested-indirect.rs:LL:CC
+   |
+LL | fn indirectly_recurse(depth: u64) {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ recursive call of function `indirectly_recurse`
+   |
+help: (1) called from function `indirection`
+  --> tests/fail/recursion/nested-indirect.rs:LL:CC
+   |
+LL |     indirectly_recurse(depth + 1);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: ... which itself was called from function `indirectly_recurse`
+  --> tests/fail/recursion/nested-indirect.rs:LL:CC
+   |
+LL |     indirection(depth);
+   |     ^^^^^^^^^^^^^^^^^^
+help: (2) originally called from function `wrapper`
+  --> tests/fail/recursion/nested-indirect.rs:LL:CC
+   |
+LL |     indirectly_recurse(0);
+   |     ^^^^^^^^^^^^^^^^^^^^^
+help: ... which itself was called from function `main`
+  --> tests/fail/recursion/nested-indirect.rs:LL:CC
+   |
+LL |     wrapper();
+   |     ^^^^^^^^^
+   = note: stack backtrace:
+           0: indirectly_recurse
+               at tests/fail/recursion/nested-indirect.rs:LL:CC
+           1: indirection
+               at tests/fail/recursion/nested-indirect.rs:LL:CC
+           2: indirectly_recurse
+               at tests/fail/recursion/nested-indirect.rs:LL:CC
+           3: wrapper
+               at tests/fail/recursion/nested-indirect.rs:LL:CC
+           4: main
+               at tests/fail/recursion/nested-indirect.rs:LL:CC
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+
