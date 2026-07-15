@@ -148,7 +148,7 @@ fn tree_compacting_is_sound() {
 /// every relatedness pairing reachable for an (ancestor, descendant) pair: both local,
 /// both foreign, and local to parent but foreign to sibling. (The fourth pairing,
 /// foreign to parent but local to sibling, is impossible.)
-/// 
+///
 /// If both survive an access, the results must remain in the relation. Child UB is
 /// always fine, and parent-only UB means the access came from a sibling subtree that
 /// `tree_compacting_is_sound` already shows causes the same UB without the parent.

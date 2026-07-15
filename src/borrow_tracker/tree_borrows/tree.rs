@@ -735,10 +735,17 @@ impl<'tcx> Tree {
 
 /// Integration with the BorTag garbage collector
 impl Tree {
-    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>, min_nodes: usize) {
+    /// Returns `(live, dead)`: the number of nodes remaining in the tree and the
+    /// number of nodes removed by this pass.
+    pub fn remove_unreachable_tags(
+        &mut self,
+        live_tags: &FxHashSet<BorTag>,
+        min_nodes: usize,
+    ) -> (usize, usize) {
+        let before = self.tag_mapping.len();
         // Only bother garbage collecting trees that are large enough
-        if self.tag_mapping.len() <= min_nodes {
-            return;
+        if before <= min_nodes {
+            return (before, 0);
         }
         for i in 0..(self.roots.len()) {
             self.remove_useless_children(self.roots[i], live_tags);
@@ -748,6 +755,8 @@ impl Tree {
         // tags (this does not necessarily mean that they have identical internal representations,
         // see the `PartialEq` impl for `UniValMap`)
         self.locations.merge_adjacent_thorough();
+        let after = self.tag_mapping.len();
+        (after, before - after)
     }
 
     /// Checks if a node is useless and should be GC'ed.
@@ -780,8 +789,11 @@ impl Tree {
             return node.children.iter().all(|&child_idx| {
                 let child = self.nodes.get(child_idx).unwrap();
                 self.locations.iter_all().all(|(_range, loc)| {
-                    let parent_perm =
-                        loc.perms.get(idx).map(|x| x.permission).unwrap_or(node.default_initial_perm);
+                    let parent_perm = loc
+                        .perms
+                        .get(idx)
+                        .map(|x| x.permission)
+                        .unwrap_or(node.default_initial_perm);
                     let child_perm = loc
                         .perms
                         .get(child_idx)
@@ -1040,8 +1052,9 @@ impl<'tcx> LocationTree {
             let old_state = perm.copied().unwrap_or_else(|| node.default_location_state());
             old_state.skip_if_known_noop(access_kind, args.rel_pos)
         };
+        let mut visit_count: u32 = 0;
         let node_app = |args: NodeAppArgs<'_, LocationTree>| {
-            machine.visits_since_gc.set(machine.visits_since_gc.get().saturating_add(1));
+            visit_count += 1;
             let node = args.nodes.get_mut(args.idx).unwrap();
             let mut perm = args.data.perms.entry(args.idx);
 
@@ -1078,7 +1091,7 @@ impl<'tcx> LocationTree {
             ChildrenVisitMode::SkipChildrenOfAccessed =>
                 visitor.traverse_nonchildren(access_source, node_skipper, node_app),
         };
-        
+        machine.visits_since_gc.set(machine.visits_since_gc.get().saturating_add(visit_count));
         result.into()
     }
 
@@ -1115,6 +1128,7 @@ impl<'tcx> LocationTree {
 
         // Whether there is an exposed node in this tree that allows this access.
         let mut has_valid_exposed = false;
+        let mut visit_count: u32 = 0;
 
         // This does a traversal across the tree updating children before their parents. The
         // difference to `perform_normal_access` is that we take the access relatedness from
@@ -1151,7 +1165,7 @@ impl<'tcx> LocationTree {
                 }
             },
             |args| {
-                machine.visits_since_gc.set(machine.visits_since_gc.get().saturating_add(1));
+                visit_count += 1;
                 let node = args.nodes.get_mut(args.idx).unwrap();
 
                 let protected = global.borrow().protected_tags.contains_key(&node.tag);
@@ -1207,6 +1221,7 @@ impl<'tcx> LocationTree {
                 })
             },
         )?;
+        machine.visits_since_gc.set(machine.visits_since_gc.get().saturating_add(visit_count));
         // If there is no exposed node in this tree that allows this access, then the access *must*
         // be foreign to the entire subtree. Foreign accesses are only possible on wildcard subtrees
         // as there are no ancestors to the main root. So if we do not find a valid exposed node in

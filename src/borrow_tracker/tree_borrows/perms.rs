@@ -375,7 +375,7 @@ impl Permission {
     /// the grandparent).
     ///
     ///  On top of `can_be_replaced_by_child` we must additionally forbid replacing a `ReservedIM`
-    ///  parent by a `ReservedIM` child. (`Cell` children survive foreign writes too, but a 
+    ///  parent by a `ReservedIM` child. (`Cell` children survive foreign writes too, but a
     /// `ReservedIM` parent can never be replaced by `Cell` in the first place.)
     ///
     /// This is enforced by the `tree_multi_child_compacting_is_sound` test.

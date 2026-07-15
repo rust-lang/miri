@@ -30,22 +30,13 @@ pub use self::tree::Tree;
 /// and wildcard exposure.
 #[derive(Debug, Clone)]
 pub enum AllocState {
-    Uninit {
-        id: AllocId,
-        size: Size,
-        span: Span,
-        exposed: bool,
-    },
+    Uninit { id: AllocId, size: Size, span: Span, exposed: bool },
     Init(Tree),
 }
 
 impl AllocState {
     /// Ensure the tree is initialized, creating it if necessary.
-    pub fn ensure_init<'tcx>(
-        &mut self,
-        state: &mut GlobalStateInner,
-        machine: &MiriMachine<'tcx>,
-    ) {
+    pub fn ensure_init<'tcx>(&mut self, state: &mut GlobalStateInner, machine: &MiriMachine<'tcx>) {
         if let AllocState::Uninit { id, size, span, exposed } = self {
             let tag = state.root_ptr_tag(*id, machine);
             let mut tree = Tree::new(tag, *size, *span);
@@ -75,7 +66,7 @@ impl AllocState {
         prov: ProvenanceExtra,
         range: AllocRange,
         machine: &MiriMachine<'tcx>,
-    ) -> InterpResult<'tcx> {        
+    ) -> InterpResult<'tcx> {
         match self {
             AllocState::Init(tree) => {
                 let global = machine.borrow_tracker.as_ref().unwrap();
@@ -98,9 +89,7 @@ impl AllocState {
                     machine,
                 )
             }
-            AllocState::Uninit { .. } => {
-                interp_ok(())
-            }
+            AllocState::Uninit { .. } => interp_ok(()),
         }
     }
 
@@ -111,16 +100,14 @@ impl AllocState {
         prov: ProvenanceExtra,
         size: Size,
         machine: &MiriMachine<'tcx>,
-    ) -> InterpResult<'tcx> {        
+    ) -> InterpResult<'tcx> {
         match self {
             AllocState::Init(tree) => {
                 let global = machine.borrow_tracker.as_ref().unwrap();
                 let span = machine.current_user_relevant_span();
                 tree.dealloc(prov, alloc_range(Size::ZERO, size), global, alloc_id, span, machine)
             }
-            AllocState::Uninit { .. } => {
-                interp_ok(())
-            }
+            AllocState::Uninit { .. } => interp_ok(()),
         }
     }
 
@@ -137,7 +124,6 @@ impl AllocState {
         tag: BorTag,
         alloc_id: AllocId, // diagnostics
     ) -> InterpResult<'tcx> {
-        
         match self {
             AllocState::Init(tree) => {
                 let span = machine.current_user_relevant_span();
@@ -145,16 +131,21 @@ impl AllocState {
                 tree.update_exposure_for_protector_release(tag);
                 interp_ok(())
             }
-            AllocState::Uninit { .. } => {
-                interp_ok(())
-            }
+            AllocState::Uninit { .. } => interp_ok(()),
         }
     }
 
-    /// Wrapper for Tree::remove_unreachable_tags
-    pub fn remove_unreachable_tags(&mut self, tags: &FxHashSet<BorTag>, min_nodes: usize) {
+    /// Wrapper for Tree::remove_unreachable_tags.
+    /// Returns `(live, dead)` node counts for this allocation's tree.
+    pub fn remove_unreachable_tags(
+        &mut self,
+        tags: &FxHashSet<BorTag>,
+        min_nodes: usize,
+    ) -> (usize, usize) {
         if let AllocState::Init(tree) = self {
-            tree.remove_unreachable_tags(tags, min_nodes);
+            tree.remove_unreachable_tags(tags, min_nodes)
+        } else {
+            (0, 0)
         }
     }
 
@@ -171,12 +162,18 @@ impl AllocState {
         machine: &MiriMachine<'tcx>,
     ) -> InterpResult<'tcx> {
         match self {
-            AllocState::Init(tree) => {
-                tree.perform_access(prov, range, access_kind, cause, global, alloc_id, span, machine)
-            }
-            AllocState::Uninit { .. } => {
-                interp_ok(())
-            }
+            AllocState::Init(tree) =>
+                tree.perform_access(
+                    prov,
+                    range,
+                    access_kind,
+                    cause,
+                    global,
+                    alloc_id,
+                    span,
+                    machine,
+                ),
+            AllocState::Uninit { .. } => interp_ok(()),
         }
     }
 
@@ -195,9 +192,16 @@ impl AllocState {
     ) -> InterpResult<'tcx> {
         self.ensure_init(&mut global.borrow_mut(), machine);
         match self {
-            AllocState::Init(tree) => {
-                tree.new_child(base_offset, parent_prov, new_tag, inside_perms, outside_perm, protected, span)
-            }
+            AllocState::Init(tree) =>
+                tree.new_child(
+                    base_offset,
+                    parent_prov,
+                    new_tag,
+                    inside_perms,
+                    outside_perm,
+                    protected,
+                    span,
+                ),
             AllocState::Uninit { .. } => {
                 unreachable!()
             }
@@ -205,11 +209,7 @@ impl AllocState {
     }
 
     /// Wrapper for Tree::expose_tag
-    pub fn expose_tag(
-        &mut self,
-        tag: BorTag,
-        protected: bool,
-    ) {
+    pub fn expose_tag(&mut self, tag: BorTag, protected: bool) {
         match self {
             AllocState::Init(tree) => tree.expose_tag(tag, protected),
             // Record the exposure here and apply it in `ensure_initialized`.
@@ -224,12 +224,8 @@ impl AllocState {
         show_unnamed: bool,
     ) -> InterpResult<'tcx> {
         match self {
-            AllocState::Init(tree) => {
-                tree.print_tree(protected_tags, show_unnamed)
-            }
-            AllocState::Uninit { .. } => {
-                interp_ok(())
-            }
+            AllocState::Init(tree) => tree.print_tree(protected_tags, show_unnamed),
+            AllocState::Uninit { .. } => interp_ok(()),
         }
     }
 
@@ -241,12 +237,8 @@ impl AllocState {
         name: &str,
     ) -> InterpResult<'tcx> {
         match self {
-            AllocState::Init(tree) => {
-                tree.give_pointer_debug_name(tag, nth_parent, name)
-            }
-            AllocState::Uninit { .. } => {
-                interp_ok(())
-            }
+            AllocState::Init(tree) => tree.give_pointer_debug_name(tag, nth_parent, name),
+            AllocState::Uninit { .. } => interp_ok(()),
         }
     }
 }

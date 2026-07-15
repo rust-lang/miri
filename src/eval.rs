@@ -152,6 +152,13 @@ pub struct MiriConfig {
     pub gc_interval: u32,
     /// Run a garbage collector for TreeBorrows every N visited nodes.
     pub visit_gc_interval: u32,
+    /// Lower bound for the adaptive TreeBorrows GC interval (in visited nodes).
+    pub tree_gc_min_interval: u32,
+    /// Upper bound for the adaptive TreeBorrows GC interval (in visited nodes).
+    pub tree_gc_max_interval: u32,
+    /// The fraction of dead nodes a TreeBorrows GC pass should find for the current
+    /// interval to be considered well-tuned; the interval adapts toward this target.
+    pub tree_gc_target_dead_ratio: f64,
     /// Only garbage collect TreeBorrows trees that have more than this many nodes.
     pub tree_gc_min_nodes: usize,
     /// The number of CPUs to be reported by miri.
@@ -207,6 +214,9 @@ impl Default for MiriConfig {
             native_lib_enable_tracing: false,
             gc_interval: 10_000,
             visit_gc_interval: 25_000,
+            tree_gc_min_interval: 1_000,
+            tree_gc_max_interval: 100_000,
+            tree_gc_target_dead_ratio: 0.25,
             tree_gc_min_nodes: 64,
             num_cpus: 1,
             page_size: None,
