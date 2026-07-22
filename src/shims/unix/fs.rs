@@ -166,9 +166,14 @@ impl UnixFileDescription for FileHandle {
             SharedLock { nonblocking } => (self.file.try_lock_shared(), nonblocking),
             ExclusiveLock { nonblocking } => (self.file.try_lock(), nonblocking),
             Unlock => {
-                let result = self.file.unlock();
-                self.flock_state.set(None);
-                return interp_ok(result);
+                // Skip the OS unlock if already unlocked — Windows `UnlockFileEx`
+                // errors on redundant unlock (error 158), but POSIX `flock` allows it.
+                if self.flock_state.get().is_some() {
+                    let result = self.file.unlock();
+                    self.flock_state.set(None);
+                    return interp_ok(result);
+                }
+                return interp_ok(Ok(()));
             }
         };
 
