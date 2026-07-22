@@ -27,7 +27,7 @@ fn main() {
         // Converting a shared lock to an exclusive lock is unsupported on Windows hosts.
         unsafe {
             libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB);
-            //~[shared_to_exclusive] ERROR: unsupported operation: converting shared `flock` to exclusive is not supported on Windows hosts
+            //~[shared_to_exclusive]^ ERROR: unsupported operation: converting shared `flock` to exclusive is not supported on Windows hosts
         }
     }
 
@@ -37,7 +37,7 @@ fn main() {
         // Converting an exclusive lock to a shared lock is unsupported on Windows hosts.
         unsafe {
             libc::flock(fd, libc::LOCK_SH | libc::LOCK_NB);
-            //~[exclusive_to_shared] ERROR: unsupported operation: converting exclusive `flock` to shared is not supported on Windows hosts
+            //~[exclusive_to_shared]^ ERROR: unsupported operation: converting exclusive `flock` to shared is not supported on Windows hosts
         }
     }
 }
