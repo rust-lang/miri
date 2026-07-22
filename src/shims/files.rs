@@ -1,7 +1,7 @@
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::fs::File;
+use std::fs::{Dir, File};
 use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::marker::CoercePointee;
 use std::ops::Deref;
@@ -310,12 +310,19 @@ impl FileDescription for io::Stderr {
     }
 }
 
+/// State of a `flock` lock on a file description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlockState {
+    Shared,
+    Exclusive,
+}
+
 #[derive(Debug)]
 pub struct FileHandle {
     pub(crate) file: File,
     pub(crate) readable: bool,
     pub(crate) writable: bool,
-    pub(crate) flock_state: RefCell<Option<FlockState>>,
+    pub(crate) flock_state: Cell<Option<FlockState>>,
 }
 
 impl FileDescription for FileHandle {
@@ -403,8 +410,7 @@ impl FileDescription for FileHandle {
 
 #[derive(Debug)]
 pub struct DirHandle {
-    #[cfg_attr(not(bootstrap), allow(unused))]
-    pub(crate) path: PathBuf,
+    pub(crate) dir: Dir,
 }
 
 impl FileDescription for DirHandle {
@@ -415,29 +421,7 @@ impl FileDescription for DirHandle {
     fn metadata<'tcx>(
         &self,
     ) -> InterpResult<'tcx, Either<io::Result<std::fs::Metadata>, &'static str>> {
-        #[cfg(not(bootstrap))]
-        return interp_ok(Either::Left(std::fs::metadata(&self.path)));
-        #[cfg(bootstrap)]
-        return interp_ok(Either::Left(std::fs::metadata(&self.path)));
-    }
-
-    fn destroy<'tcx>(
-        self,
-        _self_id: FdId,
-        _communicate_allowed: bool,
-        _ecx: &mut MiriInterpCx<'tcx>,
-    ) -> InterpResult<'tcx, io::Result<()>> {
-        interp_ok(Ok(()))
-    }
-}
-
-impl FileHandle {
-    pub(crate) fn flock_state(&self) -> Option<FlockState> {
-        *self.flock_state.borrow()
-    }
-
-    pub(crate) fn set_flock_state(&self, state: Option<FlockState>) {
-        *self.flock_state.borrow_mut() = state;
+        interp_ok(Either::Left(self.dir.metadata()))
     }
 }
 
@@ -465,13 +449,6 @@ impl FileDescription for NullOutput {
 
 /// Internal type of a file-descriptor - this is what [`FdTable`] expects
 pub type FdNum = i32;
-
-/// State of a `flock` lock on a file description.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlockState {
-    Shared,
-    Exclusive,
-}
 
 /// The file descriptor table
 #[derive(Debug)]

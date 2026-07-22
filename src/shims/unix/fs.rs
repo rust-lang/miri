@@ -1,7 +1,7 @@
 //! File and file system access
 
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, File, FileTimes, FileType, OpenOptions, TryLockError};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -144,18 +144,11 @@ impl UnixFileDescription for FileHandle {
 
         use FlockOp::*;
 
-        // Get current flock state for Windows-specific behavior
-        let current_state = self.flock_state();
-
         // Windows `File` locks differ from POSIX `flock`:
         // - No lock conversion (shared->exclusive or exclusive->shared)
         // - Redundant unlock is allowed
         if cfg!(windows) {
-            match (current_state, op) {
-                (Some(FlockState::Shared), SharedLock { nonblocking: _ })
-                | (Some(FlockState::Exclusive), ExclusiveLock { nonblocking: _ }) =>
-                    return interp_ok(Ok(())),
-                (None, Unlock) => return interp_ok(Ok(())),
+            match (self.flock_state.get(), op) {
                 (Some(FlockState::Exclusive), SharedLock { nonblocking: _ }) =>
                     throw_unsup_format!(
                         "converting exclusive `flock` to shared is not supported on Windows hosts"
@@ -174,7 +167,7 @@ impl UnixFileDescription for FileHandle {
             ExclusiveLock { nonblocking } => (self.file.try_lock(), nonblocking),
             Unlock => {
                 let result = self.file.unlock();
-                self.set_flock_state(None);
+                self.flock_state.set(None);
                 return interp_ok(result);
             }
         };
@@ -197,7 +190,7 @@ impl UnixFileDescription for FileHandle {
                 ExclusiveLock { nonblocking: _ } => Some(FlockState::Exclusive),
                 Unlock => None,
             };
-            self.set_flock_state(new_state);
+            self.flock_state.set(new_state);
         }
 
         interp_ok(result)
@@ -582,7 +575,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 file,
                 writable,
                 readable,
-                flock_state: RefCell::new(None),
+                flock_state: Cell::new(None),
             })
         });
 
@@ -1875,7 +1868,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         file: f,
                         writable: true,
                         readable: true,
-                        flock_state: RefCell::new(None),
+                        flock_state: Cell::new(None),
                     });
                     return interp_ok(Scalar::from_i32(fd));
                 }
