@@ -1,3 +1,9 @@
+#[allow(unused)]
+mod _unused {
+    use ring::*;
+    use tracing::*;
+}
+
 #[test]
 fn simple() {
     assert_eq!(4, 4);

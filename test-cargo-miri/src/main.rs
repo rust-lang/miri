@@ -5,6 +5,12 @@ use std::path::PathBuf;
 
 use byteorder::{BigEndian, ByteOrder};
 
+#[allow(unused)]
+mod _unused {
+    use ring::*;
+    use tracing::*;
+}
+
 fn main() {
     // Check env var set by `build.rs`.
     assert_eq!(env!("MIRITESTVAR"), "testval");
