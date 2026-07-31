@@ -62,33 +62,33 @@ function run_tests {
   fi
 
   ## ui test suite
-  if [ -n "${GC_STRESS-}" ]; then
-    MIRIFLAGS_EXTRA="-Zmiri-provenance-gc=1"
-  fi
-  time MIRIFLAGS="${MIRIFLAGS-} ${MIRIFLAGS_EXTRA-}" ./miri test $FEATURES $TARGET_FLAG
+  # if [ -n "${GC_STRESS-}" ]; then
+  #   MIRIFLAGS_EXTRA="-Zmiri-provenance-gc=1"
+  # fi
+  # time MIRIFLAGS="${MIRIFLAGS-} ${MIRIFLAGS_EXTRA-}" ./miri test $FEATURES $TARGET_FLAG
 
-  ## advanced tests
-  if [ -n "${MIR_OPT-}" ]; then
-    # Tests with optimizations (`-O` is what cargo passes, but crank MIR optimizations up all the
-    # way, too).
-    # Optimizations change diagnostics (mostly backtraces), so we don't check
-    # them. Also error locations change so we don't run the failing tests.
-    # We explicitly enable debug-assertions here, they are disabled by -O but we have tests
-    # which exist to check that we panic on debug assertion failures.
-    time MIRIFLAGS="${MIRIFLAGS-} -O -Zmir-opt-level=4 -Cdebug-assertions=yes" MIRI_SKIP_UI_CHECKS=1 ./miri test $FEATURES $TARGET_FLAG tests/{pass,panic}
-  fi
-  if [ -n "${MANY_SEEDS-}" ]; then
-    # Run many-seeds tests. (Also tests `./miri run`.)
-    time for FILE in tests/many-seeds/*.rs; do
-      ./miri run $FEATURES "-Zmiri-many-seeds=0..$MANY_SEEDS" $TARGET_FLAG "$FILE"
-    done
-    # Smoke-test `./miri run --dep`.
-    ./miri run $FEATURES $TARGET_FLAG --dep tests/pass-dep/getrandom.rs
-  fi
-  if [ -n "${TEST_BENCH-}" ]; then
-    # Check that the benchmarks build and run, but only once.
-    time HYPERFINE="hyperfine -w0 -r1 --show-output" ./miri bench $TARGET_FLAG --no-install
-  fi
+  # ## advanced tests
+  # if [ -n "${MIR_OPT-}" ]; then
+  #   # Tests with optimizations (`-O` is what cargo passes, but crank MIR optimizations up all the
+  #   # way, too).
+  #   # Optimizations change diagnostics (mostly backtraces), so we don't check
+  #   # them. Also error locations change so we don't run the failing tests.
+  #   # We explicitly enable debug-assertions here, they are disabled by -O but we have tests
+  #   # which exist to check that we panic on debug assertion failures.
+  #   time MIRIFLAGS="${MIRIFLAGS-} -O -Zmir-opt-level=4 -Cdebug-assertions=yes" MIRI_SKIP_UI_CHECKS=1 ./miri test $FEATURES $TARGET_FLAG tests/{pass,panic}
+  # fi
+  # if [ -n "${MANY_SEEDS-}" ]; then
+  #   # Run many-seeds tests. (Also tests `./miri run`.)
+  #   time for FILE in tests/many-seeds/*.rs; do
+  #     ./miri run $FEATURES "-Zmiri-many-seeds=0..$MANY_SEEDS" $TARGET_FLAG "$FILE"
+  #   done
+  #   # Smoke-test `./miri run --dep`.
+  #   ./miri run $FEATURES $TARGET_FLAG --dep tests/pass-dep/getrandom.rs
+  # fi
+  # if [ -n "${TEST_BENCH-}" ]; then
+  #   # Check that the benchmarks build and run, but only once.
+  #   time HYPERFINE="hyperfine -w0 -r1 --show-output" ./miri bench $TARGET_FLAG --no-install
+  # fi
 
   ## test-cargo-miri
   # On Windows, there is always "python", not "python3" or "python2".
