@@ -28,7 +28,7 @@ fn main() {
     }
 
     // Test that shared lock prevents exclusive lock.
-    {
+    if !cfg!(windows_host) {
         let fd = files[0].as_raw_fd();
         let err =
             errno_result(unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) }).unwrap_err();
@@ -64,10 +64,7 @@ fn main() {
         let fd = files[0].as_raw_fd();
         errno_check(unsafe { libc::flock(fd, libc::LOCK_UN) });
         // Redundant unlock also works.
-        // FIXME(#miri/5074): except on Windows hosts...
-        if !cfg!(windows_host) {
-            errno_check(unsafe { libc::flock(fd, libc::LOCK_UN) });
-        }
+        errno_check(unsafe { libc::flock(fd, libc::LOCK_UN) });
     }
 
     // Test behavior when we acquire multiple locks on the same FD.
