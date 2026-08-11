@@ -198,14 +198,6 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 }
 
-/// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in `a` with corresponding signed
-/// 8-bit integers in `b`, producing 4 intermediate signed 16-bit results. Sum these 4 results with
-/// the corresponding 32-bit integer in `src` (using wrapping arighmetic), and store the packed
-/// 32-bit results in `dst`.
-///
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_dpbusd_epi32>
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_dpbusd_epi32>
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_dpbusd_epi32>
 /// Multiply the low unsigned 52-bit integers in each 64-bit lane of `x` and
 /// `y`, producing a 104-bit product, then add either its low (`high ==
 /// false`) or high (`high == true`) 52-bit half to the full 64-bit lane of
@@ -248,6 +240,14 @@ fn vpmadd52uq<'tcx>(
     interp_ok(())
 }
 
+/// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in `a` with corresponding signed
+/// 8-bit integers in `b`, producing 4 intermediate signed 16-bit results. Sum these 4 results with
+/// the corresponding 32-bit integer in `src` (using wrapping arighmetic), and store the packed
+/// 32-bit results in `dst`.
+///
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_dpbusd_epi32>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_dpbusd_epi32>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_dpbusd_epi32>
 fn vpdpbusd<'tcx>(
     ecx: &mut crate::MiriInterpCx<'tcx>,
     src: &OpTy<'tcx>,
