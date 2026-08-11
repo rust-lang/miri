@@ -178,6 +178,20 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 packusdw(this, a, b, dest)?;
             }
+            // Used to implement the _mm512_madd52lo_epu64 and _mm512_madd52hi_epu64
+            // functions (and their 128/256-bit variants).
+            "vpmadd52l.uq.512" | "vpmadd52h.uq.512" | "vpmadd52l.uq.256" | "vpmadd52h.uq.256"
+            | "vpmadd52l.uq.128" | "vpmadd52h.uq.128" => {
+                this.expect_target_feature_for_intrinsic(link_name, "avx512ifma")?;
+                if !unprefixed_name.ends_with("512") {
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                }
+
+                let [z, x, y] = this.check_shim_sig_unadjusted(link_name, args)?;
+
+                let high = unprefixed_name.starts_with("vpmadd52h");
+                vpmadd52uq(this, z, x, y, high, dest)?;
+            }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
@@ -192,6 +206,48 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 /// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_dpbusd_epi32>
 /// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_dpbusd_epi32>
 /// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_dpbusd_epi32>
+/// Multiply the low unsigned 52-bit integers in each 64-bit lane of `x` and
+/// `y`, producing a 104-bit product, then add either its low (`high ==
+/// false`) or high (`high == true`) 52-bit half to the full 64-bit lane of
+/// `z` with wrapping arithmetic.
+///
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52lo_epu64>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52hi_epu64>
+fn vpmadd52uq<'tcx>(
+    ecx: &mut crate::MiriInterpCx<'tcx>,
+    z: &OpTy<'tcx>,
+    x: &OpTy<'tcx>,
+    y: &OpTy<'tcx>,
+    high: bool,
+    dest: &MPlaceTy<'tcx>,
+) -> InterpResult<'tcx, ()> {
+    let (z, z_len) = ecx.project_to_simd(z)?;
+    let (x, x_len) = ecx.project_to_simd(x)?;
+    let (y, y_len) = ecx.project_to_simd(y)?;
+    let (dest, dest_len) = ecx.project_to_simd(dest)?;
+
+    // fn vpmadd52luq_512(z: i64x8, x: i64x8, y: i64x8) -> i64x8;
+    assert_eq!(z_len, dest_len);
+    assert_eq!(x_len, dest_len);
+    assert_eq!(y_len, dest_len);
+
+    const MASK52: u64 = (1 << 52) - 1;
+    for i in 0..dest_len {
+        let z = ecx.read_scalar(&ecx.project_index(&z, i)?)?.to_u64()?;
+        let x = ecx.read_scalar(&ecx.project_index(&x, i)?)?.to_u64()?;
+        let y = ecx.read_scalar(&ecx.project_index(&y, i)?)?.to_u64()?;
+        let dest = ecx.project_index(&dest, i)?;
+
+        let product = u128::from(x & MASK52).strict_mul(u128::from(y & MASK52));
+        let shifted = if high { product >> 52 } else { product };
+        let chunk = u64::try_from(shifted & u128::from(MASK52)).unwrap();
+        let res = Scalar::from_u64(z.wrapping_add(chunk));
+        ecx.write_scalar(res, &dest)?;
+    }
+
+    interp_ok(())
+}
+
 fn vpdpbusd<'tcx>(
     ecx: &mut crate::MiriInterpCx<'tcx>,
     src: &OpTy<'tcx>,
