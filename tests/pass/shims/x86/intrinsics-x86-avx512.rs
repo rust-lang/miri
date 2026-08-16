@@ -36,7 +36,7 @@ fn main() {
         if is_x86_feature_detected!("avx512ifma") {
             test_avx512ifma();
         } else {
-            // Older AVX-512 silicon (e.g. Skylake-SP) lacks IFMA.
+            // Older AVX-512 CPUs (e.g. Skylake-SP) lack IFMA.
             println!("warning: skipping avx512ifma tests");
         }
     }
@@ -992,34 +992,55 @@ unsafe fn assert_eq_m128i(a: __m128i, b: __m128i) {
 
 #[target_feature(enable = "avx512ifma,avx512vl")]
 unsafe fn test_avx512ifma() {
-    // (2^52 - 1)^2 = 2^104 - 2^53 + 1: low 52-bit chunk 1, high chunk 2^52 - 2.
-    const MASK52: u64 = (1 << 52) - 1;
-    let max52 = _mm512_set1_epi64(MASK52 as i64);
-    let zero = _mm512_setzero_si512();
-    let ones = _mm512_set1_epi64(1);
-    let wrap = _mm512_set1_epi64(u64::MAX as i64);
+    // Every lane holds a different case, so a wrong lane index cannot pass. Lane 0 is the
+    // stdarch test vector, lane 1 wraps the 64-bit accumulator, lanes 2 and 3 put garbage
+    // in the upper 12 bits of a multiplicand, lane 4 is (2^52 - 1)^2, lane 6 wraps with a
+    // nonzero result. The 256/128-bit cases reuse the first 4 and the first 2 lanes.
+    #[rustfmt::skip]
+    const A: [u64; 8] = [
+        0x00000a0000000000, 0xffffffffffffffff, 0x0000000000000000, 0x0000000000000007,
+        0x0000000000000000, 0x0000000000000000, 0xffffffffffffffff, 0x8000000000000000,
+    ];
+    #[rustfmt::skip]
+    const B: [u64; 8] = [
+        0x00000b0000000004, 0x000fffffffffffff, 0x8000000000000003, 0x0000000000000001,
+        0x000fffffffffffff, 0x0000000000000000, 0x0000000000000002, 0x0008000000000001,
+    ];
+    #[rustfmt::skip]
+    const C: [u64; 8] = [
+        0x00000c0000000003, 0x000fffffffffffff, 0x0000000000000001, 0x8000000000000003,
+        0x000fffffffffffff, 0x0000000000000000, 0x0000000000000003, 0x0008000000000007,
+    ];
+    #[rustfmt::skip]
+    const LO: [u64; 8] = [
+        0x00005b000000000c, 0x0000000000000000, 0x0000000000000003, 0x000000000000000a,
+        0x0000000000000001, 0x0000000000000000, 0x0000000000000005, 0x8000000000000007,
+    ];
+    #[rustfmt::skip]
+    const HI: [u64; 8] = [
+        0x00000a0840000000, 0x000ffffffffffffd, 0x0000000000000000, 0x0000000000000007,
+        0x000ffffffffffffe, 0x0000000000000000, 0xffffffffffffffff, 0x8004000000000004,
+    ];
 
-    let lo = _mm512_madd52lo_epu64(zero, max52, max52);
-    assert_eq_m512i(lo, _mm512_set1_epi64(1));
-    let hi = _mm512_madd52hi_epu64(zero, max52, max52);
-    assert_eq_m512i(hi, _mm512_set1_epi64((MASK52 - 1) as i64));
-    // The accumulator is a full 64-bit lane with wrapping addition.
-    let wrapped = _mm512_madd52lo_epu64(wrap, max52, max52);
-    assert_eq_m512i(wrapped, zero);
-    // Multiplicands only contribute their low 52 bits.
-    let high_garbage = _mm512_set1_epi64(((1u64 << 63) | 3) as i64);
-    let masked = _mm512_madd52lo_epu64(zero, high_garbage, ones);
-    assert_eq_m512i(masked, _mm512_set1_epi64(3));
+    let a = transmute::<_, __m512i>(A);
+    let b = transmute::<_, __m512i>(B);
+    let c = transmute::<_, __m512i>(C);
+    assert_eq_m512i(_mm512_madd52lo_epu64(a, b, c), transmute::<_, __m512i>(LO));
+    assert_eq_m512i(_mm512_madd52hi_epu64(a, b, c), transmute::<_, __m512i>(HI));
 
-    let max52_256 = _mm256_set1_epi64x(MASK52 as i64);
-    let lo256 = _mm256_madd52lo_epu64(_mm256_setzero_si256(), max52_256, max52_256);
-    assert_eq_m256i(lo256, _mm256_set1_epi64x(1));
-    let hi256 = _mm256_madd52hi_epu64(_mm256_setzero_si256(), max52_256, max52_256);
-    assert_eq_m256i(hi256, _mm256_set1_epi64x((MASK52 - 1) as i64));
+    let a = transmute::<_, __m256i>([A[0], A[1], A[2], A[3]]);
+    let b = transmute::<_, __m256i>([B[0], B[1], B[2], B[3]]);
+    let c = transmute::<_, __m256i>([C[0], C[1], C[2], C[3]]);
+    let lo = transmute::<_, __m256i>([LO[0], LO[1], LO[2], LO[3]]);
+    let hi = transmute::<_, __m256i>([HI[0], HI[1], HI[2], HI[3]]);
+    assert_eq_m256i(_mm256_madd52lo_epu64(a, b, c), lo);
+    assert_eq_m256i(_mm256_madd52hi_epu64(a, b, c), hi);
 
-    let max52_128 = _mm_set1_epi64x(MASK52 as i64);
-    let lo128 = _mm_madd52lo_epu64(_mm_setzero_si128(), max52_128, max52_128);
-    assert_eq_m128i(lo128, _mm_set1_epi64x(1));
-    let hi128 = _mm_madd52hi_epu64(_mm_setzero_si128(), max52_128, max52_128);
-    assert_eq_m128i(hi128, _mm_set1_epi64x((MASK52 - 1) as i64));
+    let a = transmute::<_, __m128i>([A[0], A[1]]);
+    let b = transmute::<_, __m128i>([B[0], B[1]]);
+    let c = transmute::<_, __m128i>([C[0], C[1]]);
+    let lo = transmute::<_, __m128i>([LO[0], LO[1]]);
+    let hi = transmute::<_, __m128i>([HI[0], HI[1]]);
+    assert_eq_m128i(_mm_madd52lo_epu64(a, b, c), lo);
+    assert_eq_m128i(_mm_madd52hi_epu64(a, b, c), hi);
 }

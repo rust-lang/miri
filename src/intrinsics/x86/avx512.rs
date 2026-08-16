@@ -178,66 +178,76 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 packusdw(this, a, b, dest)?;
             }
-            // Used to implement the _mm512_madd52lo_epu64 and _mm512_madd52hi_epu64
-            // functions (and their 128/256-bit variants).
+            // Used to implement the _mm512_madd52lo_epu64 and _mm512_madd52hi_epu64 functions
+            // (and their 128/256-bit variants), and the AVX-IFMA _mm256_madd52lo_avx_epu64
+            // and _mm_madd52lo_avx_epu64 functions (and their `hi` variants).
+            //
+            // <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52lo_epu64>
+            // <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52hi_epu64>
             "vpmadd52l.uq.512" | "vpmadd52h.uq.512" | "vpmadd52l.uq.256" | "vpmadd52h.uq.256"
             | "vpmadd52l.uq.128" | "vpmadd52h.uq.128" => {
-                this.expect_target_feature_for_intrinsic(link_name, "avx512ifma")?;
-                if !unprefixed_name.ends_with("512") {
-                    this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                let is_512 = matches!(unprefixed_name, "vpmadd52l.uq.512" | "vpmadd52h.uq.512");
+                // The 128/256-bit widths are also reachable through AVX-IFMA, which is
+                // VEX-encoded and implies no AVX-512 at all.
+                if is_512 || !this.target_feature_enabled("avxifma") {
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512ifma")?;
+                    if !is_512 {
+                        this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                    }
                 }
 
-                let [z, x, y] = this.check_shim_sig_unadjusted(link_name, args)?;
+                let [a, b, c] = this.check_shim_sig_unadjusted(link_name, args)?;
 
+                assert_eq!(dest.layout, a.layout);
+                assert_eq!(dest.layout, b.layout);
+                assert_eq!(dest.layout, c.layout);
+
+                // The signatures of these operations are:
+                //
+                // ```
+                // fn vpmadd52luq_512(a: i64x8, b: i64x8, c: i64x8) -> i64x8;
+                // fn vpmadd52luq_256(a: i64x4, b: i64x4, c: i64x4) -> i64x4;
+                // fn vpmadd52luq_128(a: i64x2, b: i64x2, c: i64x2) -> i64x2;
+                // ```
+                //
+                // The element type is always a 64-bit integer, the width varies.
+
+                let (a, _a_len) = this.project_to_simd(a)?;
+                let (b, _b_len) = this.project_to_simd(b)?;
+                let (c, _c_len) = this.project_to_simd(c)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+
+                // 52 is the mantissa width of an IEEE-754 double, so the operation fits the
+                // 53x53 multiplier the FMA unit already has.
+                const MASK52: u64 = (1 << 52) - 1;
+                // `l` takes bits [51:0] of the 104-bit product, `h` takes bits [103:52].
                 let high = unprefixed_name.starts_with("vpmadd52h");
-                vpmadd52uq(this, z, x, y, high, dest)?;
+
+                for i in 0..dest_len {
+                    let a_lane = this.project_index(&a, i)?;
+                    let b_lane = this.project_index(&b, i)?;
+                    let c_lane = this.project_index(&c, i)?;
+                    let d_lane = this.project_index(&dest, i)?;
+
+                    let va = this.read_scalar(&a_lane)?.to_u64()?;
+                    let vb = this.read_scalar(&b_lane)?.to_u64()?;
+                    let vc = this.read_scalar(&c_lane)?.to_u64()?;
+
+                    // The upper 12 bits of each multiplicand are discarded, not an error.
+                    let product = u128::from(vb & MASK52).strict_mul(u128::from(vc & MASK52));
+                    // Both halves are 52 bits wide, so the `u64` conversion cannot fail.
+                    let half = if high { product >> 52 } else { product & u128::from(MASK52) };
+                    let half = u64::try_from(half).unwrap();
+
+                    // Use `wrapping_add` because the accumulator lane is a full 64 bits.
+                    let r = va.wrapping_add(half);
+                    this.write_scalar(Scalar::from_u64(r), &d_lane)?;
+                }
             }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
     }
-}
-
-/// Multiply the low unsigned 52-bit integers in each 64-bit lane of `x` and
-/// `y`, producing a 104-bit product, then add either its low (`high ==
-/// false`) or high (`high == true`) 52-bit half to the full 64-bit lane of
-/// `z` with wrapping arithmetic.
-///
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52lo_epu64>
-/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52hi_epu64>
-fn vpmadd52uq<'tcx>(
-    ecx: &mut crate::MiriInterpCx<'tcx>,
-    z: &OpTy<'tcx>,
-    x: &OpTy<'tcx>,
-    y: &OpTy<'tcx>,
-    high: bool,
-    dest: &MPlaceTy<'tcx>,
-) -> InterpResult<'tcx, ()> {
-    let (z, z_len) = ecx.project_to_simd(z)?;
-    let (x, x_len) = ecx.project_to_simd(x)?;
-    let (y, y_len) = ecx.project_to_simd(y)?;
-    let (dest, dest_len) = ecx.project_to_simd(dest)?;
-
-    // fn vpmadd52luq_512(z: i64x8, x: i64x8, y: i64x8) -> i64x8;
-    assert_eq!(z_len, dest_len);
-    assert_eq!(x_len, dest_len);
-    assert_eq!(y_len, dest_len);
-
-    const MASK52: u64 = (1 << 52) - 1;
-    for i in 0..dest_len {
-        let z = ecx.read_scalar(&ecx.project_index(&z, i)?)?.to_u64()?;
-        let x = ecx.read_scalar(&ecx.project_index(&x, i)?)?.to_u64()?;
-        let y = ecx.read_scalar(&ecx.project_index(&y, i)?)?.to_u64()?;
-        let dest = ecx.project_index(&dest, i)?;
-
-        let product = u128::from(x & MASK52).strict_mul(u128::from(y & MASK52));
-        let shifted = if high { product >> 52 } else { product };
-        let chunk = u64::try_from(shifted & u128::from(MASK52)).unwrap();
-        let res = Scalar::from_u64(z.wrapping_add(chunk));
-        ecx.write_scalar(res, &dest)?;
-    }
-
-    interp_ok(())
 }
 
 /// Multiply groups of 4 adjacent pairs of unsigned 8-bit integers in `a` with corresponding signed
