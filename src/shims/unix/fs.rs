@@ -1,6 +1,7 @@
 //! File and file system access
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, File, FileTimes, FileType, OpenOptions, TryLockError};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -13,7 +14,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_target::spec::Os;
 
 use self::shims::time::system_time_to_duration;
-use crate::shims::files::FileHandle;
+use crate::shims::files::{FileHandle, FlockState};
 use crate::shims::os_str::bytes_to_os_str;
 use crate::shims::sig::check_min_vararg_count;
 use crate::shims::unix::fd::{FlockOp, UnixFileDescription};
@@ -142,25 +143,62 @@ impl UnixFileDescription for FileHandle {
         assert!(communicate_allowed, "isolation should have prevented even opening a file");
 
         use FlockOp::*;
+
+        // Windows `File` locks differ from POSIX `flock`:
+        // - No lock conversion (shared->exclusive or exclusive->shared)
+        // - Redundant unlock is allowed
+        if cfg!(windows) {
+            match (self.flock_state.get(), op) {
+                (Some(FlockState::Exclusive), SharedLock { nonblocking: _ }) =>
+                    throw_unsup_format!(
+                        "converting exclusive `flock` to shared is not supported on Windows hosts"
+                    ),
+                (Some(FlockState::Shared), ExclusiveLock { nonblocking: _ }) =>
+                    throw_unsup_format!(
+                        "converting shared `flock` to exclusive is not supported on Windows hosts"
+                    ),
+                _ => {}
+            }
+        }
+
         // We must not block the interpreter loop, so we always `try_lock`.
         let (res, nonblocking) = match op {
             SharedLock { nonblocking } => (self.file.try_lock_shared(), nonblocking),
             ExclusiveLock { nonblocking } => (self.file.try_lock(), nonblocking),
             Unlock => {
-                return interp_ok(self.file.unlock());
+                // Skip the OS unlock if already unlocked — Windows `UnlockFileEx`
+                // errors on redundant unlock (error 158), but POSIX `flock` allows it.
+                if self.flock_state.get().is_some() {
+                    let result = self.file.unlock();
+                    self.flock_state.set(None);
+                    return interp_ok(result);
+                }
+                return interp_ok(Ok(()));
             }
         };
 
-        match res {
-            Ok(()) => interp_ok(Ok(())),
-            Err(TryLockError::Error(err)) => interp_ok(Err(err)),
+        let result = match res {
+            Ok(()) => Ok(()),
+            Err(TryLockError::Error(err)) => Err(err),
             Err(TryLockError::WouldBlock) =>
                 if nonblocking {
-                    interp_ok(Err(ErrorKind::WouldBlock.into()))
+                    Err(ErrorKind::WouldBlock.into())
                 } else {
                     throw_unsup_format!("blocking `flock` is not currently supported");
                 },
+        };
+
+        // Update flock state on success
+        if result.is_ok() {
+            let new_state = match op {
+                SharedLock { nonblocking: _ } => Some(FlockState::Shared),
+                ExclusiveLock { nonblocking: _ } => Some(FlockState::Exclusive),
+                Unlock => None,
+            };
+            self.flock_state.set(new_state);
         }
+
+        interp_ok(result)
     }
 }
 
@@ -537,9 +575,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
         }
 
-        let fd = options
-            .open(path)
-            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable, readable }));
+        let fd = options.open(path).map(|file| {
+            this.machine.fds.insert_new(FileHandle {
+                file,
+                writable,
+                readable,
+                flock_state: Cell::new(None),
+            })
+        });
 
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
     }
@@ -1759,6 +1802,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         file: f,
                         writable: true,
                         readable: true,
+                        flock_state: Cell::new(None),
                     });
                     return interp_ok(Scalar::from_i32(fd));
                 }
