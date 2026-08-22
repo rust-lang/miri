@@ -424,17 +424,32 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "fstat" => {
-                let [fd, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [fd, buf] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *mut _) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let result = this.fstat(fd, buf)?;
                 this.write_scalar(result, dest)?;
             }
             "lstat" => {
-                let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [path, buf] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*const _, *mut _) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let result = this.lstat(path, buf)?;
                 this.write_scalar(result, dest)?;
             }
             "stat" => {
-                let [path, buf] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [path, buf] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*const _, *mut _) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let result = this.stat(path, buf)?;
                 this.write_scalar(result, dest)?;
             }
@@ -512,7 +527,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "readdir" => {
-                let [dirp] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [dirp] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*mut _) -> *mut _),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 this.readdir(dirp, dest)?;
             }
             "lseek" => {
@@ -871,8 +891,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // Allocation
             "posix_memalign" => {
-                let [memptr, align, size] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [memptr, align, size] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*mut _, usize, usize) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let result = this.posix_memalign(memptr, align, size)?;
                 this.write_scalar(result, dest)?;
             }
@@ -923,8 +947,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Currently this function does not exist on all Unixes, e.g. on macOS.
                 this.check_target_os(&[Os::Linux, Os::FreeBsd, Os::Android], link_name)?;
 
-                let [ptr, nmemb, size] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [ptr, nmemb, size] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*mut _, usize, usize) -> *mut _),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let ptr = this.read_pointer(ptr)?;
                 let nmemb = this.read_target_usize(nmemb)?;
                 let size = this.read_target_usize(size)?;
@@ -947,16 +975,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             "aligned_alloc" => {
                 // This is a C11 function, we assume all Unixes have it.
                 // (MSVC explicitly does not support this.)
-                let [align, size] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [align, size] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(usize, usize) -> *mut _),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let res = this.aligned_alloc(align, size)?;
                 this.write_pointer(res, dest)?;
             }
 
             // Dynamic symbol loading
             "dlsym" => {
-                let [handle, symbol] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [handle, symbol] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*mut _, *const _) -> *mut _),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 this.read_target_usize(handle)?;
                 let symbol = this.read_pointer(symbol)?;
                 let name = this.read_c_str(symbol)?;
@@ -975,7 +1011,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // Thread-local storage
             "pthread_key_create" => {
-                let [key, dtor] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [key, dtor] = this.check_shim_sig(
+                    // FIXME: The second argument is actually a function pointer.
+                    shim_sig!(extern "C" fn(*mut _, *const _) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let key_place = this.deref_pointer_as(key, this.libc_ty_layout("pthread_key_t"))?;
                 let dtor = this.read_pointer(dtor)?;
 
@@ -1007,7 +1049,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "pthread_key_delete" => {
                 // FIXME: This does not have a direct test (#3179).
-                let [key] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [key] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(libc::pthread_key_t) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let key = this.read_scalar(key)?.to_bits(key.layout.size)?;
                 this.machine.tls.delete_tls_key(key)?;
                 // Return success (0)
@@ -1015,7 +1062,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "pthread_getspecific" => {
                 // FIXME: This does not have a direct test (#3179).
-                let [key] = this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [key] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(libc::pthread_key_t) -> *mut _),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let key = this.read_scalar(key)?.to_bits(key.layout.size)?;
                 let active_thread = this.active_thread();
                 let ptr = this.machine.tls.load_tls(key, active_thread, this)?;
@@ -1023,8 +1075,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "pthread_setspecific" => {
                 // FIXME: This does not have a direct test (#3179).
-                let [key, new_ptr] =
-                    this.check_shim_sig_lenient(abi, CanonAbi::C, link_name, args)?;
+                let [key, new_ptr] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(libc::pthread_key_t, *const _) -> i32),
+                    link_name,
+                    abi,
+                    args,
+                )?;
                 let key = this.read_scalar(key)?.to_bits(key.layout.size)?;
                 let active_thread = this.active_thread();
                 let new_data = this.read_scalar(new_ptr)?;
