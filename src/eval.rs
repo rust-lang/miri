@@ -170,6 +170,9 @@ pub struct MiriConfig {
     pub short_fd_operations: bool,
     /// A list of crates that are considered user-relevant.
     pub user_relevant_crates: Vec<String>,
+    /// Whether target features that Miri does not support should be removed from
+    /// `cfg(target_feature)`.
+    pub disable_unsupported_target_features: Option<bool>,
 }
 
 impl Default for MiriConfig {
@@ -212,6 +215,7 @@ impl Default for MiriConfig {
             float_rounding_error: FloatRoundingErrorMode::Random,
             short_fd_operations: true,
             user_relevant_crates: vec![],
+            disable_unsupported_target_features: None,
         }
     }
 }

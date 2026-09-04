@@ -31,6 +31,7 @@
 // Configure clippy and other lints
 #![allow(
     clippy::collapsible_if,
+    clippy::collapsible_match,
     clippy::enum_variant_names,
     clippy::manual_map,
     clippy::neg_cmp_op_on_partial_ord,
@@ -156,7 +157,7 @@ pub use crate::diagnostics::{
 };
 pub use crate::eval::{MiriConfig, MiriEntryFnType, create_ecx, entry_fn, eval_entry};
 pub use crate::helpers::{EvalContextExt as _, ToU64 as _, ToUsize as _};
-pub use crate::intrinsics::EvalContextExt as _;
+pub use crate::intrinsics::{EvalContextExt as _, remove_unsupported_target_features};
 pub use crate::machine::{
     AlignmentCheck, AllocExtra, BacktraceStyle, DynMachineCallback, FloatRoundingErrorMode,
     FrameExtra, IsolatedOp, MachineCallback, MemoryKind, MiriInterpCx, MiriInterpCxExt,
