@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs::{Dir, File};
 use std::io::{ErrorKind, IsTerminal, Read, Seek, SeekFrom, Write};
@@ -421,11 +422,19 @@ impl FileDescription for NullOutput {
     }
 }
 
+/// State of a `flock` lock on a file description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlockState {
+    Shared,
+    Exclusive,
+}
+
 #[derive(Debug)]
 pub struct FileHandle {
     pub(crate) file: File,
     pub(crate) readable: bool,
     pub(crate) writable: bool,
+    pub(crate) flock_state: Cell<Option<FlockState>>,
 }
 
 impl FileDescription for FileHandle {

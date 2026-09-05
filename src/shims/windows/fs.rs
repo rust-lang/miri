@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::fs::{self, Dir};
 use std::io;
 use std::io::SeekFrom;
@@ -316,6 +317,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     file,
                     writable: desired_write,
                     readable: desired_read,
+                    flock_state: Cell::new(None),
                 });
                 return interp_ok(Handle::File(fd_num));
             }
