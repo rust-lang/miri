@@ -6,10 +6,14 @@ mod math;
 mod simd;
 mod x86;
 
+use std::mem;
+
 #[rustfmt::skip] // prevent `use` reordering
 use rand::RngExt;
 use rustc_abi::{Endian, Size};
+use rustc_data_structures::unord::UnordSet;
 use rustc_middle::{mir, ty};
+use rustc_session::Session;
 use rustc_span::{Symbol, sym};
 use rustc_target::spec::Arch;
 
@@ -32,6 +36,39 @@ where
         args.len(),
         N
     )
+}
+
+fn should_remove_unsupported_target_features() -> bool {
+    // We cannot use `MiriConfig` to decide this as that is not available in dependencies.
+    std::env::var("MIRI_DISABLE_UNSUPPORTED_TARGET_FEATURES").is_ok_and(|s| s == "1")
+}
+
+pub fn remove_unsupported_target_features(sess: &Session, features: &mut UnordSet<Symbol>) {
+    if !should_remove_unsupported_target_features() {
+        return;
+    }
+
+    // While an allowlist may feel more natural here, we don't have a very good idea of what exactly
+    // we do support. So instead we list things that we know we don't support.
+    let is_unsupported = match sess.target.arch {
+        Arch::X86_64 | Arch::X86 =>
+            |feature: Symbol| {
+                // AVX512 is only partially supported.
+                feature.as_str().starts_with("avx512")
+            },
+        Arch::AArch64 =>
+            |feature| {
+                // We don't fully support `neon` but we cannot remove that as it is ABI-required.
+                matches!(feature, sym::aes)
+            },
+        // Fallback: we don't know so we just don't touch anything.
+        _ => |_feature| true,
+    };
+
+    // Apply the filter. This is currently annoying to do because there's no `retain` on `UnordSet`.
+    let mut features_vec = mem::take(features).into_sorted_stable_ord();
+    features_vec.retain(|f| !is_unsupported(*f));
+    *features = UnordSet::from_iter(features_vec);
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -245,12 +282,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             EmulateItemResult::NeedsReturn
         };
 
-        // The rest either implements the logic, or falls back to `lookup_exported_symbol`.
+        // The rest either implements the logic, or emits an error. These are not real symbols so we
+        // do not invoke `lookup_exported_symbol`.
         res.jump_to_next_block(this, &dest.clone().into(), ret, None, |this| {
-            throw_machine_stop!(TerminationInfo::UnsupportedForeignItem(format!(
-                "can't call LLVM intrinsic `{link_name}` on architecture `{arch}`",
-                arch = this.tcx.sess.target.arch,
-            )));
+            // Only show a hint on targets where we have decent support.
+            let help = if matches!(this.tcx.sess.target.arch, Arch::X86_64 | Arch::X86 | Arch::AArch64) {
+                Some(if should_remove_unsupported_target_features() {
+                    format!("This likely means that Miri did not remove enough target features from `cfg(target_feature)`; \
+                    please file an issue at <https://github.com/rust-lang/miri/issues>.")
+                } else {
+                    format!("Try setting `MIRI_DISABLE_UNSUPPORTED_TARGET_FEATURES=1` (needs full rebuild via `cargo clean`) \
+                    to steer this code towards a fallback path that may work in Miri.")
+                })
+            } else { None };
+            throw_machine_stop!(TerminationInfo::UnsupportedForeignItem {
+                msg: format!(
+                    "can't call LLVM intrinsic `{link_name}` on architecture `{arch}`",
+                    arch = this.tcx.sess.target.arch,
+                ),
+                help
+            });
         })
     }
 }

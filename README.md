@@ -162,14 +162,21 @@ endian-sensitive code.
 ### Controlling target features
 
 Controlling target features works similar to regular rustc invocations:
-`RUSTFLAGS="-Ctarget-feature=+avx512f" cargo miri test` runs the tests with AVX512 enabled. (Miri
-only supports very few AVX512 intrinsics at the moment.) `-Ctarget-cpu` also works. If target
-features are also relevant for doctests, you have to also set `RUSTDOCFLAGS`.
+`RUSTFLAGS="-Ctarget-feature=+avx2" cargo miri test` runs the tests with AVX2 enabled.
+`-Ctarget-cpu` also works. If target features are also relevant for doctests, you have to also set
+`RUSTDOCFLAGS`.
 
 Unlike regular rustc, this flag has *two* effects: it builds the code with that target feature
 available (which affects `cfg(target_feature)`), and it tells Miri to consider the "virtual CPU"
 that the interpreted program runs on as having the feature available (meaning the code is allowed to
 invoke the corresponding intrinsics).
+
+By default, Miri will interpret `-Ctarget-feature` and `-Ctarget-cpu` the same way rustc does.
+However, not all these target features are actually supported by Miri. You can instruct Miri to
+automatically disable unsupported target features by setting
+`MIRI_DISABLE_UNSUPPORTED_TARGET_FEATURES=1`. (You have to `cargo clean` when changing this setting
+as it affects dependencies as well.) Note that this can disable even some target features that are
+usually available by default on the current target, which could cause surprising behavior.
 
 ### Nextest integration
 

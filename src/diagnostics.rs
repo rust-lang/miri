@@ -58,7 +58,10 @@ pub enum TerminationInfo {
         extra: Option<&'static str>,
         retag_explain: bool,
     },
-    UnsupportedForeignItem(String),
+    UnsupportedForeignItem {
+        msg: String,
+        help: Option<String>,
+    },
 }
 
 pub struct RacingOp {
@@ -99,7 +102,7 @@ impl fmt::Display for TerminationInfo {
                     op2.action,
                     op2.thread_info
                 ),
-            UnsupportedForeignItem(msg) => write!(f, "{msg}"),
+            UnsupportedForeignItem { msg, .. } => write!(f, "{msg}"),
         }
     }
 }
@@ -254,8 +257,9 @@ pub fn report_result<'tcx>(
             &Exit { code, leak_check } => return Some((code, leak_check)),
             Abort(_) => Some("abnormal termination"),
             Interrupted => None,
-            UnsupportedInIsolation(_) | Int2PtrWithStrictProvenance | UnsupportedForeignItem(_) =>
-                Some("unsupported operation"),
+            UnsupportedInIsolation(_)
+            | Int2PtrWithStrictProvenance
+            | UnsupportedForeignItem { .. } => Some("unsupported operation"),
             StackedBorrowsUb { .. } | TreeBorrowsUb { .. } | DataRace { .. } =>
                 Some("Undefined Behavior"),
             GenmcMoot => {
@@ -301,10 +305,14 @@ pub fn report_result<'tcx>(
                     note!("set `MIRIFLAGS=-Zmiri-disable-isolation` to disable isolation;"),
                     note!("or set `MIRIFLAGS=-Zmiri-isolation-error=warn` to make Miri return an error code from isolated operations (if supported for that operation) and continue with a warning"),
                 ],
-            UnsupportedForeignItem(_) => {
-                vec![
+            UnsupportedForeignItem { help, .. } => {
+                let mut helps = vec![
                     note!("this means the program tried to do something Miri does not support; it does not indicate a bug in the program"),
-                ]
+                ];
+                if let Some(help) = help {
+                    helps.push(note!("{help}"))
+                }
+                helps
             }
             StackedBorrowsUb { help, history, .. } => {
                 labels.extend(help.clone());

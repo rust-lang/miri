@@ -117,6 +117,8 @@ pub fn setup(
         // `RUSTC_WRAPPER` to the empty string overwrites `build.rustc-wrapper` set via
         // `bootstrap.toml`.
         command.env("RUSTC_WRAPPER", "");
+        // Don't let `MIRI_DISABLE_UNSUPPORTED_TARGET_FEATURES` affect the sysroot build.
+        command.env_remove("MIRI_DISABLE_UNSUPPORTED_TARGET_FEATURES");
 
         if show_setup {
             // Forward output. Even make it verbose, if requested.
