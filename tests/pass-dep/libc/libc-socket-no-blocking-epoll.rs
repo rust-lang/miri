@@ -789,17 +789,5 @@ fn test_initial_readiness() {
 
     epoll_ctl_add(epfd, sockfd, EPOLLOUT | EPOLLIN | EPOLLHUP | EPOLLRDHUP).unwrap();
 
-    if cfg!(miri) {
-        // Because the cross-platform best-effort readiness mapping maps a host EPOLLHUP
-        // readiness to a "write closed" and "read closed" readiness, Miri also reports
-        // EPOLLRDHUP for a newly created socket.
-        check_epoll_wait(
-            epfd,
-            &[Ev { events: EPOLLOUT | EPOLLHUP | EPOLLRDHUP, data: sockfd }],
-            -1,
-        );
-    } else {
-        // Native hosts only report EPOLLOUT and EPOLLHUP for newly created sockets.
-        check_epoll_wait(epfd, &[Ev { events: EPOLLOUT | EPOLLHUP, data: sockfd }], -1);
-    }
+    check_epoll_wait(epfd, &[Ev { events: EPOLLOUT | EPOLLHUP, data: sockfd }], -1);
 }

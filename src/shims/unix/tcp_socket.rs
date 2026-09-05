@@ -25,11 +25,12 @@ use crate::*;
 /// shut down, (E)POLLOUT is also reported for freshly created TCP sockets:
 /// See <https://github.com/torvalds/linux/blob/980a813/net/ipv4/tcp.c#L602>
 ///
-/// These events map to "read closed", "write closed" and "writable" of our generic
-/// [`Readiness`] struct. Because the TCP socket is only added to the blocking I/O
-/// manager after it is connected or listening, we manually set this initial readiness.
+/// These events are reported when the "write closed" and "writable" readiness of
+/// our generic [`Readiness`] struct are set. Because the TCP socket is only added
+/// to the blocking I/O manager after it is connected or listening, we manually set
+/// this initial readiness.
 const INITIAL_TCP_SOCKET_READINESS: Readiness =
-    Readiness { writable: true, read_closed: true, write_closed: true, ..Readiness::EMPTY };
+    Readiness { writable: true, write_closed: true, ..Readiness::EMPTY };
 
 #[derive(Debug)]
 enum SocketState {
@@ -317,9 +318,8 @@ impl UnixSocketFileDescription for TcpSocket {
                         // register the socket afterwards to the blocking I/O manager, we just
                         // clear its readiness here as the blocking I/O manager will update its
                         // readiness accordingly.
-                        // We intentionally don't invoke `ecx.update_fd_readiness` here since
-                        // the readiness "change" from the clearing should not be noticed.
                         self.io_readiness.replace(Readiness::EMPTY);
+                        ecx.update_fd_readiness(self.clone(), ReadinessUpdateFlags::DEFAULT)?;
 
                         // Register the socket to the blocking I/O manager because
                         // we now have an associated host socket.
@@ -419,9 +419,8 @@ impl UnixSocketFileDescription for TcpSocket {
                 // register the socket afterwards to the blocking I/O manager, we just
                 // clear its readiness here as the blocking I/O manager will update its
                 // readiness accordingly.
-                // We intentionally don't invoke `ecx.update_fd_readiness` here since
-                // the readiness "change" from the clearing should not be noticed.
                 self.io_readiness.replace(Readiness::EMPTY);
+                ecx.update_fd_readiness(self.clone(), ReadinessUpdateFlags::DEFAULT)?;
 
                 // Register the socket to the blocking I/O manager because
                 // we now have an associated host socket.
