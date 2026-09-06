@@ -630,6 +630,14 @@ pub struct MiriMachine<'tcx> {
     /// clamped to a fixed range; the configured
     /// value only sets the starting point (0 disables the visit-based GC entirely).
     pub(crate) tree_gc_visit_interval: u32,
+    /// Whether the provenance GC interval is measured in visited Tree Borrows nodes
+    /// (`tree_gc_visit_interval`) rather than in basic blocks (`gc_interval`).
+    ///
+    /// This depends only on the borrow tracker method and on `tree_gc_visit_interval`, both of
+    /// which are fixed for the whole run, so we settle it once here: `before_terminator` runs
+    /// on every single basic block and must not borrow the global borrow tracker state just to
+    /// ask which tracker is in use.
+    pub(crate) tree_gc_by_visits: bool,
     /// Number of nodes visited since the last GC pass.
     pub(crate) visits_since_gc: Cell<u32>,
     /// The dead-node fraction a GC pass should find for `tree_gc_visit_interval` to be
@@ -843,6 +851,11 @@ impl<'tcx> MiriMachine<'tcx> {
             gc_interval: config.gc_interval,
             since_gc: 0,
             tree_gc_visit_interval: config.tree_gc_visit_interval,
+            tree_gc_by_visits: config.tree_gc_visit_interval > 0
+                && matches!(
+                    config.borrow_tracker,
+                    Some(borrow_tracker::BorrowTrackerMethod::TreeBorrows(_))
+                ),
             visits_since_gc: Cell::new(0),
             tree_gc_target_dead_ratio: config.tree_gc_target_dead_ratio,
             tree_gc_min_nodes: config.tree_gc_min_nodes,
@@ -1078,6 +1091,7 @@ impl VisitProvenance for MiriMachine<'_> {
             gc_interval: _,
             since_gc: _,
             tree_gc_visit_interval: _,
+            tree_gc_by_visits: _,
             visits_since_gc: _,
             tree_gc_target_dead_ratio: _,
             tree_gc_min_nodes: _,
@@ -1952,21 +1966,12 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         //
         // Tree Borrows counts visited nodes rather than basic blocks, but only if a
         // visit interval is configured; with `tree_gc_visit_interval == 0` it falls back to
-        // the plain basic-block interval.
-        let gc_cond = if let Some(borrow_tracker) = &ecx.machine.borrow_tracker {
-            let default_cond =
-                ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval;
-            match borrow_tracker.borrow().borrow_tracker_method() {
-                crate::borrow_tracker::BorrowTrackerMethod::TreeBorrows(_) =>
-                    if ecx.machine.tree_gc_visit_interval > 0 {
-                        ecx.machine.visits_since_gc.get() >= ecx.machine.tree_gc_visit_interval
-                    } else {
-                        default_cond
-                    },
-                crate::borrow_tracker::BorrowTrackerMethod::StackedBorrows => default_cond,
-            }
+        // the plain basic-block interval. Which of the two applies is decided once at startup,
+        // see `tree_gc_by_visits`.
+        let gc_cond = if ecx.machine.tree_gc_by_visits {
+            ecx.machine.visits_since_gc.get() >= ecx.machine.tree_gc_visit_interval
         } else {
-            false
+            ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval
         };
 
         if gc_cond {

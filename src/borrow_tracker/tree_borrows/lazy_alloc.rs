@@ -26,8 +26,13 @@ use crate::*;
 pub enum LazyTree {
     /// The tree does not exist yet. We keep everything needed to build it, plus
     /// `exposed`, which records if `expose_tag` was called before the tree was built.
+    ///
+    /// The root tag is taken here rather than in `init` so that materializing the tree needs
+    /// no access to the global state; the eager `Tree::new_allocation` takes it at this point
+    /// too, and `adjust_alloc_root_pointer` asks for it for essentially every allocation
+    /// anyway, so nothing is gained by deferring it.
     Uninit {
-        id: AllocId,
+        root_tag: BorTag,
         size: Size,
         span: Span,
         exposed: bool,
@@ -39,22 +44,21 @@ impl LazyTree {
     /// Create the tree if it does not exist yet. The common case of an already-initialized tree
     /// must be cheap, so only the check is here.
     #[inline]
-    pub fn ensure_init(&mut self, global: &GlobalState, machine: &MiriMachine<'_>) {
+    pub fn ensure_init(&mut self) {
         if matches!(self, LazyTree::Uninit { .. }) {
-            self.init(global, machine);
+            self.init();
         }
     }
 
     /// The cold half of [`LazyTree::ensure_init`], kept out of line so that it does not bloat
-    /// the retag path. The global state is only borrowed when there is actually a tree to build.
+    /// the retag path.
     #[cold]
     #[inline(never)]
-    fn init(&mut self, global: &GlobalState, machine: &MiriMachine<'_>) {
-        let LazyTree::Uninit { id, size, span, exposed } = *self else { return };
-        let tag = global.borrow_mut().root_ptr_tag(id, machine);
-        let mut tree = Tree::new(tag, size, span);
+    fn init(&mut self) {
+        let LazyTree::Uninit { root_tag, size, span, exposed } = *self else { return };
+        let mut tree = Tree::new(root_tag, size, span);
         if exposed {
-            tree.expose_tag(tag, false);
+            tree.expose_tag(root_tag, false);
         }
         *self = LazyTree::Init(Box::new(tree));
     }
@@ -74,11 +78,17 @@ impl<'tcx> LazyTree {
     pub fn new_allocation(
         id: AllocId,
         size: Size,
-        _state: &mut GlobalStateInner,
+        state: &mut GlobalStateInner,
         _kind: MemoryKind,
         machine: &MiriMachine<'tcx>,
     ) -> Self {
-        LazyTree::Uninit { id, size, span: machine.current_user_relevant_span(), exposed: false }
+        let root_tag = state.root_ptr_tag(id, machine); // Fresh tag for the root
+        LazyTree::Uninit {
+            root_tag,
+            size,
+            span: machine.current_user_relevant_span(),
+            exposed: false,
+        }
     }
 
     /// Wrapper for `Tree::before_memory_access`.

@@ -385,7 +385,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let mut tree_borrows = alloc_extra.borrow_tracker_tb().borrow_mut();
 
         #[cfg(feature = "lazy-alloc")]
-        tree_borrows.ensure_init(this.machine.borrow_tracker.as_ref().unwrap(), &this.machine);
+        tree_borrows.ensure_init();
 
         for (perm_range, loc_state) in inside_perms.iter_all() {
             if let Some(access) = loc_state.permission().associated_access() {
