@@ -9,6 +9,7 @@ use core::arch::x86::*;
 use core::arch::x86_64::*;
 
 fn main() {
+    // Bail out dynamically if target feature is not supported
     if is_x86_feature_detected!("aes") {
         unsafe {
             test_aes_keygen();
@@ -24,54 +25,51 @@ fn main() {
                 unsafe {
                     test_vaes512();
                 }
+            } else {
+                println!("warning: skipping VAES+AVX-512 tests");
             }
+        } else {
+            println!("warning: skipping VAES tests");
         }
+    } else {
+        println!("warning: skipping AES tests");
     }
 }
 
-macro_rules! hex {
-    ($($s:literal)*) => {{
-        const STRINGS: &[&'static [u8]] = &[$($s.as_bytes(),)*];
-        const {
-            hex_literal::decode::<{ hex_literal::len(STRINGS) }>(STRINGS)
-                .expect("Output array length should be correct")
-        }
-    }};
-}
-
-const START_K: [u8; 64] = hex!(
-    "000102030405060708090A0B0C0D0E0F"
-    "101112131415161718191A1B1C1D1E1F"
-    "202122232425262728292A2B2C2D2E2F"
-    "303132333435363738393A3B3C3D3E3F"
-);
-const EXPECTED_K: [u8; 64] = hex!(
-    "3E20891643D63F40AB9858F40DF473EB"
-    "34FAD322139140B611EC284682B04712"
-    "7234EC1DF69957C127300335BB1E1F3F"
-    "118378FC9B461ED7CC4BCE7342A23269"
-);
-const EXPECTED_B: [u8; 64] = hex!(
-    "BD12A330F63C66D9220E0A15AE34C1A3"
-    "55AE92B160B72676D796AB343539B3F6"
-    "BCE5B43E431A685CD7BDC0393D6C7FDD"
-    "41F0604A1F8F16027483C220A8BDDD1F"
-);
-const N: u64 = 1000;
+const START_K: [u128; 4] = [
+    0x000102030405060708090A0B0C0D0E0F,
+    0x101112131415161718191A1B1C1D1E1F,
+    0x202122232425262728292A2B2C2D2E2F,
+    0x303132333435363738393A3B3C3D3E3F,
+];
+const EXPECTED_K: [u128; 4] = [
+    0xD21928B8DEB8D0565C1FB92B010E2363,
+    0x8D2E2F5521147125F8E24489EA0D8D97,
+    0xEE26FC76F1CC0D3D849AAF838A16117B,
+    0xA4C8122B4F6C00362E3692B1B7854BF7,
+];
+const EXPECTED_B: [u128; 4] = [
+    0xE74F19EFD8C28BFE3BD285175F3F68FF,
+    0xCE70940A752A6E0A23AD14E31C033BBF,
+    0xE224ED621B046A2D337BB2EC5020424E,
+    0xE617A20C71EC216CF6DE4FF8EDB763B0,
+];
+const ITERATIONS: u64 = 128;
 
 // Test `_mm_aeskeygenassist_si128` and `_mm_aesimc_si128`
 #[target_feature(enable = "aes")]
 fn test_aes_keygen() {
-    let k = hex!("000102030405060708090A0B0C0D0E0F");
-    let expected_k = hex!("B5A5445BB9DF01C715DF84737CC240F3");
+    let k = 0x000102030405060708090A0B0C0D0E0F;
+    let expected_k = 0x8DD2144D60F310A85C3487481DDC6789;
 
     let mut k = k.as_mm();
-    for _ in 0..N {
+    for _ in 0..ITERATIONS {
         k = _mm_aeskeygenassist_si128(k, 0x36);
         let t = _mm_aesimc_si128(k);
         // use `aesenc` to "randomize" `k`
         k = _mm_aesenc_si128(k, t);
     }
+
     assert!(expected_k.is_eq(k));
 }
 
@@ -79,24 +77,17 @@ fn test_aes_keygen() {
 /// `_mm_aesdec_si128`, and `_mm_aesdeclast_si128`
 #[target_feature(enable = "aes")]
 fn test_aes() {
-    let (ks, tail) = START_K.as_chunks::<16>();
-    assert!(tail.is_empty());
-    let (expected_ks, tail) = EXPECTED_K.as_chunks::<16>();
-    assert!(tail.is_empty());
-    let (expected_bs, tail) = EXPECTED_B.as_chunks::<16>();
-    assert!(tail.is_empty());
-
-    for i in 0..ks.len() {
-        let mut k = ks[i].as_mm();
+    for i in 0..4 {
+        let mut k = START_K[i].as_mm();
         let mut b = k;
-        for _ in 0..N {
+        for _ in 0..ITERATIONS {
             b = _mm_aesenc_si128(b, k);
             k = _mm_aesenclast_si128(k, b);
             b = _mm_aesdec_si128(b, k);
             k = _mm_aesdeclast_si128(k, b);
         }
-        assert!(expected_ks[i].is_eq(k));
-        assert!(expected_bs[i].is_eq(b));
+        assert!(EXPECTED_K[i].is_eq(k));
+        assert!(EXPECTED_B[i].is_eq(b));
     }
 }
 
@@ -104,17 +95,17 @@ fn test_aes() {
 /// `_mm256_aesdec_epi128`, and `_mm256_aesdeclast_epi128`
 #[target_feature(enable = "vaes")]
 fn test_vaes256() {
-    let (ks, tail) = START_K.as_chunks::<32>();
+    let (ks, tail) = START_K.as_chunks::<2>();
     assert!(tail.is_empty());
-    let (expected_ks, tail) = EXPECTED_K.as_chunks::<32>();
+    let (expected_ks, tail) = EXPECTED_K.as_chunks::<2>();
     assert!(tail.is_empty());
-    let (expected_bs, tail) = EXPECTED_B.as_chunks::<32>();
+    let (expected_bs, tail) = EXPECTED_B.as_chunks::<2>();
     assert!(tail.is_empty());
 
-    for i in 0..ks.len() {
+    for i in 0..2 {
         let mut k = ks[i].as_mm();
         let mut b = k;
-        for _ in 0..N {
+        for _ in 0..ITERATIONS {
             b = _mm256_aesenc_epi128(b, k);
             k = _mm256_aesenclast_epi128(k, b);
             b = _mm256_aesdec_epi128(b, k);
@@ -131,7 +122,7 @@ fn test_vaes256() {
 fn test_vaes512() {
     let mut k = START_K.as_mm();
     let mut b = k;
-    for _ in 0..N {
+    for _ in 0..ITERATIONS {
         b = _mm512_aesenc_epi128(b, k);
         k = _mm512_aesenclast_epi128(k, b);
         b = _mm512_aesdec_epi128(b, k);
@@ -141,7 +132,7 @@ fn test_vaes512() {
     assert!(EXPECTED_B.is_eq(b));
 }
 
-/// Trait for casting between `[u8; 16/32/64]` and `__m128/256/512i` types
+/// Trait for casting between `u128/[u128; 2]/[u128; 4]` and `__m128/256/512i` types
 ///
 /// # Safety
 /// The trait must not be implemented for any other type pairs.
@@ -158,88 +149,14 @@ unsafe trait AsMm: Sized + core::cmp::Eq {
     }
 }
 
-unsafe impl AsMm for [u8; 16] {
+unsafe impl AsMm for u128 {
     type Mm = __m128i;
 }
 
-unsafe impl AsMm for [u8; 32] {
+unsafe impl AsMm for [u128; 2] {
     type Mm = __m256i;
 }
 
-unsafe impl AsMm for [u8; 64] {
+unsafe impl AsMm for [u128; 4] {
     type Mm = __m512i;
-}
-
-// Vendored from the `hex-literal` crate
-mod hex_literal {
-    const fn next_hex_char(string: &[u8], mut pos: usize) -> Option<(u8, usize)> {
-        while pos < string.len() {
-            let raw_val = string[pos];
-            pos += 1;
-            let val = match raw_val {
-                b'0'..=b'9' => raw_val - 48,
-                b'A'..=b'F' => raw_val - 55,
-                b'a'..=b'f' => raw_val - 87,
-                b' ' | b':' | b'\r' | b'\n' | b'\t' => continue,
-                0..=127 => panic!("Encountered invalid ASCII character"),
-                _ => panic!("Encountered non-ASCII character"),
-            };
-            return Some((val, pos));
-        }
-        None
-    }
-
-    const fn next_byte(string: &[u8], pos: usize) -> Option<(u8, usize)> {
-        let (half1, pos) = match next_hex_char(string, pos) {
-            Some(v) => v,
-            None => return None,
-        };
-        let (half2, pos) = match next_hex_char(string, pos) {
-            Some(v) => v,
-            None => panic!("Odd number of hex characters"),
-        };
-        Some(((half1 << 4) + half2, pos))
-    }
-
-    /// Compute length of a byte array which will be decoded from the strings.
-    ///
-    /// This function is an implementation detail and SHOULD NOT be called directly!
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn len(strings: &[&[u8]]) -> usize {
-        let mut i = 0;
-        let mut len = 0;
-        while i < strings.len() {
-            let mut pos = 0;
-            while let Some((_, new_pos)) = next_byte(strings[i], pos) {
-                len += 1;
-                pos = new_pos;
-            }
-            i += 1;
-        }
-        len
-    }
-
-    /// Decode hex strings into a byte array of pre-computed length.
-    ///
-    /// This function is an implementation detail and SHOULD NOT be called directly!
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn decode<const LEN: usize>(strings: &[&[u8]]) -> Option<[u8; LEN]> {
-        let mut string_pos = 0;
-        let mut buf = [0u8; LEN];
-        let mut buf_pos = 0;
-        while string_pos < strings.len() {
-            let mut pos = 0;
-            let string = &strings[string_pos];
-            string_pos += 1;
-
-            while let Some((byte, new_pos)) = next_byte(string, pos) {
-                buf[buf_pos] = byte;
-                buf_pos += 1;
-                pos = new_pos;
-            }
-        }
-        if LEN == buf_pos { Some(buf) } else { None }
-    }
 }
