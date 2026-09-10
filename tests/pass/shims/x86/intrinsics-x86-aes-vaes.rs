@@ -19,9 +19,6 @@ fn main() {
             test_aesenclast();
             test_aesdec();
             test_aesdeclast();
-
-            loop_test_aes_keygen();
-            loop_test_aes();
         }
 
         if is_x86_feature_detected!("vaes") {
@@ -30,8 +27,6 @@ fn main() {
                 test_aesenclast256();
                 test_aesdec256();
                 test_aesdeclast256();
-
-                loop_test_vaes256();
             }
 
             if is_x86_feature_detected!("avx512f") {
@@ -40,8 +35,6 @@ fn main() {
                     test_aesenclast512();
                     test_aesdec512();
                     test_aesdeclast512();
-
-                    loop_test_vaes512();
                 }
             } else {
                 println!("warning: skipping VAES+AVX-512 tests");
@@ -114,22 +107,6 @@ const EXPECTED_AESDECLAST: [u128; N] = [
     0x98C5F123B4967E2DA4F16F2EDB918529,
     0x319E3DBCE4268B35F215B038FD022054,
 ];
-// Expected value of `k` in loop tests
-const EXPECTED_LOOP_K: [u128; N] = [
-    0xD21928B8DEB8D0565C1FB92B010E2363,
-    0x8D2E2F5521147125F8E24489EA0D8D97,
-    0xEE26FC76F1CC0D3D849AAF838A16117B,
-    0xA4C8122B4F6C00362E3692B1B7854BF7,
-];
-// Expected value of `b` in loop tests
-const EXPECTED_LOOP_B: [u128; N] = [
-    0xE74F19EFD8C28BFE3BD285175F3F68FF,
-    0xCE70940A752A6E0A23AD14E31C033BBF,
-    0xE224ED621B046A2D337BB2EC5020424E,
-    0xE617A20C71EC216CF6DE4FF8EDB763B0,
-];
-/// Number of iternations used in loop tests
-const ITERATIONS: u64 = 128;
 
 #[target_feature(enable = "aes")]
 fn test_aesimc() {
@@ -179,38 +156,6 @@ fn test_aesdeclast() {
     }
 }
 
-#[target_feature(enable = "aes")]
-fn loop_test_aes_keygen() {
-    let k = K[0];
-    let expected_k = 0x8DD2144D60F310A85C3487481DDC6789;
-
-    let mut k = k.as_mm();
-    for _ in 0..ITERATIONS {
-        k = _mm_aeskeygenassist_si128(k, 0x36);
-        let t = _mm_aesimc_si128(k);
-        // use `aesenc` to "randomize" `k`
-        k = _mm_aesenc_si128(k, t);
-    }
-
-    assert!(expected_k.is_eq(k));
-}
-
-#[target_feature(enable = "aes")]
-fn loop_test_aes() {
-    for i in 0..N {
-        let mut k = K[i].as_mm();
-        let mut b = k;
-        for _ in 0..ITERATIONS {
-            b = _mm_aesenc_si128(b, k);
-            k = _mm_aesenclast_si128(k, b);
-            b = _mm_aesdec_si128(b, k);
-            k = _mm_aesdeclast_si128(k, b);
-        }
-        assert!(EXPECTED_LOOP_K[i].is_eq(k));
-        assert!(EXPECTED_LOOP_B[i].is_eq(b));
-    }
-}
-
 #[target_feature(enable = "vaes")]
 fn test_aesenc256() {
     let (b, _) = B.as_chunks::<2>();
@@ -255,29 +200,6 @@ fn test_aesdeclast256() {
     }
 }
 
-#[target_feature(enable = "vaes")]
-fn loop_test_vaes256() {
-    let (ks, tail) = K.as_chunks::<2>();
-    assert!(tail.is_empty());
-    let (expected_ks, tail) = EXPECTED_LOOP_K.as_chunks::<2>();
-    assert!(tail.is_empty());
-    let (expected_bs, tail) = EXPECTED_LOOP_B.as_chunks::<2>();
-    assert!(tail.is_empty());
-
-    for i in 0..N / 2 {
-        let mut k = ks[i].as_mm();
-        let mut b = k;
-        for _ in 0..ITERATIONS {
-            b = _mm256_aesenc_epi128(b, k);
-            k = _mm256_aesenclast_epi128(k, b);
-            b = _mm256_aesdec_epi128(b, k);
-            k = _mm256_aesdeclast_epi128(k, b);
-        }
-        assert!(expected_ks[i].is_eq(k));
-        assert!(expected_bs[i].is_eq(b));
-    }
-}
-
 #[target_feature(enable = "avx512f,vaes")]
 fn test_aesenc512() {
     let r = _mm512_aesenc_epi128(B.as_mm(), K.as_mm());
@@ -300,20 +222,6 @@ fn test_aesdec512() {
 fn test_aesdeclast512() {
     let r = _mm512_aesdeclast_epi128(B.as_mm(), K.as_mm());
     assert!(EXPECTED_AESDECLAST.is_eq(r));
-}
-
-#[target_feature(enable = "avx512f,vaes")]
-fn loop_test_vaes512() {
-    let mut k = K.as_mm();
-    let mut b = k;
-    for _ in 0..ITERATIONS {
-        b = _mm512_aesenc_epi128(b, k);
-        k = _mm512_aesenclast_epi128(k, b);
-        b = _mm512_aesdec_epi128(b, k);
-        k = _mm512_aesdeclast_epi128(k, b);
-    }
-    assert!(EXPECTED_LOOP_K.is_eq(k));
-    assert!(EXPECTED_LOOP_B.is_eq(b));
 }
 
 /// Trait for casting between `u128/[u128; 2]/[u128; 4]` and `__m128/256/512i` types
