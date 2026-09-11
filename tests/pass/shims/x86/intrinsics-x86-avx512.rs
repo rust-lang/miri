@@ -1,6 +1,6 @@
 // We're testing x86 target specific features
 //@only-target: x86_64 i686
-//@compile-flags: -C target-feature=+avx512f,+avx512vl,+avx512bw,+avx512bitalg,+avx512vpopcntdq,+avx512vnni,+avx512vbmi
+//@compile-flags: -C target-feature=+avx512f,+avx512vl,+avx512bw,+avx512bitalg,+avx512vpopcntdq,+avx512vnni,+avx512vbmi,+avx512ifma
 //@run-native
 
 #[cfg(target_arch = "x86")]
@@ -33,6 +33,12 @@ fn main() {
         test_avx512ternarylogic();
         test_avx512vnni();
         test_avx512vbmi();
+        if is_x86_feature_detected!("avx512ifma") {
+            test_avx512ifma();
+        } else {
+            // Older AVX-512 silicon (e.g. Skylake-SP) lacks IFMA.
+            println!("warning: skipping avx512ifma tests");
+        }
     }
 }
 
@@ -982,4 +988,38 @@ unsafe fn assert_eq_m256i(a: __m256i, b: __m256i) {
 #[track_caller]
 unsafe fn assert_eq_m128i(a: __m128i, b: __m128i) {
     assert_eq!(transmute::<_, [u64; 2]>(a), transmute::<_, [u64; 2]>(b))
+}
+
+#[target_feature(enable = "avx512ifma,avx512vl")]
+unsafe fn test_avx512ifma() {
+    // (2^52 - 1)^2 = 2^104 - 2^53 + 1: low 52-bit chunk 1, high chunk 2^52 - 2.
+    const MASK52: u64 = (1 << 52) - 1;
+    let max52 = _mm512_set1_epi64(MASK52 as i64);
+    let zero = _mm512_setzero_si512();
+    let ones = _mm512_set1_epi64(1);
+    let wrap = _mm512_set1_epi64(u64::MAX as i64);
+
+    let lo = _mm512_madd52lo_epu64(zero, max52, max52);
+    assert_eq_m512i(lo, _mm512_set1_epi64(1));
+    let hi = _mm512_madd52hi_epu64(zero, max52, max52);
+    assert_eq_m512i(hi, _mm512_set1_epi64((MASK52 - 1) as i64));
+    // The accumulator is a full 64-bit lane with wrapping addition.
+    let wrapped = _mm512_madd52lo_epu64(wrap, max52, max52);
+    assert_eq_m512i(wrapped, zero);
+    // Multiplicands only contribute their low 52 bits.
+    let high_garbage = _mm512_set1_epi64(((1u64 << 63) | 3) as i64);
+    let masked = _mm512_madd52lo_epu64(zero, high_garbage, ones);
+    assert_eq_m512i(masked, _mm512_set1_epi64(3));
+
+    let max52_256 = _mm256_set1_epi64x(MASK52 as i64);
+    let lo256 = _mm256_madd52lo_epu64(_mm256_setzero_si256(), max52_256, max52_256);
+    assert_eq_m256i(lo256, _mm256_set1_epi64x(1));
+    let hi256 = _mm256_madd52hi_epu64(_mm256_setzero_si256(), max52_256, max52_256);
+    assert_eq_m256i(hi256, _mm256_set1_epi64x((MASK52 - 1) as i64));
+
+    let max52_128 = _mm_set1_epi64x(MASK52 as i64);
+    let lo128 = _mm_madd52lo_epu64(_mm_setzero_si128(), max52_128, max52_128);
+    assert_eq_m128i(lo128, _mm_set1_epi64x(1));
+    let hi128 = _mm_madd52hi_epu64(_mm_setzero_si128(), max52_128, max52_128);
+    assert_eq_m128i(hi128, _mm_set1_epi64x((MASK52 - 1) as i64));
 }
