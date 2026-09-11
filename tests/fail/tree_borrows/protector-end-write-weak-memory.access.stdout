@@ -1,0 +1,15 @@
+Thread 2: started!
+Thread 2: about to load_acquire!
+Thread 2: load_acquire -> 0!
+Thread 1: started!
+Thread 1: protector active!
+Thread 1: past release!
+Thread 2: about to load_acquire!
+Thread 2: load_acquire -> 1!
+Thread 1: pretend read -> 0!
+Thread 1: pretend read just happened!
+Thread 1: protector finished!
+Thread 1: past relaxed store!
+Thread 2: about to load_acquire!
+Thread 2: load_acquire -> 2!
+Thread 2: about to store non-atomically!

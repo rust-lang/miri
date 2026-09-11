@@ -209,6 +209,23 @@ impl VClock {
             l.span = l.span.substitute_dummy(r_span).substitute_dummy(l_span);
         }
     }
+    // Meet the two vector clocks together, this
+    // sets each vector element to the minimum value
+    // of that element in either of the two source elements.
+    pub fn meet(&mut self, other: &Self) {
+        let rhs_slice = other.as_slice();
+        let lhs_slice = self.get_mut_with_min_len(rhs_slice.len());
+        for (l, &r) in lhs_slice.iter_mut().zip(rhs_slice.iter()) {
+            let l_span = l.span;
+            let r_span = r.span;
+            *l = r.min(*l);
+            l.span = l.span.substitute_dummy(r_span).substitute_dummy(l_span);
+        }
+        // restore the invariant
+        while self.0.last().is_some_and(|x| x.time() == 0) {
+            self.0.pop();
+        }
+    }
 
     /// Set the element at the current index of the vector. May only increase elements.
     pub(super) fn set_at_index(&mut self, other: &Self, idx: VectorIdx) {
