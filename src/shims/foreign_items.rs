@@ -79,10 +79,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 return interp_ok(Some(body));
             }
 
-            throw_machine_stop!(TerminationInfo::UnsupportedForeignItem(format!(
-                "can't call foreign function `{link_name}` on OS `{os}`",
-                os = this.tcx.sess.target.os,
-            )));
+            throw_machine_stop!(TerminationInfo::UnsupportedForeignItem {
+                msg: format!(
+                    "can't call foreign function `{link_name}` on OS `{os}`",
+                    os = this.tcx.sess.target.os,
+                ),
+                help: None
+            });
         })
     }
 

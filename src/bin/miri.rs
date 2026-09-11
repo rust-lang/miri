@@ -216,9 +216,11 @@ impl CodegenBackend for MiriCodegenBackend {
     }
 
     fn target_config(&self, sess: &Session) -> TargetConfig {
-        let native_target_config = self.native.target_config(sess);
+        let mut internal_target_features = self.native.target_config(sess).internal_target_features;
+        miri::remove_unsupported_target_features(sess, &mut internal_target_features);
+
         TargetConfig {
-            internal_target_features: native_target_config.internal_target_features,
+            internal_target_features,
 
             // The basic types and ABI always work.
             has_reliable_f16: true,
