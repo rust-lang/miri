@@ -148,21 +148,13 @@ pub struct MiriConfig {
     pub native_lib: Vec<PathBuf>,
     /// Whether to enable the new native lib tracing system.
     pub native_lib_enable_tracing: bool,
-    /// Run a garbage collector for BorTags every N basic blocks. Under TreeBorrows this is
-    /// only used when `tree_gc_visit_interval` is `0`.
+    /// Run a garbage collector for BorTags every N basic blocks. `0` also disables `tree_gc`.
     pub gc_interval: u32,
-    /// Run a garbage collector for TreeBorrows every N visited nodes. `0` falls back to the
-    /// basic-block-based `gc_interval`.
+    /// Run a garbage collector for Tree Borrows every N visited nodes. `0` falls back to the
+    /// basic block-based `gc_interval`.
     pub tree_gc_visit_interval: u32,
-    /// The fraction of dead nodes a TreeBorrows GC pass should find for the current
-    /// interval to be considered well-tuned; the interval adapts toward this target.
-    /// `0` disables the adaptation, pinning the interval to `tree_gc_visit_interval`.
-    pub tree_gc_target_dead_ratio: f64,
-    /// Only garbage collect TreeBorrows trees that have more than this many nodes.
+    /// Only garbage collect Tree Borrows trees that have more than this many nodes.
     pub tree_gc_min_nodes: usize,
-    /// Upper bound on how many children compaction may give a node when splicing out a
-    /// dead node with several children. `0` disables multi-child compaction.
-    pub tree_gc_max_compact: usize,
     /// The number of CPUs to be reported by miri.
     pub num_cpus: u32,
     /// Requires Miri to emulate pages of a certain size.
@@ -216,9 +208,7 @@ impl Default for MiriConfig {
             native_lib_enable_tracing: false,
             gc_interval: 10_000,
             tree_gc_visit_interval: 20_000,
-            tree_gc_target_dead_ratio: 0.25,
             tree_gc_min_nodes: 64,
-            tree_gc_max_compact: 16,
             num_cpus: 1,
             page_size: None,
             collect_leak_backtraces: true,

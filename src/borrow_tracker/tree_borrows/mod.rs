@@ -18,23 +18,12 @@ mod tree_visitor;
 mod unimap;
 mod wildcard;
 
-#[cfg(feature = "lazy-alloc")]
-mod lazy_alloc;
-use self::perms::Permission;
-pub use self::tree::Tree;
-
 #[cfg(test)]
 mod exhaustive;
 
-/// Per-allocation state for Tree Borrows.
-///
-/// With the `lazy-alloc` feature the tree is only built once it is actually
-/// needed; otherwise it is created eagerly together with the allocation. Both
-/// types expose the same methods, so callers never need to care which one this
-/// is.
-#[cfg(feature = "lazy-alloc")]
-pub type AllocState = lazy_alloc::LazyTree;
-#[cfg(not(feature = "lazy-alloc"))]
+use self::perms::Permission;
+pub use self::tree::Tree;
+
 pub type AllocState = Tree;
 
 impl<'tcx> Tree {
@@ -383,9 +372,6 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let alloc_extra = this.get_alloc_extra(alloc_id)?;
         let mut tree_borrows = alloc_extra.borrow_tracker_tb().borrow_mut();
-
-        #[cfg(feature = "lazy-alloc")]
-        tree_borrows.ensure_init();
 
         for (perm_range, loc_state) in inside_perms.iter_all() {
             if let Some(access) = loc_state.permission().associated_access() {

@@ -9,11 +9,6 @@ use crate::*;
 
 pub type VisitWith<'a> = dyn FnMut(Option<AllocId>, Option<BorTag>) + 'a;
 
-/// Lower bound for the adaptive `tree_gc_visit_interval`.
-const TREE_GC_MIN_INTERVAL: u32 = 1_000;
-/// Upper bound for the adaptive `tree_gc_visit_interval`.
-const TREE_GC_MAX_INTERVAL: u32 = 100_000;
-
 pub trait VisitProvenance {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>);
 }
@@ -242,32 +237,21 @@ impl LiveAllocs<'_, '_> {
     }
 }
 
-/// Returns the total `(live, dead)` tree node counts across all allocations
-/// (only nonzero under Tree Borrows).
-fn remove_unreachable_tags<'tcx>(
-    ecx: &mut MiriInterpCx<'tcx>,
-    tags: FxHashSet<BorTag>,
-) -> (usize, usize) {
-    let mut live_nodes = 0;
-    let mut dead_nodes = 0;
+fn remove_unreachable_tags<'tcx>(ecx: &mut MiriInterpCx<'tcx>, tags: FxHashSet<BorTag>) {
     // Avoid iterating all allocations if there's no borrow tracker anyway.
     if ecx.machine.borrow_tracker.is_some() {
-        let min_nodes = ecx.machine.tree_gc_min_nodes;
-        let max_compact = ecx.machine.tree_gc_max_compact;
+        let tree_gc_min_nodes = ecx.machine.tree_gc_min_nodes;
         ecx.memory.alloc_map().iter(|it| {
             for (_id, (_kind, alloc)) in it {
-                let (live, dead) = alloc
-                    .extra
-                    .borrow_tracker
-                    .as_ref()
-                    .unwrap()
-                    .remove_unreachable_tags(&tags, min_nodes, max_compact);
-                live_nodes += live;
-                dead_nodes += dead;
+                alloc
+                .extra
+                .borrow_tracker
+                .as_ref()
+                .unwrap()
+                .remove_unreachable_tags(&tags, tree_gc_min_nodes);
             }
         });
     }
-    (live_nodes, dead_nodes)
 }
 
 fn remove_unreachable_allocs<'tcx>(ecx: &mut MiriInterpCx<'tcx>, allocs: FxHashSet<AllocId>) {
@@ -280,30 +264,6 @@ fn remove_unreachable_allocs<'tcx>(ecx: &mut MiriInterpCx<'tcx>, allocs: FxHashS
     }
     // Clean up core (non-Miri-specific) state.
     ecx.remove_unreachable_allocs(&allocs.collected);
-}
-
-/// Recalculates `tree_gc_visit_interval` based on how productive this GC pass was:
-/// passes finding a larger dead-node fraction than `tree_gc_target_dead_ratio`
-/// shrink the interval (collect sooner); passes finding less grow it.
-/// The adjustment is damped to at most 2x per pass in either direction, and the
-/// resulting interval is clamped to `[TREE_GC_MIN_INTERVAL, TREE_GC_MAX_INTERVAL]`.
-///
-/// A `tree_gc_target_dead_ratio` of `0` disables this.
-fn update_tree_gc_interval<'tcx>(ecx: &mut MiriInterpCx<'tcx>, live: usize, dead: usize) {
-    let total = live + dead;
-    if total == 0
-        || ecx.machine.tree_gc_visit_interval == 0
-        || ecx.machine.tree_gc_target_dead_ratio == 0.0
-    {
-        return;
-    }
-    #[allow(clippy::as_conversions)]
-    let dead_ratio = dead as f64 / total as f64;
-    let adjust = (ecx.machine.tree_gc_target_dead_ratio / dead_ratio.max(0.01)).clamp(0.5, 2.0);
-    #[allow(clippy::as_conversions)]
-    let new_interval = (f64::from(ecx.machine.tree_gc_visit_interval) * adjust) as u32;
-    ecx.machine.tree_gc_visit_interval =
-        new_interval.clamp(TREE_GC_MIN_INTERVAL, TREE_GC_MAX_INTERVAL);
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -324,10 +284,7 @@ pub trait EvalContextExt<'tcx>: MiriInterpCxExt<'tcx> {
         });
 
         // Based on this, clean up the interpreter state.
-        let (live_nodes, dead_nodes) = remove_unreachable_tags(this, tags);
+        remove_unreachable_tags(this, tags);
         remove_unreachable_allocs(this, alloc_ids);
-
-        // Adapt the visit-based GC interval to how much garbage this pass found.
-        update_tree_gc_interval(this, live_nodes, dead_nodes);
     }
 }

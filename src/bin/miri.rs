@@ -627,24 +627,11 @@ fn main() -> ExitCode {
                 fatal_error!("-Zmiri-tree-gc-visits requires a `u32`: {}", err)
             });
             miri_config.tree_gc_visit_interval = interval;
-        } else if let Some(param) = arg.strip_prefix("-Zmiri-tree-gc-target-dead-ratio=") {
-            let ratio = param.parse::<f64>().unwrap_or_else(|err| {
-                fatal_error!("-Zmiri-tree-gc-target-dead-ratio requires an `f64`: {}", err)
-            });
-            if !(ratio >= 0.0 && ratio <= 1.0) {
-                fatal_error!("-Zmiri-tree-gc-target-dead-ratio must be in [0.0, 1.0]");
-            }
-            miri_config.tree_gc_target_dead_ratio = ratio;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-tree-gc-min-nodes=") {
-            let min_nodes = param.parse::<usize>().unwrap_or_else(|err| {
+            let tree_gc_min_nodes = param.parse::<usize>().unwrap_or_else(|err| {
                 fatal_error!("-Zmiri-tree-gc-min-nodes requires a `usize`: {}", err)
             });
-            miri_config.tree_gc_min_nodes = min_nodes;
-        } else if let Some(param) = arg.strip_prefix("-Zmiri-tree-gc-multi-child-compact=") {
-            let max = param.parse::<usize>().unwrap_or_else(|err| {
-                fatal_error!("-Zmiri-tree-gc-multi-child-compact requires a `usize`: {}", err)
-            });
-            miri_config.tree_gc_max_compact = max;
+            miri_config.tree_gc_min_nodes = tree_gc_min_nodes;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-measureme=") {
             miri_config.measureme_out = Some(param.to_string());
         } else if let Some(param) = arg.strip_prefix("-Zmiri-backtrace=") {

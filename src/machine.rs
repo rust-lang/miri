@@ -646,30 +646,15 @@ pub struct MiriMachine<'tcx> {
     /// The number of blocks that passed since the last BorTag GC pass.
     pub(crate) since_gc: u32,
 
-    /// Run a garbage collector for TreeBorrows every N visited nodes.
-    /// Recalculated after every GC pass based on the fraction of dead nodes found,
-    /// clamped to a fixed range; the configured
-    /// value only sets the starting point (0 disables the visit-based GC entirely).
+    /// Run a garbage collector for Tree Borrows every N visited nodes.
     pub(crate) tree_gc_visit_interval: u32,
     /// Whether the provenance GC interval is measured in visited Tree Borrows nodes
     /// (`tree_gc_visit_interval`) rather than in basic blocks (`gc_interval`).
-    ///
-    /// This depends only on the borrow tracker method and on `tree_gc_visit_interval`, both of
-    /// which are fixed for the whole run, so we settle it once here: `before_terminator` runs
-    /// on every single basic block and must not borrow the global borrow tracker state just to
-    /// ask which tracker is in use.
-    pub(crate) tree_gc_by_visits: bool,
+    pub(crate) tree_gc_enabled: bool,
     /// Number of nodes visited since the last GC pass.
     pub(crate) visits_since_gc: Cell<u32>,
-    /// The dead-node fraction a GC pass should find for `tree_gc_visit_interval` to be
-    /// considered well-tuned; the interval adapts toward this target. `0` disables the
-    /// adaptation, pinning `tree_gc_visit_interval` to its configured value.
-    pub(crate) tree_gc_target_dead_ratio: f64,
-    /// Only garbage collect TreeBorrows trees that have more than this many nodes.
+    /// Only garbage collect trees that have more than this many nodes.
     pub(crate) tree_gc_min_nodes: usize,
-    /// Upper bound on how many children compaction may give a node when splicing out a
-    /// dead node with several children. `0` or `1` disables multi-child compaction.
-    pub(crate) tree_gc_max_compact: usize,
 
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
@@ -872,15 +857,14 @@ impl<'tcx> MiriMachine<'tcx> {
             gc_interval: config.gc_interval,
             since_gc: 0,
             tree_gc_visit_interval: config.tree_gc_visit_interval,
-            tree_gc_by_visits: config.tree_gc_visit_interval > 0
+            tree_gc_enabled: config.gc_interval > 0
+                && config.tree_gc_visit_interval > 0
                 && matches!(
                     config.borrow_tracker,
                     Some(borrow_tracker::BorrowTrackerMethod::TreeBorrows(_))
                 ),
             visits_since_gc: Cell::new(0),
-            tree_gc_target_dead_ratio: config.tree_gc_target_dead_ratio,
             tree_gc_min_nodes: config.tree_gc_min_nodes,
-            tree_gc_max_compact: config.tree_gc_max_compact,
             num_cpus: config.num_cpus,
             page_size,
             stack_addr,
@@ -1112,11 +1096,9 @@ impl VisitProvenance for MiriMachine<'_> {
             gc_interval: _,
             since_gc: _,
             tree_gc_visit_interval: _,
-            tree_gc_by_visits: _,
+            tree_gc_enabled: _,
             visits_since_gc: _,
-            tree_gc_target_dead_ratio: _,
             tree_gc_min_nodes: _,
-            tree_gc_max_compact: _,
             num_cpus: _,
             page_size: _,
             stack_addr: _,
@@ -1988,8 +1970,8 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         // Tree Borrows counts visited nodes rather than basic blocks, but only if a
         // visit interval is configured; with `tree_gc_visit_interval == 0` it falls back to
         // the plain basic-block interval. Which of the two applies is decided once at startup,
-        // see `tree_gc_by_visits`.
-        let gc_cond = if ecx.machine.tree_gc_by_visits {
+        // see `tree_gc_enabled`.
+        let gc_cond = if ecx.machine.tree_gc_enabled {
             ecx.machine.visits_since_gc.get() >= ecx.machine.tree_gc_visit_interval
         } else {
             ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval
