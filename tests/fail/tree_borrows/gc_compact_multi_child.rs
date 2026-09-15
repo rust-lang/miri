@@ -7,7 +7,7 @@
 // the `Frozen` parent, even though `b` itself (still `ReservedIM`) would accept it. Splicing the
 // parent away loses that UB and wrongly accepts this program.
 //
-//@compile-flags: -Zmiri-tree-borrows -Zmiri-visit-gc=1 -Zmiri-tree-gc-min-nodes=0
+//@compile-flags: -Zmiri-tree-borrows -Zmiri-tree-gc-visits=1 -Zmiri-tree-gc-min-nodes=0
 #[path = "../../utils/mod.rs"]
 mod utils;
 

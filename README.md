@@ -500,17 +500,28 @@ to Miri failing to detect cases of undefined behavior in a program.
 * `-Zmiri-provenance-gc=<blocks>` configures how often the pointer provenance garbage collector runs.
   The default is to search for and remove unreachable provenance once every `10000` basic blocks. Setting
   this to `0` disables the garbage collector, which causes some programs to have explosive memory
-  usage and/or super-linear runtime.
-* `-Zmiri-visit-gc=<visits>` sets the initial interval (in visited tree nodes) of the provenance
-  garbage collector under Tree Borrows. The default is `25000`. After each pass the interval is
+  usage and/or super-linear runtime. Under Tree Borrows, this is only used when
+  `-Zmiri-tree-gc-visits=0`, since Tree Borrows counts visited tree nodes instead.
+* `-Zmiri-tree-gc-visits=<visits>` sets the initial interval (in visited tree nodes) of the provenance
+  garbage collector under Tree Borrows. The default is `20000`. After each pass the interval is
   recalculated from the fraction of dead nodes the pass found, so this only sets the starting
-  point. Setting this to `0` disables the visit-based garbage collector.
-* `-Zmiri-tree-gc-min-interval=<visits>` and `-Zmiri-tree-gc-max-interval=<visits>` bound the
-  adaptive Tree Borrows GC interval. The defaults are `1000` and `100000`.
+  point. Setting this to `0` disables the visit-based garbage collector, falling back to the
+  basic-block interval of `-Zmiri-provenance-gc`.
 * `-Zmiri-tree-gc-target-dead-ratio=<ratio>` sets the fraction of dead nodes a Tree Borrows GC
-  pass should find for the interval to be considered well-tuned; passes finding more garbage than
-  this shrink the interval and passes finding less grow it. Must be in `(0.0, 1.0]`; the default
-  is `0.25`.
+  pass should find for the interval to be considered well-tuned, bounded between an interval of 
+  1,000 and 100,000 visits; passes finding more garbage than this shrink the interval, and passes 
+  finding less grow it. Must be in `[0.0, 1.0]`; the default is `0.25`. Setting this to `0` disables
+  the adaptation, fixing the interval at the `-Zmiri-tree-gc-visits` value.
+* `-Zmiri-tree-gc-min-nodes=` sets the minimum tree size for garbage collection during a Tree Borrows
+  GC pass. The default is `64` nodes. Trees below this threshold are ignored entirely as smaller trees
+  tend to amass proportionally few dead nodes, but they may still grow beyond this threshold and be
+  GC'd in a later pass.
+* `-Zmiri-tree-gc-multi-child-compact=<max>` bounds how wide Tree Borrows compaction may make a
+  node. When the GC splices out a dead node that has several children, those children are
+  reparented onto its parent; this is refused if it would leave the parent with more than `max`
+  children. The default is `16`. Setting this to `0` or `1` disables multi-child compaction entirely,
+  leaving dead nodes with more than one child in place (dead leaves and dead nodes with exactly
+  one child are still removed).
 * `-Zmiri-track-alloc-accesses` show not only allocation and free events for tracked allocations,
   but also reads and writes.
 * `-Zmiri-track-alloc-id=<id1>,<id2>,...` shows a backtrace when the given allocations are

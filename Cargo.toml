@@ -64,9 +64,10 @@ name = "ui"
 harness = false
 
 [features]
-default = ["stack-cache", "native-lib"]
+default = ["stack-cache", "native-lib", "lazy-alloc"]
 genmc = ["dep:genmc-sys"]
 stack-cache = []
+lazy-alloc = []
 expensive-consistency-checks = ["stack-cache"]
 tracing = ["serde_json"]
 native-lib = ["dep:libffi", "dep:libffi-sys", "dep:libloading", "dep:capstone", "dep:ipc-channel", "dep:nix", "dep:serde"]
