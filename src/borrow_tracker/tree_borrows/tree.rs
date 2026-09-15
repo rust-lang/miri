@@ -738,7 +738,11 @@ impl<'tcx> Tree {
 impl Tree {
     /// Returns `(live, dead)`: the number of nodes remaining in the tree and the
     /// number of nodes removed by this pass.
-    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>, tree_gc_min_nodes: usize) {
+    pub fn remove_unreachable_tags(
+        &mut self,
+        live_tags: &FxHashSet<BorTag>,
+        tree_gc_min_nodes: usize,
+    ) {
         // Only prune trees that are large enough
         if self.tag_mapping.len() <= tree_gc_min_nodes {
             return;

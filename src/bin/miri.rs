@@ -713,6 +713,7 @@ fn main() -> ExitCode {
             "Weak memory emulation cannot be enabled when the data race detector is disabled"
         );
     };
+
     // Validate GenMC settings.
     if miri_config.genmc_config.is_some()
         && let Err(err) = GenmcConfig::validate(&mut miri_config)
