@@ -644,6 +644,9 @@ impl<'tcx> Tree {
             ProvenanceExtra::Wildcard => None,
         };
         // We iterate over affected locations and traverse the tree for each of them.
+        // The visited-node count is accumulated locally across all of them, so that
+        // `visits_since_gc` is only written once per access rather than once per traversal.
+        let mut visits: u32 = 0;
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
             let diagnostics = DiagnosticInfo {
                 access_cause,
@@ -661,9 +664,10 @@ impl<'tcx> Tree {
                 ChildrenVisitMode::VisitChildrenOfAccessed,
                 &diagnostics,
                 /* min_exposed_child */ None, // only matters for protector end access,
-                visits_since_gc,
+                &mut visits,
             )?;
         }
+        visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
         interp_ok(())
     }
     /// This is the special access that is applied on protector release:
@@ -704,6 +708,7 @@ impl<'tcx> Tree {
         // See the test case `returned_mut_is_usable` from
         // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
         // why this is important.
+        let mut visits: u32 = 0;
         for (loc_range, loc) in self.locations.iter_mut_all() {
             // Only visit accessed permissions
             if let Some(p) = loc.perms.get(source_idx)
@@ -726,10 +731,11 @@ impl<'tcx> Tree {
                     ChildrenVisitMode::SkipChildrenOfAccessed,
                     &diagnostics,
                     min_exposed_child,
-                    visits_since_gc,
+                    &mut visits,
                 )?;
             }
         }
+        visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
         interp_ok(())
     }
 }
@@ -937,7 +943,7 @@ impl<'tcx> LocationTree {
         visit_children: ChildrenVisitMode,
         diagnostics: &DiagnosticInfo,
         min_exposed_child: Option<BorTag>,
-        visits_since_gc: &Cell<u32>,
+        visits: &mut u32,
     ) -> InterpResult<'tcx> {
         let accessed_root = if let Some(idx) = access_source {
             Some(self.perform_normal_access(
@@ -947,7 +953,7 @@ impl<'tcx> LocationTree {
                 global,
                 visit_children,
                 diagnostics,
-                visits_since_gc,
+                visits,
             )?)
         } else {
             // `SkipChildrenOfAccessed` only gets set on protector release, which only
@@ -996,7 +1002,7 @@ impl<'tcx> LocationTree {
                 global,
                 diagnostics,
                 /*is_wildcard_tree*/ i != 0,
-                visits_since_gc,
+                visits,
             )?;
         }
         interp_ok(())
@@ -1016,7 +1022,7 @@ impl<'tcx> LocationTree {
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
         diagnostics: &DiagnosticInfo,
-        visits_since_gc: &Cell<u32>,
+        visits: &mut u32,
     ) -> InterpResult<'tcx, UniIndex> {
         // Performs the per-node work:
         // - insert the permission if it does not exist
@@ -1074,7 +1080,7 @@ impl<'tcx> LocationTree {
             ChildrenVisitMode::SkipChildrenOfAccessed =>
                 visitor.traverse_nonchildren(access_source, node_skipper, node_app),
         };
-        visits_since_gc.set(visits_since_gc.get().saturating_add(visit_count));
+        *visits = visits.saturating_add(visit_count);
         result.into()
     }
 
@@ -1095,7 +1101,7 @@ impl<'tcx> LocationTree {
         global: &GlobalState,
         diagnostics: &DiagnosticInfo,
         is_wildcard_tree: bool,
-        visits_since_gc: &Cell<u32>,
+        visits: &mut u32,
     ) -> InterpResult<'tcx> {
         let get_relatedness = |idx: UniIndex, node: &Node, loc: &LocationTree| {
             // If the tag is larger than `max_local_tag` then the access can only be foreign.
@@ -1204,7 +1210,7 @@ impl<'tcx> LocationTree {
                 })
             },
         )?;
-        visits_since_gc.set(visits_since_gc.get().saturating_add(visit_count));
+        *visits = visits.saturating_add(visit_count);
         // If there is no exposed node in this tree that allows this access, then the access *must*
         // be foreign to the entire subtree. Foreign accesses are only possible on wildcard subtrees
         // as there are no ancestors to the main root. So if we do not find a valid exposed node in
