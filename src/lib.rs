@@ -13,6 +13,7 @@
 #![feature(f16)]
 #![feature(float_gamma)]
 #![feature(float_erf)]
+#![feature(complex_numbers)]
 #![feature(map_try_insert)]
 #![cfg_attr(bootstrap, feature(never_type))]
 #![feature(try_blocks)]
