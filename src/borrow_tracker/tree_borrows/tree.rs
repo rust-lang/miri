@@ -643,9 +643,7 @@ impl<'tcx> Tree {
             ProvenanceExtra::Concrete(tag) => Some(self.tag_mapping.get(&tag).unwrap()),
             ProvenanceExtra::Wildcard => None,
         };
-        // We iterate over affected locations and traverse the tree for each of them.
-        // The visited-node count is accumulated locally across all of them, so that
-        // `visits_since_gc` is only written once per access rather than once per traversal.
+        // `visits_since_gc` is only written once per access.
         let mut visits: u32 = 0;
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
             let diagnostics = DiagnosticInfo {
@@ -667,7 +665,11 @@ impl<'tcx> Tree {
                 &mut visits,
             )?;
         }
-        visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
+        // Trees with a single node have nothing for the GC to prune, so accesses to
+        // them should not count towards triggering a GC pass.
+        if self.tag_mapping.len() > 1 {
+            visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
+        }
         interp_ok(())
     }
     /// This is the special access that is applied on protector release:
@@ -735,7 +737,11 @@ impl<'tcx> Tree {
                 )?;
             }
         }
-        visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
+        // Trees with a single node have nothing for the GC to prune, so accesses to
+        // them should not count towards triggering a GC pass.
+        if self.tag_mapping.len() > 1 {
+            visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
+        }
         interp_ok(())
     }
 }
