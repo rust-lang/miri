@@ -11,13 +11,7 @@ impl Exhaustive for LocationState {
         // We keep `latest_foreign_access` at `None` as that's just a cache.
         Box::new(
             <(Permission, bool)>::exhaustive()
-                .map(|(permission, accessed)| {
-                    Self {
-                        permission,
-                        accessed,
-                        idempotent_foreign_access: IdempotentForeignAccess::default(),
-                    }
-                })
+                .map(|(permission, accessed)| Self { permission, accessed })
                 .filter(|x| x.possible()),
         )
     }
@@ -608,17 +602,11 @@ mod spurious_read {
             xy_rel: RelPosXY::MutuallyForeign,
             x: LocStateProt {
                 // For the tests, the strongest idempotent foreign access does not matter, so we use `Default::default`
-                state: LocationState::new_accessed(
-                    Permission::new_frozen(),
-                    IdempotentForeignAccess::default(),
-                ),
+                state: LocationState::new_accessed(Permission::new_frozen()),
                 prot: true,
             },
             y: LocStateProt {
-                state: LocationState::new_non_accessed(
-                    Permission::new_reserved_frz(),
-                    IdempotentForeignAccess::default(),
-                ),
+                state: LocationState::new_non_accessed(Permission::new_reserved_frz()),
                 prot: true,
             },
         };
