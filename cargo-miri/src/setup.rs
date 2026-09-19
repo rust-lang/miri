@@ -161,14 +161,19 @@ pub fn setup(
     };
 
     // Do the build.
-    let status = SysrootBuilder::new(&sysroot_dir, target)
+    let mut builder = SysrootBuilder::new(&sysroot_dir, target)
         .build_mode(BuildMode::Build) // not a real build, since we use dummy codegen
         .rustc_version(rustc_version.clone())
         .sysroot_config(sysroot_config)
         .rustflags(rustflags)
         .cargo(cargo_cmd)
-        .when_build_required(notify)
-        .build_from_source(&rust_src);
+        .when_build_required(notify);
+
+    for cargo_config in get_arg_flag_values("--config") {
+        builder = builder.cargo_config(cargo_config);
+    }
+
+    let status = builder.build_from_source(&rust_src);
     match status {
         Ok(SysrootStatus::AlreadyCached) =>
             if !quiet && show_setup {
