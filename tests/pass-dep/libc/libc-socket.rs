@@ -33,10 +33,17 @@ fn main() {
     }
     test_bind_ipv4_invalid_addr_len();
     test_bind_ipv6();
+    test_bind_twice();
+    test_bind_connected();
+    test_bind_listening();
     test_listen();
+    test_listen_connected();
+    test_listen_listening();
 
     test_accept_connect();
     test_connect_error();
+    test_connect_connected();
+    test_connect_listening();
     test_send_peek_recv();
     test_write_read();
     test_readv();
@@ -236,6 +243,78 @@ fn test_bind_ipv6() {
     }
 }
 
+/// Test that invoking `bind` on an already bound TCP socket
+/// returns EINVAL.
+fn test_bind_twice() {
+    let sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+    let addr = net::sock_addr_ipv4(net::IPV4_LOCALHOST, 0);
+    let err = unsafe {
+        errno_check(libc::bind(
+            sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        ));
+        errno_result(libc::bind(
+            sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        ))
+        .unwrap_err()
+    };
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    // Check that it is the right kind of `InvalidInput`.
+    assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+}
+
+/// Test that invoking `bind` on an already connected client
+/// TCP socket returns EINVAL.
+fn test_bind_connected() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+    net::accept_ipv4(server_sockfd).unwrap();
+
+    let addr = net::sock_addr_ipv4(net::IPV4_LOCALHOST, 0);
+    let err = unsafe {
+        errno_result(libc::bind(
+            client_sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        ))
+        .unwrap_err()
+    };
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    // Check that it is the right kind of `InvalidInput`.
+    assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+}
+
+/// Test that invoking `bind` on an already listening server
+/// TCP socket returns EINVAL.
+fn test_bind_listening() {
+    let server_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    unsafe {
+        errno_check(libc::listen(server_sockfd, 16));
+    }
+
+    let addr = net::sock_addr_ipv4(net::IPV4_LOCALHOST, 0);
+    let err = unsafe {
+        errno_result(libc::bind(
+            server_sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        ))
+        .unwrap_err()
+    };
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    // Check that it is the right kind of `InvalidInput`.
+    assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+}
+
 fn test_listen() {
     let sockfd =
         unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
@@ -251,6 +330,34 @@ fn test_listen() {
     unsafe {
         errno_check(libc::listen(sockfd, 16));
     }
+}
+
+/// Test that `listen` returns EINVAL for a client TCP socket which
+/// is already connected to a peer socket.
+fn test_listen_connected() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+    net::accept_ipv4(server_sockfd).unwrap();
+
+    // Connected sockets cannot start listening, thus the operation should
+    // fail with EINVAL.
+    let err = unsafe { errno_result(libc::listen(client_sockfd, 16)).unwrap_err() };
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    // Check that it is the right kind of `InvalidInput`.
+    assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+}
+
+/// Test that `listen` succeeds for a server TCP socket which is already
+/// listening.
+fn test_listen_listening() {
+    let (server_sockfd, _) = net::make_listener_ipv4().unwrap();
+
+    // Invoking `listen` multiple times should be allowed as it can be used to change
+    // the backlog value.
+    unsafe { errno_check(libc::listen(server_sockfd, 16)) };
 }
 
 /// Test accepting connections by running a server in a separate thread and connecting clients
@@ -316,6 +423,46 @@ fn test_connect_error() {
             | ErrorKind::AddrNotAvailable
             | ErrorKind::NetworkUnreachable
     ));
+}
+
+/// Test that invoking `connect` on an already connected client
+/// TCP socket returns EISCONN.
+fn test_connect_connected() {
+    let (server_sockfd1, addr1) = net::make_listener_ipv4().unwrap();
+    let (_, addr2) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    net::connect_ipv4(client_sockfd, addr1).unwrap();
+    net::accept_ipv4(server_sockfd1).unwrap();
+
+    let err = net::connect_ipv4(client_sockfd, addr2).unwrap_err();
+    // The standard library doesn't provide an error kind for EISCONN;
+    // we thus cannot assert the correct error kind.
+    assert_eq!(err.raw_os_error(), Some(libc::EISCONN));
+}
+
+/// Test that invoking `connect` on an already listening server
+/// TCP socket returns EOPNOTSUPP on non-Linux-like targets and
+/// EISCONN on Linux-like targets.
+fn test_connect_listening() {
+    let (_, addr1) = net::make_listener_ipv4().unwrap();
+    let (server_sockfd2, _) = net::make_listener_ipv4().unwrap();
+
+    let err = net::connect_ipv4(server_sockfd2, addr1).unwrap_err();
+
+    if cfg!(any(target_os = "linux", target_os = "android")) {
+        // Linux-like targets return EISCONN when attempting to invoke
+        // `connect` on an already listening socket.
+
+        // The standard library doesn't provide an error kind for EISCONN;
+        // we thus cannot assert the correct error kind.
+        assert_eq!(err.raw_os_error(), Some(libc::EISCONN));
+    } else {
+        // POSIX specifies EOPNOTSUPP when attempting to invoke
+        // `connect` on an already listening socket.
+        assert_eq!(err.kind(), ErrorKind::Unsupported);
+    }
 }
 
 /// Test sending bytes into a connected stream and then peeking and receiving
