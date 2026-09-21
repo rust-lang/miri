@@ -748,8 +748,6 @@ impl<'tcx> Tree {
 
 /// Integration with the BorTag garbage collector
 impl Tree {
-    /// Returns `(live, dead)`: the number of nodes remaining in the tree and the
-    /// number of nodes removed by this pass.
     pub fn remove_unreachable_tags(
         &mut self,
         live_tags: &FxHashSet<BorTag>,
