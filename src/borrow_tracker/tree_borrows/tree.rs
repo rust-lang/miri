@@ -10,7 +10,6 @@
 //!   and the relative position of the access;
 //! - idempotency properties asserted in `perms.rs` (for optimizations)
 
-use std::cell::Cell;
 use std::ops::Range;
 use std::{cmp, fmt, mem};
 
@@ -527,7 +526,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
-        visits_since_gc: &Cell<u32>,
+        gc: &ProvenanceGcState,
     ) -> InterpResult<'tcx> {
         self.perform_access(
             prov,
@@ -537,7 +536,7 @@ impl<'tcx> Tree {
             global,
             alloc_id,
             span,
-            visits_since_gc,
+            gc,
         )?;
 
         let start_idx = match prov {
@@ -632,7 +631,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
-        visits_since_gc: &Cell<u32>,
+        gc: &ProvenanceGcState,
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 || matches!(prov, ProvenanceExtra::Wildcard) {
@@ -643,7 +642,7 @@ impl<'tcx> Tree {
             ProvenanceExtra::Concrete(tag) => Some(self.tag_mapping.get(&tag).unwrap()),
             ProvenanceExtra::Wildcard => None,
         };
-        // `visits_since_gc` is only written once per access.
+        // The GC state is only written once per access.
         let mut visits: u32 = 0;
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
             let diagnostics = DiagnosticInfo {
@@ -668,7 +667,7 @@ impl<'tcx> Tree {
         // Trees with a single node have nothing for the GC to prune, so accesses to
         // them should not count towards triggering a GC pass.
         if self.tag_mapping.len() > 1 {
-            visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
+            gc.record_visits(visits);
         }
         interp_ok(())
     }
@@ -685,7 +684,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
-        visits_since_gc: &Cell<u32>,
+        gc: &ProvenanceGcState,
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 {
@@ -740,7 +739,7 @@ impl<'tcx> Tree {
         // Trees with a single node have nothing for the GC to prune, so accesses to
         // them should not count towards triggering a GC pass.
         if self.tag_mapping.len() > 1 {
-            visits_since_gc.set(visits_since_gc.get().saturating_add(visits));
+            gc.record_visits(visits);
         }
         interp_ok(())
     }
@@ -748,13 +747,9 @@ impl<'tcx> Tree {
 
 /// Integration with the BorTag garbage collector
 impl Tree {
-    pub fn remove_unreachable_tags(
-        &mut self,
-        live_tags: &FxHashSet<BorTag>,
-        tree_gc_min_nodes: usize,
-    ) {
-        // Only prune trees that are large enough
-        if self.tag_mapping.len() <= tree_gc_min_nodes {
+    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>, min_size: usize) {
+        // Only prune trees that are large enough.
+        if self.tag_mapping.len() <= min_size {
             return;
         }
         for i in 0..(self.roots.len()) {

@@ -641,20 +641,8 @@ pub struct MiriMachine<'tcx> {
     #[cfg(all(feature = "native-lib", unix))]
     pub native_lib_ecx_interchange: &'static Cell<usize>,
 
-    /// Run a garbage collector for BorTags every N basic blocks.
-    pub(crate) gc_interval: u32,
-    /// The number of blocks that passed since the last BorTag GC pass.
-    pub(crate) since_gc: u32,
-
-    /// Run a garbage collector for Tree Borrows every N visited nodes.
-    pub(crate) tree_gc_visit_interval: u32,
-    /// Whether the provenance GC interval is measured in visited Tree Borrows nodes
-    /// (`tree_gc_visit_interval`) rather than in basic blocks (`gc_interval`).
-    pub(crate) tree_gc_enabled: bool,
-    /// Number of nodes visited since the last GC pass.
-    pub(crate) visits_since_gc: Cell<u32>,
-    /// Only garbage collect trees that have more than this many nodes.
-    pub(crate) tree_gc_min_nodes: usize,
+    /// Pacing and tuning of the BorTag garbage collector.
+    pub(crate) provenance_gc: ProvenanceGcState,
 
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
@@ -854,17 +842,7 @@ impl<'tcx> MiriMachine<'tcx> {
             native_lib: config.native_lib.iter().map(|_| {
                 panic!("calling functions from native libraries via FFI is not supported in this build of Miri")
             }).collect(),
-            gc_interval: config.gc_interval,
-            since_gc: 0,
-            tree_gc_visit_interval: config.tree_gc_visit_interval,
-            tree_gc_enabled: config.gc_interval > 0
-                && config.tree_gc_visit_interval > 0
-                && matches!(
-                    config.borrow_tracker,
-                    Some(borrow_tracker::BorrowTrackerMethod::TreeBorrows(_))
-                ),
-            visits_since_gc: Cell::new(0),
-            tree_gc_min_nodes: config.tree_gc_min_nodes,
+            provenance_gc: ProvenanceGcState::new(config),
             num_cpus: config.num_cpus,
             page_size,
             stack_addr,
@@ -1093,12 +1071,7 @@ impl VisitProvenance for MiriMachine<'_> {
             native_lib: _,
             #[cfg(all(feature = "native-lib", unix))]
             native_lib_ecx_interchange: _,
-            gc_interval: _,
-            since_gc: _,
-            tree_gc_visit_interval: _,
-            tree_gc_enabled: _,
-            visits_since_gc: _,
-            tree_gc_min_nodes: _,
+            provenance_gc: _,
             num_cpus: _,
             page_size: _,
             stack_addr: _,
@@ -1951,7 +1924,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
 
     fn before_terminator(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
         ecx.machine.basic_block_count += 1u64; // a u64 that is only incremented by 1 will "never" overflow
-        ecx.machine.since_gc += 1;
+        ecx.machine.provenance_gc.inc_block();
         // Possibly report our progress. This will point at the terminator we are about to execute.
         if let Some(report_progress) = ecx.machine.report_progress {
             if ecx.machine.basic_block_count.is_multiple_of(u64::from(report_progress)) {
@@ -1966,20 +1939,8 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         // table and closed source file descriptions in the blocking I/O manager.
         // When debug assertions are enabled, run the GC as often as possible so that any cases
         // where it mistakenly removes an important tag become visible.
-        //
-        // Tree Borrows counts visited nodes rather than basic blocks, but only if a
-        // visit interval is configured; with `tree_gc_visit_interval == 0` it falls back to
-        // the plain basic-block interval. Which of the two applies is decided once at startup,
-        // see `tree_gc_enabled`.
-        let gc_cond = if ecx.machine.tree_gc_enabled {
-            ecx.machine.visits_since_gc.get() >= ecx.machine.tree_gc_visit_interval
-        } else {
-            ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval
-        };
-
-        if gc_cond {
-            ecx.machine.since_gc = 0;
-            ecx.machine.visits_since_gc.set(0);
+        if ecx.machine.provenance_gc.gc_cond() {
+            ecx.machine.provenance_gc.reset();
             ecx.run_provenance_gc();
             ecx.machine.blocking_io.run_gc();
         }

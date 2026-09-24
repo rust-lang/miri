@@ -67,7 +67,7 @@ impl<'tcx> Tree {
             global,
             alloc_id,
             span,
-            &machine.visits_since_gc,
+            &machine.provenance_gc,
         )
     }
 
@@ -87,7 +87,7 @@ impl<'tcx> Tree {
             global,
             alloc_id,
             span,
-            &machine.visits_since_gc,
+            &machine.provenance_gc,
         )
     }
 
@@ -105,7 +105,7 @@ impl<'tcx> Tree {
         alloc_id: AllocId, // diagnostics
     ) -> InterpResult<'tcx> {
         let span = machine.current_user_relevant_span();
-        self.perform_protector_end_access(tag, global, alloc_id, span, &machine.visits_since_gc)?;
+        self.perform_protector_end_access(tag, global, alloc_id, span, &machine.provenance_gc)?;
 
         self.update_exposure_for_protector_release(tag);
 
@@ -399,7 +399,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.machine.borrow_tracker.as_ref().unwrap(),
                     alloc_id,
                     this.machine.current_user_relevant_span(),
-                    &this.machine.visits_since_gc,
+                    &this.machine.provenance_gc,
                 )?;
 
                 // Also inform the data race model (but only if any bytes are actually affected).

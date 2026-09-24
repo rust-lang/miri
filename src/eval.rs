@@ -148,13 +148,13 @@ pub struct MiriConfig {
     pub native_lib: Vec<PathBuf>,
     /// Whether to enable the new native lib tracing system.
     pub native_lib_enable_tracing: bool,
-    /// Run a garbage collector for BorTags every N basic blocks. `0` also disables `tree_gc`.
+    /// Run a garbage collector for BorTags every N basic blocks. `0` disables the GC entirely.
     pub gc_interval: u32,
-    /// Run a garbage collector for Tree Borrows every N visited nodes. `0` falls back to the
-    /// basic block-based `gc_interval`.
-    pub tree_gc_visit_interval: u32,
+    /// Run a garbage collector every N visited Tree Borrows nodes. `0` falls back to
+    /// the basic block-based `gc_interval`.
+    pub gc_visit_interval: u32,
     /// Only garbage collect Tree Borrows trees that have more than this many nodes.
-    pub tree_gc_min_nodes: usize,
+    pub gc_min_size: usize,
     /// The number of CPUs to be reported by miri.
     pub num_cpus: u32,
     /// Requires Miri to emulate pages of a certain size.
@@ -207,8 +207,8 @@ impl Default for MiriConfig {
             native_lib: vec![],
             native_lib_enable_tracing: false,
             gc_interval: 10_000,
-            tree_gc_visit_interval: 20_000,
-            tree_gc_min_nodes: 64,
+            gc_visit_interval: 20_000,
+            gc_min_size: 64,
             num_cpus: 1,
             page_size: None,
             collect_leak_backtraces: true,

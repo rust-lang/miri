@@ -622,16 +622,16 @@ fn main() -> ExitCode {
                 fatal_error!("-Zmiri-provenance-gc requires a `u32`: {}", err)
             });
             miri_config.gc_interval = interval;
-        } else if let Some(param) = arg.strip_prefix("-Zmiri-tree-gc-visits=") {
+        } else if let Some(param) = arg.strip_prefix("-Zmiri-provenance-gc-visits=") {
             let interval = param.parse::<u32>().unwrap_or_else(|err| {
-                fatal_error!("-Zmiri-tree-gc-visits requires a `u32`: {}", err)
+                fatal_error!("-Zmiri-provenance-gc-visits requires a `u32`: {}", err)
             });
-            miri_config.tree_gc_visit_interval = interval;
-        } else if let Some(param) = arg.strip_prefix("-Zmiri-tree-gc-min-nodes=") {
-            let tree_gc_min_nodes = param.parse::<usize>().unwrap_or_else(|err| {
-                fatal_error!("-Zmiri-tree-gc-min-nodes requires a `usize`: {}", err)
+            miri_config.gc_visit_interval = interval;
+        } else if let Some(param) = arg.strip_prefix("-Zmiri-provenance-gc-min-size=") {
+            let min_size = param.parse::<usize>().unwrap_or_else(|err| {
+                fatal_error!("-Zmiri-provenance-gc-min-size requires a `usize`: {}", err)
             });
-            miri_config.tree_gc_min_nodes = tree_gc_min_nodes;
+            miri_config.gc_min_size = min_size;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-measureme=") {
             miri_config.measureme_out = Some(param.to_string());
         } else if let Some(param) = arg.strip_prefix("-Zmiri-backtrace=") {

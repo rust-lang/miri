@@ -499,15 +499,17 @@ to Miri failing to detect cases of undefined behavior in a program.
   if a thread blocks or yields, the next thread is chosen randomly.
 * `-Zmiri-provenance-gc=<blocks>` configures how often the pointer provenance garbage collector runs.
   The default is to search for and remove unreachable provenance once every `10000` basic blocks. Setting
-  this to `0` disables the garbage collector, including `tree-gc` listed below, which causes some programs
-  to have explosive memory usage and/or super-linear runtime.
-* `-Zmiri-tree-gc-visits=<visits>` sets the interval (in visited tree nodes) of the provenance
-  garbage collector under Tree Borrows. The default is `20000`. Setting this to `0` disables the 
-  visit-based garbage collector, falling back to the basic block interval of `-Zmiri-provenance-gc`.
-* `-Zmiri-tree-gc-min-nodes=` sets the minimum tree size for garbage collection during a Tree Borrows
-  GC pass. The default is `64` nodes. Trees below this threshold are ignored entirely as smaller trees
-  tend to amass proportionally few dead nodes, but they may still grow beyond this threshold and be
-  GC'd in a later pass.
+  this to `0` disables the garbage collector entirely, including the visit-based intervals listed below,
+  which causes some programs to have explosive memory usage and/or super-linear runtime.
+* `-Zmiri-provenance-gc-visits=<visits>` [Tree Borrows Only] paces the provenance garbage collector by a
+  global count of node visits during accesses rather than by basic blocks, which tracks how much
+  work the borrow tracker has done since the last pass. The default is `20000`. Setting this to `0` falls back to
+  the basic block interval of `-Zmiri-provenance-gc`.
+* `-Zmiri-provenance-gc-min-size=<size>` [Tree Borrows Only] sets the minimum size of an allocation's
+  borrow tracker model for it to be pruned during a GC pass, measured in nodes under Tree Borrows. 
+  The default is `64`. Allocations below this threshold are ignored entirely as smaller ones tend 
+  to amass proportionally few dead nodes, but they may still grow beyond this threshold and be GC'd
+  in a later pass.
 * `-Zmiri-track-alloc-accesses` show not only allocation and free events for tracked allocations,
   but also reads and writes.
 * `-Zmiri-track-alloc-id=<id1>,<id2>,...` shows a backtrace when the given allocations are

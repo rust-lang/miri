@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -226,6 +227,73 @@ impl VisitProvenance for crate::MiriInterpCx<'_> {
     }
 }
 
+/// Pacing and tuning of the provenance garbage collector.
+///
+/// The GC is paced either by basic blocks or by a global count of node visits
+/// during accesses (Tree Borrows only).
+pub struct ProvenanceGcState {
+    /// Run the GC every N basic blocks. `0` disables the GC entirely.
+    block_interval: u32,
+    /// The number of blocks that passed since the last GC pass.
+    blocks_since_gc: Cell<u32>,
+    /// If set, pace the GC by visited nodes rather than by basic blocks: the number of visits
+    /// that triggers a GC pass. Decided once at startup.
+    visit_interval: Option<u32>,
+    /// The count of node visits since the last GC pass (Tree Borrows).
+    visits_since_gc: Cell<u32>,
+    /// Don't bother pruning the borrow tracker state of an allocation this small,
+    /// measured in nodes (Tree Borrows).
+    min_size: usize,
+}
+
+impl ProvenanceGcState {
+    pub fn new(config: &MiriConfig) -> Self {
+        // When enabled, Tree Borrows' GC is paced by visits.
+        // Stacked Borrows keeps counting basic blocks.
+        let reports_visits =
+            matches!(config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows(_)));
+        ProvenanceGcState {
+            block_interval: config.gc_interval,
+            blocks_since_gc: Cell::new(0),
+            visit_interval: (config.gc_interval > 0
+                && config.gc_visit_interval > 0
+                && reports_visits)
+                .then_some(config.gc_visit_interval),
+            visits_since_gc: Cell::new(0),
+            min_size: config.gc_min_size,
+        }
+    }
+
+    /// Called by the borrow tracker after an access, with the number of nodes it visited.
+    pub fn record_visits(&self, visits: u32) {
+        self.visits_since_gc.set(self.visits_since_gc.get().saturating_add(visits));
+    }
+
+    /// The size a borrow tracker structure must exceed to be worth pruning.
+    pub fn min_size(&self) -> usize {
+        self.min_size
+    }
+
+    /// Account for one more basic block having been executed.
+    pub fn inc_block(&self) {
+        self.blocks_since_gc.set(self.blocks_since_gc.get() + 1);
+    }
+
+    /// Check if enough has happened since the last pass to warrant another one.
+    pub fn gc_cond(&self) -> bool {
+        match self.visit_interval {
+            Some(visit_interval) => self.visits_since_gc.get() >= visit_interval,
+            None => self.block_interval > 0 && self.blocks_since_gc.get() >= self.block_interval,
+        }
+    }
+
+    /// Start a new interval, after a pass has run.
+    pub fn reset(&self) {
+        self.blocks_since_gc.set(0);
+        self.visits_since_gc.set(0);
+    }
+}
+
 pub struct LiveAllocs<'a, 'tcx> {
     collected: FxHashSet<AllocId>,
     ecx: &'a MiriInterpCx<'tcx>,
@@ -240,7 +308,7 @@ impl LiveAllocs<'_, '_> {
 fn remove_unreachable_tags<'tcx>(ecx: &mut MiriInterpCx<'tcx>, tags: FxHashSet<BorTag>) {
     // Avoid iterating all allocations if there's no borrow tracker anyway.
     if ecx.machine.borrow_tracker.is_some() {
-        let tree_gc_min_nodes = ecx.machine.tree_gc_min_nodes;
+        let min_size = ecx.machine.provenance_gc.min_size();
         ecx.memory.alloc_map().iter(|it| {
             for (_id, (_kind, alloc)) in it {
                 alloc
@@ -248,7 +316,7 @@ fn remove_unreachable_tags<'tcx>(ecx: &mut MiriInterpCx<'tcx>, tags: FxHashSet<B
                     .borrow_tracker
                     .as_ref()
                     .unwrap()
-                    .remove_unreachable_tags(&tags, tree_gc_min_nodes);
+                    .remove_unreachable_tags(&tags, min_size);
             }
         });
     }
