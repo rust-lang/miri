@@ -229,20 +229,20 @@ impl VisitProvenance for crate::MiriInterpCx<'_> {
 
 /// Pacing and tuning of the provenance garbage collector.
 ///
-/// The GC is paced either by basic blocks or by a global count of node visits
-/// during accesses (Tree Borrows only).
+/// The GC is paced either by basic blocks or by a global count of visits,
+/// (nodes x location states visited during `Tree::perform_access`).
 pub struct ProvenanceGcState {
     /// Run the GC every N basic blocks. `0` disables the GC entirely.
     block_interval: u32,
     /// The number of blocks that passed since the last GC pass.
     blocks_since_gc: Cell<u32>,
-    /// If set, pace the GC by visited nodes rather than by basic blocks: the number of visits
-    /// that triggers a GC pass. Decided once at startup.
+    /// If set, pace the GC by visits instead of basic blocks
+    /// (Tree Borrows Only).
     visit_interval: Option<u32>,
-    /// The count of node visits since the last GC pass (Tree Borrows).
+    /// The count of visits since the last GC pass (Tree Borrows Only).
     visits_since_gc: Cell<u32>,
-    /// Don't bother pruning the borrow tracker state of an allocation this small,
-    /// measured in nodes (Tree Borrows).
+    /// The size an allocation must exceed to be worth garbage collecting.
+    /// Measured in nodes for Tree Borrows (Tree Borrows Only).
     min_size: usize,
 }
 
@@ -264,12 +264,11 @@ impl ProvenanceGcState {
         }
     }
 
-    /// Called by the borrow tracker after an access, with the number of nodes it visited.
+    /// Called by Tree Borrows after each access to record global visit count.
     pub fn record_visits(&self, visits: u32) {
         self.visits_since_gc.set(self.visits_since_gc.get().saturating_add(visits));
     }
 
-    /// The size a borrow tracker structure must exceed to be worth pruning.
     pub fn min_size(&self) -> usize {
         self.min_size
     }
@@ -287,7 +286,7 @@ impl ProvenanceGcState {
         }
     }
 
-    /// Start a new interval, after a pass has run.
+    /// Start a new interval after a pass has run.
     pub fn reset(&self) {
         self.blocks_since_gc.set(0);
         self.visits_since_gc.set(0);

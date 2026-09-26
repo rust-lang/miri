@@ -612,7 +612,7 @@ impl<'tcx> Tree {
         interp_ok(())
     }
 
-    /// Report to the GC the number of nodes a traversal of this tree visited.
+    /// Report the number of visits to each node for each location state to the GC.
     ///
     /// Trees that are too small for the GC to prune (see `remove_unreachable_tags`) have
     /// nothing to gain from a pass, so accesses to them do not count towards triggering one.
