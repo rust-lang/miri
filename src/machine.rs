@@ -639,10 +639,8 @@ pub struct MiriMachine<'tcx> {
     #[cfg(all(feature = "native-lib", unix))]
     pub native_lib_ecx_interchange: &'static Cell<usize>,
 
-    /// Run a garbage collector for BorTags every N basic blocks.
-    pub(crate) gc_interval: u32,
-    /// The number of blocks that passed since the last BorTag GC pass.
-    pub(crate) since_gc: u32,
+    /// Pacing and tuning of the BorTag garbage collector.
+    pub(crate) provenance_gc: ProvenanceGcState,
 
     /// The number of CPUs to be reported by miri.
     pub(crate) num_cpus: u32,
@@ -842,8 +840,7 @@ impl<'tcx> MiriMachine<'tcx> {
             native_lib: config.native_lib.iter().map(|_| {
                 panic!("calling functions from native libraries via FFI is not supported in this build of Miri")
             }).collect(),
-            gc_interval: config.gc_interval,
-            since_gc: 0,
+            provenance_gc: ProvenanceGcState::new(config),
             num_cpus: config.num_cpus,
             page_size,
             stack_addr,
@@ -1072,8 +1069,7 @@ impl VisitProvenance for MiriMachine<'_> {
             native_lib: _,
             #[cfg(all(feature = "native-lib", unix))]
             native_lib_ecx_interchange: _,
-            gc_interval: _,
-            since_gc: _,
+            provenance_gc: _,
             num_cpus: _,
             page_size: _,
             stack_addr: _,
@@ -1926,7 +1922,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
 
     fn before_terminator(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
         ecx.machine.basic_block_count += 1u64; // a u64 that is only incremented by 1 will "never" overflow
-        ecx.machine.since_gc += 1;
+        ecx.machine.provenance_gc.inc_block();
         // Possibly report our progress. This will point at the terminator we are about to execute.
         if let Some(report_progress) = ecx.machine.report_progress {
             if ecx.machine.basic_block_count.is_multiple_of(u64::from(report_progress)) {
@@ -1941,8 +1937,8 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         // table and closed source file descriptions in the blocking I/O manager.
         // When debug assertions are enabled, run the GC as often as possible so that any cases
         // where it mistakenly removes an important tag become visible.
-        if ecx.machine.gc_interval > 0 && ecx.machine.since_gc >= ecx.machine.gc_interval {
-            ecx.machine.since_gc = 0;
+        if ecx.machine.provenance_gc.gc_cond() {
+            ecx.machine.provenance_gc.reset();
             ecx.run_provenance_gc();
             ecx.machine.blocking_io.run_gc();
         }

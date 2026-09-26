@@ -526,6 +526,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
+        gc: &ProvenanceGcState,
     ) -> InterpResult<'tcx> {
         self.perform_access(
             prov,
@@ -535,6 +536,7 @@ impl<'tcx> Tree {
             global,
             alloc_id,
             span,
+            gc,
         )?;
 
         let start_idx = match prov {
@@ -610,6 +612,16 @@ impl<'tcx> Tree {
         interp_ok(())
     }
 
+    /// Report to the GC the number of nodes a traversal of this tree visited.
+    ///
+    /// Trees that are too small for the GC to prune (see `remove_unreachable_tags`) have
+    /// nothing to gain from a pass, so accesses to them do not count towards triggering one.
+    fn report_visits(&self, gc: &ProvenanceGcState, visits: u32) {
+        if self.tag_mapping.len() >= gc.min_size() {
+            gc.record_visits(visits);
+        }
+    }
+
     /// Map the per-node and per-location `LocationState::perform_access`
     /// to each location of the first component of `access_range_and_kind`,
     /// on every tag of the allocation.
@@ -629,6 +641,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
+        gc: &ProvenanceGcState,
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 || matches!(prov, ProvenanceExtra::Wildcard) {
@@ -640,6 +653,8 @@ impl<'tcx> Tree {
             ProvenanceExtra::Wildcard => None,
         };
         // We iterate over affected locations and traverse the tree for each of them.
+        // The GC state is only written once per access.
+        let mut visits: u32 = 0;
         for (loc_range, loc) in self.locations.iter_mut(access_range.start, access_range.size) {
             let diagnostics = DiagnosticInfo {
                 access_cause,
@@ -657,8 +672,10 @@ impl<'tcx> Tree {
                 ChildrenVisitMode::VisitChildrenOfAccessed,
                 &diagnostics,
                 /* min_exposed_child */ None, // only matters for protector end access,
+                &mut visits,
             )?;
         }
+        self.report_visits(gc, visits);
         interp_ok(())
     }
     /// This is the special access that is applied on protector release:
@@ -674,6 +691,7 @@ impl<'tcx> Tree {
         global: &GlobalState,
         alloc_id: AllocId, // diagnostics
         span: Span,        // diagnostics
+        gc: &ProvenanceGcState,
     ) -> InterpResult<'tcx> {
         #[cfg(feature = "expensive-consistency-checks")]
         if self.roots.len() > 1 {
@@ -698,6 +716,7 @@ impl<'tcx> Tree {
         // See the test case `returned_mut_is_usable` from
         // `tests/pass/tree_borrows/tree-borrows.rs` for an example of
         // why this is important.
+        let mut visits: u32 = 0;
         for (loc_range, loc) in self.locations.iter_mut_all() {
             // Only visit accessed permissions
             if let Some(p) = loc.perms.get(source_idx)
@@ -720,16 +739,22 @@ impl<'tcx> Tree {
                     ChildrenVisitMode::SkipChildrenOfAccessed,
                     &diagnostics,
                     min_exposed_child,
+                    &mut visits,
                 )?;
             }
         }
+        self.report_visits(gc, visits);
         interp_ok(())
     }
 }
 
 /// Integration with the BorTag garbage collector
 impl Tree {
-    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>) {
+    pub fn remove_unreachable_tags(&mut self, live_tags: &FxHashSet<BorTag>, min_size: usize) {
+        // Only prune trees that are large enough.
+        if self.tag_mapping.len() < min_size {
+            return;
+        }
         for i in 0..(self.roots.len()) {
             self.remove_useless_children(self.roots[i], live_tags);
         }
@@ -920,6 +945,7 @@ impl<'tcx> LocationTree {
         visit_children: ChildrenVisitMode,
         diagnostics: &DiagnosticInfo,
         min_exposed_child: Option<BorTag>,
+        visits: &mut u32,
     ) -> InterpResult<'tcx> {
         let accessed_root = if let Some(idx) = access_source {
             Some(self.perform_normal_access(
@@ -929,6 +955,7 @@ impl<'tcx> LocationTree {
                 global,
                 visit_children,
                 diagnostics,
+                visits,
             )?)
         } else {
             // `SkipChildrenOfAccessed` only gets set on protector release, which only
@@ -977,6 +1004,7 @@ impl<'tcx> LocationTree {
                 global,
                 diagnostics,
                 /*is_wildcard_tree*/ i != 0,
+                visits,
             )?;
         }
         interp_ok(())
@@ -996,6 +1024,7 @@ impl<'tcx> LocationTree {
         global: &GlobalState,
         visit_children: ChildrenVisitMode,
         diagnostics: &DiagnosticInfo,
+        visits: &mut u32,
     ) -> InterpResult<'tcx, UniIndex> {
         // Performs the per-node work:
         // - insert the permission if it does not exist
@@ -1015,6 +1044,7 @@ impl<'tcx> LocationTree {
             old_state.skip_if_known_noop(access_kind, args.rel_pos)
         };
         let node_app = |args: NodeAppArgs<'_, LocationTree>| {
+            *visits = visits.saturating_add(1);
             let node = args.nodes.get_mut(args.idx).unwrap();
             let mut perm = args.data.perms.entry(args.idx);
 
@@ -1071,6 +1101,7 @@ impl<'tcx> LocationTree {
         global: &GlobalState,
         diagnostics: &DiagnosticInfo,
         is_wildcard_tree: bool,
+        visits: &mut u32,
     ) -> InterpResult<'tcx> {
         let get_relatedness = |idx: UniIndex, node: &Node, loc: &LocationTree| {
             // If the tag is larger than `max_local_tag` then the access can only be foreign.
@@ -1122,6 +1153,7 @@ impl<'tcx> LocationTree {
                 }
             },
             |args| {
+                *visits = visits.saturating_add(1);
                 let node = args.nodes.get_mut(args.idx).unwrap();
 
                 let protected = global.borrow().protected_tags.contains_key(&node.tag);
