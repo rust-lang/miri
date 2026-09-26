@@ -545,6 +545,80 @@ unsafe fn test_avx512ternarylogic() {
         assert_eq_m128i(r, e);
     }
     test_mm_ternarylogic_epi32();
+
+    #[target_feature(enable = "avx512f")]
+    unsafe fn test_mm512_ternarylogic_epi64() {
+        let a = _mm512_set4_epi64(0b100, 0b110, 0b001, 0b101);
+        let b = _mm512_set4_epi64(0b010, 0b011, 0b001, 0b110);
+        let c = _mm512_set4_epi64(0b001, 0b000, 0b001, 0b111);
+
+        // Identity of A.
+        let r = _mm512_ternarylogic_epi64::<0b1111_0000>(a, b, c);
+        assert_eq_m512i(r, a);
+
+        // Bitwise xor.
+        let r = _mm512_ternarylogic_epi64::<0b10010110>(a, b, c);
+        let e = _mm512_set4_epi64(0b111, 0b101, 0b001, 0b100);
+        assert_eq_m512i(r, e);
+
+        // Majority (2 or more bits set).
+        let r = _mm512_ternarylogic_epi64::<0b1110_1000>(a, b, c);
+        let e = _mm512_set4_epi64(0b000, 0b010, 0b001, 0b111);
+        assert_eq_m512i(r, e);
+
+        // Every bit of every lane: with these inputs, bit `i` indexes the table with
+        // `i % 8`, so the result is the table repeated in every byte.
+        let a = _mm512_set1_epi64(0xF0F0_F0F0_F0F0_F0F0_u64 as i64);
+        let b = _mm512_set1_epi64(0xCCCC_CCCC_CCCC_CCCC_u64 as i64);
+        let c = _mm512_set1_epi64(0xAAAA_AAAA_AAAA_AAAA_u64 as i64);
+        let r = _mm512_ternarylogic_epi64::<0x6C>(a, b, c);
+        assert_eq_m512i(r, _mm512_set1_epi64(0x6C6C_6C6C_6C6C_6C6C));
+    }
+    test_mm512_ternarylogic_epi64();
+
+    #[target_feature(enable = "avx512f,avx512vl")]
+    unsafe fn test_mm256_ternarylogic_epi64() {
+        let a = _mm256_setr_epi64x(0b100, 0b110, 0b001, 0b101);
+        let b = _mm256_setr_epi64x(0b010, 0b011, 0b001, 0b110);
+        let c = _mm256_setr_epi64x(0b001, 0b000, 0b001, 0b111);
+
+        // Identity of A.
+        let r = _mm256_ternarylogic_epi64::<0b1111_0000>(a, b, c);
+        assert_eq_m256i(r, a);
+
+        // Bitwise xor.
+        let r = _mm256_ternarylogic_epi64::<0b10010110>(a, b, c);
+        let e = _mm256_setr_epi64x(0b111, 0b101, 0b001, 0b100);
+        assert_eq_m256i(r, e);
+
+        // Majority (2 or more bits set).
+        let r = _mm256_ternarylogic_epi64::<0b1110_1000>(a, b, c);
+        let e = _mm256_setr_epi64x(0b000, 0b010, 0b001, 0b111);
+        assert_eq_m256i(r, e);
+    }
+    test_mm256_ternarylogic_epi64();
+
+    #[target_feature(enable = "avx512f,avx512vl")]
+    unsafe fn test_mm_ternarylogic_epi64() {
+        let a = _mm_set_epi64x(0b100, 0b110);
+        let b = _mm_set_epi64x(0b010, 0b011);
+        let c = _mm_set_epi64x(0b001, 0b000);
+
+        // Identity of A.
+        let r = _mm_ternarylogic_epi64::<0b1111_0000>(a, b, c);
+        assert_eq_m128i(r, a);
+
+        // Bitwise xor.
+        let r = _mm_ternarylogic_epi64::<0b10010110>(a, b, c);
+        let e = _mm_set_epi64x(0b111, 0b101);
+        assert_eq_m128i(r, e);
+
+        // Majority (2 or more bits set).
+        let r = _mm_ternarylogic_epi64::<0b1110_1000>(a, b, c);
+        let e = _mm_set_epi64x(0b000, 0b010);
+        assert_eq_m128i(r, e);
+    }
+    test_mm_ternarylogic_epi64();
 }
 
 #[target_feature(enable = "avx512vnni")]
@@ -967,6 +1041,37 @@ unsafe fn test_avx512vbmi() {
         assert_eq_m128i(r, e);
     }
     test_mm_permutexvar_epi8();
+
+    // Byte `j` of the control selects 8 bits of the data lane from bit `control % 64` on,
+    // wrapping past bit 63 (60 and 63 wrap; 255 and 200 are 63 and 8 modulo 64).
+    const CONTROL: i64 = i64::from_le_bytes([0, 4, 8, 60, 63, 255, 200, 7]);
+    const D1: i64 = 0x0123_4567_89AB_CDEF_u64 as i64;
+    const D2: i64 = 0xFEDC_BA98_7654_3210_u64 as i64;
+    const E1: i64 = i64::from_le_bytes([0xEF, 0xDE, 0xCD, 0xF0, 0xDE, 0xDE, 0xCD, 0x9B]);
+    const E2: i64 = i64::from_le_bytes([0x10, 0x21, 0x32, 0x0F, 0x21, 0x21, 0x32, 0x64]);
+
+    #[target_feature(enable = "avx512vbmi")]
+    unsafe fn test_mm512_multishift_epi64_epi8() {
+        let data = _mm512_setr_epi64(D1, D2, D2, D1, D1, D1, D2, D2);
+        let r = _mm512_multishift_epi64_epi8(_mm512_set1_epi64(CONTROL), data);
+        assert_eq_m512i(r, _mm512_setr_epi64(E1, E2, E2, E1, E1, E1, E2, E2));
+    }
+    test_mm512_multishift_epi64_epi8();
+
+    #[target_feature(enable = "avx512vbmi,avx512vl")]
+    unsafe fn test_mm256_multishift_epi64_epi8() {
+        let data = _mm256_setr_epi64x(D1, D2, D2, D1);
+        let r = _mm256_multishift_epi64_epi8(_mm256_set1_epi64x(CONTROL), data);
+        assert_eq_m256i(r, _mm256_setr_epi64x(E1, E2, E2, E1));
+    }
+    test_mm256_multishift_epi64_epi8();
+
+    #[target_feature(enable = "avx512vbmi,avx512vl")]
+    unsafe fn test_mm_multishift_epi64_epi8() {
+        let r = _mm_multishift_epi64_epi8(_mm_set1_epi64x(CONTROL), _mm_set_epi64x(D2, D1));
+        assert_eq_m128i(r, _mm_set_epi64x(E2, E1));
+    }
+    test_mm_multishift_epi64_epi8();
 }
 
 #[track_caller]

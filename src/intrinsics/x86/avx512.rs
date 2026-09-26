@@ -19,9 +19,10 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         match unprefixed_name {
             // Used by the ternarylogic functions.
-            "pternlog.d.128" | "pternlog.d.256" | "pternlog.d.512" => {
+            "pternlog.d.128" | "pternlog.d.256" | "pternlog.d.512" | "pternlog.q.128"
+            | "pternlog.q.256" | "pternlog.q.512" => {
                 this.expect_target_feature_for_intrinsic(link_name, "avx512f")?;
-                if matches!(unprefixed_name, "pternlog.d.128" | "pternlog.d.256") {
+                if !unprefixed_name.ends_with(".512") {
                     this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
                 }
 
@@ -37,9 +38,14 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // fn vpternlogd(a: i32x16, b: i32x16, c: i32x16, imm8: i32) -> i32x16;
                 // fn vpternlogd256(a: i32x8, b: i32x8, c: i32x8, imm8: i32) -> i32x8;
                 // fn vpternlogd128(a: i32x4, b: i32x4, c: i32x4, imm8: i32) -> i32x4;
+                // fn vpternlogq(a: i64x8, b: i64x8, c: i64x8, imm8: i32) -> i64x8;
+                // fn vpternlogq256(a: i64x4, b: i64x4, c: i64x4, imm8: i32) -> i64x4;
+                // fn vpternlogq128(a: i64x2, b: i64x2, c: i64x2, imm8: i32) -> i64x2;
                 // ```
                 //
-                // The element type is always a 32-bit integer, the width varies.
+                // The element type is a 32- or 64-bit integer, the width varies. The operation
+                // is bitwise, so the element size only matters to the masked forms, which stdarch
+                // builds from this and a select.
 
                 let (a, _a_len) = this.project_to_simd(a)?;
                 let (b, _b_len) = this.project_to_simd(b)?;
@@ -47,10 +53,10 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let (dest, dest_len) = this.project_to_simd(dest)?;
 
                 // Compute one lane with ternary table.
-                let tern = |xa: u32, xb: u32, xc: u32, imm: u32| -> u32 {
-                    let mut out = 0u32;
+                let tern = |xa: u128, xb: u128, xc: u128, imm: u128, bits: u64| -> u128 {
+                    let mut out = 0u128;
                     // At each bit position, select bit from imm8 at index = (a << 2) | (b << 1) | c
-                    for bit in 0..32 {
+                    for bit in 0..bits {
                         let ia = (xa >> bit) & 1;
                         let ib = (xb >> bit) & 1;
                         let ic = (xc >> bit) & 1;
@@ -61,19 +67,20 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     out
                 };
 
-                let imm8 = this.read_scalar(imm8)?.to_u32()? & 0xFF;
+                let imm8 = u128::from(this.read_scalar(imm8)?.to_u32()? & 0xFF);
                 for i in 0..dest_len {
                     let a_lane = this.project_index(&a, i)?;
                     let b_lane = this.project_index(&b, i)?;
                     let c_lane = this.project_index(&c, i)?;
                     let d_lane = this.project_index(&dest, i)?;
 
-                    let va = this.read_scalar(&a_lane)?.to_u32()?;
-                    let vb = this.read_scalar(&b_lane)?.to_u32()?;
-                    let vc = this.read_scalar(&c_lane)?.to_u32()?;
+                    let size = d_lane.layout.size;
+                    let va = this.read_scalar(&a_lane)?.to_bits(size)?;
+                    let vb = this.read_scalar(&b_lane)?.to_bits(size)?;
+                    let vc = this.read_scalar(&c_lane)?.to_bits(size)?;
 
-                    let r = tern(va, vb, vc, imm8);
-                    this.write_scalar(Scalar::from_u32(r), &d_lane)?;
+                    let r = tern(va, vb, vc, imm8, size.bits());
+                    this.write_scalar(Scalar::from_uint(r, size), &d_lane)?;
                 }
             }
             // Used to implement the _mm512_sad_epu8 function.
@@ -127,6 +134,17 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [left, indices, right] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
 
                 permute2(this, left, indices, right, dest)?;
+            }
+            // Used to implement the _mm{,256,512}_multishift_epi64_epi8 functions.
+            "pmultishift.qb.128" | "pmultishift.qb.256" | "pmultishift.qb.512" => {
+                this.expect_target_feature_for_intrinsic(link_name, "avx512vbmi")?;
+                if !unprefixed_name.ends_with(".512") {
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                }
+
+                let [control, data] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
+
+                pmultishiftqb(this, control, data, dest)?;
             }
             // Used to implement the _mm512_shuffle_epi8 intrinsic.
             "pshuf.b.512" => {
@@ -228,6 +246,50 @@ fn vpdpbusd<'tcx>(
         // Use `wrapping_add` because `src` is an arbitrary i32 and the addition can overflow.
         let res = Scalar::from_i32(intermediate_sum.wrapping_add(src));
         ecx.write_scalar(res, &dest)?;
+    }
+
+    interp_ok(())
+}
+
+/// For each 64-bit lane of `data`, byte `j` of the corresponding result lane is the 8 bits of
+/// that lane starting at bit `control.byte[j] % 64`, wrapping around past bit 63: the lane
+/// rotated right by that amount, truncated to a byte.
+///
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_multishift_epi64_epi8>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_multishift_epi64_epi8>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_multishift_epi64_epi8>
+fn pmultishiftqb<'tcx>(
+    ecx: &mut crate::MiriInterpCx<'tcx>,
+    control: &OpTy<'tcx>,
+    data: &OpTy<'tcx>,
+    dest: &MPlaceTy<'tcx>,
+) -> InterpResult<'tcx, ()> {
+    let (control, control_len) = ecx.project_to_simd(control)?;
+    let (data, data_len) = ecx.project_to_simd(data)?;
+    let (dest, dest_len) = ecx.project_to_simd(dest)?;
+
+    // fn vpmultishiftqb(a: i8x64, b: i8x64) -> i8x64;
+    // fn vpmultishiftqb256(a: i8x32, b: i8x32) -> i8x32;
+    // fn vpmultishiftqb128(a: i8x16, b: i8x16) -> i8x16;
+    //
+    // `a` is the control, `b` the data.
+    assert_eq!(control_len, dest_len);
+    assert_eq!(data_len, dest_len);
+    assert_eq!(dest_len % 8, 0);
+
+    for lane in (0..dest_len).step_by(8) {
+        let mut bytes = [0u8; 8];
+        for (j, byte) in (0u64..).zip(&mut bytes) {
+            *byte = ecx.read_scalar(&ecx.project_index(&data, lane.strict_add(j))?)?.to_u8()?;
+        }
+        let lane_bits = u64::from_le_bytes(bytes);
+
+        for j in 0..8 {
+            let idx = lane.strict_add(j);
+            let shift = ecx.read_scalar(&ecx.project_index(&control, idx)?)?.to_u8()? % 64;
+            let res = lane_bits.rotate_right(u32::from(shift)).to_le_bytes()[0];
+            ecx.write_scalar(Scalar::from_u8(res), &ecx.project_index(&dest, idx)?)?;
+        }
     }
 
     interp_ok(())
