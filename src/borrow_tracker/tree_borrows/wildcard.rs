@@ -203,8 +203,8 @@ impl Tree {
                 let perm = loc
                     .perms
                     .get(id)
-                    .map(|p| p.permission())
-                    .unwrap_or_else(|| node.default_location_state().permission());
+                    .map(|p| p.base.permission())
+                    .unwrap_or_else(|| node.default_location_state().base.permission());
 
                 let access_level = perm.strongest_allowed_local_access(protected);
                 // An unexposed node gets treated as access level `None`. Therefore,
@@ -233,8 +233,8 @@ impl Tree {
                 let perm = loc
                     .perms
                     .get(idx)
-                    .map(|p| p.permission())
-                    .unwrap_or_else(|| node.default_location_state().permission());
+                    .map(|p| p.base.permission())
+                    .unwrap_or_else(|| node.default_location_state().base.permission());
                 // We are transitioning from protected to unprotected.
                 let old_access_type = perm.strongest_allowed_local_access(/*protected*/ true);
                 let access_type = perm.strongest_allowed_local_access(/*protected*/ false);
@@ -261,9 +261,10 @@ impl Tree {
 
                 let exposed_as = if node.is_exposed {
                     let perm =
-                        perms.get(id).copied().unwrap_or_else(|| node.default_location_state());
+                        perms.get(id).cloned().unwrap_or_else(|| node.default_location_state());
 
-                    perm.permission()
+                    perm.base
+                        .permission()
                         .strongest_allowed_local_access(protected_tags.contains_key(&node.tag))
                 } else {
                     WildcardAccessLevel::None

@@ -277,6 +277,9 @@ pub(super) enum TransitionError {
     /// Cannot deallocate because some tag in the allocation is strongly protected.
     /// This kind of error can only occur on deallocations.
     ProtectedDealloc,
+    /// A protector has ended, but this has not yet happened-before this thread's timestamp.
+    /// The permission is the last protected permission, so it behaves like `ProtectedDisabled`
+    ProtectorEndDataRace(Permission, ThreadId, Span),
 }
 
 impl History {
@@ -321,7 +324,7 @@ pub(super) struct TbError<'node> {
 
 impl TbError<'_> {
     /// Produce a UB error.
-    pub fn build<'tcx>(self) -> InterpErrorKind<'tcx> {
+    pub fn build<'tcx>(self, tm: &ThreadManager<'_>) -> InterpErrorKind<'tcx> {
         use TransitionError::*;
         let cause = self.access_info.access_cause;
         let error_offset = self.access_info.transition_range.start;
@@ -329,6 +332,7 @@ impl TbError<'_> {
         let accessed_str =
             self.accessed_node_info.map(|v| format!("{v}")).unwrap_or_else(|| "<wildcard>".into());
         let conflicting = self.conflicting_node_info;
+        let mut extra_history_events = vec![];
         // An access is considered conflicting if it happened through a
         // different tag than the one who caused UB.
         // When doing a wildcard access (where `accessed` is `None`) we
@@ -358,10 +362,10 @@ impl TbError<'_> {
                 ));
                 (title, details, conflicting_tag_name)
             }
-            ProtectedDisabled(before_disabled) => {
+            ProtectedDisabled(before_disabled) | ProtectorEndDataRace(before_disabled, _, _) => {
                 let conflicting_tag_name = "protected";
                 let access = cause.print_as_access(/* is_foreign */ true);
-                let details = vec![
+                let mut details = vec![
                     format!(
                         "the accessed tag {accessed_str} is foreign to the {conflicting_tag_name} tag {conflicting} (i.e., it is not a child)"
                     ),
@@ -370,6 +374,14 @@ impl TbError<'_> {
                     ),
                     format!("protected tags must never be Disabled"),
                 ];
+                if let ProtectorEndDataRace(_, tid, span) = self.error_kind {
+                    let thread_name = tm.get_thread_display_name(tid);
+                    details.push(format!("The protector has already ended (in thread `{thread_name}`), but this end has not yet happened-before the conflicting access; so this is also a data race!"));
+                    extra_history_events.push((
+                        Some(span.data()),
+                        format!("the protector on {conflicting} ended (in thread `{thread_name}`) when this function returned:"),
+                    ));
+                }
                 (title, details, conflicting_tag_name)
             }
             ProtectedDealloc => {
@@ -394,6 +406,7 @@ impl TbError<'_> {
             conflicting_tag_name,
             true,
         );
+        history.events.extend(extra_history_events);
         err_machine_stop!(TerminationInfo::TreeBorrowsUb { title, details, history })
     }
 }
@@ -682,7 +695,7 @@ impl DisplayRepr {
                     .iter_all()
                     .map(move |(_offset, loc)| {
                         let perm = loc.perms.get(idx);
-                        perm.cloned()
+                        perm.map(|x| x.base)
                     })
                     .collect::<Vec<_>>();
                 let mut children = Vec::new();
