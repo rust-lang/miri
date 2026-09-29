@@ -4,7 +4,7 @@
 //@[vl_128,vl_256]compile-flags: -C target-feature=+avx512ifma,-avx512vl,-avxifma
 //@[avx_512]compile-flags: -C target-feature=+avxifma,-avx512f
 
-#![feature(abi_unadjusted, link_llvm_intrinsics, simd_ffi)]
+#![feature(link_llvm_intrinsics, simd_ffi)]
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
@@ -38,7 +38,7 @@ fn main() {
 }
 
 #[allow(improper_ctypes)]
-unsafe extern "unadjusted" {
+unsafe extern "llvm-intrinsic" {
     #[cfg(any(missing_128, vl_128))]
     #[link_name = "llvm.x86.avx512.vpmadd52l.uq.128"]
     fn madd52_128(a: __m128i, b: __m128i, c: __m128i) -> __m128i;

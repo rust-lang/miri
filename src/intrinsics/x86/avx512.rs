@@ -189,7 +189,7 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                 }
 
-                let [a, b, c] = this.check_shim_sig_unadjusted(link_name, args)?;
+                let [a, b, c] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
 
                 assert_eq!(dest.layout, a.layout);
                 assert_eq!(dest.layout, b.layout);
