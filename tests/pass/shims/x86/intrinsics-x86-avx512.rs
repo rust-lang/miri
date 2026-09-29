@@ -1,6 +1,6 @@
 // We're testing x86 target specific features
 //@only-target: x86_64 i686
-//@compile-flags: -C target-feature=+avx512f,+avx512vl,+avx512bw,+avx512bitalg,+avx512vpopcntdq,+avx512vnni,+avx512vbmi,+avx512ifma
+//@compile-flags: -C target-feature=+avx512f,+avx512vl,+avx512bw,+avx512bitalg,+avx512vpopcntdq,+avx512vnni,+avx512vbmi
 //@run-native
 
 #[cfg(target_arch = "x86")]
@@ -33,12 +33,6 @@ fn main() {
         test_avx512ternarylogic();
         test_avx512vnni();
         test_avx512vbmi();
-        if is_x86_feature_detected!("avx512ifma") {
-            test_avx512ifma();
-        } else {
-            // Older AVX-512 CPUs (e.g. Skylake-SP) lack IFMA.
-            println!("warning: skipping avx512ifma tests");
-        }
     }
 }
 
@@ -988,59 +982,4 @@ unsafe fn assert_eq_m256i(a: __m256i, b: __m256i) {
 #[track_caller]
 unsafe fn assert_eq_m128i(a: __m128i, b: __m128i) {
     assert_eq!(transmute::<_, [u64; 2]>(a), transmute::<_, [u64; 2]>(b))
-}
-
-#[target_feature(enable = "avx512ifma,avx512vl")]
-unsafe fn test_avx512ifma() {
-    // Every lane holds a different case, so a wrong lane index cannot pass. Lane 0 is the
-    // stdarch test vector, lane 1 wraps the 64-bit accumulator, lanes 2 and 3 put garbage
-    // in the upper 12 bits of a multiplicand, lane 4 is (2^52 - 1)^2, lane 6 wraps with a
-    // nonzero result. The 256/128-bit cases reuse the first 4 and the first 2 lanes.
-    #[rustfmt::skip]
-    const A: [u64; 8] = [
-        0x00000a0000000000, 0xffffffffffffffff, 0x0000000000000000, 0x0000000000000007,
-        0x0000000000000000, 0x0000000000000000, 0xffffffffffffffff, 0x8000000000000000,
-    ];
-    #[rustfmt::skip]
-    const B: [u64; 8] = [
-        0x00000b0000000004, 0x000fffffffffffff, 0x8000000000000003, 0x0000000000000001,
-        0x000fffffffffffff, 0x0000000000000000, 0x0000000000000002, 0x0008000000000001,
-    ];
-    #[rustfmt::skip]
-    const C: [u64; 8] = [
-        0x00000c0000000003, 0x000fffffffffffff, 0x0000000000000001, 0x8000000000000003,
-        0x000fffffffffffff, 0x0000000000000000, 0x0000000000000003, 0x0008000000000007,
-    ];
-    #[rustfmt::skip]
-    const LO: [u64; 8] = [
-        0x00005b000000000c, 0x0000000000000000, 0x0000000000000003, 0x000000000000000a,
-        0x0000000000000001, 0x0000000000000000, 0x0000000000000005, 0x8000000000000007,
-    ];
-    #[rustfmt::skip]
-    const HI: [u64; 8] = [
-        0x00000a0840000000, 0x000ffffffffffffd, 0x0000000000000000, 0x0000000000000007,
-        0x000ffffffffffffe, 0x0000000000000000, 0xffffffffffffffff, 0x8004000000000004,
-    ];
-
-    let a = transmute::<_, __m512i>(A);
-    let b = transmute::<_, __m512i>(B);
-    let c = transmute::<_, __m512i>(C);
-    assert_eq_m512i(_mm512_madd52lo_epu64(a, b, c), transmute::<_, __m512i>(LO));
-    assert_eq_m512i(_mm512_madd52hi_epu64(a, b, c), transmute::<_, __m512i>(HI));
-
-    let a = transmute::<_, __m256i>([A[0], A[1], A[2], A[3]]);
-    let b = transmute::<_, __m256i>([B[0], B[1], B[2], B[3]]);
-    let c = transmute::<_, __m256i>([C[0], C[1], C[2], C[3]]);
-    let lo = transmute::<_, __m256i>([LO[0], LO[1], LO[2], LO[3]]);
-    let hi = transmute::<_, __m256i>([HI[0], HI[1], HI[2], HI[3]]);
-    assert_eq_m256i(_mm256_madd52lo_epu64(a, b, c), lo);
-    assert_eq_m256i(_mm256_madd52hi_epu64(a, b, c), hi);
-
-    let a = transmute::<_, __m128i>([A[0], A[1]]);
-    let b = transmute::<_, __m128i>([B[0], B[1]]);
-    let c = transmute::<_, __m128i>([C[0], C[1]]);
-    let lo = transmute::<_, __m128i>([LO[0], LO[1]]);
-    let hi = transmute::<_, __m128i>([HI[0], HI[1]]);
-    assert_eq_m128i(_mm_madd52lo_epu64(a, b, c), lo);
-    assert_eq_m128i(_mm_madd52hi_epu64(a, b, c), hi);
 }

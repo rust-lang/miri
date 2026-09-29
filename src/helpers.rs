@@ -927,10 +927,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
-    /// Checks whether target feature `target_feature` is enabled.
-    ///
-    /// Use this when an intrinsic accepts more than one feature; otherwise prefer
-    /// `expect_target_feature_for_intrinsic`.
     fn target_feature_enabled(&self, target_feature: &str) -> bool {
         let this = self.eval_context_ref();
         this.tcx.sess.internal_target_features.contains(&Symbol::intern(target_feature))

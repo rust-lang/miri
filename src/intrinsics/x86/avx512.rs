@@ -178,17 +178,10 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 packusdw(this, a, b, dest)?;
             }
-            // Used to implement the _mm512_madd52lo_epu64 and _mm512_madd52hi_epu64 functions
-            // (and their 128/256-bit variants), and the AVX-IFMA _mm256_madd52lo_avx_epu64
-            // and _mm_madd52lo_avx_epu64 functions (and their `hi` variants).
-            //
-            // <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52lo_epu64>
-            // <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_madd52hi_epu64>
             "vpmadd52l.uq.512" | "vpmadd52h.uq.512" | "vpmadd52l.uq.256" | "vpmadd52h.uq.256"
             | "vpmadd52l.uq.128" | "vpmadd52h.uq.128" => {
                 let is_512 = matches!(unprefixed_name, "vpmadd52l.uq.512" | "vpmadd52h.uq.512");
-                // The 128/256-bit widths are also reachable through AVX-IFMA, which is
-                // VEX-encoded and implies no AVX-512 at all.
+                // AVX-IFMA permits narrow vectors without AVX-512.
                 if is_512 || !this.target_feature_enabled("avxifma") {
                     this.expect_target_feature_for_intrinsic(link_name, "avx512ifma")?;
                     if !is_512 {
@@ -202,25 +195,12 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 assert_eq!(dest.layout, b.layout);
                 assert_eq!(dest.layout, c.layout);
 
-                // The signatures of these operations are:
-                //
-                // ```
-                // fn vpmadd52luq_512(a: i64x8, b: i64x8, c: i64x8) -> i64x8;
-                // fn vpmadd52luq_256(a: i64x4, b: i64x4, c: i64x4) -> i64x4;
-                // fn vpmadd52luq_128(a: i64x2, b: i64x2, c: i64x2) -> i64x2;
-                // ```
-                //
-                // The element type is always a 64-bit integer, the width varies.
-
                 let (a, _a_len) = this.project_to_simd(a)?;
                 let (b, _b_len) = this.project_to_simd(b)?;
                 let (c, _c_len) = this.project_to_simd(c)?;
                 let (dest, dest_len) = this.project_to_simd(dest)?;
 
-                // 52 is the mantissa width of an IEEE-754 double, so the operation fits the
-                // 53x53 multiplier the FMA unit already has.
                 const MASK52: u64 = (1 << 52) - 1;
-                // `l` takes bits [51:0] of the 104-bit product, `h` takes bits [103:52].
                 let high = unprefixed_name.starts_with("vpmadd52h");
 
                 for i in 0..dest_len {
@@ -233,13 +213,13 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let vb = this.read_scalar(&b_lane)?.to_u64()?;
                     let vc = this.read_scalar(&c_lane)?.to_u64()?;
 
-                    // The upper 12 bits of each multiplicand are discarded, not an error.
+                    // The upper 12 bits of each multiplicand do not affect the product.
                     let product = u128::from(vb & MASK52).strict_mul(u128::from(vc & MASK52));
-                    // Both halves are 52 bits wide, so the `u64` conversion cannot fail.
                     let half = if high { product >> 52 } else { product & u128::from(MASK52) };
+                    // Each product half fits in 52 bits.
                     let half = u64::try_from(half).unwrap();
 
-                    // Use `wrapping_add` because the accumulator lane is a full 64 bits.
+                    // Each accumulator retains all 64 bits and wraps independently.
                     let r = va.wrapping_add(half);
                     this.write_scalar(Scalar::from_u64(r), &d_lane)?;
                 }
