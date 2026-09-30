@@ -17,8 +17,24 @@ impl Args {
         Self { args: args.collect() }
     }
 
+    pub fn as_slice(&self) -> &[String] {
+        &self.args
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &str> {
         self.args.iter().map(String::as_str)
+    }
+
+    pub fn into_vec(self) -> Vec<String> {
+        self.args
+    }
+
+    pub fn first(&self) -> Option<&str> {
+        self.args.first().map(String::as_str)
+    }
+
+    pub fn consume_first(&mut self) -> Option<String> {
+        if self.args.is_empty() { None } else { Some(self.args.remove(0)) }
     }
 
     /// Determines whether a `--flag` is present before `--`.
@@ -55,16 +71,6 @@ impl IntoIterator for Args {
     fn into_iter(self) -> Self::IntoIter {
         self.args.into_iter()
     }
-}
-
-/// Determines whether a `--flag` is present.
-pub fn has_arg_flag(name: &str) -> bool {
-    Args::from_env().has_arg_flag(name)
-}
-
-/// Determines how many times a `--flag` is present.
-pub fn num_arg_flag(name: &str) -> usize {
-    Args::from_env().num_arg_flag(name)
 }
 
 /// Yields all values of command line flag `name` as `Ok(arg)`, and all other arguments except
@@ -168,16 +174,6 @@ impl ArgFlagValueIter {
     }
 }
 
-/// Gets the values of a `--flag`.
-pub fn get_arg_flag_values(name: &str) -> impl Iterator<Item = String> + '_ {
-    Args::from_env().get_arg_flag_values(name).map(String::from).collect::<Vec<_>>().into_iter()
-}
-
-/// Gets the value of a `--flag`.
-pub fn get_arg_flag_value(name: &str) -> Option<String> {
-    Args::from_env().get_arg_flag_value(name).map(String::from)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +229,22 @@ mod tests {
         let args = Args::from_iter(["-C", "extra-filename=-suffix", "-o", "output"]);
         assert_eq!(args.get_arg_flag_value("extra-filename"), Some("-suffix"));
         assert_eq!(args.get_arg_flag_value("-o"), Some("output"));
+    }
+
+    #[test]
+    fn test_consume_first() {
+        let mut args = Args::from_iter(["miri", "run", "--flag"]);
+        assert_eq!(args.as_slice(), &["miri", "run", "--flag"]);
+        assert_eq!(args.first(), Some("miri"));
+        assert_eq!(args.consume_first(), Some("miri".into()));
+        assert_eq!(args.first(), Some("run"));
+        assert_eq!(args.consume_first(), Some("run".into()));
+        assert_eq!(args.first(), Some("--flag"));
+        assert!(args.has_arg_flag("--flag"));
+        assert_eq!(args.consume_first(), Some("--flag".into()));
+        assert_eq!(args.first(), None);
+        assert_eq!(args.consume_first(), None);
+        assert_eq!(args.into_vec(), Vec::<String>::new());
     }
 
     #[test]
