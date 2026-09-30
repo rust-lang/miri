@@ -132,3 +132,28 @@ pub fn get_arg_flag_values(name: &str) -> impl Iterator<Item = String> + '_ {
 pub fn get_arg_flag_value(name: &str) -> Option<String> {
     get_arg_flag_values(name).next()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_flag_value_preserves_trailing_args() {
+        let args = vec![
+            "--target-dir".to_string(),
+            "foo".to_string(),
+            "cmd".to_string(),
+            "--target-dir=bar".to_string(),
+            "--".to_string(),
+            "--target-dir".to_string(),
+            "keep".to_string(),
+        ];
+        let mut iter = args.into_iter();
+        let forwarded: Vec<_> = ArgSplitFlagValue::from_string_iter(&mut iter, "--target-dir")
+            .filter_map(Result::err)
+            .collect();
+        assert_eq!(forwarded, vec!["cmd", "--"]);
+        let remaining: Vec<_> = iter.collect();
+        assert_eq!(remaining, vec!["--target-dir", "keep"]);
+    }
+}
