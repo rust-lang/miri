@@ -227,22 +227,25 @@ impl VisitProvenance for crate::MiriInterpCx<'_> {
     }
 }
 
+/// What activates the provenance garbage collector. Decided once at startup.
+#[derive(Clone, Copy, Debug)]
+enum GcInterval {
+    /// The GC never runs.
+    Disabled,
+    /// Run the GC every N basic blocks.
+    Blocks(u32),
+    /// Run the GC every N (node x location state) visits during accesses (Tree Borrows only).
+    Visits(u32),
+}
+
 /// Pacing and tuning of the provenance garbage collector.
-///
-/// The GC is paced either by basic blocks or by a global count of visits,
-/// (nodes x location states visited during `Tree::perform_access`).
 pub struct ProvenanceGcState {
-    /// Run the GC every N basic blocks. `0` disables the GC entirely.
-    block_interval: u32,
-    /// The number of blocks that passed since the last GC pass.
-    blocks_since_gc: Cell<u32>,
-    /// If set, pace the GC by visits instead of basic blocks
-    /// (Tree Borrows Only).
-    visit_interval: Option<u32>,
-    /// The count of visits since the last GC pass (Tree Borrows Only).
-    visits_since_gc: Cell<u32>,
-    /// The size an allocation must exceed to be worth garbage collecting.
-    /// Measured in nodes for Tree Borrows (Tree Borrows Only).
+    // The interval metric
+    interval: GcInterval,
+    /// Progress since the last GC pass, in the unit chosen by `interval`.
+    since_gc: Cell<u32>,
+    /// Don't bother pruning the borrow tracker state of an allocation this small,
+    /// measured in nodes (Tree Borrows).
     min_size: usize,
 }
 
@@ -252,21 +255,21 @@ impl ProvenanceGcState {
         // Stacked Borrows keeps counting basic blocks.
         let reports_visits =
             matches!(config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows(_)));
-        ProvenanceGcState {
-            block_interval: config.gc_interval,
-            blocks_since_gc: Cell::new(0),
-            visit_interval: (config.gc_interval > 0
-                && config.gc_visit_interval > 0
-                && reports_visits)
-                .then_some(config.gc_visit_interval),
-            visits_since_gc: Cell::new(0),
-            min_size: config.gc_min_size,
-        }
+        let interval = if config.gc_interval == 0 {
+            GcInterval::Disabled
+        } else if config.gc_visit_interval > 0 && reports_visits {
+            GcInterval::Visits(config.gc_visit_interval)
+        } else {
+            GcInterval::Blocks(config.gc_interval)
+        };
+        ProvenanceGcState { interval, since_gc: Cell::new(0), min_size: config.gc_min_size }
     }
 
     /// Called by Tree Borrows after each access to record global visit count.
     pub fn record_visits(&self, visits: u32) {
-        self.visits_since_gc.set(self.visits_since_gc.get().saturating_add(visits));
+        if let GcInterval::Visits(_) = self.interval {
+            self.since_gc.set(self.since_gc.get().saturating_add(visits));
+        }
     }
 
     pub fn min_size(&self) -> usize {
@@ -275,21 +278,22 @@ impl ProvenanceGcState {
 
     /// Account for one more basic block having been executed.
     pub fn inc_block(&self) {
-        self.blocks_since_gc.set(self.blocks_since_gc.get() + 1);
+        if let GcInterval::Blocks(_) = self.interval {
+            self.since_gc.set(self.since_gc.get().saturating_add(1));
+        }
     }
 
     /// Check if enough has happened since the last pass to warrant another one.
     pub fn gc_cond(&self) -> bool {
-        match self.visit_interval {
-            Some(visit_interval) => self.visits_since_gc.get() >= visit_interval,
-            None => self.block_interval > 0 && self.blocks_since_gc.get() >= self.block_interval,
+        match self.interval {
+            GcInterval::Disabled => false,
+            GcInterval::Blocks(n) | GcInterval::Visits(n) => self.since_gc.get() >= n,
         }
     }
 
     /// Start a new interval after a pass has run.
     pub fn reset(&self) {
-        self.blocks_since_gc.set(0);
-        self.visits_since_gc.set(0);
+        self.since_gc.set(0);
     }
 }
 
