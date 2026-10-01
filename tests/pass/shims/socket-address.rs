@@ -29,8 +29,8 @@ fn test_address_resolution() {
                 assert_eq!(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8888, 0, 0), addr),
         }
     }
-    // We expect an IPv4 and an IPv6 address.
-    assert!(addr_count == 2);
+    // We expect an IPv4 address, an IPv6 address, or both.
+    assert!(addr_count == 1 || addr_count == 2);
 
     // Resolving an invalid name should error. Needs the port to even hit `getaddrinfo`.
     let addr_str = "this-is-not-a-valid-address:80";

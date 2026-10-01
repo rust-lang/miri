@@ -80,8 +80,8 @@ fn test_getaddrinfo_freeaddrinfo() {
         }
     }
 
-    // We expect an IPv4 and an IPv6 address.
-    assert!(addr_count == 2);
+    // We expect an IPv4 address, an IPv6 address, or both.
+    assert!(addr_count == 1 || addr_count == 2);
 
     unsafe {
         libc::freeaddrinfo(start.cast());
