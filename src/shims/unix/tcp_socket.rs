@@ -759,6 +759,7 @@ impl UnixSocketFileDescription for TcpSocket {
                 // For all other targets SO_LINGER sets the linger duration in seconds.
                 ecx.eval_libc_i32("SO_LINGER")
             };
+            let opt_so_keepalive = ecx.eval_libc_i32("SO_KEEPALIVE");
 
             if matches!(ecx.tcx.sess.target.os, Os::MacOs | Os::FreeBsd | Os::NetBsd) {
                 // SO_NOSIGPIPE only exists on MacOS, FreeBSD, and NetBSD.
@@ -822,6 +823,18 @@ impl UnixSocketFileDescription for TcpSocket {
 
                 let linger = onoff.then_some(Duration::from_secs(u64::try_from(linger).unwrap()));
                 return match self.with_socket_ref(|s| s.set_linger(linger)) {
+                    Ok(()) => interp_ok(Ok(())),
+                    Err(e) => interp_ok(Err(IoError::HostError(e))),
+                };
+            } else if option == opt_so_keepalive {
+                if value_len != 4 {
+                    // Option value should be C-int which is usually 4 bytes.
+                    return interp_ok(Err(LibcError("EINVAL")));
+                }
+                let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.i32);
+                let keepalive = ecx.read_scalar(&option_value)?.to_i32()? != 0;
+
+                return match self.with_socket_ref(|s| s.set_keepalive(keepalive)) {
                     Ok(()) => interp_ok(Ok(())),
                     Err(e) => interp_ok(Err(IoError::HostError(e))),
                 };
@@ -896,6 +909,7 @@ impl UnixSocketFileDescription for TcpSocket {
                 // For all other targets SO_LINGER sets the linger duration in seconds.
                 ecx.eval_libc_i32("SO_LINGER")
             };
+            let opt_so_keepalive = ecx.eval_libc_i32("SO_KEEPALIVE");
 
             if option == opt_so_error {
                 // Reading SO_ERROR should always return the latest async error. Because our stored
@@ -961,6 +975,16 @@ impl UnixSocketFileDescription for TcpSocket {
                 ecx.write_int(secs, &linger_field)?;
 
                 interp_ok(Ok(linger_buffer))
+            } else if option == opt_so_keepalive {
+                let keepalive = match self.with_socket_ref(|s| s.keepalive()) {
+                    Ok(keepalive) => keepalive,
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                };
+
+                // Allocate new buffer on the stack with the `i32` layout.
+                let value_buffer = ecx.allocate(ecx.machine.layouts.i32, MemoryKind::Stack)?;
+                ecx.write_int(i32::from(keepalive), &value_buffer)?;
+                interp_ok(Ok(value_buffer))
             } else {
                 throw_unsup_format!(
                     "getsockopt: option {option:#x} is unsupported for level SOL_SOCKET",
