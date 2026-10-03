@@ -927,6 +927,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    fn target_feature_enabled(&self, target_feature: &str) -> bool {
+        let this = self.eval_context_ref();
+        this.tcx.sess.internal_target_features.contains(&Symbol::intern(target_feature))
+    }
+
     /// Checks that target feature `target_feature` is enabled.
     ///
     /// If not enabled, emits an UB error that states that the feature is
@@ -937,7 +942,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         target_feature: &str,
     ) -> InterpResult<'tcx, ()> {
         let this = self.eval_context_ref();
-        if !this.tcx.sess.internal_target_features.contains(&Symbol::intern(target_feature)) {
+        if !this.target_feature_enabled(target_feature) {
             throw_ub_format!(
                 "attempted to call intrinsic `{intrinsic}` that requires missing target feature {target_feature}"
             );
