@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 
 use rustc_target::spec::Os;
@@ -19,6 +19,8 @@ pub(super) struct UdpSocket {
     socket: mio::net::UdpSocket,
     /// Whether this fd is non-blocking or not.
     is_non_block: Cell<bool>,
+    /// Whether the socket is implicitly or explicitly bound to an address.
+    is_bound: Cell<bool>,
     /// Read timeout of the socket. [`None`] means that reads can block indefinitely.
     /// The timeout is applied to the monotonic clock (the Unix specification doesn't
     /// specify which clock to use, but the monotonic clock is more common for
@@ -70,6 +72,7 @@ impl UdpSocket {
             family,
             socket,
             is_non_block: Cell::new(is_non_block),
+            is_bound: Cell::new(false),
             read_timeout: Cell::new(None),
             write_timeout: Cell::new(None),
         })
@@ -171,6 +174,9 @@ impl UnixSocketFileDescription for UdpSocket {
         if let Err(e) = self.as_socket_ref().bind(&socket2::SockAddr::from(address)) {
             return interp_ok(Err(IoError::HostError(e)));
         }
+
+        // The socket has been explicitly bound to a local address.
+        self.is_bound.set(true);
 
         interp_ok(Ok(()))
     }
@@ -326,6 +332,37 @@ impl UnixSocketFileDescription for UdpSocket {
                 "getsockopt: level {level:#x} is unsupported, only SOL_SOCKET and IPPROTO_IP \
                 are allowed"
             )
+        }
+    }
+
+    fn getsockname<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<SocketAddr, IoError>> {
+        assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
+
+        if !self.is_bound.get() {
+            // Since Windows returns EINVAL when invoking `getsockname` on
+            // a socket which hasn't been bound yet, we need to manually
+            // return an unspecified address here.
+
+            let address = if self.family == socket2::Domain::IPV4 {
+                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, /* port */ 0))
+            } else {
+                SocketAddr::V6(SocketAddrV6::new(
+                    Ipv6Addr::UNSPECIFIED,
+                    /* port */ 0,
+                    /* flowinfo */ 0,
+                    /* scope_id */ 0,
+                ))
+            };
+            return interp_ok(Ok(address));
+        }
+
+        match self.socket.local_addr() {
+            Ok(address) => interp_ok(Ok(address)),
+            Err(e) => interp_ok(Err(IoError::HostError(e))),
         }
     }
 }
