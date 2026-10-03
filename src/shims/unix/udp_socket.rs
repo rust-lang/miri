@@ -265,4 +265,67 @@ impl UnixSocketFileDescription for UdpSocket {
            are allowed"
         );
     }
+
+    fn getsockopt<'tcx>(
+        self: FileDescriptionRef<Self>,
+        level: i32,
+        option: i32,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<MPlaceTy<'tcx>, IoError>> {
+        if level == ecx.eval_libc_i32("SOL_SOCKET") {
+            let opt_so_rcvtimeo = ecx.eval_libc_i32("SO_RCVTIMEO");
+            let opt_so_sndtimeo = ecx.eval_libc_i32("SO_SNDTIMEO");
+
+            if option == opt_so_rcvtimeo || option == opt_so_sndtimeo {
+                let timeout = if option == opt_so_rcvtimeo {
+                    self.read_timeout.get()
+                } else {
+                    self.write_timeout.get()
+                }
+                .unwrap_or_default();
+
+                let secs = timeout.as_secs();
+                let usecs = timeout.subsec_micros();
+
+                let timeval_layout = ecx.libc_ty_layout("timeval");
+                // Allocate new buffer on the stack with the `timeval` layout.
+                let timeval_buffer = ecx.allocate(timeval_layout, MemoryKind::Stack)?;
+
+                let sec_field = ecx.project_field_named(&timeval_buffer, "tv_sec")?;
+                ecx.write_int(secs, &sec_field)?;
+
+                let usec_field = ecx.project_field_named(&timeval_buffer, "tv_usec")?;
+                ecx.write_int(usecs, &usec_field)?;
+
+                interp_ok(Ok(timeval_buffer))
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option:#x} is unsupported for level SOL_SOCKET",
+                );
+            }
+        } else if level == ecx.eval_libc_i32("IPPROTO_IP") {
+            let opt_ip_ttl = ecx.eval_libc_i32("IP_TTL");
+
+            if option == opt_ip_ttl {
+                let ttl = match self.socket.ttl() {
+                    Ok(ttl) => ttl,
+                    Err(e) => return interp_ok(Err(IoError::HostError(e))),
+                };
+
+                // Allocate new buffer on the stack with the `u32` layout.
+                let value_buffer = ecx.allocate(ecx.machine.layouts.u32, MemoryKind::Stack)?;
+                ecx.write_int(ttl, &value_buffer)?;
+                interp_ok(Ok(value_buffer))
+            } else {
+                throw_unsup_format!(
+                    "getsockopt: option {option:#x} is unsupported for level IPPROTO_IP",
+                );
+            }
+        } else {
+            throw_unsup_format!(
+                "getsockopt: level {level:#x} is unsupported, only SOL_SOCKET and IPPROTO_IP \
+                are allowed"
+            )
+        }
+    }
 }
