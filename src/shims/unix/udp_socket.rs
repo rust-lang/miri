@@ -365,4 +365,15 @@ impl UnixSocketFileDescription for UdpSocket {
             Err(e) => interp_ok(Err(IoError::HostError(e))),
         }
     }
+
+    fn getpeername<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<SocketAddr, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
+
+        finish.call(ecx, self.socket.peer_addr().map_err(IoError::HostError))
+    }
 }
