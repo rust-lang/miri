@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::io;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use rustc_target::spec::Os;
 
@@ -18,6 +19,18 @@ pub(super) struct UdpSocket {
     socket: mio::net::UdpSocket,
     /// Whether this fd is non-blocking or not.
     is_non_block: Cell<bool>,
+    /// Read timeout of the socket. [`None`] means that reads can block indefinitely.
+    /// The timeout is applied to the monotonic clock (the Unix specification doesn't
+    /// specify which clock to use, but the monotonic clock is more common for
+    /// relative timeouts).
+    /// This is ignored when the socket is non-blocking.
+    read_timeout: Cell<Option<Duration>>,
+    /// Write timeout of the socket. [`None`] means that writes can block indefinitely.
+    /// The timeout is applied to the monotonic clock (the Unix specification doesn't
+    /// specify which clock to use, but the monotonic clock is more common
+    /// for relative timeouts).
+    /// This is ignored when the socket is non-blocking.
+    write_timeout: Cell<Option<Duration>>,
 }
 
 impl UdpSocket {
@@ -53,7 +66,13 @@ impl UdpSocket {
 
         // TODO: Add the underlying host socket to the blocking I/O manager.
 
-        Ok(UdpSocket { family, socket, is_non_block: Cell::new(is_non_block) })
+        Ok(UdpSocket {
+            family,
+            socket,
+            is_non_block: Cell::new(is_non_block),
+            read_timeout: Cell::new(None),
+            write_timeout: Cell::new(None),
+        })
     }
 
     /// View the underlying host socket as a [`socket2::SockRef`].
@@ -166,5 +185,84 @@ impl UnixSocketFileDescription for UdpSocket {
         assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
 
         finish.call(ecx, self.socket.connect(address).map_err(IoError::HostError))
+    }
+
+    fn setsockopt<'tcx>(
+        self: FileDescriptionRef<Self>,
+        level: i32,
+        option: i32,
+        value_ptr: Pointer,
+        value_len: u64,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        if level == ecx.eval_libc_i32("SOL_SOCKET") {
+            let opt_so_rcvtimeo = ecx.eval_libc_i32("SO_RCVTIMEO");
+            let opt_so_sndtimeo = ecx.eval_libc_i32("SO_SNDTIMEO");
+
+            if matches!(ecx.tcx.sess.target.os, Os::MacOs | Os::FreeBsd | Os::NetBsd) {
+                // SO_NOSIGPIPE only exists on MacOS, FreeBSD, and NetBSD.
+                let opt_so_nosigpipe = ecx.eval_libc_i32("SO_NOSIGPIPE");
+
+                if option == opt_so_nosigpipe {
+                    if value_len != 4 {
+                        // Option value should be C-int which is usually 4 bytes.
+                        return interp_ok(Err(LibcError("EINVAL")));
+                    }
+                    let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.i32);
+                    let _val = ecx.read_scalar(&option_value)?.to_i32()?;
+                    // We entirely ignore this value since we do not support signals anyway.
+
+                    return interp_ok(Ok(()));
+                }
+            }
+
+            if option == opt_so_rcvtimeo || option == opt_so_sndtimeo {
+                let timeval_layout = ecx.libc_ty_layout("timeval");
+                let option_value = ecx.ptr_to_mplace(value_ptr, timeval_layout);
+
+                let timeout = match ecx.read_timeval(&option_value)? {
+                    None => return interp_ok(Err(LibcError("EINVAL"))),
+                    Some(Duration::ZERO) => None,
+                    Some(duration) => Some(duration),
+                };
+
+                if option == opt_so_rcvtimeo {
+                    self.read_timeout.set(timeout);
+                } else {
+                    self.write_timeout.set(timeout);
+                }
+
+                return interp_ok(Ok(()));
+            } else {
+                throw_unsup_format!(
+                    "setsockopt: option {option:#x} is unsupported for level SOL_SOCKET",
+                );
+            }
+        } else if level == ecx.eval_libc_i32("IPPROTO_IP") {
+            let opt_ip_ttl = ecx.eval_libc_i32("IP_TTL");
+
+            if option == opt_ip_ttl {
+                if value_len != 4 {
+                    // Option value should be C-uint which is usually 4 bytes.
+                    return interp_ok(Err(LibcError("EINVAL")));
+                }
+                let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.u32);
+                let ttl = ecx.read_scalar(&option_value)?.to_u32()?;
+
+                return match self.socket.set_ttl(ttl) {
+                    Ok(_) => interp_ok(Ok(())),
+                    Err(e) => interp_ok(Err(IoError::HostError(e))),
+                };
+            } else {
+                throw_unsup_format!(
+                    "setsockopt: option {option:#x} is unsupported for level IPPROTO_IP",
+                );
+            }
+        }
+
+        throw_unsup_format!(
+            "setsockopt: level {level:#x} is unsupported, only SOL_SOCKET and IPPROTO_IP \
+           are allowed"
+        );
     }
 }
