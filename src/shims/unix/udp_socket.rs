@@ -1,5 +1,8 @@
 use std::cell::Cell;
 use std::io;
+use std::net::SocketAddr;
+
+use rustc_target::spec::Os;
 
 use crate::shims::files::{FileDescription, FileDescriptionRef};
 use crate::shims::unix::UnixFileDescription;
@@ -7,7 +10,6 @@ use crate::shims::unix::socket::UnixSocketFileDescription;
 use crate::*;
 
 #[derive(Debug)]
-#[expect(unused)]
 pub(super) struct UdpSocket {
     /// Family of the socket, used to ensure that the socket only binds/connects to addresses
     /// of the same family.
@@ -52,6 +54,15 @@ impl UdpSocket {
         // TODO: Add the underlying host socket to the blocking I/O manager.
 
         Ok(UdpSocket { family, socket, is_non_block: Cell::new(is_non_block) })
+    }
+
+    /// View the underlying host socket as a [`socket2::SockRef`].
+    ///
+    /// **Note**: Potentially blocking operations need to be performed on the
+    /// underlying [`mio::net::UdpSocket`] as it would break the mio poll on
+    /// Windows hosts when performed on the [`socket2::SockRef`].
+    fn as_socket_ref<'a>(&'a self) -> socket2::SockRef<'a> {
+        (&self.socket).into()
     }
 }
 
@@ -106,4 +117,42 @@ impl UnixFileDescription for UdpSocket {
     }
 }
 
-impl UnixSocketFileDescription for UdpSocket {}
+impl UnixSocketFileDescription for UdpSocket {
+    fn bind<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        address: SocketAddr,
+        ecx: &mut MiriInterpCx<'tcx>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
+
+        let address_family = match &address {
+            SocketAddr::V4(_) => socket2::Domain::IPV4,
+            SocketAddr::V6(_) => socket2::Domain::IPV6,
+        };
+
+        if self.family != address_family {
+            // Attempted to bind an address from a family that doesn't match
+            // the family of the socket.
+            let err = if matches!(ecx.tcx.sess.target.os, Os::Linux | Os::Android | Os::MacOs) {
+                // Linux man page states that `EINVAL` is used when there is an address family mismatch.
+                // See <https://man7.org/linux/man-pages/man2/bind.2.html>
+                // macOS also returns `EINVAL` but their man page does not specify this.
+                LibcError("EINVAL")
+            } else {
+                // POSIX man page states that `EAFNOSUPPORT` should be used when there is an address
+                // family mismatch.
+                // See <https://man7.org/linux/man-pages/man3/bind.3p.html>
+                LibcError("EAFNOSUPPORT")
+            };
+            return interp_ok(Err(err));
+        }
+
+        // `bind` is a non-blocking operation for UDP sockets.
+        if let Err(e) = self.as_socket_ref().bind(&socket2::SockAddr::from(address)) {
+            return interp_ok(Err(IoError::HostError(e)));
+        }
+
+        interp_ok(Ok(()))
+    }
+}
