@@ -10,6 +10,7 @@ const TEST_BYTES: &[u8] = b"these are some test bytes!";
 fn main() {
     test_create_ipv4();
     test_create_ipv6();
+    test_connect();
 }
 
 fn test_create_ipv4() {
@@ -18,4 +19,10 @@ fn test_create_ipv4() {
 
 fn test_create_ipv6() {
     let _socket_ipv6 = UdpSocket::bind("[::1]:0").unwrap();
+}
+
+/// Test setting the default destination address using `connect`.
+fn test_connect() {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket.connect("127.0.1.1:8080").unwrap()
 }
