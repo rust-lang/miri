@@ -967,6 +967,37 @@ unsafe fn test_avx512vbmi() {
         assert_eq_m128i(r, e);
     }
     test_mm_permutexvar_epi8();
+
+    // Byte `j` of the control selects 8 bits of the data lane from bit `control % 64` on,
+    // wrapping past bit 63 (60 and 63 wrap; 255 and 200 are 63 and 8 modulo 64).
+    const CONTROL: i64 = i64::from_le_bytes([0, 4, 8, 60, 63, 255, 200, 7]);
+    const D1: i64 = 0x0123_4567_89AB_CDEF_u64 as i64;
+    const D2: i64 = 0xFEDC_BA98_7654_3210_u64 as i64;
+    const E1: i64 = i64::from_le_bytes([0xEF, 0xDE, 0xCD, 0xF0, 0xDE, 0xDE, 0xCD, 0x9B]);
+    const E2: i64 = i64::from_le_bytes([0x10, 0x21, 0x32, 0x0F, 0x21, 0x21, 0x32, 0x64]);
+
+    #[target_feature(enable = "avx512vbmi")]
+    unsafe fn test_mm512_multishift_epi64_epi8() {
+        let data = _mm512_setr_epi64(D1, D2, D2, D1, D1, D1, D2, D2);
+        let r = _mm512_multishift_epi64_epi8(_mm512_set1_epi64(CONTROL), data);
+        assert_eq_m512i(r, _mm512_setr_epi64(E1, E2, E2, E1, E1, E1, E2, E2));
+    }
+    test_mm512_multishift_epi64_epi8();
+
+    #[target_feature(enable = "avx512vbmi,avx512vl")]
+    unsafe fn test_mm256_multishift_epi64_epi8() {
+        let data = _mm256_setr_epi64x(D1, D2, D2, D1);
+        let r = _mm256_multishift_epi64_epi8(_mm256_set1_epi64x(CONTROL), data);
+        assert_eq_m256i(r, _mm256_setr_epi64x(E1, E2, E2, E1));
+    }
+    test_mm256_multishift_epi64_epi8();
+
+    #[target_feature(enable = "avx512vbmi,avx512vl")]
+    unsafe fn test_mm_multishift_epi64_epi8() {
+        let r = _mm_multishift_epi64_epi8(_mm_set1_epi64x(CONTROL), _mm_set_epi64x(D2, D1));
+        assert_eq_m128i(r, _mm_set_epi64x(E2, E1));
+    }
+    test_mm_multishift_epi64_epi8();
 }
 
 #[track_caller]
