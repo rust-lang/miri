@@ -170,6 +170,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         try_resolve_did(*self.eval_context_ref().tcx, path, None).is_some()
     }
 
+    /// The type and layout of `core::num::Complex<{component_type}>`.
+    fn complex_ty_layout(&self, component_type: Ty<'tcx>) -> TyAndLayout<'tcx> {
+        let this = self.eval_context_ref();
+        let tcx = this.tcx;
+
+        let complex_def_id = tcx.lang_items().complex().unwrap();
+        let complex_def = tcx.adt_def(complex_def_id);
+
+        let args = tcx.mk_args(&[component_type.into()]);
+        let ty = Ty::new_adt(*tcx, complex_def, args);
+
+        this.layout_of(ty).unwrap()
+    }
+
     /// Evaluates the scalar at the specified path.
     fn eval_path(&self, path: &[&str]) -> MPlaceTy<'tcx> {
         let this = self.eval_context_ref();

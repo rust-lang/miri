@@ -1,5 +1,8 @@
-use rustc_abi::CanonAbi;
+use core::num::Complex;
+
+use rustc_abi::{CanonAbi, FieldIdx};
 use rustc_apfloat::Float;
+use rustc_apfloat::ieee::{DoubleS, HalfS, IeeeFloat, QuadS, Semantics, SingleS};
 use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
@@ -249,9 +252,280 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(res, dest)?;
             }
 
+            // Complex multiplication.
+            "__rust_mulhc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "Rust" fn(f16, f16, f16, f16) -> Complex<f16>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<HalfS>(this, complex_mul, args, dest)?;
+            }
+            "__mulsc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(f32, f32, f32, f32) -> Complex<f32>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<SingleS>(this, complex_mul, args, dest)?;
+            }
+            "__muldc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(f64, f64, f64, f64) -> Complex<f64>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<DoubleS>(this, complex_mul, args, dest)?;
+            }
+            "__rust_multc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "Rust" fn(f128, f128, f128, f128) -> Complex<f128>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<QuadS>(this, complex_mul, args, dest)?;
+            }
+
+            // Complex division.
+            "__rust_divhc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "Rust" fn(f16, f16, f16, f16) -> Complex<f16>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<HalfS>(this, complex_div, args, dest)?;
+            }
+            "__divsc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(f32, f32, f32, f32) -> Complex<f32>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<SingleS>(this, complex_div, args, dest)?;
+            }
+            "__divdc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(f64, f64, f64, f64) -> Complex<f64>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<DoubleS>(this, complex_div, args, dest)?;
+            }
+            "__rust_divtc3" => {
+                let args = this.check_shim_sig(
+                    shim_sig!(extern "Rust" fn(f128, f128, f128, f128) -> Complex<f128>),
+                    (link_name, abi, args),
+                )?;
+                complex_binop::<QuadS>(this, complex_div, args, dest)?;
+            }
+
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
 
         interp_ok(EmulateItemResult::NeedsReturn)
     }
+}
+
+type ComplexFloatBinop<S> =
+    fn(a: IeeeFloat<S>, b: IeeeFloat<S>, c: IeeeFloat<S>, d: IeeeFloat<S>) -> Complex<IeeeFloat<S>>;
+
+fn complex_binop<'tcx, S: Semantics>(
+    this: &mut MiriInterpCx<'tcx>,
+    op: ComplexFloatBinop<S>,
+    [lhs_re, lhs_im, rhs_re, rhs_im]: &[OpTy<'tcx>; 4],
+    dest: &MPlaceTy<'tcx>,
+) -> InterpResult<'tcx>
+where
+    IeeeFloat<S>: Into<Scalar>,
+{
+    let a: IeeeFloat<S> = this.read_scalar(lhs_re)?.to_float()?;
+    let b: IeeeFloat<S> = this.read_scalar(lhs_im)?.to_float()?;
+    let c: IeeeFloat<S> = this.read_scalar(rhs_re)?.to_float()?;
+    let d: IeeeFloat<S> = this.read_scalar(rhs_im)?.to_float()?;
+
+    let res = op(a, b, c, d);
+
+    this.write_scalar(res.re, &this.project_field(dest, FieldIdx::ZERO)?)?;
+    this.write_scalar(res.im, &this.project_field(dest, FieldIdx::ONE)?)?;
+    interp_ok(())
+}
+
+/// Returns the product of `a + ib` and `c + id`.
+///
+/// This implementation uses the standard formula:
+///
+/// a+bi * c+di = ((ac - bd) + (ad + bc)i)
+///
+/// But with recovery of infinities if the above expresion results in NaN + NaNi.
+///
+/// Consider inf+NaNi * 0.0+1.0i, for which we expect the result to be 0+infi:
+/// geometrically, a multiplication by i rotates the vector by 90 degrees.
+///
+/// But evaluating the standard formula computes inf*0.0 which results in a spurious
+/// NaN, so the naive answer is NaN+NaNi. The slow path catches cases like this and
+/// attempts to produce the correct answer.
+///
+/// This algorithm is defined in the C standard,
+/// see <https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#page=556>.
+fn complex_mul<S: Semantics>(
+    mut a: IeeeFloat<S>,
+    mut b: IeeeFloat<S>,
+    mut c: IeeeFloat<S>,
+    mut d: IeeeFloat<S>,
+) -> Complex<IeeeFloat<S>> {
+    let ac = (a * c).value;
+    let bd = (b * d).value;
+    let ad = (a * d).value;
+    let bc = (b * c).value;
+
+    let z = Complex::new((ac - bd).value, (ad + bc).value);
+
+    // The fast path: exit when at least one component is not NaN.
+    if !(z.re.is_nan() && z.im.is_nan()) {
+        return z;
+    }
+
+    let zero_if_nan =
+        |x: IeeeFloat<S>| if x.is_nan() { IeeeFloat::<S>::ZERO.copy_sign(x) } else { x };
+
+    let signed_unit_if_inf = |x: IeeeFloat<S>| {
+        let mag =
+            if x.is_infinite() { IeeeFloat::<S>::from_u128(1).value } else { IeeeFloat::<S>::ZERO };
+        mag.copy_sign(x)
+    };
+
+    // Recover infinities that computed as NaN + iNaN.
+
+    // Will be set to `true` if the double-NaN result is wrong and we have to do infinity recovery.
+    let mut recalc = false;
+
+    if a.is_infinite() || b.is_infinite() {
+        // Replace infinities with a signed unit value, and NaN with zero.
+        // This avoids invalid infinity arithmetic.
+        a = signed_unit_if_inf(a);
+        b = signed_unit_if_inf(b);
+        c = zero_if_nan(c);
+        d = zero_if_nan(d);
+        recalc = true;
+    }
+
+    if c.is_infinite() || d.is_infinite() {
+        // Replace infinities with a signed unit value, and NaN with zero.
+        // This avoids invalid infinity arithmetic.
+        a = zero_if_nan(a);
+        b = zero_if_nan(b);
+        c = signed_unit_if_inf(c);
+        d = signed_unit_if_inf(d);
+        recalc = true;
+    }
+
+    if !recalc && (ac.is_infinite() || bd.is_infinite() || ad.is_infinite() || bc.is_infinite()) {
+        // Recover infinities from overflow by changing NaNs to zero.
+        a = zero_if_nan(a);
+        b = zero_if_nan(b);
+        c = zero_if_nan(c);
+        d = zero_if_nan(d);
+        recalc = true;
+    }
+
+    if !recalc {
+        return z;
+    }
+
+    let mut z = naive_complex_mul(a, b, c, d);
+    z.re = (z.re * IeeeFloat::<S>::INFINITY).value;
+    z.im = (z.im * IeeeFloat::<S>::INFINITY).value;
+
+    z
+}
+
+/// Textbook complex multiplication, with no correction for NaN.
+///
+/// (a+bi) * (c+di) = (ac-bd) + (ad+bc)i
+fn naive_complex_mul<S: Semantics>(
+    a: IeeeFloat<S>,
+    b: IeeeFloat<S>,
+    c: IeeeFloat<S>,
+    d: IeeeFloat<S>,
+) -> Complex<IeeeFloat<S>> {
+    let ac = (a * c).value;
+    let bd = (b * d).value;
+    let ad = (a * d).value;
+    let bc = (b * c).value;
+
+    Complex::new((ac - bd).value, (ad + bc).value)
+}
+
+/// Returns the quotient of `(a + ib)` and `(c + id)`.
+///
+/// This implementation uses the standard formula:
+///
+/// a+bi / c+di = ((ac + bd) / (c*c + d*d)) + ((bc - ad) / (c*c + d*d))i
+///
+/// But with recovery of infinities and zeros if the above expresion results in NaN + NaNi.
+/// Consider inf+NaNi / 0.0+1.0i, for which we expect the result to be 0-infi:
+/// geometrically, a division by i rotates the vector by -90 degrees.
+///
+/// But evaluating the standard formula computes inf*0.0 which results in a spurious
+/// NaN, so the naive answer is NaN+NaNi. The slow path catches cases like this and
+/// attempts to produce the correct answer.
+///
+/// This algorithm is defined in the C standard,
+/// see <https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#page=556>.
+fn complex_div<S: Semantics>(
+    mut a: IeeeFloat<S>,
+    mut b: IeeeFloat<S>,
+    mut c: IeeeFloat<S>,
+    mut d: IeeeFloat<S>,
+) -> Complex<IeeeFloat<S>> {
+    // The denominator (c*c + d*d) is prone to overflow, even if the inputs and (exact) output are
+    // perfectly representable in the given IeeeFloat.
+
+    let max = IeeeFloat::<S>::max(c.abs(), d.abs());
+    let mut neg_ilogbw = 0;
+
+    // Scale c and d so that their base-2 exponent is zero.
+    if max.is_finite() && max != IeeeFloat::<S>::ZERO {
+        neg_ilogbw = max.ilogb().checked_neg().unwrap();
+        c = c.scalbn(neg_ilogbw);
+        d = d.scalbn(neg_ilogbw);
+    }
+
+    let cc = (c * c).value;
+    let dd = (d * d).value;
+    let denom = (cc + dd).value;
+
+    let mut z = naive_complex_mul(a, b, c, -d);
+
+    // Divide by the scaled-down denominator and then undo the scaling.
+    z.re = (z.re / denom).value.scalbn(neg_ilogbw);
+    z.im = (z.im / denom).value.scalbn(neg_ilogbw);
+
+    // The fast path: exit when at least one component is not NaN.
+    if !(z.re.is_nan() && z.im.is_nan()) {
+        return z;
+    }
+
+    // Recover infinities and zeros that computed as NaN+iNaN.
+    // The only cases are nonzero/zero, infinite/finite, and finite/infinite.
+
+    let signed_unit_if_inf = |x: IeeeFloat<S>| {
+        let mag =
+            if x.is_infinite() { IeeeFloat::<S>::from_u128(1).value } else { IeeeFloat::<S>::ZERO };
+        mag.copy_sign(x)
+    };
+
+    if denom == IeeeFloat::<S>::ZERO && (!a.is_nan() || !b.is_nan()) {
+        z.re = (IeeeFloat::<S>::INFINITY.copy_sign(c) * a).value;
+        z.im = (IeeeFloat::<S>::INFINITY.copy_sign(c) * b).value;
+    } else if (a.is_infinite() || b.is_infinite()) && c.is_finite() && d.is_finite() {
+        a = signed_unit_if_inf(a);
+        b = signed_unit_if_inf(b);
+
+        z = naive_complex_mul(a, b, c, -d);
+        z.re = (IeeeFloat::<S>::INFINITY * z.re).value;
+        z.im = (IeeeFloat::<S>::INFINITY * z.im).value;
+    } else if max.is_infinite() && a.is_finite() && b.is_finite() {
+        c = signed_unit_if_inf(c);
+        d = signed_unit_if_inf(d);
+
+        z = naive_complex_mul(a, b, c, -d);
+        z.re = (IeeeFloat::<S>::ZERO * z.re).value;
+        z.im = (IeeeFloat::<S>::ZERO * z.im).value;
+    }
+
+    z
 }
