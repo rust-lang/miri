@@ -718,3 +718,39 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(result.map_err(IoError::HostError))
     }
 }
+
+/// Open something for which we don't know whether it is a file or a directory.
+pub fn open_file_or_dir(path: &std::path::Path, opts: &fs::OpenOptions) -> io::Result<fs::File> {
+    // On Unix, `open` works for files and directories.
+    // On Windows, that needs FILE_FLAG_BACKUP_SEMANTICS, but we don't want to set that by default.
+    // #[expect(clippy::needless_match)] // it does not see the cfg
+    match opts.open(path) {
+        Ok(file) => Ok(file),
+
+        #[cfg(windows)]
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            // This can happen when the file is actually a directory.
+            // So retry with FILE_FLAG_BACKUP_SEMANTICS.
+            use std::os::windows::fs::OpenOptionsExt;
+
+            let mut opts = opts.clone();
+            opts.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS);
+            opts.open(path)
+        }
+
+        Err(err) => Err(err),
+    }
+}
+
+pub fn file_to_dir(file: fs::File) -> fs::Dir {
+    cfg_select! {
+        unix => {
+            use std::os::fd::OwnedFd;
+            OwnedFd::from(file).into()
+        }
+        windows => {
+            use std::os::windows::io::OwnedHandle;
+            OwnedHandle::from(file).into()
+        }
+    }
+}
