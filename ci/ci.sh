@@ -30,7 +30,7 @@ endgroup
 begingroup "Building Miri"
 
 # Global configuration
-export RUSTFLAGS="-D warnings"
+export CARGO_BUILD_WARNINGS=deny
 export CARGO_INCREMENTAL=0
 export CARGO_EXTRA_FLAGS="--locked"
 export CARGO_UNSTABLE_BUILD_DIR_NEW_LAYOUT=true
