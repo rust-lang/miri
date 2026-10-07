@@ -428,6 +428,30 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.fchmod(fd, mode)?;
                 this.write_scalar(result, dest)?;
             }
+            "chown" => {
+                let [path, uid, gid] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*_, libc::uid_t, libc::gid_t) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = this.chown(path, uid, gid, true)?;
+                this.write_scalar(result, dest)?;
+            }
+            "lchown" => {
+                let [path, uid, gid] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*_, libc::uid_t, libc::gid_t) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = this.chown(path, uid, gid, false)?;
+                this.write_scalar(result, dest)?;
+            }
+            "fchown" => {
+                let [fd, uid, gid] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, libc::uid_t, libc::gid_t) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = this.fchown(fd, uid, gid)?;
+                this.write_scalar(result, dest)?;
+            }
             "rename" => {
                 // FIXME: This does not have a direct test (#3179).
                 let [oldpath, newpath] = this.check_shim_sig(

@@ -415,6 +415,47 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
     }
+
+    /// Changes the owner and group of the host file at `path`. As in the libc functions,
+    /// an id of `u32::MAX` (i.e., `-1`) means that this id is left unchanged.
+    fn host_chown(
+        &self,
+        path: &Path,
+        uid: u32,
+        gid: u32,
+        follow: bool,
+    ) -> InterpResult<'tcx, io::Result<()>> {
+        cfg_select! {
+            unix => {
+                let uid = (uid != u32::MAX).then_some(uid);
+                let gid = (gid != u32::MAX).then_some(gid);
+                interp_ok(if follow {
+                    std::os::unix::fs::chown(path, uid, gid)
+                } else {
+                    std::os::unix::fs::lchown(path, uid, gid)
+                })
+            }
+            _ => {
+                let _ = (path, uid, gid, follow);
+                throw_unsup_format!("changing file ownership is only supported on Unix hosts")
+            }
+        }
+    }
+
+    /// Like `host_chown`, but for an open host file.
+    fn host_fchown(&self, file: &File, uid: u32, gid: u32) -> InterpResult<'tcx, io::Result<()>> {
+        cfg_select! {
+            unix => {
+                let uid = (uid != u32::MAX).then_some(uid);
+                let gid = (gid != u32::MAX).then_some(gid);
+                interp_ok(std::os::unix::fs::fchown(file, uid, gid))
+            }
+            _ => {
+                let _ = (file, uid, gid);
+                throw_unsup_format!("changing file ownership is only supported on Unix hosts")
+            }
+        }
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -1105,6 +1146,71 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
         if let Err(err) = file.file.set_permissions(permissions) {
+            return this.set_errno_and_return_neg1_i32(err);
+        }
+
+        interp_ok(Scalar::from_i32(0))
+    }
+
+    /// Implements both `chown` (`follow == true`) and `lchown` (`follow == false`).
+    fn chown(
+        &mut self,
+        path_op: &OpTy<'tcx>,
+        uid_op: &OpTy<'tcx>,
+        gid_op: &OpTy<'tcx>,
+        follow: bool,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+        let name = if follow { "`chown`" } else { "`lchown`" };
+
+        let path_ptr = this.read_pointer(path_op)?;
+        let uid = this.read_scalar(uid_op)?.to_u32()?;
+        let gid = this.read_scalar(gid_op)?.to_u32()?;
+
+        if this.ptr_is_null(path_ptr)? {
+            return this.set_errno_and_return_neg1_i32(LibcError("EFAULT"));
+        }
+        let path = this.read_path_from_c_str(path_ptr)?;
+
+        // Reject if isolation is enabled.
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation(name, reject_with)?;
+            return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+        }
+
+        if let Err(err) = this.host_chown(&path, uid, gid, follow)? {
+            return this.set_errno_and_return_neg1_i32(err);
+        }
+
+        interp_ok(Scalar::from_i32(0))
+    }
+
+    fn fchown(
+        &mut self,
+        fd_op: &OpTy<'tcx>,
+        uid_op: &OpTy<'tcx>,
+        gid_op: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let fd_num = this.read_scalar(fd_op)?.to_i32()?;
+        let uid = this.read_scalar(uid_op)?.to_u32()?;
+        let gid = this.read_scalar(gid_op)?.to_u32()?;
+
+        let Some(fd) = this.machine.fds.get(fd_num) else {
+            return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+        };
+        let Some(file) = fd.downcast::<FileHandle>() else {
+            throw_unsup_format!("`fchown` is only supported on regular files")
+        };
+        if !file.writable && !file.readable {
+            // Like `fchmod`, this does not work on a path-only file.
+            return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+        }
+        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
+
+        let result = this.host_fchown(&file.file, uid, gid)?;
+        if let Err(err) = result {
             return this.set_errno_and_return_neg1_i32(err);
         }
 
