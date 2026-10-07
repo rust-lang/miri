@@ -703,4 +703,7 @@ fn test_directory_handle() {
 
     fs::create_dir(dirname.join("subdir")).unwrap();
     let _subdir = dir.open_dir("subdir").unwrap();
+
+    dir.open_dir(".").unwrap();
+    dir.metadata(".").unwrap();
 }
