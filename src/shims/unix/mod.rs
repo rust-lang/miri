@@ -33,5 +33,4 @@ pub use self::thread::{EvalContextExt as _, ThreadNameResult};
 pub use self::virtual_socket::EvalContextExt as _;
 
 // Make up some constants.
-const UID: u32 = 1000;
 const HOSTNAME: &[u8] = b"Miri";
