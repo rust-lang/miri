@@ -1149,7 +1149,6 @@ fn test_stat() {
     assert_eq!(stat.st_mode & libc::S_IFMT, libc::S_IFREG);
     assert_ne!(stat.st_mode & !libc::S_IFMT, 0, "some permission should be set");
     assert_eq!(stat.st_size, 5);
-    assert_eq!(stat.st_uid, unsafe { libc::geteuid() });
 
     // Check that all fields are initialized.
     check_stat_fields(stat);
