@@ -78,6 +78,14 @@ fn test_geteuid() {
     let _val = unsafe { libc::geteuid() };
 }
 
+fn test_getgid() {
+    let _val = unsafe { libc::getgid() };
+}
+
+fn test_getegid() {
+    let _val = unsafe { libc::getegid() };
+}
+
 fn test_pthread_atfork() {
     extern "C" fn prepare() {}
     extern "C" fn parent() {}
@@ -121,6 +129,8 @@ fn main() {
     test_dlsym();
     test_getuid();
     test_geteuid();
+    test_getgid();
+    test_getegid();
     test_pthread_atfork();
 
     #[cfg(target_os = "macos")]
