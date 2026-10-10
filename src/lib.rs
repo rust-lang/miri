@@ -163,7 +163,9 @@ pub use crate::machine::{
     ValidationMode,
 };
 pub use crate::operator::EvalContextExt as _;
-pub use crate::provenance_gc::{EvalContextExt as _, LiveAllocs, VisitProvenance, VisitWith};
+pub use crate::provenance_gc::{
+    EvalContextExt as _, LiveAllocs, ProvenanceGcState, VisitProvenance, VisitWith,
+};
 pub use crate::shims::EmulateItemResult;
 pub use crate::shims::cpu_affinity::MAX_CPUS;
 pub use crate::shims::env::{EnvVars, EvalContextExt as _};
