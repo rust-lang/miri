@@ -128,6 +128,17 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 permute2(this, left, indices, right, dest)?;
             }
+            // Used to implement the _mm{,256,512}_multishift_epi64_epi8 functions.
+            "pmultishift.qb.128" | "pmultishift.qb.256" | "pmultishift.qb.512" => {
+                this.expect_target_feature_for_intrinsic(link_name, "avx512vbmi")?;
+                if !unprefixed_name.ends_with(".512") {
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                }
+
+                let [control, data] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
+
+                pmultishiftqb(this, control, data, dest)?;
+            }
             // Used to implement the _mm512_shuffle_epi8 intrinsic.
             "pshuf.b.512" => {
                 let [left, right] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
@@ -228,6 +239,59 @@ fn vpdpbusd<'tcx>(
         // Use `wrapping_add` because `src` is an arbitrary i32 and the addition can overflow.
         let res = Scalar::from_i32(intermediate_sum.wrapping_add(src));
         ecx.write_scalar(res, &dest)?;
+    }
+
+    interp_ok(())
+}
+
+/// Each result byte is 8 bits read from the corresponding 64-bit lane of `data`, starting at a
+/// bit offset given by the byte of `control` at the same position.
+///
+/// Only the low 6 bits of a control byte are used, so the offset is `control[j] % 64`, and the
+/// result byte is bits `offset..offset + 8` of the data lane. For offsets above 56 the field runs
+/// past bit 63 and continues at bit 0 of the same lane. Both cases are the lane rotated right by
+/// the offset, truncated to its low byte.
+///
+/// For example, with the data lane `0x0123_4567_89AB_CDEF`:
+/// - offset 0 gives `0xEF`, bits 0..8;
+/// - offset 4 gives `0xDE`, bits 4..12;
+/// - offset 60 gives `0xF0`: bits 60..64 (`0x0`) become the low half, bits 0..4 (`0xF`) the high.
+///
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_multishift_epi64_epi8>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_multishift_epi64_epi8>
+/// <https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_multishift_epi64_epi8>
+fn pmultishiftqb<'tcx>(
+    ecx: &mut crate::MiriInterpCx<'tcx>,
+    control: &OpTy<'tcx>,
+    data: &OpTy<'tcx>,
+    dest: &MPlaceTy<'tcx>,
+) -> InterpResult<'tcx, ()> {
+    let (control, control_len) = ecx.project_to_simd(control)?;
+    let (data, data_len) = ecx.project_to_simd(data)?;
+    let (dest, dest_len) = ecx.project_to_simd(dest)?;
+
+    // fn vpmultishiftqb(a: i8x64, b: i8x64) -> i8x64;
+    // fn vpmultishiftqb256(a: i8x32, b: i8x32) -> i8x32;
+    // fn vpmultishiftqb128(a: i8x16, b: i8x16) -> i8x16;
+    //
+    // `a` is the control, `b` the data.
+    assert_eq!(control_len, dest_len);
+    assert_eq!(data_len, dest_len);
+    assert_eq!(dest_len % 8, 0);
+
+    for lane in (0..dest_len).step_by(8) {
+        let mut bytes = [0u8; 8];
+        for (j, byte) in (0u64..).zip(&mut bytes) {
+            *byte = ecx.read_scalar(&ecx.project_index(&data, lane.strict_add(j))?)?.to_u8()?;
+        }
+        let lane_bits = u64::from_le_bytes(bytes);
+
+        for j in 0..8 {
+            let idx = lane.strict_add(j);
+            let shift = ecx.read_scalar(&ecx.project_index(&control, idx)?)?.to_u8()? % 64;
+            let res = lane_bits.rotate_right(u32::from(shift)).to_le_bytes()[0];
+            ecx.write_scalar(Scalar::from_u8(res), &ecx.project_index(&dest, idx)?)?;
+        }
     }
 
     interp_ok(())
