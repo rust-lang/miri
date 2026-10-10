@@ -1300,13 +1300,37 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.handle_miri_start_unwind(payload)?;
                 return interp_ok(EmulateItemResult::NeedsUnwind);
             }
-            "getuid" | "geteuid" => {
+            "getuid" => {
                 let [] = this.check_shim_sig(
                     shim_sig!(extern "C" fn() -> libc::uid_t),
                     (link_name, abi, args),
                 )?;
-                // For now, just pretend we always have this fixed UID.
-                this.write_int(UID, dest)?;
+                let result = this.getuid()?;
+                this.write_scalar(result, dest)?;
+            }
+            "geteuid" => {
+                let [] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn() -> libc::uid_t),
+                    (link_name, abi, args),
+                )?;
+                let result = this.geteuid()?;
+                this.write_scalar(result, dest)?;
+            }
+            "getgid" => {
+                let [] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn() -> libc::gid_t),
+                    (link_name, abi, args),
+                )?;
+                let result = this.getgid()?;
+                this.write_scalar(result, dest)?;
+            }
+            "getegid" => {
+                let [] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn() -> libc::gid_t),
+                    (link_name, abi, args),
+                )?;
+                let result = this.getegid()?;
+                this.write_scalar(result, dest)?;
             }
 
             // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
@@ -1380,7 +1404,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.deref_pointer_as(result, this.machine.layouts.unit_ptr_mut)?;
 
                 // Must be for "us".
-                if uid != UID {
+                if uid != this.get_uid(/* effective */ false) {
                     throw_unsup_format!("`getpwuid_r` on other users is not supported");
                 }
 

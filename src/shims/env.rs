@@ -109,6 +109,44 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         if this.machine.communicate() { std::process::id() } else { 1000 }
     }
 
+    /// Get the real or effective user ID of the process.
+    fn get_uid(&self, effective: bool) -> u32 {
+        let this = self.eval_context_ref();
+        if !this.machine.communicate() {
+            return 1000;
+        }
+
+        cfg_select! {
+            unix => {
+                // SAFETY: these functions are always safe to call.
+                unsafe { if effective { libc::geteuid() } else { libc::getuid() } }
+            }
+            _ => {
+                let _ = effective;
+                1000
+            }
+        }
+    }
+
+    /// Get the real or effective group ID of the process.
+    fn get_gid(&self, effective: bool) -> u32 {
+        let this = self.eval_context_ref();
+        if !this.machine.communicate() {
+            return 1000;
+        }
+
+        cfg_select! {
+            unix => {
+                // SAFETY: these functions are always safe to call.
+                unsafe { if effective { libc::getegid() } else { libc::getgid() } }
+            }
+            _ => {
+                let _ = effective;
+                1000
+            }
+        }
+    }
+
     /// Get an "OS" thread ID for any thread.
     fn get_tid(&self, thread: ThreadId) -> u32 {
         let this = self.eval_context_ref();
