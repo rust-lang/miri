@@ -178,6 +178,52 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
                 packusdw(this, a, b, dest)?;
             }
+            "vpmadd52l.uq.512" | "vpmadd52h.uq.512" | "vpmadd52l.uq.256" | "vpmadd52h.uq.256"
+            | "vpmadd52l.uq.128" | "vpmadd52h.uq.128" => {
+                let is_512 = matches!(unprefixed_name, "vpmadd52l.uq.512" | "vpmadd52h.uq.512");
+                // AVX-IFMA permits narrow vectors without AVX-512.
+                if is_512 || !this.target_feature_enabled("avxifma") {
+                    this.expect_target_feature_for_intrinsic(link_name, "avx512ifma")?;
+                    if !is_512 {
+                        this.expect_target_feature_for_intrinsic(link_name, "avx512vl")?;
+                    }
+                }
+
+                let [a, b, c] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
+
+                assert_eq!(dest.layout, a.layout);
+                assert_eq!(dest.layout, b.layout);
+                assert_eq!(dest.layout, c.layout);
+
+                let (a, _a_len) = this.project_to_simd(a)?;
+                let (b, _b_len) = this.project_to_simd(b)?;
+                let (c, _c_len) = this.project_to_simd(c)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+
+                const MASK52: u64 = (1 << 52) - 1;
+                let high = unprefixed_name.starts_with("vpmadd52h");
+
+                for i in 0..dest_len {
+                    let a_lane = this.project_index(&a, i)?;
+                    let b_lane = this.project_index(&b, i)?;
+                    let c_lane = this.project_index(&c, i)?;
+                    let d_lane = this.project_index(&dest, i)?;
+
+                    let va = this.read_scalar(&a_lane)?.to_u64()?;
+                    let vb = this.read_scalar(&b_lane)?.to_u64()?;
+                    let vc = this.read_scalar(&c_lane)?.to_u64()?;
+
+                    // The upper 12 bits of each multiplicand do not affect the product.
+                    let product = u128::from(vb & MASK52).strict_mul(u128::from(vc & MASK52));
+                    let half = if high { product >> 52 } else { product & u128::from(MASK52) };
+                    // Each product half fits in 52 bits.
+                    let half = u64::try_from(half).unwrap();
+
+                    // Each accumulator retains all 64 bits and wraps independently.
+                    let r = va.wrapping_add(half);
+                    this.write_scalar(Scalar::from_u64(r), &d_lane)?;
+                }
+            }
             _ => return interp_ok(EmulateItemResult::NotSupported),
         }
         interp_ok(EmulateItemResult::NeedsReturn)
