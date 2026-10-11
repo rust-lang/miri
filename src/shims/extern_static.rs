@@ -60,7 +60,10 @@ impl<'tcx> MiriMachine<'tcx> {
 
         match &ecx.tcx.sess.target.os {
             Os::Linux => {
-                Self::weak_fn_symbols(ecx, &["getrandom", "gettid", "statx", "strlen"])?;
+                Self::weak_fn_symbols(
+                    ecx,
+                    &["copy_file_range", "getrandom", "gettid", "statx", "strlen"],
+                )?;
             }
             Os::Android => {
                 Self::weak_fn_symbols(
