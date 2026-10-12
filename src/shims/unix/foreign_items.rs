@@ -371,6 +371,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = this.unlink(path)?;
                 this.write_scalar(result, dest)?;
             }
+            "unlinkat" => {
+                let [dirfd, path, flags] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *_, i32) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = this.unlinkat(dirfd, path, flags)?;
+                this.write_scalar(result, dest)?;
+            }
             "symlink" => {
                 // FIXME: This does not have a direct test (#3179).
                 let [target, linkpath] = &this.check_shim_sig(
