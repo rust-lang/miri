@@ -66,7 +66,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(result, dest)?;
             }
             "fstatat$INODE64" => {
-                let [dirfd, path, buf, flags] = this.check_shim_sig(
+                let [dirfd, path, buf, flags] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *_, *_, i32) -> i32),
                     (link_name, abi, args),
                 )?;
