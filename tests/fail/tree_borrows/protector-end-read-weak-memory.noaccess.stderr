@@ -1,0 +1,49 @@
+error: Undefined Behavior: read access through <TAG> (root of the allocation) at ALLOC[0x0] is forbidden
+  --> tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+   |
+LL |     let xv = unsafe { *x };
+   |                       ^^ Undefined Behavior occurred here
+   |
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
+   = help: the accessed tag <TAG> (root of the allocation) is foreign to the protected tag <TAG> (i.e., it is not a child)
+   = help: this foreign read access would cause the protected tag <TAG> (currently Unique) to become Disabled
+   = help: protected tags must never be Disabled
+   = help: The protector has already ended (in thread `unnamed-ID`), but this end has not yet happened-before the conflicting access; so this is also a data race!
+help: the accessed tag <TAG> was created here
+  --> tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+   |
+LL |     let xptr = SendPtr(&raw mut x);
+   |                        ^^^^^^^^^^
+help: the protected tag <TAG> was created here, in the initial state Reserved
+  --> tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+   |
+LL | fn thread1_inner(x: &mut u8, comm: &Arc<AtomicI32>) {
+   |                  ^
+help: the protected tag <TAG> later transitioned to Unique due to a child write access at offsets [0x0..0x1]
+  --> tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+   |
+LL |     *x = 42;
+   |     ^^^^^^^
+   = help: this transition corresponds to the first write to a 2-phase borrowed mutable reference
+help: the protector on <TAG> ended (in thread `unnamed-ID`) when this function returned:
+  --> tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+   |
+LL | }
+   |  ^
+   = note: this is on thread `unnamed-ID`
+   = note: stack backtrace:
+           0: thread2
+               at tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+           1: main::{closure#0}
+               at tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+note: the last function in that backtrace got called indirectly due to this code
+  --> tests/fail/tree_borrows/protector-end-read-weak-memory.rs:LL:CC
+   |
+LL |     let t2 = thread::spawn(move || thread2(xptr2, commr2));
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+
