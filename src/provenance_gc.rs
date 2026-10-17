@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -226,6 +227,76 @@ impl VisitProvenance for crate::MiriInterpCx<'_> {
     }
 }
 
+/// What activates the provenance garbage collector. Decided once at startup.
+#[derive(Clone, Copy, Debug)]
+enum GcInterval {
+    /// The GC never runs.
+    Disabled,
+    /// Run the GC every N basic blocks.
+    Blocks(u32),
+    /// Run the GC every N (node x location state) visits during accesses (Tree Borrows only).
+    Visits(u32),
+}
+
+/// Pacing and tuning of the provenance garbage collector.
+pub struct ProvenanceGcState {
+    // The interval metric
+    interval: GcInterval,
+    /// Progress since the last GC pass, in the unit chosen by `interval`.
+    since_gc: Cell<u32>,
+    /// Don't bother pruning the borrow tracker state of an allocation this small,
+    /// measured in nodes (Tree Borrows).
+    min_size: usize,
+}
+
+impl ProvenanceGcState {
+    pub fn new(config: &MiriConfig) -> Self {
+        // When enabled, Tree Borrows' GC is paced by visits.
+        // Stacked Borrows keeps counting basic blocks.
+        let reports_visits =
+            matches!(config.borrow_tracker, Some(BorrowTrackerMethod::TreeBorrows(_)));
+        let interval = if config.gc_interval == 0 {
+            GcInterval::Disabled
+        } else if config.gc_visit_interval > 0 && reports_visits {
+            GcInterval::Visits(config.gc_visit_interval)
+        } else {
+            GcInterval::Blocks(config.gc_interval)
+        };
+        ProvenanceGcState { interval, since_gc: Cell::new(0), min_size: config.gc_min_size }
+    }
+
+    /// Called by Tree Borrows after each access to record global visit count.
+    pub fn record_visits(&self, visits: u32) {
+        if let GcInterval::Visits(_) = self.interval {
+            self.since_gc.set(self.since_gc.get().saturating_add(visits));
+        }
+    }
+
+    pub fn min_size(&self) -> usize {
+        self.min_size
+    }
+
+    /// Account for one more basic block having been executed.
+    pub fn inc_block(&self) {
+        if let GcInterval::Blocks(_) = self.interval {
+            self.since_gc.set(self.since_gc.get().saturating_add(1));
+        }
+    }
+
+    /// Check if enough has happened since the last pass to warrant another one.
+    pub fn gc_cond(&self) -> bool {
+        match self.interval {
+            GcInterval::Disabled => false,
+            GcInterval::Blocks(n) | GcInterval::Visits(n) => self.since_gc.get() >= n,
+        }
+    }
+
+    /// Start a new interval after a pass has run.
+    pub fn reset(&self) {
+        self.since_gc.set(0);
+    }
+}
+
 pub struct LiveAllocs<'a, 'tcx> {
     collected: FxHashSet<AllocId>,
     ecx: &'a MiriInterpCx<'tcx>,
@@ -240,9 +311,15 @@ impl LiveAllocs<'_, '_> {
 fn remove_unreachable_tags<'tcx>(ecx: &mut MiriInterpCx<'tcx>, tags: FxHashSet<BorTag>) {
     // Avoid iterating all allocations if there's no borrow tracker anyway.
     if ecx.machine.borrow_tracker.is_some() {
+        let min_size = ecx.machine.provenance_gc.min_size();
         ecx.memory.alloc_map().iter(|it| {
             for (_id, (_kind, alloc)) in it {
-                alloc.extra.borrow_tracker.as_ref().unwrap().remove_unreachable_tags(&tags);
+                alloc
+                    .extra
+                    .borrow_tracker
+                    .as_ref()
+                    .unwrap()
+                    .remove_unreachable_tags(&tags, min_size);
             }
         });
     }
