@@ -3,307 +3,252 @@
 //@compile-flags: -C target-feature=+aes,+vaes,+avx512f
 //@run-native
 
-use core::mem::transmute;
 #[cfg(target_arch = "x86")]
-use std::arch::x86::*;
+use core::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 fn main() {
-    assert!(is_x86_feature_detected!("aes"));
+    // Bail out dynamically if target feature is not supported
+    if is_x86_feature_detected!("aes") {
+        unsafe {
+            test_aesimc();
+            test_aeskeygenassist();
 
-    unsafe {
-        test_aes();
-    }
+            test_aesenc();
+            test_aesenclast();
+            test_aesdec();
+            test_aesdeclast();
+        }
 
-    // The tests below require vaes, which is recent enough that contributors may be using CPUs that
-    // do not support it. But we still want to run this natively if the machine happens to have vaes.
-    // So we bail out dynamically.
-    if !is_x86_feature_detected!("vaes") {
-        println!("warning: skipping vaes tests");
-        return;
-    }
+        if is_x86_feature_detected!("vaes") {
+            unsafe {
+                test_aesenc256();
+                test_aesenclast256();
+                test_aesdec256();
+                test_aesdeclast256();
+            }
 
-    unsafe {
-        test_vaes();
+            if is_x86_feature_detected!("avx512f") {
+                unsafe {
+                    test_aesenc512();
+                    test_aesenclast512();
+                    test_aesdec512();
+                    test_aesdeclast512();
+                }
+            } else {
+                println!("warning: skipping VAES+AVX-512 tests");
+            }
+        } else {
+            println!("warning: skipping VAES tests");
+        }
+    } else {
+        println!("warning: skipping AES tests");
     }
 }
 
-// The constants in the tests below are just bit patterns. They should not
-// be interpreted as integers; signedness does not make sense for them, but
-// __m128i happens to be defined in terms of signed integers.
-#[allow(overflowing_literals)]
+/// Number of 128 bit values in test vectors.
+const N: usize = 4;
+
+// Initial value of `k` used in tests
+const K: [u128; N] = [
+    0x000102030405060708090A0B0C0D0E0F,
+    0x101112131415161718191A1B1C1D1E1F,
+    0x202122232425262728292A2B2C2D2E2F,
+    0x303132333435363738393A3B3C3D3E3F,
+];
+// Initial value of `b` used in tests
+const B: [u128; N] = [
+    0x404142434445464748494A4B4C4D4E4F,
+    0x505152535455565758595A5B5C5D5E5F,
+    0x606162636465666768696A6B6C6D6E6F,
+    0x707172737475767778797A7B7C7D7E7F,
+];
+
+// Expected values after applying `aesimc` to `K`
+const EXPECTED_AESIMC: [u128; N] = [
+    0x0E0B0C090A0F080D0603040102070005,
+    0x1E1B1C191A1F181D1613141112171015,
+    0x2E2B2C292A2F282D2623242122272025,
+    0x3E3B3C393A3F383D3633343132373035,
+];
+// Expected values after applying `aeskeygenassist` to `K` with `rcon` equal to 0x36
+const EXPECTED_AESKEYGENASSIST: [u128; N] = [
+    0x7B637C41637C777B2B3001513001672B,
+    0x7DCA82FFCA82C97DAFADD494ADD4A2AF,
+    0x26B7FDA5B7FD9326F134A5D334A5E5F1,
+    0xC304C71504C723C3E20712B6071280E2,
+];
+// Expected values after applying `aesenc` to `B` and `K`
+const EXPECTED_AESENC: [u128; N] = [
+    0x0C6F106694A292994D86BA323198861A,
+    0xEF4929D16168F387A7F6783AB27AFAEC,
+    0xD669AFCEACBDEDAAD550493F3B7685FF,
+    0xC097131CECBAE545E04D8582B4E7AE39,
+];
+// Expected values after applying `aesenclast` to `B` and `K`
+const EXPECTED_AESENCLAST: [u128; N] = [
+    0x1B3A2D1956E62AA7218A50B80563D88B,
+    0x30DA4AFE7E59164C52C8AB224FE1A0D0,
+    0x63D8BDD861198CA278C61954FC602C87,
+    0xA287C1BC88CA76C2289A021A6DA0E4ED,
+];
+// Expected values after applying `aesdec` to `B` and `K`
+const EXPECTED_AESDEC: [u128; N] = [
+    0x3B4CF684851A13D1FEF9C4C79E8115D2,
+    0x8FC125301FBECD1178BD94161F98F50D,
+    0xDF5BB3B842D66A8F10B4F343DE4E5721,
+    0x4B1C1B62454ED2A55A44C6B75C118C4A,
+];
+// Expected values after applying `aesdeclast` to `B` and `K`
+const EXPECTED_AESDECLAST: [u128; N] = [
+    0x5DA59A6776605A118EF1BCC7D865F89D,
+    0xB704AB43789850CDE569874C42F0569B,
+    0x98C5F123B4967E2DA4F16F2EDB918529,
+    0x319E3DBCE4268B35F215B038FD022054,
+];
+
 #[target_feature(enable = "aes")]
-unsafe fn test_aes() {
-    // Mostly copied from library/stdarch/crates/core_arch/src/x86/aes.rs
-
-    #[target_feature(enable = "aes")]
-    unsafe fn test_mm_aesdec_si128() {
-        // Constants taken from https://msdn.microsoft.com/en-us/library/cc664949.aspx.
-        let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
-        let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
-        let e = _mm_set_epi64x(0x044e4f5176fec48f, 0xb57ecfa381da39ee);
-        let r = _mm_aesdec_si128(a, k);
-        assert_eq_m128i(r, e);
+fn test_aesimc() {
+    for i in 0..N {
+        let r = _mm_aesimc_si128(K[i].as_mm());
+        assert!(EXPECTED_AESIMC[i].is_eq(r));
     }
-    test_mm_aesdec_si128();
-
-    #[target_feature(enable = "aes")]
-    unsafe fn test_mm_aesdeclast_si128() {
-        // Constants taken from https://msdn.microsoft.com/en-us/library/cc714178.aspx.
-        let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
-        let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
-        let e = _mm_set_epi64x(0x36cad57d9072bf9e, 0xf210dd981fa4a493);
-        let r = _mm_aesdeclast_si128(a, k);
-        assert_eq_m128i(r, e);
-    }
-    test_mm_aesdeclast_si128();
-
-    #[target_feature(enable = "aes")]
-    unsafe fn test_mm_aesenc_si128() {
-        // Constants taken from https://msdn.microsoft.com/en-us/library/cc664810.aspx.
-        let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
-        let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
-        let e = _mm_set_epi64x(0x16ab0e57dfc442ed, 0x28e4ee1884504333);
-        let r = _mm_aesenc_si128(a, k);
-        assert_eq_m128i(r, e);
-    }
-    test_mm_aesenc_si128();
-
-    #[target_feature(enable = "aes")]
-    unsafe fn test_mm_aesenclast_si128() {
-        // Constants taken from https://msdn.microsoft.com/en-us/library/cc714136.aspx.
-        let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
-        let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
-        let e = _mm_set_epi64x(0xb6dd7df25d7ab320, 0x4b04f98cf4c860f8);
-        let r = _mm_aesenclast_si128(a, k);
-        assert_eq_m128i(r, e);
-    }
-    test_mm_aesenclast_si128();
-
-    #[target_feature(enable = "aes")]
-    unsafe fn test_mm_aesimc_si128() {
-        // Constants taken from https://msdn.microsoft.com/en-us/library/cc714195.aspx.
-        let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
-        let e = _mm_set_epi64x(0xc66c82284ee40aa0, 0x6633441122770055);
-        let r = _mm_aesimc_si128(a);
-        assert_eq_m128i(r, e);
-    }
-    test_mm_aesimc_si128();
-
-    #[target_feature(enable = "aes")]
-    unsafe fn test_mm_aeskeygenassist_si128() {
-        // Constants taken from https://msdn.microsoft.com/en-us/library/cc714195.aspx.
-        let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
-        let e = _mm_set_epi64x(0x857c266b7c266e85, 0xeac4eea9c4eeacea);
-        let r = _mm_aeskeygenassist_si128(a, 5);
-        assert_eq_m128i(r, e);
-    }
-    test_mm_aeskeygenassist_si128();
 }
 
-// The constants in the tests below are just bit patterns. They should not
-// be interpreted as integers; signedness does not make sense for them, but
-// __m128i happens to be defined in terms of signed integers.
-#[allow(overflowing_literals)]
+#[target_feature(enable = "aes")]
+fn test_aeskeygenassist() {
+    for i in 0..N {
+        let r = _mm_aeskeygenassist_si128(K[i].as_mm(), 0x36);
+        assert!(EXPECTED_AESKEYGENASSIST[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "aes")]
+fn test_aesenc() {
+    for i in 0..N {
+        let r = _mm_aesenc_si128(B[i].as_mm(), K[i].as_mm());
+        assert!(EXPECTED_AESENC[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "aes")]
+fn test_aesenclast() {
+    for i in 0..N {
+        let r = _mm_aesenclast_si128(B[i].as_mm(), K[i].as_mm());
+        assert!(EXPECTED_AESENCLAST[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "aes")]
+fn test_aesdec() {
+    for i in 0..N {
+        let r = _mm_aesdec_si128(B[i].as_mm(), K[i].as_mm());
+        assert!(EXPECTED_AESDEC[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "aes")]
+fn test_aesdeclast() {
+    for i in 0..N {
+        let r = _mm_aesdeclast_si128(B[i].as_mm(), K[i].as_mm());
+        assert!(EXPECTED_AESDECLAST[i].is_eq(r));
+    }
+}
+
 #[target_feature(enable = "vaes")]
-unsafe fn test_vaes() {
-    #[target_feature(enable = "avx")]
-    unsafe fn get_a256() -> __m256i {
-        // Constants are random
-        _mm256_set_epi64x(
-            0xb89f43a558d3cd51,
-            0x57b3e81e369bd603,
-            0xf177a1a626933fd6,
-            0x50d8adbed1a2f9d7,
-        )
+fn test_aesenc256() {
+    let (b, _) = B.as_chunks::<2>();
+    let (k, _) = K.as_chunks::<2>();
+    let (e, _) = EXPECTED_AESENC.as_chunks::<2>();
+    for i in 0..N / 2 {
+        let r = _mm256_aesenc_epi128(b[i].as_mm(), k[i].as_mm());
+        assert!(e[i].is_eq(r));
     }
-    #[target_feature(enable = "avx")]
-    unsafe fn get_k256() -> __m256i {
-        // Constants are random
-        _mm256_set_epi64x(
-            0x503ff704588b5627,
-            0xe23d882ed9c3c146,
-            0x2785e5b670155b3c,
-            0xa750718e183549ff,
-        )
-    }
-
-    #[target_feature(enable = "vaes")]
-    unsafe fn test_mm256_aesdec_epi128() {
-        let a = get_a256();
-        let k = get_k256();
-        let r = _mm256_aesdec_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 2] = transmute(a);
-        let k: [u128; 2] = transmute(k);
-        let r: [u128; 2] = transmute(r);
-        for i in 0..2 {
-            let e: u128 = transmute(_mm_aesdec_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm256_aesdec_epi128();
-
-    #[target_feature(enable = "vaes")]
-    unsafe fn test_mm256_aesdeclast_epi128() {
-        let a = get_a256();
-        let k = get_k256();
-        let r = _mm256_aesdeclast_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 2] = transmute(a);
-        let k: [u128; 2] = transmute(k);
-        let r: [u128; 2] = transmute(r);
-        for i in 0..2 {
-            let e: u128 = transmute(_mm_aesdeclast_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm256_aesdeclast_epi128();
-
-    #[target_feature(enable = "vaes")]
-    unsafe fn test_mm256_aesenc_epi128() {
-        let a = get_a256();
-        let k = get_k256();
-        let r = _mm256_aesenc_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 2] = transmute(a);
-        let k: [u128; 2] = transmute(k);
-        let r: [u128; 2] = transmute(r);
-        for i in 0..2 {
-            let e: u128 = transmute(_mm_aesenc_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm256_aesenc_epi128();
-
-    #[target_feature(enable = "vaes")]
-    unsafe fn test_mm256_aesenclast_epi128() {
-        let a = get_a256();
-        let k = get_k256();
-        let r = _mm256_aesenclast_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 2] = transmute(a);
-        let k: [u128; 2] = transmute(k);
-        let r: [u128; 2] = transmute(r);
-        for i in 0..2 {
-            let e: u128 = transmute(_mm_aesenclast_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm256_aesenclast_epi128();
-
-    // The tests below require avx512. GH runners don't have this, but we still want to run this
-    // natively if the machine happens to have AVX512. So we bail out dynamically.
-    if !is_x86_feature_detected!("avx512f") {
-        println!("warning: skipping avx512 tests");
-        return;
-    }
-
-    #[target_feature(enable = "avx512f")]
-    unsafe fn get_a512() -> __m512i {
-        // Constants are random
-        _mm512_set_epi64(
-            0xb89f43a558d3cd51,
-            0x57b3e81e369bd603,
-            0xf177a1a626933fd6,
-            0x50d8adbed1a2f9d7,
-            0xfbfee3116629db78,
-            0x6aef4a91f2ad50f4,
-            0x4258bb51ff1d476d,
-            0x31da65761c8016cf,
-        )
-    }
-    #[target_feature(enable = "avx512f")]
-    unsafe fn get_k512() -> __m512i {
-        // Constants are random
-        _mm512_set_epi64(
-            0x503ff704588b5627,
-            0xe23d882ed9c3c146,
-            0x2785e5b670155b3c,
-            0xa750718e183549ff,
-            0xdfb408830a65d3d9,
-            0x0de3d92adac81b0a,
-            0xed2741fe12877cae,
-            0x3251ddb5404e0974,
-        )
-    }
-
-    #[target_feature(enable = "vaes,avx512f")]
-    unsafe fn test_mm512_aesdec_epi128() {
-        let a = get_a512();
-        let k = get_k512();
-        let r = _mm512_aesdec_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 4] = transmute(a);
-        let k: [u128; 4] = transmute(k);
-        let r: [u128; 4] = transmute(r);
-        for i in 0..4 {
-            let e: u128 = transmute(_mm_aesdec_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm512_aesdec_epi128();
-
-    #[target_feature(enable = "vaes,avx512f")]
-    unsafe fn test_mm512_aesdeclast_epi128() {
-        let a = get_a512();
-        let k = get_k512();
-        let r = _mm512_aesdeclast_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 4] = transmute(a);
-        let k: [u128; 4] = transmute(k);
-        let r: [u128; 4] = transmute(r);
-        for i in 0..4 {
-            let e: u128 = transmute(_mm_aesdeclast_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm512_aesdeclast_epi128();
-
-    #[target_feature(enable = "vaes,avx512f")]
-    unsafe fn test_mm512_aesenc_epi128() {
-        let a = get_a512();
-        let k = get_k512();
-        let r = _mm512_aesenc_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 4] = transmute(a);
-        let k: [u128; 4] = transmute(k);
-        let r: [u128; 4] = transmute(r);
-        for i in 0..4 {
-            let e: u128 = transmute(_mm_aesenc_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm512_aesenc_epi128();
-
-    #[target_feature(enable = "vaes,avx512f")]
-    unsafe fn test_mm512_aesenclast_epi128() {
-        let a = get_a512();
-        let k = get_k512();
-        let r = _mm512_aesenclast_epi128(a, k);
-
-        // Check results.
-        let a: [u128; 4] = transmute(a);
-        let k: [u128; 4] = transmute(k);
-        let r: [u128; 4] = transmute(r);
-        for i in 0..4 {
-            let e: u128 = transmute(_mm_aesenclast_si128(transmute(a[i]), transmute(k[i])));
-            assert_eq!(r[i], e);
-        }
-    }
-    test_mm512_aesenclast_epi128();
 }
 
-#[track_caller]
-#[target_feature(enable = "sse2")]
-unsafe fn assert_eq_m128i(a: __m128i, b: __m128i) {
-    assert_eq!(transmute::<_, [u64; 2]>(a), transmute::<_, [u64; 2]>(b))
+#[target_feature(enable = "vaes")]
+fn test_aesenclast256() {
+    let (b, _) = B.as_chunks::<2>();
+    let (k, _) = K.as_chunks::<2>();
+    let (e, _) = EXPECTED_AESENCLAST.as_chunks::<2>();
+    for i in 0..N / 2 {
+        let r = _mm256_aesenclast_epi128(b[i].as_mm(), k[i].as_mm());
+        assert!(e[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "vaes")]
+fn test_aesdec256() {
+    let (b, _) = B.as_chunks::<2>();
+    let (k, _) = K.as_chunks::<2>();
+    let (e, _) = EXPECTED_AESDEC.as_chunks::<2>();
+    for i in 0..N / 2 {
+        let r = _mm256_aesdec_epi128(b[i].as_mm(), k[i].as_mm());
+        assert!(e[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "vaes")]
+fn test_aesdeclast256() {
+    let (b, _) = B.as_chunks::<2>();
+    let (k, _) = K.as_chunks::<2>();
+    let (e, _) = EXPECTED_AESDECLAST.as_chunks::<2>();
+    for i in 0..N / 2 {
+        let r = _mm256_aesdeclast_epi128(b[i].as_mm(), k[i].as_mm());
+        assert!(e[i].is_eq(r));
+    }
+}
+
+#[target_feature(enable = "avx512f,vaes")]
+fn test_aesenc512() {
+    let r = _mm512_aesenc_epi128(B.as_mm(), K.as_mm());
+    assert!(EXPECTED_AESENC.is_eq(r));
+}
+
+#[target_feature(enable = "avx512f,vaes")]
+fn test_aesenclast512() {
+    let r = _mm512_aesenclast_epi128(B.as_mm(), K.as_mm());
+    assert!(EXPECTED_AESENCLAST.is_eq(r));
+}
+
+#[target_feature(enable = "avx512f,vaes")]
+fn test_aesdec512() {
+    let r = _mm512_aesdec_epi128(B.as_mm(), K.as_mm());
+    assert!(EXPECTED_AESDEC.is_eq(r));
+}
+
+#[target_feature(enable = "avx512f,vaes")]
+fn test_aesdeclast512() {
+    let r = _mm512_aesdeclast_epi128(B.as_mm(), K.as_mm());
+    assert!(EXPECTED_AESDECLAST.is_eq(r));
+}
+
+/// Trait for casting between `u128/[u128; 2]/[u128; 4]` and `__m128/256/512i` types
+///
+/// # Safety
+/// The trait must not be implemented for any other type pairs.
+unsafe trait AsMm: Sized + core::cmp::Eq {
+    type Mm;
+
+    fn as_mm(&self) -> Self::Mm {
+        unsafe { core::mem::transmute_copy(self) }
+    }
+
+    fn is_eq(&self, v: Self::Mm) -> bool {
+        let r: Self = unsafe { core::mem::transmute_copy(&v) };
+        self.eq(&r)
+    }
+}
+
+unsafe impl AsMm for u128 {
+    type Mm = __m128i;
+}
+
+unsafe impl AsMm for [u128; 2] {
+    type Mm = __m256i;
+}
+
+unsafe impl AsMm for [u128; 4] {
+    type Mm = __m512i;
 }
