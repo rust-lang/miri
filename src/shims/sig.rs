@@ -22,6 +22,8 @@ pub struct ShimSig<'tcx, const ARGS: usize> {
 ///
 /// The following types are supported:
 /// - primitive integer types
+/// - primitive float types
+/// - `Complex<{primitive float}>`
 /// - `()`
 /// - (thin) raw pointers, written `*_` since the mutability and pointee type are irrelevant
 /// - `$crate::$mod::...::$ty` for a type from the given crate (most commonly that is `libc`)
@@ -139,6 +141,30 @@ macro_rules! shim_sig_arg {
     };
     ($this:ident, usize) => {
         $this.tcx.types.usize
+    };
+    ($this:ident, f16) => {
+        $this.tcx.types.f16
+    };
+    ($this:ident, f32) => {
+        $this.tcx.types.f32
+    };
+    ($this:ident, f64) => {
+        $this.tcx.types.f64
+    };
+    ($this:ident, f128) => {
+        $this.tcx.types.f128
+    };
+    ($this:ident, Complex<f16>) => {
+        $this.complex_ty_layout($this.tcx.types.f16).ty
+    };
+    ($this:ident, Complex<f32>) => {
+        $this.complex_ty_layout($this.tcx.types.f32).ty
+    };
+    ($this:ident, Complex<f64>) => {
+        $this.complex_ty_layout($this.tcx.types.f64).ty
+    };
+    ($this:ident, Complex<f128>) => {
+        $this.complex_ty_layout($this.tcx.types.f128).ty
     };
     ($this:ident, ()) => {
         $this.tcx.types.unit
