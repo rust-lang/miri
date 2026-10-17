@@ -317,6 +317,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         file,
                         writable: desired_write,
                         readable: desired_read,
+                        append: false,
                     });
                     interp_ok(Handle::File(fd_num))
                 }
