@@ -324,8 +324,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// The point of storing an `init_val` is so that if this memory gets copied somewhere else,
     /// it does not look like the static initializer (i.e., `uninit_val`) any more. For some
     /// objects we could just entirely forbid reading their bytes to ensure they don't get copied,
-    /// but that does not work for objects without a destructor (Windows `InitOnce`, macOS
-    /// `os_unfair_lock`).
+    /// but that does not work for objects without a destructor (such as futexes).
     fn get_immovable_sync_with_static_init<'a, T: SyncObj>(
         &'a mut self,
         obj: &MPlaceTy<'tcx>,

@@ -313,31 +313,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     addr_op, size_op, flags_op, /* all */ true, dest,
                 )?;
             }
-            "os_unfair_lock_lock" => {
-                let [lock_op] =
-                    this.check_shim_sig_deprecated(abi, CanonAbi::C, link_name, args)?;
-                this.os_unfair_lock_lock(lock_op)?;
-            }
-            "os_unfair_lock_trylock" => {
-                let [lock_op] =
-                    this.check_shim_sig_deprecated(abi, CanonAbi::C, link_name, args)?;
-                this.os_unfair_lock_trylock(lock_op, dest)?;
-            }
-            "os_unfair_lock_unlock" => {
-                let [lock_op] =
-                    this.check_shim_sig_deprecated(abi, CanonAbi::C, link_name, args)?;
-                this.os_unfair_lock_unlock(lock_op)?;
-            }
-            "os_unfair_lock_assert_owner" => {
-                let [lock_op] =
-                    this.check_shim_sig_deprecated(abi, CanonAbi::C, link_name, args)?;
-                this.os_unfair_lock_assert_owner(lock_op)?;
-            }
-            "os_unfair_lock_assert_not_owner" => {
-                let [lock_op] =
-                    this.check_shim_sig_deprecated(abi, CanonAbi::C, link_name, args)?;
-                this.os_unfair_lock_assert_not_owner(lock_op)?;
-            }
 
             "pthread_cond_timedwait_relative_np" => {
                 let [cond, mutex, reltime] =
