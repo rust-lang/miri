@@ -28,8 +28,8 @@ fn main() {
 
     // test `unlinkat`
     unsafe {
-        assert_eq!(libc::unlinkat(libc::AT_FDCWD, c"foo.txt".as_ptr(), 0), -1);
-        assert_eq!(Error::last_os_error().raw_os_error(), Some(libc::EACCES));
+        let err = errno_result(libc::unlinkat(libc::AT_FDCWD, c"foo.txt".as_ptr(), 0)).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EACCES));
     }
 
     // test `stat`
