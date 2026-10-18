@@ -1,7 +1,7 @@
 //@revisions: stack tree
 //@[tree]compile-flags: -Zmiri-tree-borrows
 
-//@[stack]error-in-other-file: /deallocating while item \[Unique for .*\] is strongly protected/
+//@[stack]error-in-other-file: /deallocating while item \[Unique for .*\] is in use by a function argument reference \(is strongly protected\)/
 //@[tree]error-in-other-file: /deallocation through .* is forbidden/
 
 fn inner(x: &mut i32, f: fn(&mut i32)) {

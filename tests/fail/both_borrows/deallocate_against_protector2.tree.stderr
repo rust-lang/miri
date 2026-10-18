@@ -6,9 +6,9 @@ LL |         std::alloc::dealloc(raw.cast(), Layout::new::<i32>());
    |
    = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
-   = help: the allocation of the accessed tag <TAG> also contains the strongly protected tag <TAG>
-   = help: the strongly protected tag <TAG> disallows deallocations
-help: the strongly protected tag <TAG> was created here, in the initial state Reserved
+   = help: the allocation of the accessed tag <TAG> also contains the function argument tag <TAG>
+   = help: the function argument tag <TAG> disallows deallocations, because the function to which it was an argument is still live.
+help: the function argument tag <TAG> was created here, in the initial state Reserved
   --> tests/fail/both_borrows/deallocate_against_protector2.rs:LL:CC
    |
 LL |     inner(unsafe { &mut *(ptr as *mut ()) }, |x| unsafe {

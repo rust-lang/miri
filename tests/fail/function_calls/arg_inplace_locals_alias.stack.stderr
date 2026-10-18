@@ -1,8 +1,8 @@
-error: Undefined Behavior: not granting access to tag <TAG> because that would remove [Unique for <TAG>] which is strongly protected (i.e. it is in use as a function argument)
+error: Undefined Behavior: not granting access to tag <TAG> because that would remove [Unique for <TAG>] which is in use by a function argument reference (is strongly protected)
   --> tests/fail/function_calls/arg_inplace_locals_alias.rs:LL:CC
    |
 LL | fn callee(x: S, mut y: S) {
-   |                 ^^^^^ Undefined Behavior occurred here
+   |                 ^^^^^ Undefined Behavior occured here; see below to identify which function's argument is <TAG>.
    |
    = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
@@ -11,7 +11,7 @@ help: <TAG> was created here, as the root tag for ALLOC
    |
 LL |             Call(_unit = callee(Move(non_copy), Move(non_copy)), ReturnTo(after_call), UnwindContinue())
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: <TAG> is this argument
+help: <TAG> corresponds to this argument, which is still live:
   --> tests/fail/function_calls/arg_inplace_locals_alias.rs:LL:CC
    |
 LL | fn callee(x: S, mut y: S) {
