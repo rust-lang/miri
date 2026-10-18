@@ -1,7 +1,7 @@
 //@revisions: stack tree
 //@[tree]compile-flags: -Zmiri-tree-borrows
 
-//@[stack]error-in-other-file: which is strongly protected
+//@[stack]error-in-other-file: which is in use by a function argument reference (is strongly protected)
 //@[tree]error-in-other-file: /deallocation through .* is forbidden/
 
 struct Newtype<'a>(#[allow(dead_code)] &'a mut i32);
