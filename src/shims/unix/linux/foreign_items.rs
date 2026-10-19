@@ -19,7 +19,7 @@ use crate::*;
 const TASK_COMM_LEN: u64 = 16;
 
 pub fn is_dyn_sym(name: &str) -> bool {
-    matches!(name, "gettid" | "statx")
+    matches!(name, "copy_file_range" | "gettid" | "statx")
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -37,6 +37,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         match link_name.as_str() {
             // File related shims
+            "copy_file_range" => {
+                let [fd_in, off_in, fd_out, off_out, len, flags] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *_, i32, *_, usize, u32) -> isize),
+                    (link_name, abi, args),
+                )?;
+                this.copy_file_range(fd_in, off_in, fd_out, off_out, len, flags, dest)?;
+            }
             "open64" => {
                 // FIXME: This does not have a direct test (#3179).
                 // "open64" means that the file is opened with O_LARGEFILE, which we always do.

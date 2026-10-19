@@ -452,6 +452,117 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Only supports distinct regular files on the same device, null offset pointers, and zero flags.
+    /// The destination position must be at or before EOF and below i64::MAX.
+    /// Append mode and recovery from I/O errors are not implemented.
+    fn copy_file_range(
+        &mut self,
+        fd_in: &OpTy<'tcx>,
+        off_in: &OpTy<'tcx>,
+        fd_out: &OpTy<'tcx>,
+        off_out: &OpTy<'tcx>,
+        len: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let fd_in = this.read_scalar(fd_in)?.to_i32()?;
+        let off_in = this.read_pointer(off_in)?;
+        let fd_out = this.read_scalar(fd_out)?.to_i32()?;
+        let off_out = this.read_pointer(off_out)?;
+        let len = this.read_target_usize(len)?;
+        let flags = this.read_scalar(flags)?.to_u32()?;
+
+        if !this.ptr_is_null(off_in)? || !this.ptr_is_null(off_out)? {
+            throw_unsup_format!("`copy_file_range` with non-null offset pointers is not supported");
+        }
+        if flags != 0 {
+            throw_unsup_format!("unsupported `copy_file_range` flags: {flags:#x}");
+        }
+        if len > u64::try_from(this.target_isize_max()).unwrap() {
+            throw_unsup_format!("`copy_file_range` lengths exceeding isize::MAX are not supported");
+        }
+
+        let Some(fd_in) = this.machine.fds.get(fd_in) else {
+            return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
+        };
+        let Some(fd_out) = this.machine.fds.get(fd_out) else {
+            return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
+        };
+        let (Some(file_in), Some(file_out)) =
+            (fd_in.downcast::<FileHandle>(), fd_out.downcast::<FileHandle>())
+        else {
+            throw_unsup_format!("`copy_file_range` is only supported on regular files");
+        };
+        if !file_in.readable || !file_out.writable {
+            return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
+        }
+        if file_out.append {
+            throw_unsup_format!(
+                "`copy_file_range` to a file opened in append mode is not supported"
+            );
+        }
+        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
+
+        #[cfg(not(unix))]
+        {
+            let _ = len;
+            throw_unsup_format!("`copy_file_range` is only supported on Unix hosts");
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            let result = (|| {
+                let metadata_in = file_in.file.metadata()?;
+                let metadata_out = file_out.file.metadata()?;
+                Ok::<_, io::Error>((metadata_in, metadata_out))
+            })();
+            let (metadata_in, metadata_out) = match result {
+                Ok(metadata) => metadata,
+                Err(err) => return this.set_errno_and_return_neg1(err, dest),
+            };
+            if !metadata_in.is_file() || !metadata_out.is_file() {
+                throw_unsup_format!("`copy_file_range` is only supported on regular files");
+            }
+            // io::copy could fall back to read/write after a cross-device copy_file_range fails.
+            if metadata_in.dev() != metadata_out.dev() {
+                throw_unsup_format!("`copy_file_range` across devices is not supported");
+            }
+            // Comparing file descriptions alone would miss opening the same file twice.
+            if metadata_in.ino() == metadata_out.ino() {
+                throw_unsup_format!("`copy_file_range` within the same file is not supported");
+            }
+            let position_out = match (&file_out.file).stream_position() {
+                Ok(position) => position,
+                Err(err) => return this.set_errno_and_return_neg1(err, dest),
+            };
+            // io::copy skips writing at EOF or for zero-length copies, so it would not check
+            // whether a position far beyond the destination's end exceeds filesystem limits.
+            if position_out > metadata_out.len() || position_out >= i64::MAX as u64 {
+                throw_unsup_format!(
+                    "unsupported `copy_file_range` destination position: {position_out}"
+                );
+            }
+
+            // Short copies are allowed. Bound each call's work independently of the requested size.
+            let mut src = (&file_in.file).take(len.min(64 * 1024));
+            let result = io::copy(&mut src, &mut &file_out.file);
+            match result {
+                Ok(copied) => this.write_int(copied, dest)?,
+                // io::copy can fail after reading or writing some bytes. Handling that would
+                // require fixing the file positions and reporting partial progress.
+                Err(err) =>
+                    throw_unsup_format!(
+                        "I/O errors during `copy_file_range` are not supported: {err}"
+                    ),
+            }
+            interp_ok(())
+        }
+    }
+
     fn open(
         &mut self,
         dirfd: Option<&OpTy<'tcx>>,
@@ -595,7 +706,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
         let o_append = this.eval_libc_i32("O_APPEND");
-        if flag & o_append == o_append {
+        let append = flag & o_append == o_append;
+        if append {
             flag &= !o_append;
             options.append(true);
         }
@@ -732,7 +844,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     panic!("we should not get a symlink here");
                 }
 
-                let fd = this.machine.fds.insert_new(FileHandle { file, writable, readable });
+                let fd =
+                    this.machine.fds.insert_new(FileHandle { file, writable, readable, append });
                 interp_ok(Scalar::from_i32(fd))
             }
         }
@@ -2145,6 +2258,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         file: f,
                         writable: true,
                         readable: true,
+                        append: false,
                     });
                     return interp_ok(Scalar::from_i32(fd));
                 }
