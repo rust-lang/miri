@@ -662,6 +662,23 @@ impl UnixSocketFileDescription for TcpSocket {
         )
     }
 
+    fn send_to<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_non_block: bool,
+        _dest_addr_ptr: Pointer,
+        _dest_addr_len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        // Since TCP is a connection-mode protocol we can simply ignore
+        // the `dest_addr_ptr` and `dest_addr_len` which is equivalent to
+        // a `send`.
+        self.send(communicate_allowed, ptr, len, is_non_block, ecx, finish)
+    }
+
     fn recv<'tcx>(
         self: FileDescriptionRef<Self>,
         communicate_allowed: bool,

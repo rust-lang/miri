@@ -100,6 +100,26 @@ pub trait UnixSocketFileDescription: UnixFileDescription {
         throw_unsup_format!("cannot send to {}", self.name());
     }
 
+    /// Send data from the given buffer `ptr` into the socket with an
+    /// explicit target destination.
+    /// `len` indicates how many bytes we should try to send.
+    /// `is_non_block` specifies whether the send operation is non-blocking.
+    /// `destination` contains the socket address of the target socket.
+    /// After a successful send, `finish` should be called with the amount of bytes sent.
+    fn send_to<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _communicate_allowed: bool,
+        _ptr: Pointer,
+        _len: usize,
+        _is_non_block: bool,
+        _dest_addr_ptr: Pointer,
+        _dest_addr_len: usize,
+        _ecx: &mut MiriInterpCx<'tcx>,
+        _finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        throw_unsup_format!("cannot send to {} with a destination", self.name())
+    }
+
     /// Set the socket option `option` on `level`.
     /// `value_ptr` points to the new value of the socket option, and `value_len` contains
     /// the amount of bytes the value uses at `value_ptr`.
@@ -507,6 +527,55 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             buffer_ptr,
             length,
             is_non_block,
+            this,
+            callback!(
+                @capture<'tcx> {
+                    dest: MPlaceTy<'tcx>,
+                } |this, result: Result<usize, IoError>| {
+                    match result {
+                        Ok(bytes_sent) =>
+                            this.write_scalar(Scalar::from_target_usize(bytes_sent.try_into().unwrap(), this), &dest),
+                        Err(e) => this.set_errno_and_return_neg1(e, &dest)
+                    }
+                }
+            )
+        )
+    }
+
+    fn sendto(
+        &mut self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+        dest_addr: &OpTy<'tcx>,
+        dest_len: &OpTy<'tcx>,
+        // Location where the output scalar is written to.
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let dest_addr_ptr = this.read_pointer(dest_addr)?;
+        let socklen_layout = this.libc_ty_layout("socklen_t");
+        // We only support address lengths which can be stored in a u64 since the
+        // size of a layout is also stored in a u64.
+        let dest_addr_len: usize =
+            this.read_scalar(dest_len)?.to_int(socklen_layout.size)?.try_into().unwrap();
+
+        let (socket, buffer_ptr, length, is_non_block) =
+            match this.parse_send_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
+
+        let dest = dest.clone();
+        socket.send_to(
+            this.machine.communicate(),
+            buffer_ptr,
+            length,
+            is_non_block,
+            dest_addr_ptr,
+            dest_addr_len,
             this,
             callback!(
                 @capture<'tcx> {
