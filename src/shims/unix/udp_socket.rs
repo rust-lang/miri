@@ -95,6 +95,25 @@ impl FileDescription for UdpSocket {
         "udp socket"
     }
 
+    fn read<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        self.recv(
+            communicate_allowed,
+            ptr,
+            len,
+            /* is_peek */ false,
+            /* is_non_block */ false,
+            ecx,
+            finish,
+        )
+    }
+
     fn write<'tcx>(
         self: FileDescriptionRef<Self>,
         communicate_allowed: bool,
@@ -242,6 +261,28 @@ impl UnixSocketFileDescription for UdpSocket {
         }
 
         let result = ecx.try_non_block_send(&self, ptr, len)?;
+        finish.call(ecx, result)
+    }
+
+    fn recv<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_peek: bool,
+        is_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
+
+        let is_non_block = is_non_block || self.is_non_block.get();
+
+        if !is_non_block {
+            throw_unsup_format!("send: blocking reads are currently unsupported for UDP sockets");
+        }
+
+        let result = ecx.try_non_block_recv(&self, ptr, len, is_peek)?;
         finish.call(ecx, result)
     }
 
@@ -410,6 +451,58 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // On Windows hosts this returns WSAEMSGSIZE while on Unix-like hosts this returns EMSGSIZE.
                 // We thus need to remap this error to EMSGSIZE on Windows hosts.
                 interp_ok(Err(IoError::LibcError("EMSGSIZE")))
+            }
+            result => interp_ok(result),
+        }
+    }
+
+    /// Attempt to receive bytes from the socket in a non-blocking manner.
+    fn try_non_block_recv(
+        &mut self,
+        socket: &FileDescriptionRef<UdpSocket>,
+        buffer_ptr: Pointer,
+        length: usize,
+        should_peek: bool,
+    ) -> InterpResult<'tcx, Result<usize, IoError>> {
+        let this = self.eval_context_mut();
+
+        let host_socket = socket.socket.borrow();
+
+        let read_cb = |buf: &mut [u8]| {
+            let result = if should_peek { host_socket.peek(buf) } else { host_socket.recv(buf) };
+            match result {
+                Err(e)
+                    if cfg!(windows)
+                        && e.raw_os_error()
+                            .is_some_and(|errno| errno == /* WSAEMSGSIZE */ 10040) =>
+                {
+                    // We tried to read a message from the socket which does not fit our
+                    // provided buffer. POSIX specifies that the provided buffer should be
+                    // filled and the remaining bytes should be discarded. The `recv` should
+                    // then return the amount of bytes read. Windows hosts fill the buffer
+                    // and discard the excess bytes but return WSAEMSGSIZE instead of the
+                    // bytes read. We thus ignore this error and instead return the length
+                    // of the buffer since we know that the buffer has been filled. This
+                    // needs to be done inside this callback function since `read_from_host`
+                    // won't copy the bytes from `buf` to `buffer_ptr` should the callback
+                    // return an error.
+
+                    Ok(length)
+                }
+                result => result,
+            }
+        };
+
+        // This is a *non-blocking* read/peek.
+        let result = this.read_from_host(read_cb, length, buffer_ptr)?;
+
+        match result {
+            Err(IoError::HostError(e)) if matches!(e.kind(), io::ErrorKind::WouldBlock) => {
+                // We know that the source is not readable so we need to update its readiness.
+                socket.io_readiness.borrow_mut().readable = false;
+                this.update_fd_readiness(socket.clone(), ReadinessUpdateFlags::DEFAULT)?;
+
+                interp_ok(Err(IoError::HostError(e)))
             }
             result => interp_ok(result),
         }
