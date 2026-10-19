@@ -84,6 +84,28 @@ pub trait UnixSocketFileDescription: UnixFileDescription {
         throw_unsup_format!("cannot receive from {}", self.name());
     }
 
+    /// Receive data on the socket into the given buffer `ptr` and return the socket
+    /// address from where the data originated.
+    /// `len` indicates how many bytes we should try to receive.
+    /// `is_peek` specifies whether the receive removes the bytes from the receive buffer
+    /// ([`false`]) or leaves them in the receive buffer ([`true`]).
+    /// `is_non_block` specifies whether the receive operation is non-blocking.
+    /// After a successful receive, `finish` should be called with a tuple containing the
+    /// amount of bytes received and the socket address from where the data originated, should
+    /// it be provided by the protocol.
+    fn recv_from<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _communicate_allowed: bool,
+        _ptr: Pointer,
+        _len: usize,
+        _is_peek: bool,
+        _is_non_block: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+        _finish: DynMachineCallback<'tcx, Result<(usize, Option<SocketAddr>), IoError>>,
+    ) -> InterpResult<'tcx> {
+        throw_unsup_format!("cannot receive with origin from {}", self.name());
+    }
+
     /// Send data from the given buffer `ptr` into the socket.
     /// `len` indicates how many bytes we should try to send.
     /// `is_non_block` specifies whether the send operation is non-blocking.
@@ -626,6 +648,62 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             this.write_scalar(Scalar::from_target_usize(bytes_sent.try_into().unwrap(), this), &dest),
                         Err(e) => this.set_errno_and_return_neg1(e, &dest)
                     }
+                }
+            ),
+        )
+    }
+
+    fn recvfrom(
+        &mut self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+        addr: &OpTy<'tcx>,
+        addr_len: &OpTy<'tcx>,
+        // Location where the output scalar is written to.
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let addr_ptr = this.read_pointer(addr)?;
+        let addr_len_ptr = this.read_pointer(addr_len)?;
+
+        let (socket, buffer_ptr, length, is_non_block, is_peek) =
+            match this.parse_recv_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
+
+        let dest = dest.clone();
+
+        socket.recv_from(
+            this.machine.communicate(),
+            buffer_ptr,
+            length,
+            is_peek,
+            is_non_block,
+            this,
+            callback!(
+                @capture<'tcx> {
+                    addr_ptr: Pointer,
+                    addr_len_ptr: Pointer,
+                    dest: MPlaceTy<'tcx>,
+                } |this, result: Result<(usize, Option<SocketAddr>), IoError>| {
+                    let (bytes_sent, origin_addr_opt) = match result {
+                        Ok(value) => value,
+                        Err(e) => return this.set_errno_and_return_neg1(e, &dest)
+                    };
+
+                    // The recvfrom(3) man page specifies that "[...] the value stored in the object pointed to
+                    // `address` is unspecified [...]" should the protocol not provide the source address of the message.
+                    // In this case we do the same thing as the Linux implementation and simply don't write anything to the
+                    // `addr_ptr` and `addr_len_ptr` pointers.
+                    if let Some(origin_addr) = origin_addr_opt {
+                        this.write_socket_address(&origin_addr, addr_ptr, addr_len_ptr, "recvfrom")?;
+                    }
+
+                    this.write_scalar(Scalar::from_target_usize(bytes_sent.try_into().unwrap(), this), &dest)
                 }
             ),
         )
