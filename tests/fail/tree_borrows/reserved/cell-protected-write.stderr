@@ -18,8 +18,8 @@ LL |             *y = 1;
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> (y, callee:y, caller:y) is foreign to the function argument tag <TAG> (callee:x) (i.e., it is not a child)
    = help: this foreign write access would cause the function argument tag <TAG> (callee:x) (currently Reserved) to become Disabled
-   = help: but this tag is still in use as a function argument (is protected).
-   = help: Function argument tags must not become Disabled before the function returns.
+   = help: but this tag is still in use as a function argument (is protected)
+   = help: function argument tags must not become Disabled before the function returns
 help: the accessed tag <TAG> was created here
   --> tests/fail/tree_borrows/reserved/cell-protected-write.rs:LL:CC
    |

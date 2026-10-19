@@ -1,8 +1,8 @@
-error: Undefined Behavior: not granting access to tag <TAG> because that would remove [Unique for <TAG>] which is in use by a function argument reference (is strongly protected)
+error: Undefined Behavior: not granting access to tag <TAG> because that would invalidate a function argument with tag <TAG> (that tag is strongly protected)
   --> RUSTLIB/alloc/src/boxed.rs:LL:CC
    |
 LL |         Box(unsafe { BoxRaw::new_unchecked(raw) }, alloc)
-   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occured here; see below to identify which function's argument is <TAG>.
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here; see below to identify which function's argument is <TAG>.
    |
    = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
@@ -11,7 +11,7 @@ help: <TAG> was created by a SharedReadWrite retag at offsets [0x0..0x4]
    |
 LL |     let ptr = Box::into_raw(Box::new(0i32));
    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: <TAG> corresponds to this argument, which is still live:
+help: <TAG> corresponds to this argument, which must not be invalidated before the function returns:
   --> tests/fail/both_borrows/newtype_retagging.rs:LL:CC
    |
 LL | fn dealloc_while_running(_n: Newtype<'_>, dealloc: impl FnOnce()) {

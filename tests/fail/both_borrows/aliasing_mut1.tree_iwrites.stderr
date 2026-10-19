@@ -8,8 +8,8 @@ LL | fn safe(x: &mut i32, y: &mut i32) {
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> is foreign to the function argument tag <TAG> (i.e., it is not a child)
    = help: this reborrow (acting as a foreign write access) would cause the function argument tag <TAG> (currently Unique) to become Disabled
-   = help: but this tag is still in use as a function argument (is protected).
-   = help: Function argument tags must not become Disabled before the function returns.
+   = help: but this tag is still in use as a function argument (is protected)
+   = help: function argument tags must not become Disabled before the function returns
 help: the accessed tag <TAG> was created here
   --> tests/fail/both_borrows/aliasing_mut1.rs:LL:CC
    |
