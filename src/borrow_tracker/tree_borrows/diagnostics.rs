@@ -366,9 +366,9 @@ impl TbError<'_> {
                     format!(
                         "this {access} would cause the {conflicting_tag_name} tag {conflicting} (currently {before_disabled}) to become Disabled"
                     ),
-                    format!("but this tag is still in use as a function argument (is protected)."),
+                    format!("but this tag is still in use as a function argument (is protected)"),
                     format!(
-                        "Function argument tags must not become Disabled before the function returns."
+                        "function argument tags must not become Disabled before the function returns"
                     ),
                 ];
                 (title, details, conflicting_tag_name)
@@ -377,10 +377,10 @@ impl TbError<'_> {
                 let conflicting_tag_name = "function argument";
                 let details = vec![
                     format!(
-                        "the allocation of the accessed tag {accessed_str} also contains the {conflicting_tag_name} tag {conflicting}"
+                        "the allocation of the accessed tag {accessed_str} is also referenced by a {conflicting_tag_name} with tag {conflicting}"
                     ),
                     format!(
-                        "the {conflicting_tag_name} tag {conflicting} disallows deallocations, because the function to which it was an argument is still live."
+                        "when a function argument reference points to some memory, that memory cannot be freed before the function returns"
                     ),
                 ];
                 (title, details, conflicting_tag_name)

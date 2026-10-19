@@ -8,8 +8,8 @@ LL |     unsafe { ptr.write(0) };
    = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> (root of the allocation) is foreign to the function argument tag <TAG> (i.e., it is not a child)
    = help: this foreign write access would cause the function argument tag <TAG> (currently Unique) to become Disabled
-   = help: but this tag is still in use as a function argument (is protected).
-   = help: Function argument tags must not become Disabled before the function returns.
+   = help: but this tag is still in use as a function argument (is protected)
+   = help: function argument tags must not become Disabled before the function returns
 help: the accessed tag <TAG> was created here
   --> tests/fail/function_calls/return_pointer_aliasing_write.rs:LL:CC
    |

@@ -11,7 +11,7 @@ fn foo(a: &mut u32, y: *mut u32) -> u32 {
     *a = 1;
     let _b = &*a;
     unsafe { *y = 2 };
-    //~[stack]^ ERROR: /not granting access .* because that would remove .* which is in use by a function argument reference \(is strongly protected\)/
+    //~[stack]^ ERROR: /not granting access to tag .* because that would invalidate a function argument with tag .* \(that tag is strongly protected\)/
     //~[tree]| ERROR: /write access through .* is forbidden/
     return *a;
 }
