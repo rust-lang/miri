@@ -494,51 +494,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let socket = this.read_scalar(socket)?.to_i32()?;
-        let buffer_ptr = this.read_pointer(buffer)?;
-        let size_layout = this.libc_ty_layout("size_t");
-        let length: usize =
-            this.read_scalar(length)?.to_uint(size_layout.size)?.try_into().unwrap();
-        let mut flags = this.read_scalar(flags)?.to_i32()?;
-
-        // Get the file handle
-        let Some(fd) = this.machine.fds.get(socket) else {
-            return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
-        };
-
-        let Some(socket) = fd.as_unix().as_socket() else {
-            return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
-        };
-
-        let mut is_non_block = false;
-
-        // Interpret the flag. Every flag we recognize is "subtracted" from `flags`, so
-        // if there is anything left at the end, that's an unsupported flag.
-        if matches!(
-            this.tcx.sess.target.os,
-            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
-        ) {
-            // MSG_NOSIGNAL and MSG_DONTWAIT only exist on Linux, Android, FreeBSD,
-            // Solaris, and Illumos targets.
-            let msg_nosignal = this.eval_libc_i32("MSG_NOSIGNAL");
-            let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
-            if flags & msg_nosignal == msg_nosignal {
-                // This is only needed to ensure that no EPIPE signal is sent when
-                // trying to send into a stream which is no longer connected.
-                // Since we don't support signals, we can ignore this.
-                flags &= !msg_nosignal;
-            }
-            if flags & msg_dontwait == msg_dontwait {
-                flags &= !msg_dontwait;
-                is_non_block = true;
-            }
-        }
-
-        if flags != 0 {
-            throw_unsup_format!(
-                "send: flag {flags:#x} is unsupported, only MSG_NOSIGNAL and MSG_DONTWAIT are allowed",
-            );
-        }
+        let (socket, buffer_ptr, length, is_non_block) =
+            match this.parse_send_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
 
         let dest = dest.clone();
 
@@ -1228,5 +1188,74 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         throw_unsup_format!("getsockopt: option {option:#x} is unsupported for level IPPROTO_TCP");
+    }
+}
+
+impl<'tcx> EvalContextPrivExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Parse the shared arguments which can be passed to any send function
+    /// like `send` or `sendto`.
+    /// Returns a tuple containing the socket to which data should be sent,
+    /// the pointer to the data in memory, the amount of data which should be sent,
+    /// and whether the socket is non-blocking ([`true`]) or not ([`false`]).
+    fn parse_send_args(
+        &self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+    ) -> InterpResult<
+        'tcx,
+        Result<(FileDescriptionRef<dyn UnixSocketFileDescription>, Pointer, usize, bool), IoError>,
+    > {
+        let this = self.eval_context_ref();
+
+        let socket = this.read_scalar(socket)?.to_i32()?;
+        let buffer_ptr = this.read_pointer(buffer)?;
+        let size_layout = this.libc_ty_layout("size_t");
+        let length: usize =
+            this.read_scalar(length)?.to_uint(size_layout.size)?.try_into().unwrap();
+        let mut flags = this.read_scalar(flags)?.to_i32()?;
+
+        // Get the file handle
+        let Some(fd) = this.machine.fds.get(socket) else {
+            return interp_ok(Err(LibcError("EBADF")));
+        };
+
+        let Some(socket) = fd.as_unix().as_socket() else {
+            return interp_ok(Err(LibcError("ENOTSOCK")));
+        };
+
+        let mut is_non_block = false;
+
+        // Interpret the flag. Every flag we recognize is "subtracted" from `flags`, so
+        // if there is anything left at the end, that's an unsupported flag.
+        if matches!(
+            this.tcx.sess.target.os,
+            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
+        ) {
+            // MSG_NOSIGNAL and MSG_DONTWAIT only exist on Linux, Android, FreeBSD,
+            // Solaris, and Illumos targets.
+            let msg_nosignal = this.eval_libc_i32("MSG_NOSIGNAL");
+            let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
+            if flags & msg_nosignal == msg_nosignal {
+                // This is only needed to ensure that no EPIPE signal is sent when
+                // trying to send into a stream which is no longer connected.
+                // Since we don't support signals, we can ignore this.
+                flags &= !msg_nosignal;
+            }
+            if flags & msg_dontwait == msg_dontwait {
+                flags &= !msg_dontwait;
+                is_non_block = true;
+            }
+        }
+
+        if flags != 0 {
+            throw_unsup_format!(
+                "send: flag {flags:#x} is unsupported, only MSG_NOSIGNAL and MSG_DONTWAIT are allowed",
+            );
+        }
+
+        interp_ok(Ok((socket, buffer_ptr, length, is_non_block)))
     }
 }
