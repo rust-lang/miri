@@ -230,6 +230,18 @@ pub struct TreeBorrowsParams {
     pub precise_interior_mut: bool,
     /// Controls whether `&mut` function arguments are immediately activated with an implicit write.
     pub implicit_writes: bool,
+    /// Controls whether protectors have weak-memory behavior. This is the intended semantics but too slow currently.
+    pub protector_end_weak_memory: bool,
+}
+
+impl Default for TreeBorrowsParams {
+    fn default() -> Self {
+        Self {
+            precise_interior_mut: true,
+            implicit_writes: false,
+            protector_end_weak_memory: false,
+        }
+    }
 }
 
 impl BorrowTrackerMethod {

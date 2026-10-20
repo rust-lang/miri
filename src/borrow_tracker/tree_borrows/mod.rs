@@ -134,19 +134,27 @@ impl<'tcx> Tree {
     ) -> InterpResult<'tcx> {
         let span = machine.current_user_relevant_span();
 
-        Tree::with_release_clock(
-            |time| {
-                self.perform_protector_end_access(
-                    tag,
-                    global,
-                    time,
-                    alloc_id,
-                    &machine.threads,
-                    span,
-                )
-            },
-            machine,
-        )?;
+        let protector_end_weak_memory = global
+            .borrow()
+            .borrow_tracker_method()
+            .get_tree_borrows_params()
+            .protector_end_weak_memory;
+
+        fn cast<A, R, T: for<'a> FnOnce(Option<&'a A>) -> R>(t: T) -> T {
+            t
+        }
+
+        let handler = cast(|time: Option<&'_ _>| {
+            self.perform_protector_end_access(tag, global, time, alloc_id, &machine.threads, span)
+        });
+        if protector_end_weak_memory {
+            Tree::with_release_clock(handler, machine)?;
+        } else {
+            // If weak memory protectors are disabled, we set the `current_time` to `None`.
+            // This has the same effect as if data-race detection was disabled, and makes
+            // the protectors not have weak memory effects.
+            handler(None)?;
+        }
 
         self.update_exposure_for_protector_release(tag);
 

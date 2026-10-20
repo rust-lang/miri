@@ -1,5 +1,5 @@
 error: Undefined Behavior: write access through <TAG> (root of the allocation) at ALLOC[0x0] is forbidden
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL |     unsafe { *x = 42 };
    |              ^^^^^^^ Undefined Behavior occurred here
@@ -11,28 +11,28 @@ LL |     unsafe { *x = 42 };
    = help: protected tags must never be Disabled
    = help: The protector has already ended (in thread `unnamed-ID`), but this end has not yet happened-before the conflicting access; so this is also a data race!
 help: the accessed tag <TAG> was created here
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL |     let xptr = SendPtr(&raw mut x);
    |                        ^^^^^^^^^^
 help: the protected tag <TAG> was created here, in the initial state Reserved
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL | fn thread1_inner(x: &mut u8, comm: &Arc<AtomicI32>) {
    |                  ^
 help: the protector on <TAG> ended (in thread `unnamed-ID`) when this function returned:
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL | }
    |  ^
    = note: this is on thread `unnamed-ID`
    = note: stack backtrace:
            0: thread2
-               at tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+               at tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
            1: main::{closure#0}
-               at tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+               at tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
 note: the last function in that backtrace got called indirectly due to this code
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL |     let t2 = thread::spawn(move || thread2(xptr2, commr2));
    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

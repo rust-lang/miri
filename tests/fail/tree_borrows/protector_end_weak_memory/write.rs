@@ -1,4 +1,5 @@
 //@compile-flags:-Zmiri-deterministic-concurrency -Zmiri-tree-borrows
+//@[noaccess] compile-flags:-Zmiri-deterministic-concurrency -Zmiri-tree-borrows -Zmiri-tree-borrows-protector-end-weak-memory
 //@revisions: access noaccess
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};

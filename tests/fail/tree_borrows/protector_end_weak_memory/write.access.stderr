@@ -1,11 +1,11 @@
 error: Undefined Behavior: Data race detected between (1) non-atomic read on thread `unnamed-ID` and (2) non-atomic write on thread `unnamed-ID` at ALLOC
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL |     unsafe { *x = 42 };
    |              ^^^^^^^ (2) just happened here
    |
 help: and (1) occurred earlier here
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL |         let y = *x;
    |                 ^^
@@ -14,11 +14,11 @@ LL |         let y = *x;
    = note: this is on thread `unnamed-ID`
    = note: stack backtrace:
            0: thread2
-               at tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+               at tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
            1: main::{closure#0}
-               at tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+               at tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
 note: the last function in that backtrace got called indirectly due to this code
-  --> tests/fail/tree_borrows/protector-end-write-weak-memory.rs:LL:CC
+  --> tests/fail/tree_borrows/protector_end_weak_memory/write.rs:LL:CC
    |
 LL |     let t2 = thread::spawn(move || thread2(xptr2, commr2));
    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

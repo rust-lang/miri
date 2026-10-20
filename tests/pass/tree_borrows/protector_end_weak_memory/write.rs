@@ -1,5 +1,5 @@
 //@compile-flags:-Zmiri-deterministic-concurrency -Zmiri-tree-borrows
-//@revisions: access noaccess
+//@revisions: noaccess
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::thread;
@@ -22,15 +22,14 @@ fn miriwrite(data: &str) {
 
 fn thread1_inner(x: &mut u8, comm: &Arc<AtomicI32>) {
     miriwrite("Thread 1: protector active!\n");
-    *x = 42;
-    miriwrite("Thread 1: past write!\n");
     comm.store(1, Ordering::Release);
     miriwrite("Thread 1: past release!\n");
     thread::yield_now();
     if cfg!(access) {
-        *x = 43;
+        let y = *x;
+        miriwrite(&format!("Thread 1: pretend read -> {y}!\n"));
     }
-    miriwrite("Thread 1: pretend write just happened!\n");
+    miriwrite("Thread 1: pretend read just happened!\n");
 }
 
 fn thread1(x: SendPtr, comm: Arc<AtomicI32>) {
@@ -56,9 +55,8 @@ fn thread2(x: SendPtr, comm: Arc<AtomicI32>) {
         }
         thread::yield_now();
     }
-    miriwrite("Thread 2: about to load non-atomically!\n");
-    let xv = unsafe { *x }; //~ ERROR: /(Data race detected between \(1\) non-atomic write on thread `unnamed-[0-9]+` and \(2\) non-atomic read on thread `unnamed-[0-9]+`|read access through .* is forbidden)/
-    miriwrite(&format!("Thread 2: read {xv}!\n"));
+    miriwrite("Thread 2: about to store non-atomically!\n");
+    unsafe { *x = 42 };
     miriwrite("Thread 2: terminating!\n");
 }
 
