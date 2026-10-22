@@ -27,7 +27,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         match link_name.as_str() {
             // File related shims
             "pread64" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [fd, buf, count, offset] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *_, usize, libc::off64_t) -> isize),
                     (link_name, abi, args),
@@ -39,7 +38,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.read(fd, buf, count, Some(offset), dest)?;
             }
             "pwrite64" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [fd, buf, n, offset] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *_, usize, libc::off64_t) -> isize),
                     (link_name, abi, args),
