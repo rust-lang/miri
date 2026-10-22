@@ -250,6 +250,46 @@ fn maybe_sync_file(
     }
 }
 
+/// Removes the file at `path` on the host, with the semantics of `unlink`.
+#[rustfmt::skip] // work around https://github.com/rust-lang/rustfmt/issues/7045
+fn host_remove_file(path: &Path) -> io::Result<()> {
+    cfg_select! {
+        unix => fs::remove_file(path),
+        windows => {{
+            // This should be able to remove symlinks to dirs, but on Windows that requires
+            // `remove_dir`. Our work-around is racy but there's not a lot we can do about that.
+            // FIXME: maybe we can retry based on the error code?
+            use std::os::windows::fs::FileTypeExt;
+            let metadata = path.symlink_metadata();
+            if metadata.is_ok_and(|m| m.file_type().is_symlink_dir()) {
+                fs::remove_dir(path)
+            } else {
+                fs::remove_file(path)
+            }
+        }}
+    }
+}
+
+/// Removes the directory at `path` on the host, with the semantics of `rmdir`.
+#[rustfmt::skip] // work around https://github.com/rust-lang/rustfmt/issues/7045
+fn host_remove_dir(path: &Path) -> io::Result<()> {
+    cfg_select! {
+        unix => fs::remove_dir(path),
+        windows => {{
+            // This should *not* be able to remove symlinks to dirs, but on Windows it is. Our
+            // work-around is racy (it might change to being a directory symlink after we
+            // checked it), but there's not a lot we can do about that.
+            use std::os::windows::fs::FileTypeExt;
+            let metadata = path.symlink_metadata();
+            if metadata.is_ok_and(|m| m.file_type().is_symlink_dir()) {
+                Err(ErrorKind::NotADirectory.into())
+            } else {
+                fs::remove_dir(path)
+            }
+        }}
+    }
+}
+
 /// The host `FileTimes` that applies the given access and modification time updates.
 fn host_file_times_from_updates(access: TimeUpdate, modified: TimeUpdate) -> FileTimes {
     let mut filetimes = FileTimes::new();
@@ -795,21 +835,49 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
         }
 
-        #[rustfmt::skip] // work around https://github.com/rust-lang/rustfmt/issues/7045
-        let result = cfg_select! {
-            unix => fs::remove_file(path),
-            windows => {{
-                // This should be able to remove symlinks to dirs, but on Windows that requires
-                // `remove_dir`. Our work-around is racy but there's not a lot we can do about that.
-                // FIXME: maybe we can retry based on the error code?
-                use std::os::windows::fs::FileTypeExt;
-                let metadata = path.symlink_metadata();
-                if metadata.is_ok_and(|m| m.file_type().is_symlink_dir()) {
-                    fs::remove_dir(path)
-                } else {
-                    fs::remove_file(path)
-                }
-            }}
+        let result = host_remove_file(&path);
+        interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result.map(|()| 0))?))
+    }
+
+    fn unlinkat(
+        &mut self,
+        dirfd_op: &OpTy<'tcx>,
+        path_op: &OpTy<'tcx>,
+        flags_op: &OpTy<'tcx>,
+    ) -> InterpResult<'tcx, Scalar> {
+        let this = self.eval_context_mut();
+
+        let dirfd = this.read_scalar(dirfd_op)?.to_i32()?;
+        let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?.into_owned();
+        let flags = this.read_scalar(flags_op)?.to_i32()?;
+
+        // Reject if isolation is enabled.
+        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+            this.reject_in_isolation("`unlinkat`", reject_with)?;
+            return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+        }
+
+        // We only support `AT_REMOVEDIR`, which makes this behave like `rmdir`.
+        let remove_dir = if flags == 0 {
+            false
+        } else if flags == this.eval_libc_i32("AT_REMOVEDIR") {
+            true
+        } else {
+            throw_unsup_format!("unsupported flags for `unlinkat`: {flags:#x}")
+        };
+
+        let result = if path.is_absolute() || dirfd == this.eval_libc_i32("AT_FDCWD") {
+            // Either absolute path (dirfd is ignored) or relative to working directory.
+            if remove_dir { host_remove_dir(&path) } else { host_remove_file(&path) }
+        } else {
+            // relative to dirfd, which must be a directory handle
+            let Some(fd) = this.machine.fds.get(dirfd) else {
+                return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+            };
+            let Some(dir) = fd.downcast::<DirHandle>() else {
+                return this.set_errno_and_return_neg1_i32(LibcError("ENOTDIR"));
+            };
+            if remove_dir { dir.dir.remove_dir(&path) } else { dir.dir.remove_file(&path) }
         };
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result.map(|()| 0))?))
     }
@@ -1331,23 +1399,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
         }
 
-        #[rustfmt::skip] // work around https://github.com/rust-lang/rustfmt/issues/7045
-        let result = cfg_select! {
-            unix => fs::remove_dir(path),
-            windows => {{
-                // This should *not* be able to remove symlinks to dirs, but on Windows it is. Our
-                // work-around is racy (it might change to being a directory symlink after we
-                // checked it), but there's not a lot we can do about that.
-                use std::os::windows::fs::FileTypeExt;
-                let metadata = path.symlink_metadata();
-                if metadata.is_ok_and(|m| m.file_type().is_symlink_dir()) {
-                    return this.set_errno_and_return_neg1_i32(LibcError("ENOTDIR"));
-                } else {
-                    fs::remove_dir(path)
-                }
-            }}
-        };
-
+        let result = host_remove_dir(&path);
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result.map(|_| 0i32))?))
     }
 
