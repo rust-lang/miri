@@ -93,6 +93,9 @@ fn main() {
     test_pwrite::<libc::off_t>(libc::pwrite);
     #[cfg(any(target_os = "linux", target_os = "android"))]
     test_pwrite::<libc::off64_t>(libc::pwrite64);
+    test_lseek::<libc::off_t>(libc::lseek);
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    test_lseek::<libc::off64_t>(libc::lseek64);
     test_readlink();
     test_linkat();
 }
@@ -2001,6 +2004,46 @@ fn test_pwrite<T: From<i32>>(
 
     // The write should start at the provided byte offset.
     assert_eq!(&write_buffer[0..bytes_written], &read_buffer[OFFSET..(bytes_written + OFFSET)]);
+}
+
+/// Test repositioning the file offset.
+fn test_lseek<T: From<i32> + From<i8> + Ord + std::fmt::Debug>(
+    lseek: unsafe extern "C" fn(fd: libc::c_int, offset: T, whence: libc::c_int) -> T,
+) {
+    let file_contents = [1u8, 2, 3, 4, 5, 6];
+    let path = utils::prepare_with_content("miri-pass-libc-lseek.txt", &file_contents);
+    let cpath = utils::into_c_string(path);
+    let fd = errno_result(unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) }).unwrap();
+
+    // SEEK_SET: Offset relative to the start of the file.
+    assert_eq!(
+        errno_result(unsafe { lseek(fd, T::from(2i32), libc::SEEK_SET) }).unwrap(),
+        T::from(2i32)
+    );
+
+    // SEEK_CUR: Offset relative to the current position.
+    assert_eq!(
+        errno_result(unsafe { lseek(fd, T::from(1i32), libc::SEEK_CUR) }).unwrap(),
+        T::from(3i32)
+    );
+
+    // SEEK_END: Offset relative to the end of the file.
+    assert_eq!(
+        errno_result(unsafe { lseek(fd, T::from(-2i32), libc::SEEK_END) }).unwrap(),
+        T::from(4i32)
+    );
+
+    // invalid fd
+    let err = errno_result(unsafe { lseek(-1, T::from(2i32), libc::SEEK_SET) }).unwrap_err();
+    assert_eq!(err.raw_os_error().unwrap(), libc::EBADF);
+
+    // invalid offset + SEEK_SET
+    let err = errno_result(unsafe { lseek(fd, T::from(-1i32), libc::SEEK_SET) }).unwrap_err();
+    assert_eq!(err.raw_os_error().unwrap(), libc::EINVAL);
+
+    // invalid whence
+    let err = errno_result(unsafe { lseek(fd, T::from(2i32), 99) }).unwrap_err();
+    assert_eq!(err.raw_os_error().unwrap(), libc::EINVAL);
 }
 
 fn test_readlink() {

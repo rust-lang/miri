@@ -83,7 +83,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write(fd, buf, count, Some(offset), dest)?;
             }
             "lseek64" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [fd, offset, whence] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, libc::off64_t, i32) -> libc::off64_t),
                     (link_name, abi, args),
