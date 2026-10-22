@@ -23,7 +23,7 @@ fn test_getentropy() {
         errno_check(getentropy(buf1.as_mut_ptr() as *mut libc::c_void, buf1.len()));
         let error = errno_result(getentropy(buf2.as_mut_ptr() as *mut libc::c_void, buf2.len()))
             .unwrap_err();
-        assert_eq!(error.raw_os_error(), Some(libc::EIO));
+        assert_eq!(error.raw_os_error().unwrap(), libc::EIO);
     }
 }
 
