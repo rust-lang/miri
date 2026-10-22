@@ -10,14 +10,15 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::Path;
 use std::{fs, mem, ptr};
 
-#[path = "../../utils/mod.rs"]
+#[path = "../utils/mod.rs"]
 mod utils;
 
 use windows_sys::Wdk::Storage::FileSystem::{NtReadFile, NtWriteFile};
 use windows_sys::Win32::Foundation::{
     CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS,
-    ERROR_IO_DEVICE, FALSE, GENERIC_READ, GENERIC_WRITE, GetLastError, RtlNtStatusToDosError,
-    STATUS_ACCESS_DENIED, STATUS_IO_DEVICE_ERROR, STATUS_SUCCESS, SetLastError,
+    ERROR_FILE_EXISTS, ERROR_IO_DEVICE, FALSE, GENERIC_READ, GENERIC_WRITE, GetLastError,
+    RtlNtStatusToDosError, STATUS_ACCESS_DENIED, STATUS_IO_DEVICE_ERROR, STATUS_SUCCESS,
+    SetLastError,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_ALWAYS, CREATE_NEW, CreateFileW, DeleteFileW,
@@ -74,6 +75,19 @@ unsafe fn test_create_dir_file() {
     if CloseHandle(handle) == 0 {
         panic!("Failed to close file")
     };
+
+    // Without the FILE_FLAG_BACKUP_SEMANTICS, this does not work.
+    let handle = CreateFileW(
+        raw_path.as_ptr(),
+        GENERIC_READ,
+        FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+        ptr::null_mut(),
+        OPEN_EXISTING,
+        0,
+        ptr::null_mut(),
+    );
+    assert_eq!(handle.addr(), usize::MAX);
+    assert_eq!(GetLastError(), ERROR_ACCESS_DENIED);
 }
 
 unsafe fn test_create_normal_file() {
@@ -89,6 +103,7 @@ unsafe fn test_create_normal_file() {
         ptr::null_mut(),
     );
     assert_ne!(handle.addr(), usize::MAX, "CreateFileW Failed: {}", GetLastError());
+    assert_eq!(GetLastError(), 0);
     let mut info = std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>();
     if GetFileInformationByHandle(handle, &mut info) == 0 {
         panic!("Failed to get file information: {}", GetLastError())
@@ -106,10 +121,11 @@ unsafe fn test_create_normal_file() {
         FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
         ptr::null_mut(),
         CREATE_NEW,
-        0,
+        FILE_FLAG_OPEN_REPARSE_POINT,
         ptr::null_mut(),
     );
     assert_eq!(handle.addr(), usize::MAX, "CreateFileW did not fail");
+    assert_eq!(GetLastError(), ERROR_FILE_EXISTS);
 
     // Test metadata-only handle
     let handle = CreateFileW(
