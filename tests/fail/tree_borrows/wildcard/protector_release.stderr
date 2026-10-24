@@ -12,7 +12,7 @@ help: the accessed tag <TAG> was created here, in the initial state Reserved
    |
 LL |         let ref6 = unsafe { &mut *ref3.get() };
    |                             ^^^^^^^^^^^^^^^^
-help: the accessed tag <TAG> later transitioned to Disabled due to a protector release (acting as a foreign write access) on every location previously accessed by this tag
+help: the accessed tag <TAG> later transitioned to Disabled due to a protector release (ending the restrictions for function arguments upon return, acting as a foreign write access) on every location previously accessed by this tag
   --> tests/fail/tree_borrows/wildcard/protector_release.rs:LL:CC
    |
 LL |     };

@@ -364,7 +364,10 @@ impl<'history, 'ecx, 'tcx> DiagnosticCx<'history, 'ecx, 'tcx> {
             })
             .map(|protection| {
                 let protected_tag = protection.tag;
-                (format!("{protected_tag:?} is this argument"), protection.span)
+                (
+                    format!("{protected_tag:?} corresponds to this argument, which must not be invalidated before the function returns:"),
+                    protection.span,
+                )
             });
 
         Some(TagHistory { created, invalidated, protected })
@@ -422,25 +425,39 @@ impl<'history, 'ecx, 'tcx> DiagnosticCx<'history, 'ecx, 'tcx> {
         item: &Item,
         kind: ProtectorKind,
     ) -> InterpErrorKind<'tcx> {
-        let protected = match kind {
-            ProtectorKind::WeakProtector => "weakly protected",
-            ProtectorKind::StrongProtector => "strongly protected",
+        let prot = match kind {
+            ProtectorKind::WeakProtector => "weakly",
+            ProtectorKind::StrongProtector => "strongly",
         };
         match self.operation {
             Operation::Dealloc(DeallocOp { tag }) =>
                 err_sb_ub(
-                    format!("deallocating while item {item:?} is {protected} (i.e. it is in use as a function argument)",),
-                    vec!["This deallocation would invalidate a reference in function argument position, which is forbidden.".to_string(),
-                               format!("Reference {:?} was used as a function argument and must remain dereferenceable for the entire function.", item.tag())],
+                    format!(
+                        "deallocating memory that is referenced by a function argument with tag {:?} (that tag is {prot} protected)",
+                        item.tag()
+                    ),
+                    vec![
+                        format!(
+                            "Undefined Behavior occurred here; see below to identify which function's argument is {:?}.",
+                            item.tag()
+                        ),
+                        format!(
+                            "when a function argument reference points to some memory, that memory cannot be freed before the function returns"
+                        ),
+                    ],
                     tag.and_then(|tag| self.get_logs_relevant_to(tag, Some(item.tag()))),
                 ),
             Operation::Retag(RetagOp { orig_tag: tag, .. })
             | Operation::Access(AccessOp { tag, .. }) =>
                 err_sb_ub(
                     format!(
-                        "not granting access to tag {tag:?} because that would remove {item:?} which is {protected} (i.e. it is in use as a function argument)",
+                        "not granting access to tag {tag:?} because that would invalidate a function argument with tag {:?} (that tag is {prot} protected)",
+                        item.tag()
                     ),
-                    vec![],
+                    vec![format!(
+                        "Undefined Behavior occurred here; see below to identify which function's argument is {:?}.",
+                        item.tag()
+                    )],
                     tag.and_then(|tag| self.get_logs_relevant_to(tag, Some(item.tag()))),
                 ),
         }
