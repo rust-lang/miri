@@ -5,25 +5,24 @@ mod phases;
 mod setup;
 mod util;
 
-use std::{env, iter};
+use std::env;
 
+use crate::arg::Args;
 use crate::phases::*;
 use crate::util::show_error;
 
 /// Returns `true` if our flags look like they may be for rustdoc, i.e., this is cargo calling us to
 /// be rustdoc. It's hard to be sure as cargo does not have a RUSTDOC_WRAPPER or an env var that
 /// would let us get a clear signal.
-fn looks_like_rustdoc() -> bool {
+fn looks_like_rustdoc(args: &Args) -> bool {
     // The `--test-run-directory` flag only exists for rustdoc and cargo always passes it. Perfect!
-    env::args().any(|arg| arg == "--test-run-directory")
+    args.iter().any(|arg| arg == "--test-run-directory")
 }
 
 fn main() {
     // Rustc does not support non-UTF-8 arguments so we make no attempt either.
     // (We do support non-UTF-8 environment variables though.)
-    let mut args = env::args();
-    // Skip binary name.
-    args.next().unwrap();
+    let mut args = Args::from_env();
 
     // Dispatch to `cargo-miri` phase. Here is a rough idea of "who calls who".
     //
@@ -63,61 +62,59 @@ fn main() {
         return;
     }
 
-    let Some(first) = args.next() else {
+    if args.first().is_none() {
         show_error!(
             "`cargo-miri` called without first argument; please only invoke this binary through `cargo miri`"
-        )
-    };
+        );
+    }
 
     // The way rustdoc invokes rustc is indistinguishable from the way cargo invokes rustdoc by the
     // arguments alone. `phase_cargo_rustdoc` sets this environment variable to let us disambiguate.
     if env::var_os("MIRI_CALLED_FROM_RUSTDOC").is_some() {
         // ...however, we then also see this variable when rustdoc invokes us as the testrunner!
         // In that case the first argument is `runner` and there are no more arguments.
-        match first.as_str() {
-            "runner" => phase_runner(args, RunnerPhase::Rustdoc),
-            flag if flag.starts_with("--") || flag.starts_with("@") => {
-                // This is probably rustdoc invoking us to build the test. But we need to get `first`
-                // "back onto the iterator", it is some part of the rustc invocation.
-                phase_rustc(iter::once(first).chain(args), RustcPhase::Rustdoc);
-            }
-            _ => {
-                show_error!(
-                    "`cargo-miri` failed to recognize which phase of the build process this is, please report a bug.\n\
-                    We are inside MIRI_CALLED_FROM_RUSTDOC.\n\
-                    The command-line arguments were: {:#?}",
-                    Vec::from_iter(env::args()),
-                );
-            }
+        if args.first() == Some("runner") {
+            args.consume_first();
+            phase_runner(args, RunnerPhase::Rustdoc);
+        } else if args.first().is_some_and(|flag| flag.starts_with("--") || flag.starts_with('@')) {
+            // This is probably rustdoc invoking us to build the test.
+            phase_rustc(args, RustcPhase::Rustdoc);
+        } else {
+            show_error!(
+                "`cargo-miri` failed to recognize which phase of the build process this is, please report a bug.\n\
+                We are inside MIRI_CALLED_FROM_RUSTDOC.\n\
+                The command-line arguments were: {:#?}",
+                args.as_slice(),
+            );
         }
 
         return;
     }
 
-    match first.as_str() {
-        "miri" => phase_cargo_miri(args),
-        "runner" => phase_runner(args, RunnerPhase::Cargo),
-        arg if arg == env::var("RUSTC").unwrap_or_else(|_| {
-            show_error!(
-                "`cargo-miri` called without RUSTC set; please only invoke this binary through `cargo miri`"
-            )
-        }) => {
-            // If the first arg is equal to the RUSTC env variable (which should be set at this
-            // point), then we need to behave as rustc. This is the somewhat counter-intuitive
-            // behavior of having both RUSTC and RUSTC_WRAPPER set
-            // (see https://github.com/rust-lang/cargo/issues/10886).
-            phase_rustc(args, RustcPhase::Build)
-        }
-        _ if looks_like_rustdoc() => {
-            // This is probably rustdoc. But we need to get `first` "back onto the iterator",
-            // it is some part of the rustdoc invocation.
-            phase_rustdoc(iter::once(first).chain(args));
-        }
-        _ => {
-            show_error!(
-                "`cargo-miri` failed to recognize which phase of the build process this is, please report a bug.\nThe command-line arguments were: {:#?}",
-                Vec::from_iter(env::args()),
-            );
-        }
+    if args.first() == Some("miri") {
+        args.consume_first();
+        phase_cargo_miri(args);
+    } else if args.first() == Some("runner") {
+        args.consume_first();
+        phase_runner(args, RunnerPhase::Cargo);
+    } else if args.first() == Some(&env::var("RUSTC").unwrap_or_else(|_| {
+        show_error!(
+            "`cargo-miri` called without RUSTC set; please only invoke this binary through `cargo miri`"
+        )
+    })) {
+        // If the first arg is equal to the RUSTC env variable (which should be set at this
+        // point), then we need to behave as rustc. This is the somewhat counter-intuitive
+        // behavior of having both RUSTC and RUSTC_WRAPPER set
+        // (see https://github.com/rust-lang/cargo/issues/10886).
+        args.consume_first();
+        phase_rustc(args, RustcPhase::Build);
+    } else if looks_like_rustdoc(&args) {
+        // This is probably rustdoc.
+        phase_rustdoc(args);
+    } else {
+        show_error!(
+            "`cargo-miri` failed to recognize which phase of the build process this is, please report a bug.\nThe command-line arguments were: {:#?}",
+            args.as_slice(),
+        );
     }
 }
