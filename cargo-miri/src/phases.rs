@@ -114,12 +114,12 @@ pub fn phase_cargo_miri(mut args: Args) {
             miri_for_host()
         )
     });
-    let mut targets = args.get_arg_flag_values("--target").map(String::from).collect::<Vec<_>>();
+    let mut targets = args.get_arg_flag_values("--target").collect::<Vec<_>>();
     // If `targets` is empty, we need to add a `--target $HOST` flag ourselves, and also ensure
     // that the host target is indeed setup.
     let target_flag = if targets.is_empty() {
         let host = &rustc_version.host;
-        targets.push(host.clone());
+        targets.push(host);
         Some(host)
     } else {
         // We don't need to add a `--target` flag, we just forward the user's flags.
@@ -138,7 +138,7 @@ pub fn phase_cargo_miri(mut args: Args) {
 
     for target in &targets {
         // We always setup.
-        setup(&subcommand, target.as_str(), &rustc_version, verbose, quiet, &args);
+        setup(&subcommand, target, &rustc_version, verbose, quiet, &args);
     }
     let miri_sysroot = get_sysroot_dir();
 
@@ -553,7 +553,6 @@ pub fn phase_runner(mut binary_args: Args, phase: RunnerPhase) {
             "file {:?} not found or `cargo-miri` invoked incorrectly; please only invoke this binary through `cargo miri`", binary
         ));
     let file = BufReader::new(file);
-    let binary_args = binary_args.into_vec();
 
     let Ok(info) = serde_json::from_reader::<_, CrateRunInfo>(file) else {
         // Sometimes cargo invokes us on proc macro tests even though those are actual binaries.
@@ -561,7 +560,7 @@ pub fn phase_runner(mut binary_args: Args, phase: RunnerPhase) {
         // just run the file as a binary.
         if fs::exists(format!("{binary}.proc-macro-test")).is_ok_and(|b| b) {
             let mut cmd = Command::new(&binary);
-            cmd.args(&binary_args);
+            cmd.args(binary_args);
             exec(cmd);
         }
         show_error!("file {binary:?} contains outdated or invalid JSON; try `cargo clean`")
@@ -631,7 +630,7 @@ pub fn phase_runner(mut binary_args: Args, phase: RunnerPhase) {
 
     // Then pass binary arguments.
     cmd.arg("--");
-    cmd.args(&binary_args);
+    cmd.args(binary_args);
 
     // Make sure we use the build-time working directory for interpreting Miri/rustc arguments.
     // But then we need to switch to the run-time one, which we instruct Miri to do by setting `MIRI_CWD`.

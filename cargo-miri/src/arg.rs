@@ -25,10 +25,6 @@ impl Args {
         self.args.iter().map(String::as_str)
     }
 
-    pub fn into_vec(self) -> Vec<String> {
-        self.args
-    }
-
     pub fn first(&self) -> Option<&str> {
         self.args.first().map(String::as_str)
     }
@@ -236,7 +232,7 @@ mod tests {
         assert_eq!(args.consume_first(), Some("--flag".into()));
         assert_eq!(args.first(), None);
         assert_eq!(args.consume_first(), None);
-        assert_eq!(args.into_vec(), Vec::<String>::new());
+        assert!(args.into_iter().next().is_none());
     }
 
     #[test]
