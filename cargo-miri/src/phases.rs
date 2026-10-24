@@ -60,23 +60,25 @@ pub fn phase_cargo_miri(mut args: Args) {
     // Require a subcommand before any flags.
     // We cannot know which of those flags take arguments and which do not,
     // so we cannot detect subcommands later.
-    let Some(subcommand) = args.first() else {
+    let help = args.has_arg_flag("--help") || args.has_arg_flag("-h");
+    let version = args.has_arg_flag("--version") || args.has_arg_flag("-V");
+    let Some(subcommand) = args.consume_first() else {
         show_error!("`cargo miri` needs to be called with a subcommand (`run`, `test`, `clean`)");
     };
-    let subcommand = match subcommand {
+    let subcommand = match &*subcommand {
         "setup" => MiriCommand::Setup,
-        "test" | "t" | "run" | "r" | "nextest" => MiriCommand::Forward(subcommand.to_owned()),
+        "test" | "t" | "run" | "r" | "nextest" => MiriCommand::Forward(subcommand),
         "clean" => MiriCommand::Clean,
         // For use by the `./miri test` dependency builder.
         "build" if env::var_os("MIRI_BUILD_TEST_DEPS").is_some() =>
             MiriCommand::Forward("build".into()),
         _ => {
             // Check for version and help flags.
-            if args.has_arg_flag("--help") || args.has_arg_flag("-h") {
+            if help {
                 show_help();
                 return;
             }
-            if args.has_arg_flag("--version") || args.has_arg_flag("-V") {
+            if version {
                 show_version();
                 return;
             }
@@ -85,8 +87,7 @@ pub fn phase_cargo_miri(mut args: Args) {
             )
         }
     };
-    args.consume_first();
-    if args.has_arg_flag("--help") || args.has_arg_flag("-h") {
+    if help {
         match subcommand {
             MiriCommand::Forward(verb) => {
                 println!("`cargo miri {verb}` supports the same flags as `cargo {verb}`:\n");
@@ -346,28 +347,15 @@ pub fn phase_rustc(args: Args, phase: RustcPhase) {
 
     // Ensure we show an error if we encounter an argfile, rather than randomly misbehvaing.
     // We know rustdoc doesn't put anything important in the argfiles so we can ignore them there.
-    if phase != RustcPhase::Rustdoc {
-        for arg in args.iter() {
-            if arg.starts_with('@') {
-                show_error!(
-                    "cargo uses an argfile to invoke rustc, which is not supported by cargo-miri"
-                );
-            }
-        }
+    if phase != RustcPhase::Rustdoc && args.iter().any(|arg| arg.starts_with('@')) {
+        show_error!("cargo uses an argfile to invoke rustc, which is not supported by cargo-miri");
     }
 
     let verbose = env::var("MIRI_VERBOSE")
         .map_or(0, |verbose| verbose.parse().expect("verbosity flag must be an integer"));
     let target_crate = is_target_crate(&args);
-    let runnable_crate = is_runnable_crate(&args);
 
-    if runnable_crate && target_crate {
-        assert!(
-            phase != RustcPhase::Setup,
-            "there should be no interpretation during sysroot build"
-        );
-        let inside_rustdoc = phase == RustcPhase::Rustdoc;
-
+    let store_json = |info: &CrateRunInfo| {
         if args.get_arg_flag_value("--emit").unwrap_or_default().split(',').any(|e| e == "dep-info")
         {
             // Create a stub .d file to stop Cargo from "rebuilding" the crate:
@@ -388,21 +376,30 @@ pub fn phase_rustc(args: Args, phase: RustcPhase) {
             File::create(dep_info_name).expect("failed to create fake .d file");
         }
 
-        let filenames = out_filenames(&args);
-
-        // This is the binary or test crate that we want to interpret under Miri.
-        // But we cannot run it here, as cargo invoked us as a compiler -- our stdin and stdout are not
-        // like we want them.
-        // Instead of compiling, we write JSON into the output file with all the relevant command-line flags
-        // and environment variables; this is used when cargo calls us again in the CARGO_TARGET_RUNNER phase.
-        let info = CrateRunInfo::collect(args, inside_rustdoc);
-
-        for filename in filenames {
+        for filename in out_filenames(&args) {
             if verbose > 0 {
                 eprintln!("[cargo-miri rustc] writing run info to `{}`", filename.display());
             }
             info.store(&filename);
         }
+    };
+
+    let runnable_crate = is_runnable_crate(&args);
+
+    if runnable_crate && target_crate {
+        assert!(
+            phase != RustcPhase::Setup,
+            "there should be no interpretation during sysroot build"
+        );
+        let inside_rustdoc = phase == RustcPhase::Rustdoc;
+        // This is the binary or test crate that we want to interpret under Miri.
+        // But we cannot run it here, as cargo invoked us as a compiler -- our stdin and stdout are not
+        // like we want them.
+        // Instead of compiling, we write JSON into the output file with all the relevant command-line flags
+        // and environment variables; this is used when cargo calls us again in the CARGO_TARGET_RUNNER phase.
+        let info = CrateRunInfo::collect(args.iter().map(String::from), inside_rustdoc);
+
+        store_json(&info);
 
         // Rustdoc expects us to exit with an error code if the test is marked as `compile_fail`,
         // just creating the JSON file is not enough: we need to detect syntax errors,

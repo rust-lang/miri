@@ -37,8 +37,8 @@ pub struct CrateRunInfo {
 
 impl CrateRunInfo {
     /// Gather all the information we need.
-    pub fn collect(args: impl IntoIterator<Item = String>, capture_stdin: bool) -> Self {
-        let args = args.into_iter().collect();
+    pub fn collect(args: impl Iterator<Item = String>, capture_stdin: bool) -> Self {
+        let args = args.collect();
         let env = env::vars_os()
             .filter(|(var, _val)| {
                 // We only need to bother with env vars cargo actually sets.

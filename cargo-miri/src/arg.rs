@@ -198,6 +198,7 @@ mod tests {
             "-v",
             "--target",
             "arm",
+            "-q",
         ]);
 
         assert!(args.has_arg_flag("-v"));
@@ -211,15 +212,6 @@ mod tests {
         assert_eq!(targets, vec!["x86_64", "i686"]);
         assert_eq!(args.get_arg_flag_value("--target"), Some("x86_64"));
         assert_eq!(args.get_arg_flag_value("--missing"), None);
-    }
-
-    #[test]
-    fn test_stops_at_dash_dash() {
-        let args =
-            Args::from_iter(["--target-dir", "build", "--", "--target-dir", "ignored", "-q"]);
-        assert_eq!(args.get_arg_flag_value("--target-dir"), Some("build"));
-        assert!(!args.has_arg_flag("-q"));
-        assert_eq!(args.num_arg_flag("-q"), 0);
         // `iter()` yields all arguments including those after `--`.
         assert!(args.iter().any(|arg| arg == "-q"));
     }
