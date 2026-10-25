@@ -26,6 +26,9 @@ pub enum UnblockKind {
     Ready,
     /// The operation did not complete within its specified duration.
     TimedOut,
+    /// The thread woke up without a matching wake operation. Only futex waiters receive this;
+    /// see `-Zmiri-spurious-wakeup-rate`.
+    Spurious,
 }
 
 /// Type alias for unblock callbacks, i.e. machine callbacks invoked when
@@ -921,6 +924,32 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         interp_ok(min_wait_time)
+    }
+
+    /// Spuriously wakes up each thread blocked on a futex with probability `spurious_wakeup_rate`.
+    fn unblock_spurious_futex_waiters(&mut self) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let mut callbacks = Vec::new();
+        for (id, thread) in this.machine.threads.threads.iter_enumerated_mut() {
+            if thread.is_blocked_on(BlockReason::Futex)
+                && this.machine.rng.get_mut().random_bool(this.machine.spurious_wakeup_rate)
+            {
+                // Take ownership of the callback, same as `unblock_expired_deadlines` does,
+                // so we don't keep a borrow of `threads` alive past this loop.
+                let old_state = mem::replace(&mut thread.state, ThreadState::Enabled);
+                let ThreadState::Blocked { callback, .. } = old_state else { unreachable!() };
+                callbacks.push((id, callback));
+            }
+        }
+
+        for (thread, callback) in callbacks {
+            let old_thread = this.machine.threads.set_active_thread(thread);
+            callback.call(this, UnblockKind::Spurious)?;
+            this.machine.threads.set_active_thread(old_thread);
+        }
+
+        interp_ok(())
     }
 
     #[inline]

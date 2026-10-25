@@ -1,4 +1,7 @@
 //@ignore-target: apple # park_timeout on macOS uses the system clock
+// This test checks the exact sleep time, so Miri's spurious wakeups must stay disabled: they
+// would make `park_timeout` return early.
+//@compile-flags: -Zmiri-spurious-wakeup-rate=0
 use std::thread;
 use std::time::{Duration, Instant};
 

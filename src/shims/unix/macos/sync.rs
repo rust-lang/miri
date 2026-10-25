@@ -259,7 +259,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                     |ecx, unblock: UnblockKind| {
                         match unblock {
-                            UnblockKind::Ready => {
+                            UnblockKind::Ready | UnblockKind::Spurious => {
                                 let remaining = futex_ref.waiters().try_into().unwrap();
                                 ecx.write_scalar(Scalar::from_i32(remaining), &dest)
                             }
@@ -523,6 +523,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     match unblock {
                         UnblockKind::Ready => ecx.write_int(0, &dest),
                         UnblockKind::TimedOut => ecx.write_int(/* KERN_OPERATION_TIMED_OUT */ 49, &dest),
+                        UnblockKind::Spurious =>
+                            unreachable!("semaphore waiters never receive spurious wakeups"),
                     }
                 }
             ),

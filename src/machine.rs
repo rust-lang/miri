@@ -624,6 +624,10 @@ pub struct MiriMachine<'tcx> {
     /// The probability of the active thread being preempted at the end of each basic block.
     pub(crate) preemption_rate: f64,
 
+    /// The probability of a blocked futex waiter being woken up each time the scheduler picks
+    /// the next thread to run.
+    pub(crate) spurious_wakeup_rate: f64,
+
     /// If `Some`, we will report the current stack every N basic blocks.
     pub(crate) report_progress: Option<u32>,
     // The total number of blocks that have been executed.
@@ -810,6 +814,7 @@ impl<'tcx> MiriMachine<'tcx> {
             check_alignment: config.check_alignment,
             cmpxchg_weak_failure_rate: config.cmpxchg_weak_failure_rate,
             preemption_rate: config.preemption_rate,
+            spurious_wakeup_rate: config.spurious_wakeup_rate,
             report_progress: config.report_progress,
             basic_block_count: 0,
             monotonic_clock: MonotonicClock::new(config.isolated_op == IsolatedOp::Allow),
@@ -1061,6 +1066,7 @@ impl VisitProvenance for MiriMachine<'_> {
             check_alignment: _,
             cmpxchg_weak_failure_rate: _,
             preemption_rate: _,
+            spurious_wakeup_rate: _,
             report_progress: _,
             basic_block_count: _,
             native_lib: _,

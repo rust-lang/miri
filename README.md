@@ -333,7 +333,8 @@ environment variable. We first document the most relevant and most commonly used
   concurrency-related decisions. Therefore, Miri cannot find bugs that only occur under some
   specific circumstances, but Miri's behavior will also be more stable across versions and targets.
   This is equivalent to `-Zmiri-fixed-schedule -Zmiri-compare-exchange-weak-failure-rate=0.0
-  -Zmiri-address-reuse-cross-thread-rate=0.0 -Zmiri-disable-weak-memory-emulation`.
+  -Zmiri-address-reuse-cross-thread-rate=0.0 -Zmiri-spurious-wakeup-rate=0.0
+  -Zmiri-disable-weak-memory-emulation`.
 * `-Zmiri-disable-isolation` disables host isolation. As a consequence,
   the program has access to host resources such as environment variables, file
   systems, and randomness.
@@ -497,6 +498,10 @@ to Miri failing to detect cases of undefined behavior in a program.
   thread will be preempted. The default is `0.01` (i.e., 1%). Setting this to `0` disables
   preemption. Note that even without preemption, the schedule is still non-deterministic:
   if a thread blocks or yields, the next thread is chosen randomly.
+* `-Zmiri-spurious-wakeup-rate` configures the probability that a thread blocked on a futex-based
+  primitive (such as `std::thread::park`/`park_timeout`, or a raw futex syscall) wakes up even
+  though nobody woke it. The default is `0.01` (i.e., 1%). Setting this to `0` disables spurious
+  wakeups. The platform APIs allow spurious wakeups, so correct programs should handle them.
 * `-Zmiri-provenance-gc=<blocks>` configures how often the pointer provenance garbage collector runs.
   The default is to search for and remove unreachable provenance once every `10000` basic blocks. Setting
   this to `0` disables the garbage collector, which causes some programs to have explosive memory

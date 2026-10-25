@@ -157,10 +157,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 dest: MPlaceTy<'tcx>,
                             }
                             |ecx, unblock: UnblockKind| match unblock {
-                                UnblockKind::Ready => {
+                                UnblockKind::Ready | UnblockKind::Spurious => {
                                     // From the manual:
                                     // If successful, all requests, except UMTX_SHM_CREAT and UMTX_SHM_LOOKUP
                                     // sub-requests of the UMTX_OP_SHM request, will return zero.
+                                    // A spurious wakeup is indistinguishable from a real one here.
                                     ecx.write_int(0, &dest)
                                 }
                                 UnblockKind::TimedOut => {

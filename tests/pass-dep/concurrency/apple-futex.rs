@@ -1,6 +1,14 @@
 //@only-target: darwin
+//@revisions: default spurious
 //@compile-flags: -Zmiri-fixed-schedule
-//@run-native
+// The regular tests check exact wake/timeout behavior, so they need spurious wakeups disabled.
+// This is already the default; we set it explicitly so the tests keep working if the default
+// changes.
+//@[default]compile-flags: -Zmiri-spurious-wakeup-rate=0
+//@[default]run-native
+// Make every blocked futex waiter wake up spuriously at the next scheduling point.
+// These tests only make sense under Miri: natively, a futex wait that nobody wakes would hang.
+//@[spurious]compile-flags: -Zmiri-spurious-wakeup-rate=1.0
 
 use std::time::{Duration, Instant};
 use std::{io, ptr, sync, thread};
@@ -272,13 +280,90 @@ fn param_mismatch() {
     });
 }
 
+fn spurious_wait_returns_without_wake() {
+    let futex: i32 = 0;
+
+    // Nobody will ever wake us up, but with a spurious wakeup rate of 1.0 we
+    // still return successfully, with no other waiters remaining.
+    unsafe {
+        assert_eq!(
+            libc::os_sync_wait_on_address(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                0,
+                size_of::<i32>(),
+                libc::OS_SYNC_WAIT_ON_ADDRESS_NONE,
+            ),
+            0,
+        );
+    }
+}
+
+fn spurious_expired_deadline_times_out() {
+    // Get the current monotonic timestamp. By the time we wait, this deadline has already passed.
+    #[allow(deprecated)]
+    let deadline = unsafe { libc::mach_absolute_time() };
+
+    let futex: i32 = 0;
+
+    // Expired deadlines are handled before spurious wakeups, so we must time out.
+    unsafe {
+        assert_eq!(
+            libc::os_sync_wait_on_address_with_deadline(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                0,
+                size_of::<i32>(),
+                libc::OS_SYNC_WAIT_ON_ADDRESS_NONE,
+                libc::OS_CLOCK_MACH_ABSOLUTE_TIME,
+                deadline,
+            ),
+            -1,
+        );
+        assert_eq!(io::Error::last_os_error().raw_os_error().unwrap(), libc::ETIMEDOUT);
+    }
+}
+
+fn spurious_wakeup_removes_waiter() {
+    let futex: i32 = 0;
+
+    unsafe {
+        assert_eq!(
+            libc::os_sync_wait_on_address(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                0,
+                size_of::<i32>(),
+                libc::OS_SYNC_WAIT_ON_ADDRESS_NONE,
+            ),
+            0,
+        );
+    }
+
+    // We are no longer waiting, so there is nobody left to wake.
+    unsafe {
+        assert_eq!(
+            libc::os_sync_wake_by_address_any(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                size_of::<i32>(),
+                libc::OS_SYNC_WAKE_BY_ADDRESS_NONE
+            ),
+            -1
+        );
+        assert_eq!(io::Error::last_os_error().raw_os_error().unwrap(), libc::ENOENT);
+    }
+}
+
 fn main() {
-    wake_nobody();
-    wake_dangling();
-    wait_wrong_val();
-    wait_timeout();
-    wait_absolute_timeout();
-    wait_wake();
-    wait_wake_multiple();
-    param_mismatch();
+    if cfg!(spurious) {
+        spurious_wait_returns_without_wake();
+        spurious_expired_deadline_times_out();
+        spurious_wakeup_removes_waiter();
+    } else {
+        wake_nobody();
+        wake_dangling();
+        wait_wrong_val();
+        wait_timeout();
+        wait_absolute_timeout();
+        wait_wake();
+        wait_wake_multiple();
+        param_mismatch();
+    }
 }

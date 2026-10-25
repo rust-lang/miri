@@ -114,6 +114,11 @@ trait EvalContextPrivExt<'tcx>: MiriInterpCxExt<'tcx> {
         // <https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_timedwait.html>
         let potential_sleep_time = ecx.unblock_expired_deadlines()?;
 
+        // If spurious wakeups are enabled, randomly wakeup futexes here
+        if ecx.machine.spurious_wakeup_rate != 0.0 {
+            ecx.unblock_spurious_futex_waiters()?;
+        }
+
         let thread_manager = &mut ecx.machine.threads;
         let rng = ecx.machine.rng.get_mut();
 
