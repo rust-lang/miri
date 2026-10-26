@@ -62,6 +62,8 @@ fn main() {
     test_fallocate::<libc::off64_t>(libc::fallocate64);
     #[cfg(target_os = "linux")]
     test_sync_file_range();
+    #[cfg(target_os = "linux")]
+    test_copy_file_range();
     test_opendir_closedir();
     test_readdir();
     test_dirfd();
@@ -1072,6 +1074,55 @@ fn test_sync_file_range() {
     drop(file);
 
     fs::remove_file(&path).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+fn test_copy_file_range() {
+    use std::io::{Seek, SeekFrom};
+
+    let copy = |fd_in: i32, fd_out: i32, len: usize| {
+        errno_result(unsafe {
+            libc::copy_file_range(fd_in, ptr::null_mut(), fd_out, ptr::null_mut(), len, 0)
+        })
+    };
+
+    let src_path =
+        utils::prepare_with_content("miri_test_libc_copy_file_range_src.txt", b"Hello, World!\n");
+    let dst_path = utils::prepare("miri_test_libc_copy_file_range_dst.txt");
+    let mut src = File::open(&src_path).unwrap();
+    let mut dst = File::create(&dst_path).unwrap();
+
+    // Copying starts at the current file positions and advances both of them.
+    src.seek(SeekFrom::Start(7)).unwrap();
+    dst.write_all(b"Hi ").unwrap();
+    // Asking for more bytes than are left copies up to the end of the input.
+    assert_eq!(copy(src.as_raw_fd(), dst.as_raw_fd(), 100).unwrap(), 7);
+    assert_eq!(src.stream_position().unwrap(), 14);
+    assert_eq!(dst.stream_position().unwrap(), 10);
+    // At the end of the input, nothing is copied.
+    assert_eq!(copy(src.as_raw_fd(), dst.as_raw_fd(), 100).unwrap(), 0);
+    assert_eq!(fs::read(&dst_path).unwrap(), b"Hi World!\n");
+
+    // Invalid file descriptors.
+    let err = copy(-1, -1, 1).unwrap_err();
+    assert_eq!(err.raw_os_error(), Some(libc::EBADF));
+
+    drop((src, dst));
+    fs::remove_file(&src_path).unwrap();
+    fs::remove_file(&dst_path).unwrap();
+
+    // `fs::copy` opens the destination with the source's mode, which Miri does not support on
+    // Windows hosts.
+    if cfg!(not(windows_host)) {
+        // Larger than a single chunk copied by Miri's `copy_file_range`.
+        let bytes: Vec<u8> = (0..100_000u32).map(|i| i as u8).collect();
+        let src_path = utils::prepare_with_content("miri_test_libc_fs_copy_src.txt", &bytes);
+        let dst_path = utils::prepare("miri_test_libc_fs_copy_dst.txt");
+        assert_eq!(fs::copy(&src_path, &dst_path).unwrap(), bytes.len() as u64);
+        assert_eq!(fs::read(&dst_path).unwrap(), bytes);
+        fs::remove_file(&src_path).unwrap();
+        fs::remove_file(&dst_path).unwrap();
+    }
 }
 
 fn test_fstat() {

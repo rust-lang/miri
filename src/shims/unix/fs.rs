@@ -583,7 +583,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
         let o_append = ecx.eval_libc_i32("O_APPEND");
-        if flag & o_append == o_append {
+        let append = flag & o_append == o_append;
+        if append {
             flag &= !o_append;
             options.append(true);
         }
@@ -729,7 +730,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     panic!("we should not get a symlink here");
                 }
 
-                let Some(fd) = ecx.machine.fds.insert_new(FileHandle { file, writable, readable })
+                let Some(fd) =
+                    ecx.machine.fds.insert_new(FileHandle { file, writable, readable, append })
                 else {
                     return ecx.set_errno_and_return_neg1_i32(LibcError("EMFILE"));
                 };
@@ -1031,6 +1033,65 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(err) => return this.set_errno_and_return_neg1_i32(err),
         };
         interp_ok(Scalar::from_i32(this.write_stat_buf(metadata, buf_op)?))
+    }
+
+    /// Only supports null offset pointers, i.e. copying from and advancing the file positions.
+    fn linux_copy_file_range(
+        &mut self,
+        fd_in_op: &OpTy<'tcx>,
+        off_in_op: &OpTy<'tcx>,
+        fd_out_op: &OpTy<'tcx>,
+        off_out_op: &OpTy<'tcx>,
+        len_op: &OpTy<'tcx>,
+        flags_op: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let ecx = self.eval_context_mut();
+
+        let fd_in = ecx.read_scalar(fd_in_op)?.to_i32()?;
+        let off_in = ecx.read_pointer(off_in_op)?;
+        let fd_out = ecx.read_scalar(fd_out_op)?.to_i32()?;
+        let off_out = ecx.read_pointer(off_out_op)?;
+        let len = ecx.read_target_usize(len_op)?;
+        let flags = ecx.read_scalar(flags_op)?.to_u32()?;
+
+        let (Some(fd_in), Some(fd_out)) = (ecx.machine.fds.get(fd_in), ecx.machine.fds.get(fd_out))
+        else {
+            return ecx.set_errno_and_return_neg1(LibcError("EBADF"), dest);
+        };
+        if flags != 0 {
+            throw_unsup_format!("`copy_file_range` with non-zero flags is not supported");
+        }
+        if !ecx.ptr_is_null(off_in)? || !ecx.ptr_is_null(off_out)? {
+            throw_unsup_format!("`copy_file_range` with non-null offset pointers is not supported");
+        }
+        let (Some(file_in), Some(file_out)) =
+            (fd_in.downcast::<FileHandle>(), fd_out.downcast::<FileHandle>())
+        else {
+            throw_unsup_format!("`copy_file_range` is only supported on files");
+        };
+        assert!(ecx.machine.communicate(), "isolation should have prevented even opening a file");
+        if !file_in.readable || !file_out.writable || file_out.append {
+            throw_unsup_format!(
+                "`copy_file_range` is only supported from a readable file to a writable, non-append file"
+            );
+        }
+        let is_regular = |file: &File| file.metadata().is_ok_and(|metadata| metadata.is_file());
+        if !is_regular(&file_in.file) || !is_regular(&file_out.file) {
+            throw_unsup_format!("`copy_file_range` is only supported on regular files");
+        }
+        // FIXME: Linux returns EINVAL if both FDs refer to the same file and the ranges overlap.
+
+        // Short copies are allowed, so we copy at most one chunk per call.
+        const MAX_CHUNK: u64 = 64 * 1024;
+        let mut buf = vec![0; usize::try_from(len.min(MAX_CHUNK)).unwrap()];
+        let read = (&file_in.file)
+            .read(&mut buf)
+            .map_err(|err| err_unsup_format!("I/O error during `copy_file_range`: {err}"))?;
+        (&file_out.file)
+            .write_all(&buf[..read])
+            .map_err(|err| err_unsup_format!("I/O error during `copy_file_range`: {err}"))?;
+        ecx.write_int(u64::try_from(read).unwrap(), dest)
     }
 
     fn linux_statx(
@@ -2144,6 +2205,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         file: f,
                         writable: true,
                         readable: true,
+                        append: false,
                     }) else {
                         return this.set_errno_and_return_neg1_i32(LibcError("EMFILE"));
                     };
