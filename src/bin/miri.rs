@@ -479,10 +479,7 @@ fn main() -> ExitCode {
             miri_config.borrow_tracker = None;
         } else if arg == "-Zmiri-tree-borrows" {
             miri_config.borrow_tracker =
-                Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams {
-                    precise_interior_mut: true,
-                    implicit_writes: false,
-                }));
+                Some(BorrowTrackerMethod::TreeBorrows(TreeBorrowsParams::default()));
         } else if arg == "-Zmiri-tree-borrows-no-precise-interior-mut" {
             match &mut miri_config.borrow_tracker {
                 Some(BorrowTrackerMethod::TreeBorrows(params)) => {
@@ -501,6 +498,16 @@ fn main() -> ExitCode {
                 _ =>
                     fatal_error!(
                         "`-Zmiri-tree-borrows` is required before `-Zmiri-tree-borrows-implicit-writes`"
+                    ),
+            };
+        } else if arg == "-Zmiri-tree-borrows-protector-end-weak-memory" {
+            match &mut miri_config.borrow_tracker {
+                Some(BorrowTrackerMethod::TreeBorrows(params)) => {
+                    params.protector_end_weak_memory = true;
+                }
+                _ =>
+                    fatal_error!(
+                        "`-Zmiri-tree-borrows` is required before `Zmiri-tree-borrows-protector-end-weak-memory`"
                     ),
             };
         } else if arg == "-Zmiri-disable-data-race-detector" {

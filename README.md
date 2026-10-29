@@ -531,6 +531,9 @@ to Miri failing to detect cases of undefined behavior in a program.
   track interior mutable data on the level of references instead of on the
   byte-level as is done by default.  Therefore, with this flag, Tree
   Borrows will be more permissive.
+* `-Zmiri-tree-borrows-protector-end-weak-memory` makes protectors have weak-memory semantics. These are
+  needed to ensure the usual aliasing optimizations still hold under weak memory. This flag should be
+  default-enabled, but the current implementation is too slow for production use, so we keep it disabled.
 * `-Zmiri-force-page-size=<num>` overrides the default page size for an architecture, in multiples of 1k.
   `4` is default for most targets. This value should always be a power of 2 and nonzero.
 

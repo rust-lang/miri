@@ -7,6 +7,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::ty::Ty;
 use smallvec::SmallVec;
 
+use crate::concurrency::VClock;
 use crate::*;
 pub mod stacked_borrows;
 pub mod tree_borrows;
@@ -229,6 +230,18 @@ pub struct TreeBorrowsParams {
     pub precise_interior_mut: bool,
     /// Controls whether `&mut` function arguments are immediately activated with an implicit write.
     pub implicit_writes: bool,
+    /// Controls whether protectors have weak-memory behavior. This is the intended semantics but too slow currently.
+    pub protector_end_weak_memory: bool,
+}
+
+impl Default for TreeBorrowsParams {
+    fn default() -> Self {
+        Self {
+            precise_interior_mut: true,
+            implicit_writes: false,
+            protector_end_weak_memory: false,
+        }
+    }
 }
 
 impl BorrowTrackerMethod {
@@ -494,11 +507,16 @@ impl AllocState {
         }
     }
 
-    pub fn remove_unreachable_tags(&self, tags: &FxHashSet<BorTag>) {
+    pub fn remove_unreachable_tags(
+        &self,
+        tags: &FxHashSet<BorTag>,
+        all_threads_lower_bounds: Option<&VClock>,
+    ) {
         let _trace = enter_trace_span!(borrow_tracker::remove_unreachable_tags);
         match self {
             AllocState::StackedBorrows(sb) => sb.borrow_mut().remove_unreachable_tags(tags),
-            AllocState::TreeBorrows(tb) => tb.borrow_mut().remove_unreachable_tags(tags),
+            AllocState::TreeBorrows(tb) =>
+                tb.borrow_mut().remove_unreachable_tags(tags, all_threads_lower_bounds),
         }
     }
 
