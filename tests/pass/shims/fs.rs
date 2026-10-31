@@ -379,6 +379,22 @@ fn test_file_set_times() {
     assert_eq!(metadata.accessed().unwrap(), accessed);
     assert_eq!(metadata.modified().unwrap(), newer_modified);
 
+    // Older native 32-bit glibc may not have the time64 symbol.
+    if cfg!(all(target_os = "linux", target_env = "gnu", any(miri, target_pointer_width = "64"))) {
+        // On 32-bit glibc, std needs the weak `__futimens64` symbol for dates past 2038.
+        let future_modified = SystemTime::UNIX_EPOCH + Duration::from_secs(3_000_000_000);
+        file.set_times(FileTimes::new().set_modified(future_modified)).unwrap();
+        let metadata = file.metadata().unwrap();
+        assert_eq!(metadata.accessed().unwrap(), accessed);
+        assert_eq!(metadata.modified().unwrap(), future_modified);
+
+        let future_accessed = SystemTime::UNIX_EPOCH + Duration::from_secs(3_000_000_001);
+        file.set_times(FileTimes::new().set_accessed(future_accessed)).unwrap();
+        let metadata = file.metadata().unwrap();
+        assert_eq!(metadata.accessed().unwrap(), future_accessed);
+        assert_eq!(metadata.modified().unwrap(), future_modified);
+    }
+
     remove_file(&path).unwrap();
 }
 

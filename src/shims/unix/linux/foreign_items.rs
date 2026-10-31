@@ -1,7 +1,7 @@
 use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
-use rustc_target::spec::Target;
+use rustc_target::spec::{Arch, Target};
 
 use self::shims::unix::linux::mem::EvalContextExt as _;
 use self::shims::unix::linux_like::eventfd::EvalContextExt as _;
@@ -19,9 +19,17 @@ use crate::*;
 const TASK_COMM_LEN: u64 = 16;
 
 pub fn is_dyn_sym(name: &str, target: &Target) -> bool {
-    matches!(name, "gettid" | "statx")
-        || (target.env == rustc_target::spec::Env::Gnu
-            && matches!(name, "__cxa_thread_atexit_impl"))
+    match name {
+        "gettid" | "statx" => true,
+        "__cxa_thread_atexit_impl" => target.env == rustc_target::spec::Env::Gnu,
+        // glibc only exposes this symbol on targets with a 32-bit time_t.
+        // x32 and riscv32 already use 64-bit time_t despite having 32-bit pointers.
+        "__futimens64" =>
+            target.env == rustc_target::spec::Env::Gnu
+                && target.pointer_width == 32
+                && !matches!(target.arch, Arch::X86_64 | Arch::RiscV32),
+        _ => false,
+    }
 }
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
@@ -39,6 +47,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         match link_name.as_str() {
             // File related shims
+            "__futimens64" if ecx.is_dyn_sym("__futimens64") => {
+                let [fd, times] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *std::sys::pal::time::__timespec64) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = ecx.futimens(fd, times)?;
+                ecx.write_scalar(result, dest)?;
+            }
             "open64" => {
                 // FIXME: This does not have a direct test (#3179).
                 // "open64" means that the file is opened with O_LARGEFILE, which we always do.
