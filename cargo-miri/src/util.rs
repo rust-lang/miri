@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
 use std::ops::Not;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use cargo_metadata::{Metadata, MetadataCommand};
@@ -260,6 +260,32 @@ pub fn get_target_dir(meta: &Metadata) -> PathBuf {
     output
 }
 
+fn toolchain_key() -> Option<PathBuf> {
+    let toolchain: PathBuf = std::env::var_os("RUSTUP_TOOLCHAIN")?.into();
+
+    let toolchain: PathBuf = toolchain
+        .components()
+        .filter_map(|component| {
+            match component {
+                Component::Normal(c) => Some(c.to_string_lossy().into_owned()),
+                _ => None,
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("_")
+        .into();
+
+    if toolchain.is_empty() {
+        return None;
+    }
+
+    Some(toolchain)
+}
+
+fn sysroot_cache_root() -> PathBuf {
+    directories::ProjectDirs::from("org", "rust-lang", "miri").unwrap().cache_dir().to_owned()
+}
+
 /// Determines where the sysroot of this execution is
 ///
 /// Either in a user-specified spot by an envar, or in a default cache location.
@@ -267,8 +293,9 @@ pub fn get_sysroot_dir() -> PathBuf {
     match std::env::var_os("MIRI_SYSROOT") {
         Some(dir) => PathBuf::from(dir),
         None => {
-            let user_dirs = directories::ProjectDirs::from("org", "rust-lang", "miri").unwrap();
-            user_dirs.cache_dir().to_owned()
+            let mut path = sysroot_cache_root();
+            path.push(toolchain_key().unwrap_or("default".into()));
+            path
         }
     }
 }
@@ -293,7 +320,7 @@ pub fn clean_sysroot() {
         )
     }
 
-    let sysroot_dir = get_sysroot_dir();
+    let sysroot_dir = sysroot_cache_root();
 
     eprintln!("Cleaning sysroot cache at {}", sysroot_dir.display());
 
