@@ -6,7 +6,7 @@ unsafe fn test(mut x: Box<i32>, y: *const i32) -> i32 {
     *x = 5;
     std::mem::forget(x);
     *y
-    //~[stack]^ ERROR: weakly protected
+    //~[stack]^ ERROR: /function argument with tag .* \(that tag is weakly protected\)/
     //~[tree]| ERROR: /read access through .* is forbidden/
 }
 
