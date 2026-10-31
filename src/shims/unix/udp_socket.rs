@@ -6,7 +6,7 @@ use std::time::Duration;
 use mio::event::Source;
 use rustc_target::spec::Os;
 
-use crate::shims::files::{FileDescription, FileDescriptionRef};
+use crate::shims::files::{EvalContextExt as _, FileDescription, FileDescriptionRef};
 use crate::shims::unix::UnixFileDescription;
 use crate::shims::unix::socket::{EvalContextExt, UnixSocketFileDescription};
 use crate::*;
@@ -93,6 +93,36 @@ impl UdpSocket {
 impl FileDescription for UdpSocket {
     fn name(&self) -> &'static str {
         "udp socket"
+    }
+
+    fn read<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        self.recv(
+            communicate_allowed,
+            ptr,
+            len,
+            /* is_peek */ false,
+            /* is_non_block */ false,
+            ecx,
+            finish,
+        )
+    }
+
+    fn write<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        self.send(communicate_allowed, ptr, len, /* is_non_block */ false, ecx, finish)
     }
 
     fn as_unix(self: FileDescriptionRef<Self>) -> FileDescriptionRef<dyn UnixFileDescription> {
@@ -213,6 +243,49 @@ impl UnixSocketFileDescription for UdpSocket {
         finish.call(ecx, Ok(()))
     }
 
+    fn send<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
+
+        let is_non_block = is_non_block || self.is_non_block.get();
+
+        if !is_non_block {
+            throw_unsup_format!("send: blocking writes are currently unsupported for UDP sockets");
+        }
+
+        let result = ecx.try_non_block_send(&self, ptr, len)?;
+        finish.call(ecx, result)
+    }
+
+    fn recv<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_peek: bool,
+        is_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        assert!(communicate_allowed, "cannot have `UdpSocket` with isolation enabled!");
+
+        let is_non_block = is_non_block || self.is_non_block.get();
+
+        if !is_non_block {
+            throw_unsup_format!("send: blocking reads are currently unsupported for UDP sockets");
+        }
+
+        let result = ecx.try_non_block_recv(&self, ptr, len, is_peek)?;
+        finish.call(ecx, result)
+    }
+
     fn setsockopt<'tcx>(
         self: FileDescriptionRef<Self>,
         level: i32,
@@ -331,6 +404,108 @@ impl UnixSocketFileDescription for UdpSocket {
     {
         let socket = self.socket.borrow();
         Ok(cb(socket2::SockRef::from(&*socket)))
+    }
+}
+
+impl<'tcx> EvalContextPrivExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Attempt to send bytes into the connected socket in a non-blocking manner.
+    fn try_non_block_send(
+        &mut self,
+        socket: &FileDescriptionRef<UdpSocket>,
+        buffer_ptr: Pointer,
+        length: usize,
+    ) -> InterpResult<'tcx, Result<usize, IoError>> {
+        let this = self.eval_context_mut();
+
+        let host_socket = socket.socket.borrow();
+
+        // This is a *non-blocking* write.
+        let result = this.write_to_host(|bytes| host_socket.send(bytes), length, buffer_ptr)?;
+
+        // A write should never succeed when the `write_closed` readiness is set for this socket.
+        if result.is_ok() {
+            assert!(!socket.io_readiness.borrow().write_closed, "successful write after close");
+        }
+
+        match result {
+            Err(IoError::HostError(e)) if matches!(e.kind(), io::ErrorKind::WouldBlock) => {
+                // We know that the source is not writable so we need to update its readiness.
+                socket.io_readiness.borrow_mut().writable = false;
+                this.update_fd_readiness(socket.clone(), ReadinessUpdateFlags::DEFAULT)?;
+
+                interp_ok(Err(IoError::HostError(e)))
+            }
+            Err(IoError::HostError(e))
+                if cfg!(windows) && matches!(e.kind(), io::ErrorKind::NotConnected) =>
+            {
+                // Windows returns ENOTCONN instead of EDESTADDRREQ when attempting to `send` without
+                // having a default destination address set. We thus remap this error to an EDESTADDRREQ.
+                interp_ok(Err(IoError::LibcError("EDESTADDRREQ")))
+            }
+            Err(IoError::HostError(e))
+                if cfg!(windows)
+                    && e.raw_os_error().is_some_and(|errno| errno == /* WSAEMSGSIZE */ 10040) =>
+            {
+                // We attempted to write a message which doesn't fit into a single UDP datagram.
+                // On Windows hosts this returns WSAEMSGSIZE while on Unix-like hosts this returns EMSGSIZE.
+                // We thus need to remap this error to EMSGSIZE on Windows hosts.
+                interp_ok(Err(IoError::LibcError("EMSGSIZE")))
+            }
+            result => interp_ok(result),
+        }
+    }
+
+    /// Attempt to receive bytes from the socket in a non-blocking manner.
+    fn try_non_block_recv(
+        &mut self,
+        socket: &FileDescriptionRef<UdpSocket>,
+        buffer_ptr: Pointer,
+        length: usize,
+        should_peek: bool,
+    ) -> InterpResult<'tcx, Result<usize, IoError>> {
+        let this = self.eval_context_mut();
+
+        let host_socket = socket.socket.borrow();
+
+        let read_cb = |buf: &mut [u8]| {
+            let result = if should_peek { host_socket.peek(buf) } else { host_socket.recv(buf) };
+            match result {
+                Err(e)
+                    if cfg!(windows)
+                        && e.raw_os_error()
+                            .is_some_and(|errno| errno == /* WSAEMSGSIZE */ 10040) =>
+                {
+                    // We tried to read a message from the socket which does not fit our
+                    // provided buffer. POSIX specifies that the provided buffer should be
+                    // filled and the remaining bytes should be discarded. The `recv` should
+                    // then return the amount of bytes read. Windows hosts fill the buffer
+                    // and discard the excess bytes but return WSAEMSGSIZE instead of the
+                    // bytes read. We thus ignore this error and instead return the length
+                    // of the buffer since we know that the buffer has been filled. This
+                    // needs to be done inside this callback function since `read_from_host`
+                    // won't copy the bytes from `buf` to `buffer_ptr` should the callback
+                    // return an error.
+
+                    Ok(length)
+                }
+                result => result,
+            }
+        };
+
+        // This is a *non-blocking* read/peek.
+        let result = this.read_from_host(read_cb, length, buffer_ptr)?;
+
+        match result {
+            Err(IoError::HostError(e)) if matches!(e.kind(), io::ErrorKind::WouldBlock) => {
+                // We know that the source is not readable so we need to update its readiness.
+                socket.io_readiness.borrow_mut().readable = false;
+                this.update_fd_readiness(socket.clone(), ReadinessUpdateFlags::DEFAULT)?;
+
+                interp_ok(Err(IoError::HostError(e)))
+            }
+            result => interp_ok(result),
+        }
     }
 }
 
