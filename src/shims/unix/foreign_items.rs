@@ -684,12 +684,26 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
                 this.send(socket, buffer, length, flags, dest)?;
             }
+            "sendto" => {
+                let [socket, buffer, length, flags, dest_addr, dest_addr_len] = &this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *_, libc::size_t, i32, *_, libc::socklen_t) -> libc::ssize_t),
+                    (link_name, abi, args),
+                )?;
+                this.sendto(socket, buffer, length, flags, dest_addr, dest_addr_len, dest)?;
+            }
             "recv" => {
                 let [socket, buffer, length, flags] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *_, libc::size_t, i32) -> libc::ssize_t),
                     (link_name, abi, args),
                 )?;
                 this.recv(socket, buffer, length, flags, dest)?;
+            }
+            "recvfrom" => {
+                let [socket, buffer, length, flags, dest_addr, dest_addr_len] = &this.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *_, libc::size_t, i32, *_, *_) -> libc::ssize_t),
+                    (link_name, abi, args),
+                )?;
+                this.recvfrom(socket, buffer, length, flags, dest_addr, dest_addr_len, dest)?;
             }
             "setsockopt" => {
                 let [socket, level, option_name, option_value, option_len] = &this.check_shim_sig(

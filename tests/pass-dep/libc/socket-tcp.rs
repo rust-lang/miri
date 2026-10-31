@@ -39,6 +39,8 @@ fn main() {
     test_connect_listening();
     test_send_peek_recv();
     test_write_read();
+    test_recvfrom();
+    test_sendto();
     test_readv();
     test_writev();
 
@@ -356,6 +358,87 @@ fn test_write_read() {
 
         // Write some bytes into the stream.
         libc_utils::write_all(peerfd, TEST_BYTES).unwrap();
+    });
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    let mut buffer = [0; TEST_BYTES.len()];
+    libc_utils::read_exact(client_sockfd, &mut buffer).unwrap();
+    assert_eq!(&buffer, TEST_BYTES);
+
+    server_thread.join().unwrap();
+}
+
+/// Test receiving data from a TCP socket using `recvfrom`.
+/// Since TCP is a connection-mode protocol the `address` and `address_len`
+/// pointers should be left unchanged.
+fn test_recvfrom() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || {
+        let (peerfd, _) = net::accept_ipv4(server_sockfd).unwrap();
+
+        // Write some bytes into the stream.
+
+        libc_utils::write_all(peerfd, TEST_BYTES).unwrap();
+    });
+
+    net::connect_ipv4(client_sockfd, addr).unwrap();
+
+    let mut buffer = [0; TEST_BYTES.len()];
+    let mut address_ptr_len = 15 as libc::socklen_t;
+
+    unsafe {
+        errno_result(libc::recvfrom(
+            client_sockfd,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            0,
+            ptr::null_mut::<libc::sockaddr>().cast(),
+            &mut address_ptr_len,
+        ))
+        .unwrap();
+    }
+
+    assert_eq!(&buffer, TEST_BYTES);
+
+    // Ensure that the `address_len` pointer is unchanged.
+    assert_eq!(address_ptr_len, 15);
+
+    server_thread.join().unwrap();
+}
+
+/// Test sending data into a TCP socket using `sendto`.
+/// We provide a nullptr as destination address, which should not be
+/// a problem since TCP is a connection-mode protocol and thus the
+/// destination address should be ignored.
+fn test_sendto() {
+    let (server_sockfd, addr) = net::make_listener_ipv4().unwrap();
+    let client_sockfd =
+        unsafe { errno_result(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)).unwrap() };
+
+    // Spawn the server thread.
+    let server_thread = thread::spawn(move || {
+        let (peerfd, _) = net::accept_ipv4(server_sockfd).unwrap();
+
+        // Write some bytes into the stream.
+
+        // We write using `sendto` where the destination address pointer
+        // is a null pointer and its length is zero.
+        unsafe {
+            libc_utils::write_all_generic(
+                TEST_BYTES.as_ptr().cast(),
+                TEST_BYTES.len(),
+                libc_utils::NoRetry,
+                |buf, count| {
+                    libc::sendto(peerfd, buf, count, 0, ptr::null_mut::<libc::sockaddr>(), 0)
+                },
+            )
+            .unwrap();
+        }
     });
 
     net::connect_ipv4(client_sockfd, addr).unwrap();

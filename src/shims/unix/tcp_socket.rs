@@ -626,6 +626,23 @@ impl UnixSocketFileDescription for TcpSocket {
         )
     }
 
+    fn send_to<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_non_block: bool,
+        _dest_addr_ptr: Pointer,
+        _dest_addr_len: usize,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        // Since TCP is a connection-mode protocol we can simply ignore
+        // the `dest_addr_ptr` and `dest_addr_len` which is equivalent to
+        // a `send`.
+        self.send(communicate_allowed, ptr, len, is_non_block, ecx, finish)
+    }
+
     fn recv<'tcx>(
         self: FileDescriptionRef<Self>,
         communicate_allowed: bool,
@@ -670,6 +687,34 @@ impl UnixSocketFileDescription for TcpSocket {
                         // until we can receive some bytes from the socket or the timeout exceeded.
                         this.block_for_recv(socket, deadline, ptr, len, is_peek, finish)
                     }
+                }
+            ),
+        )
+    }
+
+    fn recv_from<'tcx>(
+        self: FileDescriptionRef<Self>,
+        communicate_allowed: bool,
+        ptr: Pointer,
+        len: usize,
+        is_peek: bool,
+        is_non_block: bool,
+        ecx: &mut MiriInterpCx<'tcx>,
+        finish: DynMachineCallback<'tcx, Result<(usize, Option<SocketAddr>), IoError>>,
+    ) -> InterpResult<'tcx> {
+        self.recv(
+            communicate_allowed,
+            ptr,
+            len,
+            is_peek,
+            is_non_block,
+            ecx,
+            callback!(
+                @capture<'tcx> {
+                    finish: DynMachineCallback<'tcx, Result<(usize, Option<SocketAddr>), IoError>>,
+                } |this, result: Result<usize, IoError>| {
+                    // The TCP protocol does not provide the source address of a message.
+                    finish.call(this, result.map(|bytes| (bytes, None)))
                 }
             ),
         )
