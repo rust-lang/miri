@@ -112,6 +112,21 @@ fn test_bind_ipv4_invalid_addr_len() {
     };
     assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
 
+    // The largest possible length is invalid. Miri used to ICE here because it
+    // read `socklen_t` as a signed integer.
+    let err = unsafe {
+        errno_result(libc::bind(
+            sockfd,
+            (&addr as *const libc::sockaddr_in).cast::<libc::sockaddr>(),
+            libc::socklen_t::MAX,
+        ))
+        .unwrap_err()
+    };
+    // Native macOS returns ENAMETOOLONG here.
+    let expected =
+        if cfg!(all(target_os = "macos", not(miri))) { libc::ENAMETOOLONG } else { libc::EINVAL };
+    assert_eq!(err.raw_os_error(), Some(expected));
+
     if cfg!(miri) {
         // A too big size is also invalid. Some native hosts (e.g. Linux)
         // allow too big sizes, so we skip this test on native hosts:
@@ -162,6 +177,23 @@ fn test_set_reuseaddr_invalid_len() {
             // On Miri we require an exact size.
             assert!(!cfg!(miri));
         }
+    }
+
+    // The same applies to the largest possible length. Miri used to ICE here because
+    // it read `socklen_t` as a signed integer.
+    let value: libc::c_int = 1;
+    let result = errno_result(unsafe {
+        libc::setsockopt(
+            sockfd,
+            libc::SOL_SOCKET,
+            libc::SO_REUSEADDR,
+            (&value as *const libc::c_int).cast(),
+            libc::socklen_t::MAX,
+        )
+    });
+    match result {
+        Err(err) => assert_eq!(err.raw_os_error(), Some(libc::EINVAL)),
+        Ok(_) => assert!(!cfg!(miri)),
     }
 }
 
@@ -301,6 +333,34 @@ fn test_getsockopt_truncate() {
     let untruncated_timeout = unsafe { option_value.assume_init() };
     assert_eq!(untruncated_timeout.tv_sec, new_timeout.tv_sec);
     assert_eq!(untruncated_timeout.tv_usec, new_timeout.tv_usec);
+
+    // The largest possible length. Miri used to ICE here because it read
+    // `socklen_t` as a signed integer.
+    let mut option_value = std::mem::MaybeUninit::<libc::timeval>::zeroed();
+    let mut max_option_len = libc::socklen_t::MAX;
+    let result = errno_result(unsafe {
+        libc::getsockopt(
+            sockfd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            option_value.as_mut_ptr().cast(),
+            &mut max_option_len,
+        )
+    });
+    match result {
+        Ok(_) => {
+            // Miri and some native hosts treat this as a big enough buffer.
+            assert_eq!(max_option_len, size_of::<libc::timeval>() as libc::socklen_t);
+            let timeout = unsafe { option_value.assume_init() };
+            assert_eq!(timeout.tv_sec, new_timeout.tv_sec);
+            assert_eq!(timeout.tv_usec, new_timeout.tv_usec);
+        }
+        Err(err) => {
+            // Linux rejects lengths that are negative as a C `int`.
+            assert_eq!(err.raw_os_error(), Some(libc::EINVAL));
+            assert!(!cfg!(miri));
+        }
+    }
 }
 
 /// Test the `getsockname` syscall on an IPv4 socket which is bound.
