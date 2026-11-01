@@ -319,6 +319,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         file,
                         writable: desired_write,
                         readable: desired_read,
+                        append: false,
                     }) else {
                         throw_unsup_format!("we ran out of FD numbers")
                     };
