@@ -61,6 +61,9 @@ impl<'tcx> MiriMachine<'tcx> {
         match &ecx.tcx.sess.target.os {
             Os::Linux => {
                 Self::weak_fn_symbols(ecx, &["getrandom", "gettid", "statx", "strlen"])?;
+                if ecx.is_dyn_sym("__futimens64") {
+                    Self::weak_fn_symbols(ecx, &["__futimens64"])?;
+                }
                 if ecx.tcx.sess.target.env == Env::Gnu {
                     // FIXME: enabling this with genmc causes test failures because of how
                     // std then uses pthread keys and genmc does not know about their state.
