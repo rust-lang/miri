@@ -470,8 +470,8 @@ impl Command {
         // Make sure the flags are going to the test harness, not cargo.
         flags.insert(0, "--".into());
 
-        // Then test, and let caller control flags.
-        // Only in root project as `cargo-miri` has no tests.
+        // The flags are for the Miri test harness, not cargo-miri's unit tests.
+        e.test("cargo-miri", &[], &[])?;
         e.test(".", &features, &flags)?;
 
         if let Some(coverage) = &coverage {
