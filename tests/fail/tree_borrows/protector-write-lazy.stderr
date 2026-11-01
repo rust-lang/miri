@@ -12,7 +12,7 @@ help: the accessed tag <TAG> was created here, in the initial state Reserved
    |
 LL |         unsafe { (&mut *(ptr_to_vec.wrapping_add(1))) as *mut i32 }.wrapping_sub(1);
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: the accessed tag <TAG> later transitioned to Disabled due to a protector release (acting as a foreign write access) on every location previously accessed by this tag
+help: the accessed tag <TAG> later transitioned to Disabled due to a protector release (ending the restrictions for function arguments upon return, acting as a foreign write access) on every location previously accessed by this tag
   --> tests/fail/tree_borrows/protector-write-lazy.rs:LL:CC
    |
 LL | }
