@@ -123,6 +123,24 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         this.free_address_infos(res_ptr)
     }
 
+    /// Read a `socklen_t` value. Returns `None` if it is negative, which is possible on
+    /// targets where `socklen_t` is signed.
+    fn read_socklen(
+        &self,
+        op: &impl Projectable<'tcx, Provenance>,
+    ) -> InterpResult<'tcx, Option<u64>> {
+        let this = self.eval_context_ref();
+
+        let socklen_layout = this.libc_ty_layout("socklen_t");
+        let scalar = this.read_scalar(op)?;
+        let len = if socklen_layout.backend_repr.is_signed() {
+            u64::try_from(scalar.to_int(socklen_layout.size)?).ok()
+        } else {
+            Some(scalar.to_uint(socklen_layout.size)?.try_into().unwrap())
+        };
+        interp_ok(len)
+    }
+
     /// Attempt to turn an address and length operand into a standard library socket address.
     ///
     /// Returns an IO error should the address length not match the address family length.
@@ -134,11 +152,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx, Result<SocketAddr, IoError>> {
         let this = self.eval_context_ref();
 
-        let socklen_layout = this.libc_ty_layout("socklen_t");
-        // We only support address lengths which can be stored in a u64 since the
-        // size of a layout is also stored in a u64.
-        let address_len: u64 =
-            this.read_scalar(address_len)?.to_int(socklen_layout.size)?.try_into().unwrap();
+        let Some(address_len) = this.read_socklen(address_len)? else {
+            return interp_ok(Err(LibcError("EINVAL")));
+        };
 
         // Initially, treat address as generic sockaddr just to extract the family field.
         let address = this.deref_pointer(address)?;

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use rustc_target::spec::Os;
 
+use super::OPEN_MAX;
 use crate::shims::files::FdNum;
 use crate::*;
 
@@ -32,8 +33,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let nfds: u64 = this.read_scalar(nfds)?.to_int(nfds.layout.size)?.try_into().unwrap();
+        let nfds: u64 = this.read_scalar(nfds)?.to_uint(nfds.layout.size)?.try_into().unwrap();
         let timeout = this.read_scalar(timeout)?.to_i32()?;
+
+        // POSIX requires EINVAL if `nfds` is greater than {OPEN_MAX}.
+        if nfds > u64::from(OPEN_MAX) {
+            return this.set_errno_and_return_neg1(LibcError("EINVAL"), dest);
+        }
         let fds_arr = this.deref_pointer(fds)?;
 
         // The provided interests indexed by the file descriptor they're for.
