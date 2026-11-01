@@ -2001,6 +2001,29 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         frame: Frame<'tcx, Provenance, FrameExtra<'tcx>>,
         unwinding: bool,
     ) -> InterpResult<'tcx, ReturnAction> {
+        if let Either::Left(loc) = frame.current_loc()
+            && matches!(
+                frame.body().basic_blocks[loc.block].terminator().kind,
+                mir::TerminatorKind::TailCall { .. }
+            )
+        {
+            // Tail calls deallocate locals after replacing their frame with the callee's.
+            // Use the old frame's span instead of the callee's current span recorded by
+            // `before_memory_deallocation`.
+            let span = frame.current_span();
+            let mut allocation_spans = ecx.machine.allocation_spans.borrow_mut();
+            for local in frame.locals() {
+                let Some(Either::Left((ptr, _))) = local.as_mplace_or_imm_ghost() else {
+                    continue;
+                };
+                let Some(Provenance::Concrete { alloc_id, .. }) = ptr.provenance else {
+                    unreachable!("locals always have concrete provenance");
+                };
+                if let Some((_, Some(deallocated_at))) = allocation_spans.get_mut(&alloc_id) {
+                    *deallocated_at = span;
+                }
+            }
+        }
         let res = {
             // Move `frame` into a sub-scope so we control when it will be dropped.
             let mut frame = frame;
