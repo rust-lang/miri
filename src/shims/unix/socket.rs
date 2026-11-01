@@ -84,6 +84,28 @@ pub trait UnixSocketFileDescription: UnixFileDescription {
         throw_unsup_format!("cannot receive from {}", self.name());
     }
 
+    /// Receive data on the socket into the given buffer `ptr` and return the socket
+    /// address from where the data originated.
+    /// `len` indicates how many bytes we should try to receive.
+    /// `is_peek` specifies whether the receive removes the bytes from the receive buffer
+    /// ([`false`]) or leaves them in the receive buffer ([`true`]).
+    /// `is_non_block` specifies whether the receive operation is non-blocking.
+    /// After a successful receive, `finish` should be called with a tuple containing the
+    /// amount of bytes received and the socket address from where the data originated, should
+    /// it be provided by the protocol.
+    fn recv_from<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _communicate_allowed: bool,
+        _ptr: Pointer,
+        _len: usize,
+        _is_peek: bool,
+        _is_non_block: bool,
+        _ecx: &mut MiriInterpCx<'tcx>,
+        _finish: DynMachineCallback<'tcx, Result<(usize, Option<SocketAddr>), IoError>>,
+    ) -> InterpResult<'tcx> {
+        throw_unsup_format!("cannot receive with origin from {}", self.name());
+    }
+
     /// Send data from the given buffer `ptr` into the socket.
     /// `len` indicates how many bytes we should try to send.
     /// `is_non_block` specifies whether the send operation is non-blocking.
@@ -98,6 +120,26 @@ pub trait UnixSocketFileDescription: UnixFileDescription {
         _finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
     ) -> InterpResult<'tcx> {
         throw_unsup_format!("cannot send to {}", self.name());
+    }
+
+    /// Send data from the given buffer `ptr` into the socket with an
+    /// explicit target destination.
+    /// `len` indicates how many bytes we should try to send.
+    /// `is_non_block` specifies whether the send operation is non-blocking.
+    /// `destination` contains the socket address of the target socket.
+    /// After a successful send, `finish` should be called with the amount of bytes sent.
+    fn send_to<'tcx>(
+        self: FileDescriptionRef<Self>,
+        _communicate_allowed: bool,
+        _ptr: Pointer,
+        _len: usize,
+        _is_non_block: bool,
+        _dest_addr_ptr: Pointer,
+        _dest_addr_len: usize,
+        _ecx: &mut MiriInterpCx<'tcx>,
+        _finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+    ) -> InterpResult<'tcx> {
+        throw_unsup_format!("cannot send to {} with a destination", self.name())
     }
 
     /// Set the socket option `option` on `level`.
@@ -497,51 +539,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let socket = this.read_scalar(socket)?.to_i32()?;
-        let buffer_ptr = this.read_pointer(buffer)?;
-        let size_layout = this.libc_ty_layout("size_t");
-        let length: usize =
-            this.read_scalar(length)?.to_uint(size_layout.size)?.try_into().unwrap();
-        let mut flags = this.read_scalar(flags)?.to_i32()?;
-
-        // Get the file handle
-        let Some(fd) = this.machine.fds.get(socket) else {
-            return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
-        };
-
-        let Some(socket) = fd.as_unix().as_socket() else {
-            return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
-        };
-
-        let mut is_non_block = false;
-
-        // Interpret the flag. Every flag we recognize is "subtracted" from `flags`, so
-        // if there is anything left at the end, that's an unsupported flag.
-        if matches!(
-            this.tcx.sess.target.os,
-            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
-        ) {
-            // MSG_NOSIGNAL and MSG_DONTWAIT only exist on Linux, Android, FreeBSD,
-            // Solaris, and Illumos targets.
-            let msg_nosignal = this.eval_libc_i32("MSG_NOSIGNAL");
-            let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
-            if flags & msg_nosignal == msg_nosignal {
-                // This is only needed to ensure that no EPIPE signal is sent when
-                // trying to send into a stream which is no longer connected.
-                // Since we don't support signals, we can ignore this.
-                flags &= !msg_nosignal;
-            }
-            if flags & msg_dontwait == msg_dontwait {
-                flags &= !msg_dontwait;
-                is_non_block = true;
-            }
-        }
-
-        if flags != 0 {
-            throw_unsup_format!(
-                "send: flag {flags:#x} is unsupported, only MSG_NOSIGNAL and MSG_DONTWAIT are allowed",
-            );
-        }
+        let (socket, buffer_ptr, length, is_non_block) =
+            match this.parse_send_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
 
         let dest = dest.clone();
 
@@ -550,6 +552,55 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             buffer_ptr,
             length,
             is_non_block,
+            this,
+            callback!(
+                @capture<'tcx> {
+                    dest: MPlaceTy<'tcx>,
+                } |this, result: Result<usize, IoError>| {
+                    match result {
+                        Ok(bytes_sent) =>
+                            this.write_scalar(Scalar::from_target_usize(bytes_sent.try_into().unwrap(), this), &dest),
+                        Err(e) => this.set_errno_and_return_neg1(e, &dest)
+                    }
+                }
+            )
+        )
+    }
+
+    fn sendto(
+        &mut self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+        dest_addr: &OpTy<'tcx>,
+        dest_len: &OpTy<'tcx>,
+        // Location where the output scalar is written to.
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let dest_addr_ptr = this.read_pointer(dest_addr)?;
+        let socklen_layout = this.libc_ty_layout("socklen_t");
+        // We only support address lengths which can be stored in a u64 since the
+        // size of a layout is also stored in a u64.
+        let dest_addr_len: usize =
+            this.read_scalar(dest_len)?.to_int(socklen_layout.size)?.try_into().unwrap();
+
+        let (socket, buffer_ptr, length, is_non_block) =
+            match this.parse_send_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
+
+        let dest = dest.clone();
+        socket.send_to(
+            this.machine.communicate(),
+            buffer_ptr,
+            length,
+            is_non_block,
+            dest_addr_ptr,
+            dest_addr_len,
             this,
             callback!(
                 @capture<'tcx> {
@@ -576,63 +627,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx> {
         let this = self.eval_context_mut();
 
-        let socket = this.read_scalar(socket)?.to_i32()?;
-        let buffer_ptr = this.read_pointer(buffer)?;
-        let size_layout = this.libc_ty_layout("size_t");
-        let length: usize =
-            this.read_scalar(length)?.to_uint(size_layout.size)?.try_into().unwrap();
-        let mut flags = this.read_scalar(flags)?.to_i32()?;
-
-        // Get the file handle
-        let Some(fd) = this.machine.fds.get(socket) else {
-            return this.set_errno_and_return_neg1(LibcError("EBADF"), dest);
-        };
-
-        let Some(socket) = fd.as_unix().as_socket() else {
-            return this.set_errno_and_return_neg1(LibcError("ENOTSOCK"), dest);
-        };
-
-        let mut is_peek = false;
-        let mut is_non_block = false;
-
-        // Interpret the flag. Every flag we recognize is "subtracted" from `flags`, so
-        // if there is anything left at the end, that's an unsupported flag.
-
-        let msg_peek = this.eval_libc_i32("MSG_PEEK");
-        if flags & msg_peek == msg_peek {
-            is_peek = true;
-            flags &= !msg_peek;
-        }
-
-        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::FreeBsd | Os::Illumos) {
-            // MSG_CMSG_CLOEXEC only exists on Linux, Android, FreeBSD,
-            // and Illumos targets.
-            let msg_cmsg_cloexec = this.eval_libc_i32("MSG_CMSG_CLOEXEC");
-            if flags & msg_cmsg_cloexec == msg_cmsg_cloexec {
-                // We don't support `exec` so we can ignore this.
-                flags &= !msg_cmsg_cloexec;
-            }
-        }
-
-        if matches!(
-            this.tcx.sess.target.os,
-            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
-        ) {
-            // MSG_DONTWAIT only exists on Linux, Android, FreeBSD,
-            // Solaris, and Illumos targets.
-            let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
-            if flags & msg_dontwait == msg_dontwait {
-                flags &= !msg_dontwait;
-                is_non_block = true;
-            }
-        }
-
-        if flags != 0 {
-            throw_unsup_format!(
-                "recv: flag {flags:#x} is unsupported, only MSG_PEEK, MSG_DONTWAIT \
-                and MSG_CMSG_CLOEXEC are allowed",
-            );
-        }
+        let (socket, buffer_ptr, length, is_non_block, is_peek) =
+            match this.parse_recv_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
 
         let dest = dest.clone();
 
@@ -652,6 +651,62 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                             this.write_scalar(Scalar::from_target_usize(bytes_sent.try_into().unwrap(), this), &dest),
                         Err(e) => this.set_errno_and_return_neg1(e, &dest)
                     }
+                }
+            ),
+        )
+    }
+
+    fn recvfrom(
+        &mut self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+        addr: &OpTy<'tcx>,
+        addr_len: &OpTy<'tcx>,
+        // Location where the output scalar is written to.
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
+        let this = self.eval_context_mut();
+
+        let addr_ptr = this.read_pointer(addr)?;
+        let addr_len_ptr = this.read_pointer(addr_len)?;
+
+        let (socket, buffer_ptr, length, is_non_block, is_peek) =
+            match this.parse_recv_args(socket, buffer, length, flags)? {
+                Ok(args) => args,
+                Err(e) => return this.set_errno_and_return_neg1(e, dest),
+            };
+
+        let dest = dest.clone();
+
+        socket.recv_from(
+            this.machine.communicate(),
+            buffer_ptr,
+            length,
+            is_peek,
+            is_non_block,
+            this,
+            callback!(
+                @capture<'tcx> {
+                    addr_ptr: Pointer,
+                    addr_len_ptr: Pointer,
+                    dest: MPlaceTy<'tcx>,
+                } |this, result: Result<(usize, Option<SocketAddr>), IoError>| {
+                    let (bytes_sent, origin_addr_opt) = match result {
+                        Ok(value) => value,
+                        Err(e) => return this.set_errno_and_return_neg1(e, &dest)
+                    };
+
+                    // The recvfrom(3) man page specifies that "[...] the value stored in the object pointed to
+                    // `address` is unspecified [...]" should the protocol not provide the source address of the message.
+                    // In this case we do the same thing as the Linux implementation and simply don't write anything to the
+                    // `addr_ptr` and `addr_len_ptr` pointers.
+                    if let Some(origin_addr) = origin_addr_opt {
+                        this.write_socket_address(&origin_addr, addr_ptr, addr_len_ptr, "recvfrom")?;
+                    }
+
+                    this.write_scalar(Scalar::from_target_usize(bytes_sent.try_into().unwrap(), this), &dest)
                 }
             ),
         )
@@ -1231,5 +1286,156 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         throw_unsup_format!("getsockopt: option {option:#x} is unsupported for level IPPROTO_TCP");
+    }
+}
+
+impl<'tcx> EvalContextPrivExt<'tcx> for crate::MiriInterpCx<'tcx> {}
+trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    /// Parse the shared arguments which can be passed to any send function
+    /// like `send` or `sendto`.
+    /// Returns a tuple containing the socket to which data should be sent,
+    /// the pointer to the data in memory, the amount of data which should be sent,
+    /// and whether the socket is non-blocking ([`true`]) or not ([`false`]).
+    fn parse_send_args(
+        &self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+    ) -> InterpResult<
+        'tcx,
+        Result<(FileDescriptionRef<dyn UnixSocketFileDescription>, Pointer, usize, bool), IoError>,
+    > {
+        let this = self.eval_context_ref();
+
+        let socket = this.read_scalar(socket)?.to_i32()?;
+        let buffer_ptr = this.read_pointer(buffer)?;
+        let size_layout = this.libc_ty_layout("size_t");
+        let length: usize =
+            this.read_scalar(length)?.to_uint(size_layout.size)?.try_into().unwrap();
+        let mut flags = this.read_scalar(flags)?.to_i32()?;
+
+        // Get the file handle
+        let Some(fd) = this.machine.fds.get(socket) else {
+            return interp_ok(Err(LibcError("EBADF")));
+        };
+
+        let Some(socket) = fd.as_unix().as_socket() else {
+            return interp_ok(Err(LibcError("ENOTSOCK")));
+        };
+
+        let mut is_non_block = false;
+
+        // Interpret the flag. Every flag we recognize is "subtracted" from `flags`, so
+        // if there is anything left at the end, that's an unsupported flag.
+        if matches!(
+            this.tcx.sess.target.os,
+            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
+        ) {
+            // MSG_NOSIGNAL and MSG_DONTWAIT only exist on Linux, Android, FreeBSD,
+            // Solaris, and Illumos targets.
+            let msg_nosignal = this.eval_libc_i32("MSG_NOSIGNAL");
+            let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
+            if flags & msg_nosignal == msg_nosignal {
+                // This is only needed to ensure that no EPIPE signal is sent when
+                // trying to send into a stream which is no longer connected.
+                // Since we don't support signals, we can ignore this.
+                flags &= !msg_nosignal;
+            }
+            if flags & msg_dontwait == msg_dontwait {
+                flags &= !msg_dontwait;
+                is_non_block = true;
+            }
+        }
+
+        if flags != 0 {
+            throw_unsup_format!(
+                "send: flag {flags:#x} is unsupported, only MSG_NOSIGNAL and MSG_DONTWAIT are allowed",
+            );
+        }
+
+        interp_ok(Ok((socket, buffer_ptr, length, is_non_block)))
+    }
+
+    /// Parse the shared arguments which can be passed to any receive function
+    /// like `recv` or `recvfrom`.
+    /// Returns a tuple containing the socket from which data should be read,
+    /// the pointer to where the data should be read, the amount of data which
+    /// should be read, whether the socket is non-blocking ([`true`]) or not ([`false`]),
+    /// and whether the receive is peeking ([`true`]) or not ([`false`]).
+    fn parse_recv_args(
+        &self,
+        socket: &OpTy<'tcx>,
+        buffer: &OpTy<'tcx>,
+        length: &OpTy<'tcx>,
+        flags: &OpTy<'tcx>,
+    ) -> InterpResult<
+        'tcx,
+        Result<
+            (FileDescriptionRef<dyn UnixSocketFileDescription>, Pointer, usize, bool, bool),
+            IoError,
+        >,
+    > {
+        let this = self.eval_context_ref();
+
+        let socket = this.read_scalar(socket)?.to_i32()?;
+        let buffer_ptr = this.read_pointer(buffer)?;
+        let size_layout = this.libc_ty_layout("size_t");
+        let length: usize =
+            this.read_scalar(length)?.to_uint(size_layout.size)?.try_into().unwrap();
+        let mut flags = this.read_scalar(flags)?.to_i32()?;
+
+        // Get the file handle
+        let Some(fd) = this.machine.fds.get(socket) else {
+            return interp_ok(Err(LibcError("EBADF")));
+        };
+
+        let Some(socket) = fd.as_unix().as_socket() else {
+            return interp_ok(Err(LibcError("ENOTSOCK")));
+        };
+
+        let mut is_peek = false;
+        let mut is_non_block = false;
+
+        // Interpret the flag. Every flag we recognize is "subtracted" from `flags`, so
+        // if there is anything left at the end, that's an unsupported flag.
+
+        let msg_peek = this.eval_libc_i32("MSG_PEEK");
+        if flags & msg_peek == msg_peek {
+            is_peek = true;
+            flags &= !msg_peek;
+        }
+
+        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::FreeBsd | Os::Illumos) {
+            // MSG_CMSG_CLOEXEC only exists on Linux, Android, FreeBSD,
+            // and Illumos targets.
+            let msg_cmsg_cloexec = this.eval_libc_i32("MSG_CMSG_CLOEXEC");
+            if flags & msg_cmsg_cloexec == msg_cmsg_cloexec {
+                // We don't support `exec` so we can ignore this.
+                flags &= !msg_cmsg_cloexec;
+            }
+        }
+
+        if matches!(
+            this.tcx.sess.target.os,
+            Os::Linux | Os::Android | Os::FreeBsd | Os::Solaris | Os::Illumos
+        ) {
+            // MSG_DONTWAIT only exists on Linux, Android, FreeBSD,
+            // Solaris, and Illumos targets.
+            let msg_dontwait = this.eval_libc_i32("MSG_DONTWAIT");
+            if flags & msg_dontwait == msg_dontwait {
+                flags &= !msg_dontwait;
+                is_non_block = true;
+            }
+        }
+
+        if flags != 0 {
+            throw_unsup_format!(
+                "recv: flag {flags:#x} is unsupported, only MSG_PEEK, MSG_DONTWAIT \
+                and MSG_CMSG_CLOEXEC are allowed",
+            );
+        }
+
+        interp_ok(Ok((socket, buffer_ptr, length, is_non_block, is_peek)))
     }
 }
