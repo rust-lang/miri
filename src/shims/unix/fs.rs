@@ -540,13 +540,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 _ => {
                     let _unused = options;
 
-                    // Only support default mode for non-UNIX (i.e. Windows) host.
                     // Ignore the "regular file" bit which is a NOP.
                     let s_ifreg = ecx.eval_libc("S_IFREG");
-                    let s_ifreg = u32::try_from(s_ifreg.to_bits(s_ifreg.size())?).unwrap();
-                    if mode & !s_ifreg != 0o666 {
+                    let mut ignore_bits = u32::try_from(s_ifreg.to_bits(s_ifreg.size())?).unwrap();
+
+                    // Windows has no concept of owner / group / other. New files are read/writable
+                    // by the current user, so we require those bits to be set. We ignore the
+                    // group/other read/write bits. This means we e.g. even with `0o600` we don't
+                    // actually make the file inaccessible to other users. That's not great, but it
+                    // is needed to make `tempfile` work on Windows hosts. We *do* document that
+                    // Miri is not a secure execution environment. Hopefully users read that...
+                    ignore_bits |= 0o066;
+
+                    if mode & !ignore_bits != 0o600 {
                         throw_unsup_format!(
-                            "{open_name}: non-default mode 0o{:o} is not supported on non-Unix hosts",
+                            "{open_name}: mode 0o{:o} is not supported on non-Unix hosts",
                             mode
                         );
                     }
