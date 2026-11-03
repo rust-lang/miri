@@ -419,7 +419,7 @@ regexes! {
     // erase platform file paths
     r"/sys/([a-z_]+)/[a-z]+\b"      => "/sys/$1/PLATFORM",
     // erase paths into the crate registry
-    "[^ \n`\"\']*/\\.?cargo/registry/.*/(.*\\.rs)" => "CARGO_REGISTRY/.../$1",
+    "[^ \n`\"\']*/\\.?cargo/registry/src/index.crates.io-[^/]+/([^/]+)-[^/-]+/(.*\\.rs)" => "CARGO_REGISTRY/$1-$$VERSION/$2",
     // remove time print from GenMC estimation mode output.
     "\nExpected verification time: .* ± .*" => "\nExpected verification time: [MEAN] ± [SD]",
 }

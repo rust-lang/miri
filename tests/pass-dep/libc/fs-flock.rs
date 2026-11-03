@@ -3,6 +3,7 @@
 //@compile-flags: -Zmiri-disable-isolation
 //@run-native
 
+// FIXME(#miri/5074): this does not behave correctly on Windows hosts.
 //@revisions: windows_host unix_host
 //@[unix_host] ignore-host: windows
 //@[windows_host] only-host: windows
