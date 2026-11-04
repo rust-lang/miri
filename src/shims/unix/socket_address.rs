@@ -300,6 +300,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.write_int(0, &elem)?;
                 }
 
+                // OS-specific fields. std assumes they are initialized, too.
+                if matches!(this.tcx.sess.target.os, Os::FreeBsd | Os::MacOs) {
+                    // FIXME: is 0 correct here?
+                    let sin_len_field = this.project_field_named(&address_buffer, "sin_len")?;
+                    this.write_int(0, &sin_len_field)?;
+                }
+
                 address_buffer
             }
             SocketAddr::V6(address) => {
@@ -352,6 +359,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     let sin6_src_id_field =
                         this.project_field_named(&address_buffer, "__sin6_src_id")?;
                     this.write_int(0, &sin6_src_id_field)?;
+                } else if matches!(this.tcx.sess.target.os, Os::FreeBsd | Os::MacOs) {
+                    // FIXME: is 0 correct here?
+                    let sin6_len_field = this.project_field_named(&address_buffer, "sin6_len")?;
+                    this.write_int(0, &sin6_len_field)?;
                 }
 
                 address_buffer

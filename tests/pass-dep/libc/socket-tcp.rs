@@ -481,6 +481,10 @@ fn test_getpeername_ipv4() {
     assert_eq!(addr.sin_family, peer_addr.sin_family);
     assert_eq!(addr.sin_port, peer_addr.sin_port);
     assert_eq!(addr.sin_addr.s_addr, peer_addr.sin_addr.s_addr);
+    #[cfg(any(target_os = "freebsd", target_vendor = "apple"))]
+    {
+        assert_eq!(addr.sin_len, peer_addr.sin_len);
+    }
 }
 
 /// Test the `getpeername` syscall on an IPv6 socket.
@@ -504,6 +508,10 @@ fn test_getpeername_ipv6() {
     assert_eq!(addr.sin6_flowinfo, peer_addr.sin6_flowinfo);
     assert_eq!(addr.sin6_scope_id, peer_addr.sin6_scope_id);
     assert_eq!(addr.sin6_addr.s6_addr, peer_addr.sin6_addr.s6_addr);
+    #[cfg(any(target_os = "freebsd", target_vendor = "apple"))]
+    {
+        assert_eq!(addr.sin6_len, peer_addr.sin6_len);
+    }
 }
 
 /// Test shutting down TCP streams.
