@@ -149,13 +149,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     {
         let ecx = self.eval_context_mut();
         let (alloc_id, offset, ..) = ecx.ptr_get_alloc_id(place.ptr(), 0)?;
-        // Sadly, without Polonius, we cannot reuse `get_meta`, and we do some double-lookups.
-        let alloc_extra = ecx.get_alloc_extra(alloc_id)?;
-        if alloc_extra.get_meta::<T>(offset).is_none() {
-            // No object yet. Create one.
-            let obj = obj(ecx)?;
-            ecx.insert_meta(place, Box::new(obj))?;
+        // Return existing object, if possible.
+        let (alloc_extra, _machine) = ecx.get_alloc_extra_mut(alloc_id).unwrap();
+        if let Some(obj) = alloc_extra.get_meta_mut(offset) {
+            return interp_ok(obj);
         }
+        // No object yet. Create one.
+        let obj = obj(ecx)?;
+        ecx.insert_meta(place, Box::new(obj))?;
         // Now there is an object.
         let (alloc_extra, _machine) = ecx.get_alloc_extra_mut(alloc_id).unwrap();
         interp_ok(alloc_extra.get_meta_mut(offset).unwrap())
