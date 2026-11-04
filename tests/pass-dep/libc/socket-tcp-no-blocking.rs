@@ -2,6 +2,7 @@
 //@compile-flags: -Zmiri-disable-isolation -Zmiri-fixed-schedule
 //@run-native
 
+// Connecting sockets return incorrect bound address on Windows hosts (leading to a warning).
 //@revisions: windows_host unix_host
 //@[unix_host] ignore-host: windows
 //@[windows_host] only-host: windows

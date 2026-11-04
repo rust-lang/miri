@@ -1,6 +1,13 @@
 //@ignore-target: windows # File handling is not implemented yet
 //@compile-flags: -Zmiri-disable-isolation
 
+// On Windows there is a warning
+//@revisions: windows_host unix_host
+//@[unix_host] ignore-host: windows
+//@[windows_host] only-host: windows
+//@normalize-stderr-test: "\n +[0-9]+:[^\n]+" -> ""
+//@normalize-stderr-test: "\n +at [^\n]+" -> ""
+
 use std::fs;
 
 #[path = "../utils/mod.rs"]

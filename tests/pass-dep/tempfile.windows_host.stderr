@@ -1,0 +1,12 @@
+warning: mode for creating new files is ignored
+  --> RUSTLIB/std/src/sys/fs/PLATFORM.rs:LL:CC
+   |
+LL |         let fd = cvt_r(|| unsafe { open64(path.as_ptr(), flags, opts.mode as c_int) })?;
+   |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ opening file with non-default file creation mode
+   |
+   = note: this file was supposed to be created with restricted access for other users, but that is not supported on Windows hosts
+   = note: this warning is only shown once per program execution
+   = note: stack backtrace:
+
+warning: 1 warning emitted
+
