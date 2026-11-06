@@ -396,8 +396,18 @@ fn test_file_set_times() {
     assert_eq!(metadata.accessed().unwrap(), accessed);
     assert_eq!(metadata.modified().unwrap(), newer_modified);
 
-    // Older native 32-bit glibc may not have the time64 symbol.
-    if cfg!(all(target_os = "linux", target_env = "gnu", any(miri, target_pointer_width = "64"))) {
+    // Other 32-bit targets may still use 32-bit time_t, and native 32-bit glibc before 2.34
+    // lacks __futimens64. Miri provides that symbol on x86 and ARM GNU/Linux.
+    if cfg!(any(
+        target_pointer_width = "64",
+        target_os = "windows",
+        all(
+            miri,
+            target_os = "linux",
+            target_env = "gnu",
+            any(target_arch = "x86", target_arch = "arm")
+        )
+    )) {
         // On 32-bit glibc, std needs the weak `__futimens64` symbol for dates past 2038.
         let future_modified = SystemTime::UNIX_EPOCH + Duration::from_secs(3_000_000_000);
         file.set_times(FileTimes::new().set_modified(future_modified)).unwrap();

@@ -1,6 +1,6 @@
 //@only-target: linux
 //@compile-flags: -Zmiri-disable-isolation
-//@run-native
+//@run-native: ignore-output
 
 use std::fs::File;
 use std::mem::MaybeUninit;
@@ -26,23 +26,20 @@ struct Timespec64 {
 
 impl Timespec64 {
     fn new(tv_sec: i64, tv_nsec: i32) -> Self {
-        // The shim must not read padding, even when it is uninitialized.
+        // Leave padding uninitialized so Miri detects if the shim reads it as part of tv_nsec.
         Self { tv_sec, tv_nsec, padding: MaybeUninit::uninit() }
     }
 }
 
 fn main() {
     let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"__futimens64".as_ptr()) };
-    if !cfg!(all(
-        target_env = "gnu",
-        target_pointer_width = "32",
-        not(any(target_arch = "x86_64", target_arch = "riscv32"))
-    )) {
+    if !cfg!(all(target_env = "gnu", any(target_arch = "x86", target_arch = "arm"))) {
         assert!(symbol.is_null());
         return;
     }
     // Native glibc before 2.34 does not provide this symbol.
     if !cfg!(miri) && symbol.is_null() {
+        eprintln!("skipping test as __futimens64 symbol is missing");
         return;
     }
     assert!(!symbol.is_null());
@@ -61,8 +58,9 @@ fn main() {
     let times =
         [Timespec64::new(5_000_000_000, 100_000_000), Timespec64::new(3_000_000_001, 200_000_000)];
     errno_check(unsafe { futimens64(fd, times.as_ptr()) });
-    let accessed = SystemTime::UNIX_EPOCH + Duration::new(5_000_000_000, 100_000_000);
-    let modified = SystemTime::UNIX_EPOCH + Duration::new(3_000_000_001, 200_000_000);
+    let [accessed, modified] = times.map(|time| {
+        SystemTime::UNIX_EPOCH + Duration::new(time.tv_sec.try_into().unwrap(), time.tv_nsec as u32)
+    });
     assert_eq!(get_times(), (accessed, modified));
 
     // Invalid nanoseconds in either slot must leave both timestamps unchanged.
@@ -82,12 +80,14 @@ fn main() {
     assert!(accessed.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() >= before);
     assert_eq!(actual_modified, modified);
 
+    // A null times pointer sets both timestamps to the current time.
     errno_check(unsafe { futimens64(fd, std::ptr::null()) });
     let (accessed, modified) = get_times();
     for time in [accessed, modified] {
         assert!(time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() >= before);
     }
 
+    // An invalid file descriptor reports EBADF.
     let err = errno_result(unsafe { futimens64(-1, times.as_ptr()) }).unwrap_err();
     assert_eq!(err.raw_os_error(), Some(libc::EBADF));
     std::fs::remove_file(path).unwrap();

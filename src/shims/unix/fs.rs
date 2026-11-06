@@ -289,7 +289,6 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         assert!(this.machine.communicate(), "isolation should have prevented reaching this");
 
         // `tv_nsec` and the `UTIME_*` constants are `c_long`, i.e. the target's `isize`.
-        // `__timespec64` has a padding field before `tv_nsec` on big-endian targets.
         let nsec_place = this.project_field_named(tp, "tv_nsec")?;
         let nsec = this.read_scalar(&nsec_place)?.to_target_isize(this)?;
 

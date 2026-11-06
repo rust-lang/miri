@@ -23,11 +23,9 @@ pub fn is_dyn_sym(name: &str, target: &Target) -> bool {
         "copy_file_range" | "gettid" | "statx" => true,
         "__cxa_thread_atexit_impl" => target.env == rustc_target::spec::Env::Gnu,
         // glibc only exposes this symbol on targets with a 32-bit time_t.
-        // x32 and riscv32 already use 64-bit time_t despite having 32-bit pointers.
         "__futimens64" =>
             target.env == rustc_target::spec::Env::Gnu
-                && target.pointer_width == 32
-                && !matches!(target.arch, Arch::X86_64 | Arch::RiscV32),
+                && matches!(target.arch, Arch::X86 | Arch::Arm),
         _ => false,
     }
 }
@@ -47,14 +45,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         match link_name.as_str() {
             // File related shims
-            "__futimens64" if ecx.is_dyn_sym("__futimens64") => {
-                let [fd, times] = &ecx.check_shim_sig(
-                    shim_sig!(extern "C" fn(i32, *std::sys::pal::time::__timespec64) -> i32),
-                    (link_name, abi, args),
-                )?;
-                let result = ecx.futimens(fd, times)?;
-                ecx.write_scalar(result, dest)?;
-            }
             "open64" => {
                 // "open64" means that the file is opened with O_LARGEFILE, which we always do.
                 let ([path_raw, flag], varargs) = ecx.check_shim_sig_variadic(
@@ -194,6 +184,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let [dirp] = &ecx
                     .check_shim_sig(shim_sig!(extern "C" fn(*_) -> *_), (link_name, abi, args))?;
                 ecx.readdir(dirp, dest, "dirent64")?;
+            }
+            "__futimens64" if ecx.is_dyn_sym("__futimens64") => {
+                // libc has no separate time64 type; its timespec uses 32-bit time_t here.
+                let [fd, times] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn(i32, *std::sys::pal::time::__timespec64) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = ecx.futimens(fd, times)?;
+                ecx.write_scalar(result, dest)?;
             }
 
             // epoll, eventfd
