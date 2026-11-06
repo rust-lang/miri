@@ -70,7 +70,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // many *host* FDs we can open. Just use some arbitrary, pretty big value;
             // this can be adjusted if it causes problems.
             // The spec imposes a minimum of `_POSIX_OPEN_MAX` (20).
-            ("_SC_OPEN_MAX", |_ecx| 2_i32.pow(16).into()),
+            ("_SC_OPEN_MAX", |_ecx| OPEN_MAX.into()),
             // Our hard-coded hostname is just 4 bytes so we don't need anything big here.
             ("_SC_HOST_NAME_MAX", |_ecx| 255),
         ];
