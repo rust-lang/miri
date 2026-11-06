@@ -31,7 +31,12 @@ macro_rules! schedule_rounds4 {
 }
 
 fn main() {
-    assert!(is_x86_feature_detected!("sha"));
+    if !is_x86_feature_detected!("sha") {
+        // This x86 CPU does not have the `sha` extensions.
+        // We thus skip this test.
+        return;
+    }
+
     assert!(is_x86_feature_detected!("sse2"));
     assert!(is_x86_feature_detected!("ssse3"));
     assert!(is_x86_feature_detected!("sse4.1"));
