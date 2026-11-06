@@ -4,7 +4,7 @@
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::VecDeque;
-use std::io::{self, ErrorKind, Read};
+use std::io::{self, ErrorKind, Read, Write};
 use std::rc::Rc;
 
 use rustc_target::spec::Os;
@@ -369,7 +369,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Do full write / partial write based on the space available.
             let write_size = len.min(available_space);
             let actual_write_size =
-                this.write_to_host(&mut writebuf.buf, write_size, ptr)?.unwrap();
+                this.write_to_host(|bytes| writebuf.buf.write(bytes), write_size, ptr)?.unwrap();
             assert_eq!(actual_write_size, write_size);
 
             // Need to stop accessing peer_fd so that it can be notified.

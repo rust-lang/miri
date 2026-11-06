@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell, RefMut};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -1109,7 +1109,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         // This is a *non-blocking* write.
-        let result = this.write_to_host(stream, length, buffer_ptr)?;
+        let result = this.write_to_host(|bytes| stream.write(bytes), length, buffer_ptr)?;
 
         drop(state);
 
