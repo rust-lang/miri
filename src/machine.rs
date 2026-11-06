@@ -41,6 +41,7 @@ use crate::concurrency::{
 };
 use crate::data_structures::range_object_map::RangeObjectMap;
 use crate::helpers::is_no_core;
+use crate::shims::alloc::{AllocFrameData, EvalContextExt as _, check_if_access_blocked};
 use crate::*;
 
 /// First real-time signal.
@@ -137,6 +138,11 @@ pub struct FrameExtra<'tcx> {
     /// we stop unwinding, use the `CatchUnwindData` to handle catching.
     pub catch_unwind: Option<CatchUnwindData<'tcx>>,
 
+    /// If this is Some(), then this is a frame with a custom global allocator `alloc` call.
+    /// Before this frame is popped, we use the `AllocFrameData` to handle issuing the
+    /// new allocation.
+    pub alloc_frame: Option<AllocFrameData>,
+
     /// If `measureme` profiling is enabled, holds timing information
     /// for the start of this frame. When we finish executing this frame,
     /// we use this to register a completed event with `measureme`.
@@ -154,8 +160,14 @@ pub struct FrameExtra<'tcx> {
 impl<'tcx> std::fmt::Debug for FrameExtra<'tcx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Omitting `timing`, it does not support `Debug`.
-        let FrameExtra { borrow_tracker, catch_unwind, timing: _, user_relevance, data_race } =
-            self;
+        let FrameExtra {
+            borrow_tracker,
+            catch_unwind,
+            alloc_frame: _,
+            timing: _,
+            user_relevance,
+            data_race,
+        } = self;
         f.debug_struct("FrameData")
             .field("borrow_tracker", borrow_tracker)
             .field("catch_unwind", catch_unwind)
@@ -167,8 +179,14 @@ impl<'tcx> std::fmt::Debug for FrameExtra<'tcx> {
 
 impl VisitProvenance for FrameExtra<'_> {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
-        let FrameExtra { catch_unwind, borrow_tracker, timing: _, user_relevance: _, data_race: _ } =
-            self;
+        let FrameExtra {
+            catch_unwind,
+            borrow_tracker,
+            alloc_frame: _,
+            timing: _,
+            user_relevance: _,
+            data_race: _,
+        } = self;
 
         catch_unwind.visit_provenance(visit);
         borrow_tracker.visit_provenance(visit);
@@ -393,6 +411,13 @@ pub struct AllocExtra<'tcx> {
     /// Some shims implement APIs that manipulate opaque data stored in memory, or that attach
     /// extra data to particular memory locations. This is where we store that data.
     pub meta_objs: RangeObjectMap<Box<dyn MetaObj>>,
+    /// The AllocId of the the allocation, this allocation was created from.
+    /// This is used by custom global allocator analysis to find the original
+    /// allocation.
+    pub parent: Option<Pointer>,
+    /// A list of AllocRanges determining which regions are currently handed out to the user.
+    /// Any memory access to an adress in a blocked range is not allowed.
+    pub blocked_ranges: Vec<AllocRange>,
 }
 
 // We need a `Clone` impl because the machine passes `Allocation` through `Cow`...
@@ -405,7 +430,14 @@ impl<'tcx> Clone for AllocExtra<'tcx> {
 
 impl VisitProvenance for AllocExtra<'_> {
     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
-        let AllocExtra { borrow_tracker, data_race, backtrace: _, meta_objs: _ } = self;
+        let AllocExtra {
+            borrow_tracker,
+            data_race,
+            backtrace: _,
+            meta_objs: _,
+            parent: _,
+            blocked_ranges: _,
+        } = self;
 
         borrow_tracker.visit_provenance(visit);
         data_race.visit_provenance(visit);
@@ -1016,6 +1048,8 @@ impl<'tcx> MiriMachine<'tcx> {
             data_race,
             backtrace,
             meta_objs: RangeObjectMap::new(),
+            parent: None,
+            blocked_ranges: Vec::new(),
         })
     }
 }
@@ -1721,6 +1755,9 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             obj.on_access()?;
         }
 
+        // Check if the memory we are trying to read intersects a blocked range of this allocation.
+        check_if_access_blocked(alloc_extra, &range)?;
+
         interp_ok(())
     }
 
@@ -1771,6 +1808,8 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             // Then remove the opaque objects.
             alloc_extra.meta_objs.remove_range_if(range, |obj| obj.opaque());
         }
+        // Check if the memory we are trying to write to is currently in a blocked range of the allocation.
+        check_if_access_blocked(alloc_extra, &range)?;
         interp_ok(())
     }
 
@@ -1810,6 +1849,10 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         // Check if there are any sync objects that would like to prevent freeing this memory.
         for obj in alloc_extra.meta_objs.range(AllocRange { start: Size::ZERO, size }) {
             obj.on_access()?;
+        }
+        // Check if there are still any blocked regions, meaning we haven't gotten back all memory we handed out.
+        if !(alloc_extra.blocked_ranges.is_empty()) {
+            panic!("Trying to deallocate memory that has a blocked region.")
         }
 
         if let Some((_, deallocated_at)) = machine.allocation_spans.borrow_mut().get_mut(&alloc_id)
@@ -1888,6 +1931,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         let extra = FrameExtra {
             borrow_tracker: borrow_tracker.map(|bt| bt.borrow_mut().new_frame()),
             catch_unwind: None,
+            alloc_frame: None,
             timing,
             user_relevance: ecx.machine.user_relevance(&frame),
             data_race: ecx
@@ -1956,6 +2000,22 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         interp_ok(())
     }
 
+    fn after_stack_frame_init(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
+        // If frame is a custom allocator `alloc` frame, we initialize the `AllocFrameData` for
+        // the caller frame to store function arguments.
+        if ecx.has_custom_alloc_frame() {
+            let data = ecx.init_alloc_frame_data()?;
+            let [.., ref mut frame, _] = ecx.active_thread_stack_mut()[..] else {
+                panic!("Call frame should exist");
+            };
+            frame.extra.alloc_frame = Some(data);
+        // If it is a dealloc frame, we need to handle that correctly.
+        } else if ecx.has_custom_dealloc_frame() {
+            ecx.handle_init_dealloc_frame()?;
+        }
+        interp_ok(())
+    }
+
     fn before_stack_pop(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
         let frame = ecx.frame();
         // We want this *before* the return value copy, because the return place itself is protected
@@ -1992,6 +2052,9 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         let res = {
             // Move `frame` into a sub-scope so we control when it will be dropped.
             let mut frame = frame;
+            if ecx.is_custom_alloc_frame(&frame) {
+                ecx.handle_alloc_frame_pop(&frame)?;
+            }
             let timing = frame.extra.timing.take();
             let res = ecx.handle_stack_pop_unwind(frame.extra, unwinding);
             if let Some(profiler) = ecx.machine.profiler.as_ref() {
