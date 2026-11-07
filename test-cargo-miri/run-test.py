@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import argparse
+import tempfile
 
 CGREEN  = '\33[32m'
 CBOLD   = '\33[1m'
@@ -141,6 +142,22 @@ def test_cargo_miri_run():
          cargo_miri("run") + ["--package=test-local-crate-detection"],
          "run.local_crate.stdout.ref", "run.local_crate.stderr.ref",
     )
+    with tempfile.TemporaryDirectory(prefix="cargo-miri-argfile-") as argfile_target_dir:
+        test("`cargo miri run` (argfile)",
+            cargo_miri("run") + [f"--target-dir={argfile_target_dir}"],
+            "run.default.stdout.ref", "run.default.stderr.ref",
+            stdin=b'12\n21\n',
+            env={
+                'MIRIFLAGS': "-Zmiri-disable-isolation",
+                'MIRITESTVAR': "wrongval",
+                '__CARGO_TEST_FORCE_ARGFILE': "1",
+            },
+        )
+        # Ensure that the compilation actually happened and created the expected artifacts.
+        if os.listdir(argfile_target_dir) != ["miri"]:
+            fail(f"`{argfile_target_dir}` contains unexpected files")
+        if not os.path.exists(os.path.join(argfile_target_dir, "miri", "debug")):
+            fail(f"`{argfile_target_dir}` is missing compiled artifacts")
 
 def test_cargo_miri_test():
     test("`cargo miri test`",

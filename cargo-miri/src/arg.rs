@@ -1,7 +1,34 @@
 //! Utilities for dealing with argument flags
 
 use std::borrow::Cow;
-use std::env;
+use std::error::Error;
+use std::{env, fmt, fs, io};
+
+#[derive(Debug)]
+pub enum ArgfileError {
+    IO(String, io::Error),
+    Utf8(String),
+}
+
+impl fmt::Display for ArgfileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ArgfileError::IO(path, err) =>
+                write!(f, "failed to read argument file `{path}`: {err}"),
+            ArgfileError::Utf8(path) =>
+                write!(f, "failed to read argument file `{path}`: not valid UTF-8"),
+        }
+    }
+}
+
+impl Error for ArgfileError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ArgfileError::IO(_, err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 /// Owned command-line arguments providing flag inspection queries.
 #[derive(Debug)]
@@ -57,6 +84,37 @@ impl Args {
     /// Gets the first value of a `--flag` before `--`.
     pub fn get_arg_flag_value<'x>(&'x self, name: &str) -> Option<&'x str> {
         self.get_arg_flag_values(name).next()
+    }
+
+    /// Replaces any `@file` arguments with the lines of `file`.
+    ///
+    /// Matches rustc's default line-based argfile expansion behavior:
+    /// - Each line of the file becomes an argument.
+    /// - `\n` and `\r\n` line endings are supported.
+    /// - Lines are not recursively expanded or split on shell whitespace.
+    ///
+    /// Note: while this expansion is non-recursive within `Args`, forwarding literal `@...`
+    /// arguments verbatim across child process boundaries without downstream re-expansion
+    /// requires outgoing argfiles (step 3).
+    pub fn expand_argfiles(self) -> Result<Self, ArgfileError> {
+        let mut expanded = Vec::with_capacity(self.args.len());
+        for arg in self.args {
+            if let Some(argfile) = arg.strip_prefix('@') {
+                let contents = fs::read_to_string(argfile).map_err(|e| {
+                    if e.kind() == io::ErrorKind::InvalidData {
+                        ArgfileError::Utf8(argfile.to_string())
+                    } else {
+                        ArgfileError::IO(argfile.to_string(), e)
+                    }
+                })?;
+                for line in contents.lines() {
+                    expanded.push(line.to_string());
+                }
+            } else {
+                expanded.push(arg);
+            }
+        }
+        Ok(Self { args: expanded })
     }
 }
 
@@ -180,6 +238,12 @@ mod tests {
         }
     }
 
+    impl FromIterator<String> for Args {
+        fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
+            Self { args: iter.into_iter().collect() }
+        }
+    }
+
     #[test]
     fn test_flag_queries() {
         let args = Args::from_iter([
@@ -253,5 +317,122 @@ mod tests {
         assert_eq!(forwarded, vec!["cmd", "--"]);
         let remaining: Vec<_> = iter.collect();
         assert_eq!(remaining, vec!["--target-dir", "keep"]);
+    }
+
+    use std::path::{Path, PathBuf};
+
+    struct TempFile(PathBuf);
+
+    impl TempFile {
+        fn new(name: &str, content: &[u8]) -> Self {
+            let mut path = env::temp_dir();
+            path.push(format!("miri_argfile_test_{}_{name}", std::process::id()));
+            fs::write(&path, content).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn test_expand_argfiles_mixed_and_order() {
+        let file1 =
+            TempFile::new("file1", b"--target\nx86_64-unknown-linux-gnu\narg with spaces\r\n");
+        let empty_file = TempFile::new("empty", b"");
+        let file2 = TempFile::new("file2", b"--crate-type=lib\r\n--verbose\n");
+
+        let arg1 = format!("@{}", file1.path().display());
+        let arg_empty = format!("@{}", empty_file.path().display());
+        let arg2 = format!("@{}", file2.path().display());
+
+        let args = Args::from_iter(["--before", &arg1, "--middle", &arg_empty, &arg2, "--after"]);
+
+        let expanded = args.expand_argfiles().unwrap();
+
+        // Drop the temporary files so they are removed from disk.
+        drop(file1);
+        drop(empty_file);
+        drop(file2);
+
+        // Verify exact contents and order are retained after file removal.
+        assert_eq!(
+            expanded.as_slice(),
+            &[
+                "--before",
+                "--target",
+                "x86_64-unknown-linux-gnu",
+                "arg with spaces",
+                "--middle",
+                "--crate-type=lib",
+                "--verbose",
+                "--after",
+            ]
+        );
+
+        // Verify flag queries work on the expanded arguments.
+        assert_eq!(expanded.get_arg_flag_value("--target"), Some("x86_64-unknown-linux-gnu"));
+        assert_eq!(expanded.get_arg_flag_value("--crate-type"), Some("lib"));
+        assert!(expanded.has_arg_flag("--verbose"));
+        assert!(expanded.has_arg_flag("--before"));
+        assert!(expanded.has_arg_flag("--after"));
+    }
+
+    #[test]
+    fn test_expand_argfiles_missing_file() {
+        let nonexistent = env::temp_dir().join(format!("miri_nonexistent_{}", std::process::id()));
+        let args = Args::from_iter([format!("@{}", nonexistent.display())]);
+        let err = args.expand_argfiles().unwrap_err();
+        match &err {
+            ArgfileError::IO(path, _) => {
+                assert_eq!(path, &nonexistent.to_string_lossy());
+            }
+            other => panic!("expected IO error, got: {other:?}"),
+        }
+        let msg = format!("{err}");
+        assert!(msg.contains("failed to read argument file"));
+        assert!(msg.contains(&nonexistent.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn test_expand_argfiles_invalid_utf8() {
+        let file = TempFile::new("invalid_utf8", b"valid\n\xff\xfe\ninvalid");
+        let args = Args::from_iter([format!("@{}", file.path().display())]);
+        let err = args.expand_argfiles().unwrap_err();
+        match &err {
+            ArgfileError::Utf8(path) => {
+                assert_eq!(path, &file.path().to_string_lossy());
+            }
+            other => panic!("expected Utf8 error, got: {other:?}"),
+        }
+        let msg = format!("{err}");
+        assert!(msg.contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn test_expand_argfiles_persists_after_file_removed() {
+        let expanded = {
+            let file =
+                TempFile::new("to_delete", b"--target\nx86_64-unknown-linux-gnu\n--verbose\n");
+            let args =
+                Args::from_iter(["--before", &format!("@{}", file.path().display()), "--after"]);
+            args.expand_argfiles().unwrap()
+        };
+        // The temporary argfile has been deleted here.
+        assert_eq!(
+            expanded.as_slice(),
+            &["--before", "--target", "x86_64-unknown-linux-gnu", "--verbose", "--after"]
+        );
+        assert_eq!(expanded.get_arg_flag_value("--target"), Some("x86_64-unknown-linux-gnu"));
+        assert!(expanded.has_arg_flag("--verbose"));
+        assert!(expanded.has_arg_flag("--before"));
+        assert!(expanded.has_arg_flag("--after"));
     }
 }
