@@ -31,6 +31,7 @@ impl Timespec64 {
     }
 }
 
+/// Test futimens64.
 fn main() {
     let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"__futimens64".as_ptr()) };
     if !cfg!(all(target_env = "gnu", any(target_arch = "x86", target_arch = "arm"))) {
