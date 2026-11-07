@@ -538,17 +538,36 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     options.mode(mode);
                 }
                 _ => {
+                    use std::sync::atomic;
+
                     let _unused = options;
 
-                    // Only support default mode for non-UNIX (i.e. Windows) host.
                     // Ignore the "regular file" bit which is a NOP.
                     let s_ifreg = ecx.eval_libc("S_IFREG");
                     let s_ifreg = u32::try_from(s_ifreg.to_bits(s_ifreg.size())?).unwrap();
-                    if mode & !s_ifreg != 0o666 {
-                        throw_unsup_format!(
-                            "{open_name}: non-default mode 0o{:o} is not supported on non-Unix hosts",
-                            mode
-                        );
+                    let mode = mode & !s_ifreg;
+
+                    let default_mode = 0o666;
+                    if mode != default_mode {
+                        // 0o666 is the only mode we can faithfully represent on Windows -- readable
+                        // and wirtable according to default settings. However, we'd lke to support
+                        // `tempfile` which uses mode 0o600. We cannot actually realize that mode
+                        // with std APIs, so we gnore the group/other read/write bits. This risks
+                        // making the file accessible to too many users. We *do* document that Miri
+                        // is not a secure execution environment. Hopefully users read that...
+                        let ignore_mode = 0o066;
+                        if mode & !ignore_mode == default_mode & !ignore_mode {
+                            // Same as default, up to the ignored bits. Emit a warning, then go on.
+                            static DEDUP: atomic::AtomicBool = atomic::AtomicBool::new(false);
+                            if !DEDUP.swap(true, atomic::Ordering::Relaxed) {
+                                ecx.emit_diagnostic(NonHaltingDiagnostic::FileModeIgnored);
+                            }
+                        } else {
+                            throw_unsup_format!(
+                                "{open_name}: mode 0o{:o} is not supported on non-Unix hosts",
+                                mode
+                            );
+                        }
                     }
                 }
             }
