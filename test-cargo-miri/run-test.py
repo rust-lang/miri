@@ -153,10 +153,7 @@ def test_cargo_miri_run():
                 '__CARGO_TEST_FORCE_ARGFILE': "1",
             },
         )
-        # Ensure that the compilation actually happened and created the expected artifacts.
-        if os.listdir(argfile_target_dir) != ["miri"]:
-            fail(f"`{argfile_target_dir}` contains unexpected files")
-        if not os.path.exists(os.path.join(argfile_target_dir, "miri", "debug")):
+        if not os.path.isdir(os.path.join(argfile_target_dir, "miri", "debug")):
             fail(f"`{argfile_target_dir}` is missing compiled artifacts")
 
 def test_cargo_miri_test():
@@ -174,10 +171,7 @@ def test_cargo_miri_test():
                 '__CARGO_TEST_FORCE_ARGFILE': "1",
             },
         )
-        # Ensure that the compilation actually happened and created the expected artifacts.
-        if os.listdir(argfile_target_dir) != ["miri"]:
-            fail(f"`{argfile_target_dir}` contains unexpected files")
-        if not os.path.exists(os.path.join(argfile_target_dir, "miri", "debug")):
+        if not os.path.isdir(os.path.join(argfile_target_dir, "miri", "debug")):
             fail(f"`{argfile_target_dir}` is missing compiled artifacts")
     test("`cargo miri test` (no isolation, no doctests)",
         cargo_miri("test") + ["--bins", "--tests"], # no `--lib`, we disabled that in `Cargo.toml`

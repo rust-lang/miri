@@ -232,15 +232,9 @@ impl ArgFlagValueIter {
 mod tests {
     use super::*;
 
-    impl<'a> FromIterator<&'a str> for Args {
-        fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
-            Self { args: iter.into_iter().map(String::from).collect() }
-        }
-    }
-
-    impl FromIterator<String> for Args {
-        fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
-            Self { args: iter.into_iter().collect() }
+    impl<S: Into<String>> FromIterator<S> for Args {
+        fn from_iter<T: IntoIterator<Item = S>>(iter: T) -> Self {
+            Self { args: iter.into_iter().map(Into::into).collect() }
         }
     }
 
@@ -357,12 +351,12 @@ mod tests {
 
         let expanded = args.expand_argfiles().unwrap();
 
-        // Drop the temporary files so they are removed from disk.
+        // Dropping the temp files verifies that arguments are retained in memory
+        // and queryable after the on-disk files are deleted.
         drop(file1);
         drop(empty_file);
         drop(file2);
 
-        // Verify exact contents and order are retained after file removal.
         assert_eq!(
             expanded.as_slice(),
             &[
@@ -377,7 +371,6 @@ mod tests {
             ]
         );
 
-        // Verify flag queries work on the expanded arguments.
         assert_eq!(expanded.get_arg_flag_value("--target"), Some("x86_64-unknown-linux-gnu"));
         assert_eq!(expanded.get_arg_flag_value("--crate-type"), Some("lib"));
         assert!(expanded.has_arg_flag("--verbose"));
@@ -414,26 +407,6 @@ mod tests {
         }
         let msg = format!("{err}");
         assert!(msg.contains("not valid UTF-8"));
-    }
-
-    #[test]
-    fn test_expand_argfiles_persists_after_file_removed() {
-        let expanded = {
-            let file =
-                TempFile::new("to_delete", b"--target\nx86_64-unknown-linux-gnu\n--verbose\n");
-            let args =
-                Args::from_iter(["--before", &format!("@{}", file.path().display()), "--after"]);
-            args.expand_argfiles().unwrap()
-        };
-        // The temporary argfile has been deleted here.
-        assert_eq!(
-            expanded.as_slice(),
-            &["--before", "--target", "x86_64-unknown-linux-gnu", "--verbose", "--after"]
-        );
-        assert_eq!(expanded.get_arg_flag_value("--target"), Some("x86_64-unknown-linux-gnu"));
-        assert!(expanded.has_arg_flag("--verbose"));
-        assert!(expanded.has_arg_flag("--before"));
-        assert!(expanded.has_arg_flag("--after"));
     }
 
     #[test]
