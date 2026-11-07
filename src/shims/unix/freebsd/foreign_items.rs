@@ -1,3 +1,10 @@
+use std::ffi::CString;
+use std::io::ErrorKind;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+
 use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
@@ -137,6 +144,142 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 } else {
                     // `id` is always that of the active thread, so this is currently unreachable.
                     unreachable!();
+                }
+            }
+
+            // We only implement `sysctl` to support `std::env::current_exe` for now.
+            "sysctl" => 'sysctl: {
+                let [names, name_len, old_p, old_len_p, new_p, new_p_len] = this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*i32, u32, *_, *u32, *_, u32) -> i32),
+                    (link_name, abi, args),
+                )?;
+
+                // Reject if isolation is enabled.
+                if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+                    this.reject_in_isolation("`sysctl`", reject_with)?;
+                    this.set_errno_and_return_neg1(ErrorKind::PermissionDenied, dest)?;
+                    break 'sysctl;
+                }
+
+                // Man page: If a new value is not to be set, newp should be set to NULL and
+                // newlen set to 0
+                // So we make sure the user never wants to update a name.
+                if !this.ptr_is_null(this.read_pointer(&new_p)?)?
+                    && this.read_scalar(&new_p_len)?.to_u32()? != 0
+                {
+                    throw_unsup_format!("`sysctl` does not support setting new values");
+                }
+
+                let old_p = this.read_pointer(&old_p)?;
+
+                // Man page: If	the old value is not desired, oldp and oldlenp should be set to NULL
+                // So nothing to do for us here.
+                if this.ptr_is_null(old_p)? && this.ptr_is_null(this.read_pointer(&old_len_p)?)? {
+                    break 'sysctl;
+                }
+
+                let ctl_maxname = u32::try_from(this.eval_libc_i32("CTL_MAXNAME"))
+                    .expect("CTL_MAXNAME is always positive");
+                let name_len = this.read_scalar(&name_len)?.to_u32()?;
+                if name_len < 2 || name_len > ctl_maxname {
+                    this.set_errno_and_return_neg1(LibcError("EINVAL"), dest)?;
+                    break 'sysctl;
+                }
+
+                let layout = this.machine.layouts.i32;
+                let names_place = this.ptr_to_mplace(this.read_pointer(&names)?, layout);
+                let mut names = this.project_array_fields(&names_place)?;
+
+                let ctl_kern = this.eval_libc_i32("CTL_KERN");
+                let kern_proc = this.eval_libc_i32("KERN_PROC");
+                let kern_proc_path = this.eval_libc_i32("KERN_PROC_PATHNAME");
+
+                let Some((_, first_name)) = names.next(this)? else {
+                    // The given length of the `names` array is >= 2 but the array itself is empty.
+                    throw_ub_format!("Out of bounds read");
+                };
+                if ctl_kern != this.read_scalar(&first_name)?.to_i32()? {
+                    throw_unsup_format!(
+                        "`sysctl` only accepts `CTL_KERN` as top-level name to support `std::env::current_exe`"
+                    )
+                }
+
+                let Some((_, second_name)) = names.next(this)? else {
+                    // The given length of the `names` array is >= 2 but the array itself is empty
+                    throw_ub_format!("Out of bounds read");
+                };
+                if kern_proc != this.read_scalar(&second_name)?.to_i32()? {
+                    throw_unsup_format!(
+                        "`sysctl` only accepts `KERN_PROC` as a second-level name to support `std::env::current_exe`"
+                    );
+                }
+
+                let Some((_, third_name)) = names.next(this)? else {
+                    // Man page: The name array specifies  an  intermediate  rather  than
+                    // terminal name.
+                    this.set_errno_and_return_neg1(LibcError("ENOTDIR"), dest)?;
+                    break 'sysctl;
+                };
+                if kern_proc_path != this.read_scalar(&third_name)?.to_i32()? {
+                    throw_unsup_format!(
+                        "`sysctl` only accepts `KERN_PROC_PATHNAME` as a third-level name to support `std::env::current_exe`"
+                    );
+                }
+
+                let Some((_, last_name)) = names.next(this)? else {
+                    // Man page: The name array specifies  an  intermediate  rather  than
+                    // terminal name.
+                    this.set_errno_and_return_neg1(LibcError("ENOTDIR"), dest)?;
+                    break 'sysctl;
+                };
+
+                // we only support the current process due to `std::env::current_exe`
+                if -1 != this.read_scalar(&last_name)?.to_i32()? {
+                    throw_unsup_format!(
+                        "`sysctl` only supports returning the current process' path"
+                    );
+                }
+
+                match std::env::current_exe() {
+                    Ok(path) => {
+                        let path_name = CString::new(path.as_path().as_os_str().as_bytes())
+                            .expect("we did not insert a null-byte ourselves");
+                        let path_name_bytes = path_name.as_bytes_with_nul(); // write as a c_str
+
+                        let path_name_len = u32::try_from(path_name_bytes.len())
+                            .expect("the path name can't be that large");
+                        let old_len_place = this.deref_pointer(&old_len_p)?;
+
+                        if this.ptr_is_null(old_p)? {
+                            // Man page: The size of the available data can be determined by calling
+                            // sysctl() with the NULL argument for oldp.
+                            this.write_int(path_name_len, &old_len_place)?;
+                            this.write_int(0, dest)?
+                        } else {
+                            let old_len = this.read_scalar(&old_len_place)?.to_u32()?;
+
+                            if old_len >= path_name_len {
+                                // We can freely write the path name.
+                                this.write_bytes_ptr(old_p, path_name_bytes.iter().copied())?;
+                                this.write_int(path_name_len, &old_len_place)?;
+                            } else {
+                                // Man page: If the amount of data available is greater than the
+                                // size of the buffer supplied, the call supplies as much data as
+                                // fits in the buffer provided and returns with the error
+                                // code ENOMEM
+                                let old_len = usize::try_from(old_len).unwrap();
+                                this.write_bytes_ptr(
+                                    old_p,
+                                    path_name_bytes[..old_len].iter().copied(),
+                                )?;
+                                this.set_errno_and_return_neg1(LibcError("ENOMEM"), dest)?;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        // convert the host error and return
+                        this.set_errno_and_return_neg1(err, dest)?;
+                    }
                 }
             }
 
