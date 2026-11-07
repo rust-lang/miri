@@ -25,7 +25,7 @@ pub fn is_dyn_sym(name: &str, target: &Target) -> bool {
         // glibc only exposes this symbol on targets with a 32-bit time_t.
         "__futimens64" =>
             target.env == rustc_target::spec::Env::Gnu
-                && matches!(target.arch, Arch::X86 | Arch::Arm),
+                && matches!(target.arch, Arch::X86 | Arch::Arm | Arch::Mips),
         _ => false,
     }
 }
