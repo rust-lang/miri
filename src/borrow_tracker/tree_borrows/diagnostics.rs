@@ -42,7 +42,10 @@ impl AccessCause {
             Self::Explicit(kind) => format!("{rel} {kind}"),
             Self::Reborrow(kind) => format!("reborrow (acting as a {rel} {kind})"),
             Self::Dealloc => format!("deallocation (acting as a {rel} write access)"),
-            Self::FnExit(kind) => format!("protector release (acting as a {rel} {kind})"),
+            Self::FnExit(kind) =>
+                format!(
+                    "protector release (ending the restrictions for function arguments upon return, acting as a {rel} {kind})"
+                ),
         }
     }
 }
@@ -354,7 +357,7 @@ impl TbError<'_> {
                 (title, details, conflicting_tag_name)
             }
             ProtectedDisabled(before_disabled) => {
-                let conflicting_tag_name = "protected";
+                let conflicting_tag_name = "function argument";
                 let access = cause.print_as_access(/* is_foreign */ true);
                 let details = vec![
                     format!(
@@ -363,17 +366,22 @@ impl TbError<'_> {
                     format!(
                         "this {access} would cause the {conflicting_tag_name} tag {conflicting} (currently {before_disabled}) to become Disabled"
                     ),
-                    format!("protected tags must never be Disabled"),
+                    format!("but this tag is still in use as a function argument (is protected)"),
+                    format!(
+                        "function argument tags must not become Disabled before the function returns"
+                    ),
                 ];
                 (title, details, conflicting_tag_name)
             }
             ProtectedDealloc => {
-                let conflicting_tag_name = "strongly protected";
+                let conflicting_tag_name = "function argument";
                 let details = vec![
                     format!(
-                        "the allocation of the accessed tag {accessed_str} also contains the {conflicting_tag_name} tag {conflicting}"
+                        "the allocation of the accessed tag {accessed_str} is also referenced by a {conflicting_tag_name} with tag {conflicting}"
                     ),
-                    format!("the {conflicting_tag_name} tag {conflicting} disallows deallocations"),
+                    format!(
+                        "when a function argument reference points to some memory, that memory cannot be freed before the function returns"
+                    ),
                 ];
                 (title, details, conflicting_tag_name)
             }

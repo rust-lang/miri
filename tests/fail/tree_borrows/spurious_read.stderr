@@ -25,7 +25,7 @@ help: the accessed tag <TAG> was created here, in the initial state Reserved
    |
 LL |         fn as_mut(y: &mut u8, b: (usize, Arc<Barrier>)) -> *mut u8 {
    |                   ^
-help: the accessed tag <TAG> later transitioned to Reserved (conflicted) due to a protector release (acting as a foreign read access) on every location previously accessed by this tag
+help: the accessed tag <TAG> later transitioned to Reserved (conflicted) due to a protector release (ending the restrictions for function arguments upon return, acting as a foreign read access) on every location previously accessed by this tag
   --> tests/fail/tree_borrows/spurious_read.rs:LL:CC
    |
 LL |         }
