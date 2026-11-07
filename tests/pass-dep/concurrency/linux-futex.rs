@@ -1,6 +1,14 @@
 //@only-target: linux android
+//@revisions: default spurious
 //@compile-flags: -Zmiri-disable-isolation -Zmiri-fixed-schedule
-//@run-native
+// The regular tests check exact wake/timeout behavior, so they need spurious wakeups disabled.
+// This is already the default; we set it explicitly so the tests keep working if the default
+// changes.
+//@[default]compile-flags: -Zmiri-spurious-wakeup-rate=0
+//@[default]run-native
+// Make every blocked futex waiter wake up spuriously at the next scheduling point.
+// These tests only make sense under Miri: natively, a futex wait that nobody wakes would hang.
+//@[spurious]compile-flags: -Zmiri-spurious-wakeup-rate=1.0
 
 // FIXME(static_mut_refs): use raw pointers instead of references
 #![allow(static_mut_refs)]
@@ -310,13 +318,144 @@ fn concurrent_wait_wake() {
     assert!(woken > 0 && woken < rounds, "woke {woken} times");
 }
 
+fn spurious_wait_returns_without_wake() {
+    let futex: u32 = 0;
+
+    // Nobody will ever wake us up, but with a spurious wakeup rate of 1.0 we
+    // still return 0, as if we had been woken up.
+    unsafe {
+        assert_eq!(
+            libc::syscall(
+                libc::SYS_futex,
+                addr_of!(futex),
+                libc::FUTEX_WAIT,
+                0,
+                ptr::null::<libc::timespec>(),
+            ),
+            0,
+        );
+    }
+}
+
+fn spurious_expired_deadline_times_out() {
+    let futex: u32 = 0;
+
+    // Get the current monotonic timestamp as timespec. By the time we wait, this deadline
+    // has already passed.
+    let timeout = unsafe {
+        let mut now: MaybeUninit<libc::timespec> = MaybeUninit::uninit();
+        assert_eq!(libc::clock_gettime(libc::CLOCK_MONOTONIC, now.as_mut_ptr()), 0);
+        now.assume_init()
+    };
+
+    // Expired deadlines are handled before spurious wakeups, so we must time out.
+    unsafe {
+        assert_eq!(
+            libc::syscall(
+                libc::SYS_futex,
+                addr_of!(futex),         // uaddr
+                libc::FUTEX_WAIT_BITSET, // op
+                0,                       // val
+                &timeout,
+                ptr::null::<u32>(), // uaddr2
+                u32::MAX,           // val3 (bitset)
+            ),
+            -1,
+        );
+        assert_eq!(io::Error::last_os_error().raw_os_error().unwrap(), libc::ETIMEDOUT);
+    }
+}
+
+fn spurious_wakeup_before_deadline() {
+    let futex: u32 = 0;
+
+    let start = Instant::now();
+
+    // The deadline is far in the future, so the spurious wakeup comes first. This must look like
+    // a regular wakeup (return 0), not like a timeout.
+    let timeout = libc::timespec { tv_sec: 3600, tv_nsec: 0 };
+    unsafe {
+        assert_eq!(
+            libc::syscall(libc::SYS_futex, addr_of!(futex), libc::FUTEX_WAIT, 0, &timeout),
+            0,
+        );
+    }
+
+    assert!(start.elapsed().as_secs() < 1);
+}
+
+fn spurious_wakeup_removes_waiter() {
+    let futex: u32 = 0;
+
+    unsafe {
+        assert_eq!(
+            libc::syscall(
+                libc::SYS_futex,
+                addr_of!(futex),
+                libc::FUTEX_WAIT,
+                0,
+                ptr::null::<libc::timespec>(),
+            ),
+            0,
+        );
+    }
+
+    // We are no longer waiting, so there is nobody left to wake.
+    unsafe {
+        assert_eq!(libc::syscall(libc::SYS_futex, addr_of!(futex), libc::FUTEX_WAKE, 10), 0);
+    }
+}
+
+fn spurious_wakeup_bitset() {
+    let futex: u32 = 0;
+
+    unsafe {
+        assert_eq!(
+            libc::syscall(
+                libc::SYS_futex,
+                addr_of!(futex),         // uaddr
+                libc::FUTEX_WAIT_BITSET, // op
+                0,                       // val
+                ptr::null::<libc::timespec>(),
+                ptr::null::<u32>(), // uaddr2
+                0b0100,             // val3 (bitset)
+            ),
+            0,
+        );
+    }
+
+    // Even with a matching bitset, there is nobody left to wake.
+    unsafe {
+        assert_eq!(
+            libc::syscall(
+                libc::SYS_futex,
+                addr_of!(futex),         // uaddr
+                libc::FUTEX_WAKE_BITSET, // op
+                10,                      // val (max wake up count)
+                ptr::null::<libc::timespec>(),
+                ptr::null::<u32>(), // uaddr2
+                0b0100,             // val3 (bitset)
+            ),
+            0,
+        );
+    }
+}
+
 fn main() {
-    wake_nobody();
-    wake_dangling();
-    wait_wrong_val();
-    wait_timeout();
-    wait_absolute_timeout();
-    wait_wake();
-    wait_wake_bitset();
-    concurrent_wait_wake();
+    if cfg!(spurious) {
+        spurious_wait_returns_without_wake();
+        spurious_expired_deadline_times_out();
+        spurious_wakeup_before_deadline();
+        spurious_wakeup_removes_waiter();
+        spurious_wakeup_bitset();
+    } else {
+        wake_nobody();
+        wake_dangling();
+        wait_wrong_val();
+        wait_timeout();
+        wait_absolute_timeout();
+        wait_wake();
+        wait_wake_bitset();
+        concurrent_wait_wake();
+    }
 }

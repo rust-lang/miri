@@ -115,6 +115,9 @@ impl GenmcConfig {
         // We enable fixed scheduling so Miri doesn't randomly yield before a terminator, which anyway
         // would be a NOP in GenMC mode.
         miri_config.fixed_scheduling = true;
+        // Likewise, GenMC does the scheduling, so Miri never gets to inject spurious wakeups.
+        // Disable them explicitly so the machine state matches what actually happens.
+        miri_config.spurious_wakeup_rate = 0.0;
 
         Ok(())
     }
