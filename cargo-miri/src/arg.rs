@@ -435,4 +435,20 @@ mod tests {
         assert!(expanded.has_arg_flag("--before"));
         assert!(expanded.has_arg_flag("--after"));
     }
+
+    #[test]
+    fn test_expand_argfiles_non_recursive() {
+        // An outer argfile contains an `@nested.txt` argument. Because `nested.txt`
+        // does not exist, a recursive expansion would attempt to open it and fail with IO error.
+        let file = TempFile::new("outer", b"--first\n@nested.txt\n--last\n");
+        let arg = format!("@{}", file.path().display());
+
+        let args = Args::from_iter(["--before", &arg, "--after"]);
+        let expanded = args.expand_argfiles().unwrap();
+
+        assert_eq!(
+            expanded.as_slice(),
+            &["--before", "--first", "@nested.txt", "--last", "--after"]
+        );
+    }
 }

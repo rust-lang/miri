@@ -165,6 +165,20 @@ def test_cargo_miri_test():
         "test.default.stdout.ref", "test.empty.ref",
         env={'MIRIFLAGS': "-Zmiri-seed=4242"},
     )
+    with tempfile.TemporaryDirectory(prefix="cargo-miri-argfile-test-") as argfile_target_dir:
+        test("`cargo miri test` (argfile)",
+            cargo_miri("test") + [f"--target-dir={argfile_target_dir}"],
+            "test.default.stdout.ref", "test.empty.ref",
+            env={
+                'MIRIFLAGS': "-Zmiri-seed=4242",
+                '__CARGO_TEST_FORCE_ARGFILE': "1",
+            },
+        )
+        # Ensure that the compilation actually happened and created the expected artifacts.
+        if os.listdir(argfile_target_dir) != ["miri"]:
+            fail(f"`{argfile_target_dir}` contains unexpected files")
+        if not os.path.exists(os.path.join(argfile_target_dir, "miri", "debug")):
+            fail(f"`{argfile_target_dir}` is missing compiled artifacts")
     test("`cargo miri test` (no isolation, no doctests)",
         cargo_miri("test") + ["--bins", "--tests"], # no `--lib`, we disabled that in `Cargo.toml`
         "test.no-doc.stdout.ref", "test.empty.ref",
