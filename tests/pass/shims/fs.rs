@@ -397,7 +397,11 @@ fn test_file_set_times() {
     assert_eq!(metadata.modified().unwrap(), newer_modified);
 
     // 32-bit FreeBSD cannot represent timestamps beyond 2038.
-    if !cfg!(all(target_os = "freebsd", target_pointer_width = "32")) {
+    if cfg!(any(
+        target_pointer_width = "64",
+        target_os = "windows",
+        all(target_os = "linux", target_env = "gnu", any(target_arch = "x86", target_arch = "arm"))
+    )) {
         // On 32-bit glibc, std needs the weak `__futimens64` symbol for dates past 2038.
         let future_modified = SystemTime::UNIX_EPOCH + Duration::from_secs(3_000_000_000);
         file.set_times(FileTimes::new().set_modified(future_modified)).unwrap();
