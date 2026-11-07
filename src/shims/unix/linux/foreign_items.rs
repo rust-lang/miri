@@ -187,6 +187,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
             "__futimens64" if ecx.is_dyn_sym("__futimens64") => {
                 // libc has no separate time64 type; its timespec uses 32-bit time_t here.
+                // (See https://github.com/rust-lang/libc/issues/3223.)
                 let [fd, times] = &ecx.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *std::sys::pal::time::__timespec64) -> i32),
                     (link_name, abi, args),
