@@ -86,16 +86,10 @@ impl Args {
         self.get_arg_flag_values(name).next()
     }
 
-    /// Replaces any `@file` arguments with the lines of `file`.
+    /// Replaces `@file` arguments with the file's lines, matching rustc's
+    /// default argfile format. Lines are not expanded recursively.
     ///
-    /// Matches rustc's default line-based argfile expansion behavior:
-    /// - Each line of the file becomes an argument.
-    /// - `\n` and `\r\n` line endings are supported.
-    /// - Lines are not recursively expanded or split on shell whitespace.
-    ///
-    /// Note: while this expansion is non-recursive within `Args`, forwarding literal `@...`
-    /// arguments verbatim across child process boundaries without downstream re-expansion
-    /// requires outgoing argfiles (step 3).
+    /// Literal `@` arguments may be expanded again when passed to a child process.
     pub fn expand_argfiles(self) -> Result<Self, ArgfileError> {
         let mut expanded = Vec::with_capacity(self.args.len());
         for arg in self.args {
@@ -351,8 +345,7 @@ mod tests {
 
         let expanded = args.expand_argfiles().unwrap();
 
-        // Dropping the temp files verifies that arguments are retained in memory
-        // and queryable after the on-disk files are deleted.
+        // The expanded arguments remain available after the files are deleted.
         drop(file1);
         drop(empty_file);
         drop(file2);
@@ -411,8 +404,7 @@ mod tests {
 
     #[test]
     fn test_expand_argfiles_non_recursive() {
-        // An outer argfile contains an `@nested.txt` argument. Because `nested.txt`
-        // does not exist, a recursive expansion would attempt to open it and fail with IO error.
+        // Lines beginning with `@` are not expanded recursively.
         let file = TempFile::new("outer", b"--first\n@nested.txt\n--last\n");
         let arg = format!("@{}", file.path().display());
 
