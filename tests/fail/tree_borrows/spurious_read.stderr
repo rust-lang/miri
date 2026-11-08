@@ -17,8 +17,6 @@ error: Undefined Behavior: write access through <TAG> at ALLOC[0x0] is forbidden
 LL |                 *y = 2;
    |                 ^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> has state Reserved (conflicted) which forbids this child write access
 help: the accessed tag <TAG> was created here, in the initial state Reserved
   --> tests/fail/tree_borrows/spurious_read.rs:LL:CC
@@ -31,6 +29,8 @@ help: the accessed tag <TAG> later transitioned to Reserved (conflicted) due to 
 LL |         }
    |          ^
    = help: this transition corresponds to a temporary loss of write permissions until function exit
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = note: this is on thread `unnamed-ID`
    = note: stack backtrace:
            0: retagx_retagy_retx_writey_rety::{closure#1}::as_mut

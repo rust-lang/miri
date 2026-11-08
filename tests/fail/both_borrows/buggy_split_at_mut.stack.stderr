@@ -5,13 +5,10 @@ LL | /             (
 LL | |                 from_raw_parts_mut(ptr, len - mid), // BUG: should be "mid" instead of "len - mid"
 LL | |                 from_raw_parts_mut(ptr.offset(mid as isize), len - mid),
 LL | |             )
-   | |             ^
-   | |             |
-   | |_____________this error occurs as part of retag at ALLOC[0x0..0x10]
-   |               while retagging field .0
+   | |_____________^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of retag at ALLOC[0x0..0x10]
+   = help: while retagging field .0
 help: <TAG> was created by a Unique retag at offsets [0x0..0x10]
   --> tests/fail/both_borrows/buggy_split_at_mut.rs:LL:CC
    |
@@ -22,6 +19,8 @@ help: <TAG> was later invalidated at offsets [0x0..0x10] by a Unique retag
    |
 LL |                 from_raw_parts_mut(ptr.offset(mid as isize), len - mid),
    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: safe::split_at_mut::<i32>
                at tests/fail/both_borrows/buggy_split_at_mut.rs:LL:CC

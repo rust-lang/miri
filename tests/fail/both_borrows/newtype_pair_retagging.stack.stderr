@@ -2,20 +2,20 @@ error: Undefined Behavior: not granting access to tag <TAG> because that would i
   --> RUSTLIB/alloc/src/boxed.rs:LL:CC
    |
 LL |         Box(unsafe { BoxRaw::new_unchecked(raw) }, alloc)
-   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here; see below to identify which function's argument is <TAG>.
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 help: <TAG> was created by a SharedReadWrite retag at offsets [0x0..0x4]
   --> tests/fail/both_borrows/newtype_pair_retagging.rs:LL:CC
    |
 LL |     let ptr = Box::into_raw(Box::new(0i32));
    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: <TAG> corresponds to this argument, which must not be invalidated before the function returns:
+help: <TAG> corresponds to this argument, which must not be invalidated before the function returns
   --> tests/fail/both_borrows/newtype_pair_retagging.rs:LL:CC
    |
 LL | fn dealloc_while_running(_n: Newtype<'_>, dealloc: impl FnOnce()) {
    |                          ^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: std::boxed::Box::<i32>::from_raw_in
                at RUSTLIB/alloc/src/boxed.rs:LL:CC

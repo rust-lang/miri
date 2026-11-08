@@ -365,7 +365,7 @@ impl<'history, 'ecx, 'tcx> DiagnosticCx<'history, 'ecx, 'tcx> {
             .map(|protection| {
                 let protected_tag = protection.tag;
                 (
-                    format!("{protected_tag:?} corresponds to this argument, which must not be invalidated before the function returns:"),
+                    format!("{protected_tag:?} corresponds to this argument, which must not be invalidated before the function returns"),
                     protection.span,
                 )
             });
@@ -436,15 +436,9 @@ impl<'history, 'ecx, 'tcx> DiagnosticCx<'history, 'ecx, 'tcx> {
                         "deallocating memory that is referenced by a function argument with tag {:?} (that tag is {prot} protected)",
                         item.tag()
                     ),
-                    vec![
-                        format!(
-                            "Undefined Behavior occurred here; see below to identify which function's argument is {:?}.",
-                            item.tag()
-                        ),
-                        format!(
-                            "when a function argument reference points to some memory, that memory cannot be freed before the function returns"
-                        ),
-                    ],
+                    vec![format!(
+                        "when a function argument reference points to some memory, that memory cannot be freed before the function returns"
+                    )],
                     tag.and_then(|tag| self.get_logs_relevant_to(tag, Some(item.tag()))),
                 ),
             Operation::Retag(RetagOp { orig_tag: tag, .. })
@@ -454,10 +448,7 @@ impl<'history, 'ecx, 'tcx> DiagnosticCx<'history, 'ecx, 'tcx> {
                         "not granting access to tag {tag:?} because that would invalidate a function argument with tag {:?} (that tag is {prot} protected)",
                         item.tag()
                     ),
-                    vec![format!(
-                        "Undefined Behavior occurred here; see below to identify which function's argument is {:?}.",
-                        item.tag()
-                    )],
+                    vec![],
                     tag.and_then(|tag| self.get_logs_relevant_to(tag, Some(item.tag()))),
                 ),
         }

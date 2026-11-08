@@ -4,12 +4,9 @@ error: Undefined Behavior: write access through <TAG> (root of the allocation) a
 LL |             P.write(0);
    |             ^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> (root of the allocation) is foreign to the function argument tag <TAG> (i.e., it is not a child)
    = help: this foreign write access would cause the function argument tag <TAG> (currently Reserved) to become Disabled
-   = help: but this tag is still in use as a function argument (is protected)
-   = help: function argument tags must not become Disabled before the function returns
+   = help: function argument tags must not become Disabled before the function returns (they are protected)
 help: the accessed tag <TAG> was created here
   --> tests/fail/both_borrows/drop_in_place_protector.rs:LL:CC
    |
@@ -20,6 +17,8 @@ help: the function argument tag <TAG> was created here, in the initial state Res
    |
 LL |         core::ptr::drop_in_place(x);
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = note: stack backtrace:
            0: <HasDrop as std::ops::Drop>::drop
                at tests/fail/both_borrows/drop_in_place_protector.rs:LL:CC

@@ -4,12 +4,9 @@ error: Undefined Behavior: reborrow through <TAG> at ALLOC[0x0] is forbidden
 LL | fn safe(x: &mut i32, y: &mut i32) {
    |                      ^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> is foreign to the function argument tag <TAG> (i.e., it is not a child)
    = help: this reborrow (acting as a foreign write access) would cause the function argument tag <TAG> (currently Unique) to become Disabled
-   = help: but this tag is still in use as a function argument (is protected)
-   = help: function argument tags must not become Disabled before the function returns
+   = help: function argument tags must not become Disabled before the function returns (they are protected)
 help: the accessed tag <TAG> was created here
   --> tests/fail/both_borrows/aliasing_mut1.rs:LL:CC
    |
@@ -20,6 +17,8 @@ help: the function argument tag <TAG> was created here, in the initial state Res
    |
 LL | fn safe(x: &mut i32, y: &mut i32) {
    |         ^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = note: stack backtrace:
            0: safe
                at tests/fail/both_borrows/aliasing_mut1.rs:LL:CC

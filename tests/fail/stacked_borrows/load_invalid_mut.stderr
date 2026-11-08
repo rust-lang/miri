@@ -2,10 +2,9 @@ error: Undefined Behavior: trying to retag from <TAG> for Unique permission at A
   --> tests/fail/stacked_borrows/load_invalid_mut.rs:LL:CC
    |
 LL |     let _val = *xref_in_mem;
-   |                ^^^^^^^^^^^^ this error occurs as part of retag at ALLOC[0x0..0x4]
+   |                ^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of retag at ALLOC[0x0..0x4]
 help: <TAG> was created by a Unique retag at offsets [0x0..0x4]
   --> tests/fail/stacked_borrows/load_invalid_mut.rs:LL:CC
    |
@@ -16,6 +15,8 @@ help: <TAG> was later invalidated at offsets [0x0..0x4] by a read access
    |
 LL |     let _val = unsafe { *xraw }; // invalidate xref
    |                         ^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

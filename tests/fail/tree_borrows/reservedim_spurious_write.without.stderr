@@ -18,8 +18,6 @@ error: Undefined Behavior: write access through <TAG> at ALLOC[0x0] is forbidden
 LL |         unsafe { *y = 13 }
    |                  ^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = help: the accessed tag <TAG> has state Disabled which forbids this child write access
 help: the accessed tag <TAG> was created here, in the initial state Reserved
   --> tests/fail/tree_borrows/reservedim_spurious_write.rs:LL:CC
@@ -32,6 +30,8 @@ help: the accessed tag <TAG> later transitioned to Disabled due to a protector r
 LL |         }
    |          ^
    = help: this transition corresponds to a loss of read and write permissions
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = note: this is on thread `unnamed-ID`
 note: the current function got called indirectly due to this code
   --> tests/fail/tree_borrows/reservedim_spurious_write.rs:LL:CC

@@ -2,20 +2,20 @@ error: Undefined Behavior: not granting access to tag <TAG> because that would i
   --> tests/fail/both_borrows/drop_in_place_protector.rs:LL:CC
    |
 LL |             P.write(0);
-   |             ^^^^^^^^^^ Undefined Behavior occurred here; see below to identify which function's argument is <TAG>.
+   |             ^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 help: <TAG> was created by a SharedReadWrite retag at offsets [0x0..0x1]
   --> tests/fail/both_borrows/drop_in_place_protector.rs:LL:CC
    |
 LL |         let x = core::ptr::addr_of_mut!(x);
    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: <TAG> corresponds to this argument, which must not be invalidated before the function returns:
+help: <TAG> corresponds to this argument, which must not be invalidated before the function returns
   --> tests/fail/both_borrows/drop_in_place_protector.rs:LL:CC
    |
 LL |         core::ptr::drop_in_place(x);
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: <HasDrop as std::ops::Drop>::drop
                at tests/fail/both_borrows/drop_in_place_protector.rs:LL:CC

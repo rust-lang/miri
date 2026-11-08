@@ -366,9 +366,8 @@ impl TbError<'_> {
                     format!(
                         "this {access} would cause the {conflicting_tag_name} tag {conflicting} (currently {before_disabled}) to become Disabled"
                     ),
-                    format!("but this tag is still in use as a function argument (is protected)"),
                     format!(
-                        "function argument tags must not become Disabled before the function returns"
+                        "function argument tags must not become Disabled before the function returns (they are protected)"
                     ),
                 ];
                 (title, details, conflicting_tag_name)

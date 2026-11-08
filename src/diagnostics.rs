@@ -314,11 +314,8 @@ pub fn report_result<'tcx>(
                 ]
             }
             StackedBorrowsUb { help, history, .. } => {
-                main_span_labels.extend(help.clone());
-                let mut helps = vec![
-                    help!("this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental"),
-                    help!("see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information"),
-                ];
+                let mut helps = vec![];
+                helps.extend(help.iter().map(|msg| help!("{msg}")));
                 if let Some(TagHistory {created, invalidated, protected}) = history.clone() {
                     helps.push((ExtraKind::Help, Some(created.1), created.0));
                     if let Some((msg, span)) = invalidated {
@@ -328,19 +325,24 @@ pub fn report_result<'tcx>(
                         helps.push(help_span!(protector_span, "{protector_msg}"));
                     }
                 }
+                helps.extend([
+                    help!("this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental"),
+                    help!("see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information"),
+                ]);
                 helps
             },
             TreeBorrowsUb { title: _, details, history } => {
-                let mut helps = vec![
-                    help!("this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental"),
-                    help!("see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information"),
-                ];
+                let mut helps = vec![];
                 for m in details {
                     helps.push(help!("{m}"));
                 }
                 for (span, msg) in history.events.clone() {
                     helps.push((ExtraKind::Help, span, msg));
                 }
+                helps.extend([
+                    help!("this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental"),
+                    help!("see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information"),
+                ]);
                 helps
             }
             MultipleSymbolDefinitions { first, first_crate, second, second_crate, .. } =>
