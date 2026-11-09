@@ -11,6 +11,11 @@ fn page_size() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap() }
 }
 
+/// A valid stack size: at least `PTHREAD_STACK_MIN` and page-aligned.
+fn normal_stack_size() -> usize {
+    libc::PTHREAD_STACK_MIN.next_multiple_of(page_size())
+}
+
 /// Spawns a thread with the given attributes, and joins it if that succeeded.
 fn spawn(attr: *const libc::pthread_attr_t) -> i32 {
     unsafe {
@@ -45,14 +50,14 @@ fn test_setstacksize() {
             libc::EINVAL
         );
         // Not a multiple of the page size: only macOS rejects this.
-        let ret = libc::pthread_attr_setstacksize(attr.as_mut_ptr(), 4 * page_size() + 1);
+        let ret = libc::pthread_attr_setstacksize(attr.as_mut_ptr(), normal_stack_size() + 1);
         if cfg!(target_os = "macos") {
             assert_eq!(ret, libc::EINVAL);
         } else {
             assert_eq!(ret, 0);
         }
         // A normal size.
-        assert_eq!(libc::pthread_attr_setstacksize(attr.as_mut_ptr(), 4 * page_size()), 0);
+        assert_eq!(libc::pthread_attr_setstacksize(attr.as_mut_ptr(), normal_stack_size()), 0);
 
         assert_eq!(libc::pthread_attr_destroy(attr.as_mut_ptr()), 0);
     }
@@ -68,7 +73,7 @@ fn test_create() {
         // Initialized attributes without a stack size.
         assert_eq!(spawn(attr.as_ptr()), 0);
         // A normal stack size.
-        assert_eq!(libc::pthread_attr_setstacksize(attr.as_mut_ptr(), 4 * page_size()), 0);
+        assert_eq!(libc::pthread_attr_setstacksize(attr.as_mut_ptr(), normal_stack_size()), 0);
         assert_eq!(spawn(attr.as_ptr()), 0);
         // A stack that is too big to reserve. Keep it page-aligned so macOS accepts it.
         let huge = usize::MAX & !(page_size() - 1);
