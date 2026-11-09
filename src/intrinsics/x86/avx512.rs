@@ -30,6 +30,32 @@ pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 };
                 shift_simd_by_simd(this, left, right, which, dest)?;
             }
+            // Used by _mm512_madd52{lo,hi}_epu64.
+            "vpmadd52l.uq.512" | "vpmadd52h.uq.512" => {
+                this.expect_target_feature_for_intrinsic(link_name, "avx512ifma")?;
+                let [acc, left, right] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
+
+                let (acc, acc_len) = this.project_to_simd(acc)?;
+                let (left, left_len) = this.project_to_simd(left)?;
+                let (right, right_len) = this.project_to_simd(right)?;
+                let (dest, dest_len) = this.project_to_simd(dest)?;
+                assert_eq!([acc_len, left_len, right_len, dest_len], [8; 4]);
+
+                let mask = (1u128 << 52).strict_sub(1);
+                for i in 0..dest_len {
+                    let acc = this.read_scalar(&this.project_index(&acc, i)?)?.to_u64()?;
+                    let left = this.read_scalar(&this.project_index(&left, i)?)?.to_u64()?;
+                    let right = this.read_scalar(&this.project_index(&right, i)?)?.to_u64()?;
+                    let product = (u128::from(left) & mask).strict_mul(u128::from(right) & mask);
+                    let product = match unprefixed_name {
+                        "vpmadd52l.uq.512" => product & mask,
+                        "vpmadd52h.uq.512" => product >> 52,
+                        _ => unreachable!(),
+                    };
+                    let result = acc.wrapping_add(u64::try_from(product).unwrap());
+                    this.write_scalar(Scalar::from_u64(result), &this.project_index(&dest, i)?)?;
+                }
+            }
             // Used by the ternarylogic functions.
             "pternlog.d.128" | "pternlog.d.256" | "pternlog.d.512" | "pternlog.q.128"
             | "pternlog.q.256" | "pternlog.q.512" => {
