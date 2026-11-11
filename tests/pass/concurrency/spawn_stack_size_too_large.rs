@@ -1,4 +1,5 @@
-//@ignore-target: windows # FIXME: `CreateThread` ignores the stack size
+//@ignore-target: windows # FIXME: `CreateThread` shim ignores the stack size
+//@run-native
 
 use std::thread;
 

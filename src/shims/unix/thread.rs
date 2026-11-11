@@ -39,26 +39,36 @@ where
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    fn pthread_attr_init(&mut self, attr_op: &OpTy<'tcx>) -> InterpResult<'tcx> {
+    fn pthread_attr_init(
+        &mut self,
+        attr_op: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
         let attr = ecx.deref_pointer(attr_op)?;
-        ecx.insert_meta(&attr, Box::new(PthreadAttr { stack_size: None }))
+        ecx.insert_meta(&attr, Box::new(PthreadAttr { stack_size: None }))?;
+        ecx.write_int(0, dest)
     }
 
-    fn pthread_attr_destroy(&mut self, attr_op: &OpTy<'tcx>) -> InterpResult<'tcx> {
+    fn pthread_attr_destroy(
+        &mut self,
+        attr_op: &OpTy<'tcx>,
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
         let attr = ecx.deref_pointer(attr_op)?;
         ecx.remove_meta::<PthreadAttr>(&attr)?.ok_or_else(|| {
             err_ub_format!("`pthread_attr_t` has not been initialized or has been tampered with")
         })?;
-        interp_ok(())
+        ecx.write_int(0, dest)
     }
 
     fn pthread_attr_setstacksize(
         &mut self,
         attr_op: &OpTy<'tcx>,
         stack_size_op: &OpTy<'tcx>,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
         let stack_size = ecx.read_target_usize(stack_size_op)?;
 
@@ -68,15 +78,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             && stack_size < ecx.eval_libc("PTHREAD_STACK_MIN").to_target_usize(ecx)?;
         // macOS additionally requires the size to be a multiple of the page size.
         let misaligned = *os == Os::MacOs && !stack_size.is_multiple_of(ecx.machine.page_size);
-        let einval = ecx.eval_libc("EINVAL");
 
         // Check the attribute object even if the size is invalid.
         let attr = attr_get_data(ecx, attr_op)?;
         if too_small || misaligned {
-            return interp_ok(einval);
+            return ecx.write_scalar(ecx.eval_libc("EINVAL"), dest);
         }
         attr.stack_size = Some(stack_size);
-        interp_ok(Scalar::from_i32(0))
+        ecx.write_scalar(Scalar::from_i32(0), dest)
     }
 
     fn pthread_create(
@@ -85,7 +94,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         attr: &OpTy<'tcx>,
         start_routine: &OpTy<'tcx>,
         arg: &OpTy<'tcx>,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
 
         let thread_info_place = ecx.deref_pointer(thread)?;
@@ -104,7 +114,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             && !ecx.thread_stack_size_ok(stack_size)
         {
             // There are not enough resources for such a big stack.
-            return interp_ok(ecx.eval_libc("EAGAIN"));
+            return ecx.write_scalar(ecx.eval_libc("EAGAIN"), dest);
         }
 
         ecx.start_regular_thread(
@@ -115,7 +125,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             ecx.machine.layouts.unit_ptr_mut,
         )?;
 
-        interp_ok(Scalar::from_i32(0))
+        ecx.write_scalar(Scalar::from_i32(0), dest)
     }
 
     fn pthread_join(

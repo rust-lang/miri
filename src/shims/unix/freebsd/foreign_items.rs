@@ -176,8 +176,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     (link_name, abi, args),
                 )?;
                 // The caller will `pthread_attr_destroy` this, so it needs to be initialized.
-                this.pthread_attr_init(attr)?;
-                this.write_int(0, dest)?;
+                this.pthread_attr_init(attr, dest)?;
             }
 
             _ => return interp_ok(EmulateItemResult::NotSupported),

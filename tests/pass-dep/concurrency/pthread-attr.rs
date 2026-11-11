@@ -1,4 +1,5 @@
 //@ignore-target: windows # No pthreads on Windows
+//@run-native
 
 use std::mem::MaybeUninit;
 use std::ptr;
@@ -75,8 +76,9 @@ fn test_create() {
         // A normal stack size.
         assert_eq!(libc::pthread_attr_setstacksize(attr.as_mut_ptr(), normal_stack_size()), 0);
         assert_eq!(spawn(attr.as_ptr()), 0);
-        // A stack that is too big to reserve. Keep it page-aligned so macOS accepts it.
-        let huge = usize::MAX & !(page_size() - 1);
+        // A stack that is too big to reserve. Keep it page-aligned so macOS accepts it, and
+        // well below `usize::MAX` since some libcs overflow when adding the guard size.
+        let huge = (1 << (usize::BITS - 1)) + page_size();
         assert_eq!(libc::pthread_attr_setstacksize(attr.as_mut_ptr(), huge), 0);
         assert_eq!(spawn(attr.as_ptr()), libc::EAGAIN);
         assert_eq!(libc::pthread_attr_destroy(attr.as_mut_ptr()), 0);

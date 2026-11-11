@@ -1178,24 +1178,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     shim_sig!(extern "C" fn(*libc::pthread_attr_t) -> i32),
                     (link_name, abi, args),
                 )?;
-                this.pthread_attr_init(attr)?;
-                this.write_int(0, dest)?;
+                this.pthread_attr_init(attr, dest)?;
             }
             "pthread_attr_destroy" => {
                 let [attr] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(*libc::pthread_attr_t) -> i32),
                     (link_name, abi, args),
                 )?;
-                this.pthread_attr_destroy(attr)?;
-                this.write_int(0, dest)?;
+                this.pthread_attr_destroy(attr, dest)?;
             }
             "pthread_attr_setstacksize" => {
                 let [attr, stack_size] = &this.check_shim_sig(
                     shim_sig!(extern "C" fn(*libc::pthread_attr_t, usize) -> i32),
                     (link_name, abi, args),
                 )?;
-                let result = this.pthread_attr_setstacksize(attr, stack_size)?;
-                this.write_scalar(result, dest)?;
+                this.pthread_attr_setstacksize(attr, stack_size, dest)?;
             }
             "pthread_create" => {
                 let [thread, attr, start, arg] = &this.check_shim_sig(
@@ -1204,8 +1201,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     ),
                     (link_name, abi, args),
                 )?;
-                let result = this.pthread_create(thread, attr, start, arg)?;
-                this.write_scalar(result, dest)?;
+                this.pthread_create(thread, attr, start, arg, dest)?;
             }
             "pthread_join" => {
                 let [thread, retval] = &this.check_shim_sig(

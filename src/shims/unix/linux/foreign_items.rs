@@ -364,8 +364,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     (link_name, abi, args),
                 )?;
                 // The caller will `pthread_attr_destroy` this, so it needs to be initialized.
-                ecx.pthread_attr_init(attr)?;
-                ecx.write_int(0, dest)?;
+                ecx.pthread_attr_init(attr, dest)?;
             }
             "gnu_get_libc_version"
                 if ecx.frame_in_std()

@@ -673,8 +673,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// address space on smaller targets).
     fn thread_stack_size_ok(&self, stack_size: u64) -> bool {
         let ecx = self.eval_context_ref();
-        let addr_bits = ecx.pointer_size().bits().min(48) - 1;
-        stack_size <= 1u64 << addr_bits
+        let addr_bits = (ecx.pointer_size().bits() - 1).clamp_to(..=47);
+        stack_size <= (1u64 << addr_bits)
     }
 
     /// Start a regular (non-main) thread.
