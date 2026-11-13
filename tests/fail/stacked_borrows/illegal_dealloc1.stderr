@@ -4,8 +4,6 @@ error: Undefined Behavior: attempting deallocation using <TAG> at ALLOC, but tha
 LL |         dealloc(ptr2, Layout::from_size_align_unchecked(1, 1));
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 help: <TAG> was created by a SharedReadWrite retag at offsets [0x0..0x1]
   --> tests/fail/stacked_borrows/illegal_deALLOC.rs:LL:CC
    |
@@ -16,6 +14,8 @@ help: <TAG> was later invalidated at offsets [0x0..0x1] by a write access
    |
 LL |         ptr1.write(0);
    |         ^^^^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

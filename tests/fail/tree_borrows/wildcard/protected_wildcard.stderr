@@ -4,11 +4,9 @@ error: Undefined Behavior: write access through <TAG> at ALLOC[0x0] is forbidden
 LL |         *ref1 = 13;
    |         ^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
-   = help: the accessed tag <TAG> is foreign to the protected tag <TAG> (i.e., it is not a child)
-   = help: this foreign write access would cause the protected tag <TAG> (currently Reserved) to become Disabled
-   = help: protected tags must never be Disabled
+   = help: the accessed tag <TAG> is foreign to the function argument tag <TAG> (i.e., it is not a child)
+   = help: this foreign write access would cause the function argument tag <TAG> (currently Reserved) to become Disabled
+   = help: function argument tags must not become Disabled before the function returns (they are protected)
 help: the accessed tag <TAG> was created here
   --> tests/fail/tree_borrows/wildcard/protected_wildcard.rs:LL:CC
    |
@@ -18,11 +16,13 @@ LL |       let mut protect = |_arg: &mut u32| {
 LL | |         *ref1 = 13;
 LL | |     };
    | |_____^
-help: the protected tag <TAG> was created here, in the initial state Reserved
+help: the function argument tag <TAG> was created here, in the initial state Reserved
   --> tests/fail/tree_borrows/wildcard/protected_wildcard.rs:LL:CC
    |
 LL |     let mut protect = |_arg: &mut u32| {
    |                        ^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = note: stack backtrace:
            0: main::{closure#0}
                at tests/fail/tree_borrows/wildcard/protected_wildcard.rs:LL:CC

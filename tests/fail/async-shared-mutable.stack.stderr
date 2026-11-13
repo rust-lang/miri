@@ -2,10 +2,9 @@ error: Undefined Behavior: attempting a write access using <TAG> at ALLOC[RANGE]
   --> tests/fail/async-shared-mutable.rs:LL:CC
    |
 LL |             *x = 1;
-   |             ^^^^^^ this error occurs as part of an access at ALLOC[RANGE]
+   |             ^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of an access at ALLOC[RANGE]
 help: <TAG> was created by a Unique retag at offsets [RANGE]
   --> tests/fail/async-shared-mutable.rs:LL:CC
    |
@@ -20,6 +19,8 @@ help: <TAG> was later invalidated at offsets [RANGE] by a SharedReadOnly retag
    |
 LL |     let _: Pin<&_> = f.as_ref(); // Or: `f.as_mut().into_ref()`.
    |                      ^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: main::{closure#0}::{closure#0}
                at tests/fail/async-shared-mutable.rs:LL:CC

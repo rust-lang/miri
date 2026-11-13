@@ -2,10 +2,9 @@ error: Undefined Behavior: attempting a write access using <TAG> at ALLOC[0x0], 
   --> tests/fail/function_calls/return_pointer_aliasing_write.rs:LL:CC
    |
 LL |     unsafe { ptr.write(0) };
-   |              ^^^^^^^^^^^^ this error occurs as part of an access at ALLOC[0x0..0x4]
+   |              ^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of an access at ALLOC[0x0..0x4]
 help: <TAG> was created by a SharedReadWrite retag at offsets [0x0..0x4]
   --> tests/fail/function_calls/return_pointer_aliasing_write.rs:LL:CC
    |
@@ -21,6 +20,8 @@ help: <TAG> was later invalidated at offsets [0x0..0x4] by a Unique in-place fun
    |
 LL | fn myfun(ptr: *mut i32) -> i32 {
    |                            ^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: myfun
                at tests/fail/function_calls/return_pointer_aliasing_write.rs:LL:CC

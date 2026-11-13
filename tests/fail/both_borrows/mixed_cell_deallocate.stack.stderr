@@ -4,13 +4,13 @@ error: Undefined Behavior: attempting deallocation using <TAG> at ALLOC, but tha
 LL |     unsafe { alloc::dealloc(x as *const _ as *mut T as *mut u8, layout) };
    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 help: <TAG> was created by a SharedReadOnly retag at offsets [0x4..0xc]
   --> tests/fail/both_borrows/mixed_cell_deallocate.rs:LL:CC
    |
 LL |     unsafe { alloc::dealloc(x as *const _ as *mut T as *mut u8, layout) };
    |                             ^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: foo
                at tests/fail/both_borrows/mixed_cell_deallocate.rs:LL:CC
