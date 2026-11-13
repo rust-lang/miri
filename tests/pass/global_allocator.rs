@@ -1,3 +1,5 @@
+//@compile-flags: -Zmiri-symbolic-alignment-check
+
 #![feature(slice_ptr_get)]
 
 use std::alloc::{Allocator as _, Global, GlobalAlloc, Layout, System};
