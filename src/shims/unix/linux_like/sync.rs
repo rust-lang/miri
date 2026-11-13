@@ -168,7 +168,9 @@ pub fn futex<'tcx>(
                             dest: MPlaceTy<'tcx>,
                         }
                         |ecx, unblock: UnblockKind| match unblock {
-                            UnblockKind::Ready => {
+                            // A spurious wakeup is indistinguishable from a real `FUTEX_WAKE`
+                            // from the caller's perspective: both just return 0.
+                            UnblockKind::Ready | UnblockKind::Spurious => {
                                 ecx.write_int(0, &dest)
                             }
                             UnblockKind::TimedOut => {

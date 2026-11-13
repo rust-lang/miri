@@ -993,7 +993,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 match kind {
                     UnblockKind::Ready => { /* fall-through to below */ },
                     // When the read timeout is exceeded EAGAIN/EWOULDBLOCK is returned.
-                    UnblockKind::TimedOut => return finish.call(ecx, Err(LibcError("EWOULDBLOCK")))
+                    UnblockKind::TimedOut =>
+                        return finish.call(ecx, Err(LibcError("EWOULDBLOCK"))),
+                    UnblockKind::Spurious =>
+                        unreachable!("I/O waiters never receive spurious wakeups"),
                 }
 
                 match ecx.try_non_block_accept(&socket, is_client_sock_nonblock)? {
@@ -1102,7 +1105,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 match kind {
                     UnblockKind::Ready => { /* fall-through to below */ },
                     // When the write timeout is exceeded EAGAIN/EWOULDBLOCK is returned.
-                    UnblockKind::TimedOut => return finish.call(ecx, Err(LibcError("EWOULDBLOCK")))
+                    UnblockKind::TimedOut =>
+                        return finish.call(ecx, Err(LibcError("EWOULDBLOCK"))),
+                    UnblockKind::Spurious =>
+                        unreachable!("I/O waiters never receive spurious wakeups"),
                 }
 
                 match ecx.try_non_block_send(&socket, buffer_ptr, length)? {
@@ -1236,7 +1242,10 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 match kind {
                     UnblockKind::Ready => { /* fall-through to below */ },
                     // When the read timeout is exceeded EAGAIN/EWOULDBLOCK is returned.
-                    UnblockKind::TimedOut => return finish.call(ecx, Err(LibcError("EWOULDBLOCK")))
+                    UnblockKind::TimedOut =>
+                        return finish.call(ecx, Err(LibcError("EWOULDBLOCK"))),
+                    UnblockKind::Spurious =>
+                        unreachable!("I/O waiters never receive spurious wakeups"),
                 }
 
                 match ecx.try_non_block_recv(&socket, buffer_ptr, length, should_peek)? {

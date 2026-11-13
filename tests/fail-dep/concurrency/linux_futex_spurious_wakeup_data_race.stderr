@@ -1,0 +1,31 @@
+error: Undefined Behavior: Data race detected between (1) non-atomic write on thread `main` and (2) non-atomic read on thread `unnamed-ID` at ALLOC
+  --> tests/fail-dep/concurrency/linux_futex_spurious_wakeup_data_race.rs:LL:CC
+   |
+LL |         let _val = DATA;
+   |                    ^^^^ (2) just happened here
+   |
+help: and (1) occurred earlier here
+  --> tests/fail-dep/concurrency/linux_futex_spurious_wakeup_data_race.rs:LL:CC
+   |
+LL |         DATA = 1;
+   |         ^^^^^^^^
+   = help: this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior
+   = help: see https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html for further information
+   = note: this is on thread `unnamed-ID`
+note: the current function got called indirectly due to this code
+  --> tests/fail-dep/concurrency/linux_futex_spurious_wakeup_data_race.rs:LL:CC
+   |
+LL |       let t = thread::spawn(|| unsafe {
+   |  _____________^
+LL | |         // Nobody wakes this bitset, so we only return on a spurious wakeup.
+LL | |         assert_eq!(
+LL | |             libc::syscall(
+...  |
+LL | |         let _val = DATA;
+LL | |     });
+   | |______^
+
+note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
+
+error: aborting due to 1 previous error
+

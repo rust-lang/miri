@@ -244,7 +244,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     }
                     |ecx, unblock: UnblockKind| {
                         match unblock {
-                            UnblockKind::Ready => {
+                            UnblockKind::Ready | UnblockKind::Spurious => {
                                 ecx.write_int(1, &dest)
                             }
                             UnblockKind::TimedOut => {

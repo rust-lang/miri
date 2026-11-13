@@ -7,6 +7,9 @@
 // On macOS we use chekced pthread mutexes which changes the error
 //@normalize-stderr-test: "a thread got stuck here" -> "thread `main` got stuck here"
 //@normalize-stderr-test: "a thread deadlocked" -> "the evaluated program deadlocked"
+// A spurious wakeup lets the deadlocked thread wake up and block again, which delays the
+// deadlock detection (and with rate 1.0 defeats it), so keep spurious wakeups disabled here.
+//@compile-flags: -Zmiri-spurious-wakeup-rate=0
 use std::mem;
 use std::sync::Mutex;
 
