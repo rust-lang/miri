@@ -171,11 +171,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
             // These shims are enabled only when the caller is in the standard library.
             "pthread_attr_get_np" if this.frame_in_std() => {
-                let [_thread, _attr] = &this.check_shim_sig(
-                    shim_sig!(extern "C" fn(libc::pthread_t, *_) -> i32),
+                let [_thread, attr] = &this.check_shim_sig(
+                    shim_sig!(extern "C" fn(libc::pthread_t, *libc::pthread_attr_t) -> i32),
                     (link_name, abi, args),
                 )?;
-                this.write_int(0, dest)?;
+                // The caller will `pthread_attr_destroy` this, so it needs to be initialized.
+                this.pthread_attr_init(attr, dest)?;
             }
 
             _ => return interp_ok(EmulateItemResult::NotSupported),

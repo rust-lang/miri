@@ -1173,13 +1173,35 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             // Threading
-            "pthread_create" => {
-                let [thread, attr, start, arg] = &this.check_shim_sig(
-                    shim_sig!(extern "C" fn(*libc::pthread_t, *_, fn(..) -> _, *_) -> i32),
+            "pthread_attr_init" => {
+                let [attr] = &this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*libc::pthread_attr_t) -> i32),
                     (link_name, abi, args),
                 )?;
-                this.pthread_create(thread, attr, start, arg)?;
-                this.write_int(0, dest)?;
+                this.pthread_attr_init(attr, dest)?;
+            }
+            "pthread_attr_destroy" => {
+                let [attr] = &this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*libc::pthread_attr_t) -> i32),
+                    (link_name, abi, args),
+                )?;
+                this.pthread_attr_destroy(attr, dest)?;
+            }
+            "pthread_attr_setstacksize" => {
+                let [attr, stack_size] = &this.check_shim_sig(
+                    shim_sig!(extern "C" fn(*libc::pthread_attr_t, usize) -> i32),
+                    (link_name, abi, args),
+                )?;
+                this.pthread_attr_setstacksize(attr, stack_size, dest)?;
+            }
+            "pthread_create" => {
+                let [thread, attr, start, arg] = &this.check_shim_sig(
+                    shim_sig!(
+                        extern "C" fn(*libc::pthread_t, *libc::pthread_attr_t, fn(..) -> _, *_) -> i32
+                    ),
+                    (link_name, abi, args),
+                )?;
+                this.pthread_create(thread, attr, start, arg, dest)?;
             }
             "pthread_join" => {
                 let [thread, retval] = &this.check_shim_sig(
@@ -1406,20 +1428,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
 
                 // Return success (`0`).
-                this.write_int(0, dest)?;
-            }
-
-            "pthread_attr_init" | "pthread_attr_destroy" if this.frame_in_std() => {
-                let [_] = &this
-                    .check_shim_sig(shim_sig!(extern "C" fn(*_) -> i32), (link_name, abi, args))?;
-                this.write_int(0, dest)?;
-            }
-
-            "pthread_attr_setstacksize" if this.frame_in_std() => {
-                let [_, _] = &this.check_shim_sig(
-                    shim_sig!(extern "C" fn(*_, usize) -> i32),
-                    (link_name, abi, args),
-                )?;
                 this.write_int(0, dest)?;
             }
 
