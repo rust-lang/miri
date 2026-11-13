@@ -149,13 +149,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // Access to command-line arguments
             "_NSGetArgc" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [] = &this
                     .check_shim_sig(shim_sig!(extern "C" fn() -> *_), (link_name, abi, args))?;
                 this.write_pointer(this.machine.argc.expect("machine must be initialized"), dest)?;
             }
             "_NSGetArgv" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [] = &this
                     .check_shim_sig(shim_sig!(extern "C" fn() -> *_), (link_name, abi, args))?;
                 this.write_pointer(this.machine.argv.expect("machine must be initialized"), dest)?;
