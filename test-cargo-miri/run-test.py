@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import argparse
+import tempfile
 
 CGREEN  = '\33[32m'
 CBOLD   = '\33[1m'
@@ -141,6 +142,19 @@ def test_cargo_miri_run():
          cargo_miri("run") + ["--package=test-local-crate-detection"],
          "run.local_crate.stdout.ref", "run.local_crate.stderr.ref",
     )
+    with tempfile.TemporaryDirectory(prefix="cargo-miri-argfile-") as argfile_target_dir:
+        test("`cargo miri run` (argfile)",
+            cargo_miri("run") + [f"--target-dir={argfile_target_dir}"],
+            "run.default.stdout.ref", "run.default.stderr.ref",
+            stdin=b'12\n21\n',
+            env={
+                'MIRIFLAGS': "-Zmiri-disable-isolation",
+                'MIRITESTVAR': "wrongval",
+                '__CARGO_TEST_FORCE_ARGFILE': "1",
+            },
+        )
+        if not os.path.isdir(os.path.join(argfile_target_dir, "miri", "debug")):
+            fail(f"`{argfile_target_dir}` is missing compiled artifacts")
 
 def test_cargo_miri_test():
     test("`cargo miri test`",
@@ -148,6 +162,17 @@ def test_cargo_miri_test():
         "test.default.stdout.ref", "test.empty.ref",
         env={'MIRIFLAGS': "-Zmiri-seed=4242"},
     )
+    with tempfile.TemporaryDirectory(prefix="cargo-miri-argfile-test-") as argfile_target_dir:
+        test("`cargo miri test` (argfile)",
+            cargo_miri("test") + [f"--target-dir={argfile_target_dir}"],
+            "test.default.stdout.ref", "test.empty.ref",
+            env={
+                'MIRIFLAGS': "-Zmiri-seed=4242",
+                '__CARGO_TEST_FORCE_ARGFILE': "1",
+            },
+        )
+        if not os.path.isdir(os.path.join(argfile_target_dir, "miri", "debug")):
+            fail(f"`{argfile_target_dir}` is missing compiled artifacts")
     test("`cargo miri test` (no isolation, no doctests)",
         cargo_miri("test") + ["--bins", "--tests"], # no `--lib`, we disabled that in `Cargo.toml`
         "test.no-doc.stdout.ref", "test.empty.ref",
