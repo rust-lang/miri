@@ -154,6 +154,7 @@ pub enum NonHaltingDiagnostic {
     SocketAddressResolution {
         error: std::io::Error,
     },
+    FileModeIgnored,
 }
 
 /// Level of Miri specific diagnostics
@@ -678,6 +679,7 @@ impl<'tcx> MiriMachine<'tcx> {
             FileInProcOpened => format!("files in `/proc` can bypass the Abstract Machine and might not work properly in Miri"),
             ConnectingSocketGetsockname => format!("connecting sockets return unspecified socket addresses on Windows hosts"),
             SocketAddressResolution { error } => format!("address resolution failed: {error}"),
+            FileModeIgnored => format!("mode for creating new files is ignored"),
         };
 
         let (main_span_label, diag_level) = match &e {
@@ -703,6 +705,8 @@ impl<'tcx> MiriMachine<'tcx> {
                 ("Called `getsockname` on connecting socket".to_string(), DiagLevel::Warning),
             SocketAddressResolution { .. } =>
                 ("error during address resolution".to_string(), DiagLevel::Warning),
+            FileModeIgnored =>
+                ("opening file with non-default file creation mode".to_string(), DiagLevel::Warning),
         };
 
         let extras = match &e {
@@ -723,6 +727,13 @@ impl<'tcx> MiriMachine<'tcx> {
                 vec![note!(
                     "Miri cannot return proper error information from this call; only a generic error code is being returned"
                 )],
+            FileModeIgnored =>
+                vec![
+                    note!(
+                        "this file was supposed to be created with restricted access for other users, but that is not supported on Windows hosts"
+                    ),
+                    note!("this warning is only shown once per program execution"),
+                ],
             Int2Ptr { details: true } => {
                 let mut v = vec![
                     help!(
