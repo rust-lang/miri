@@ -1,6 +1,6 @@
 // We're testing x86 target specific features
 //@only-target: x86_64 i686
-//@compile-flags: -C target-feature=+avx512f,+avx512vl,+avx512bw,+avx512bitalg,+avx512vpopcntdq,+avx512vnni,+avx512vbmi
+//@compile-flags: -C target-feature=+avx512f,+avx512vl,+avx512bw,+avx512bitalg,+avx512vpopcntdq,+avx512vnni,+avx512vbmi,+avx512ifma
 //@run-native: ignore-output
 
 #[cfg(target_arch = "x86")]
@@ -24,6 +24,7 @@ fn main() {
     assert!(is_x86_feature_detected!("avx512vpopcntdq"));
     assert!(is_x86_feature_detected!("avx512vnni"));
     assert!(is_x86_feature_detected!("avx512vbmi"));
+    assert!(is_x86_feature_detected!("avx512ifma"));
 
     unsafe {
         test_avx512();
@@ -35,6 +36,7 @@ fn main() {
         test_avx512vbmi();
         test_avx512_shifts();
         test_mm512_permutex2var_epi32();
+        test_avx512ifma();
     }
 }
 
@@ -60,6 +62,30 @@ unsafe fn test_mm512_permutex2var_epi32() {
     assert_eq!(
         transmute::<_, [i32; 16]>(_mm512_permutex2var_epi32(a, indices, b)),
         [0, 15, 16, 31, 0, 15, 16, 31, 31, 0, 17, 2, 30, 13, 29, 4],
+    );
+}
+
+#[target_feature(enable = "avx512ifma")]
+unsafe fn test_avx512ifma() {
+    const M: u64 = (1 << 52) - 1;
+    let src = transmute([0u64, 0, 0, u64::MAX, u64::MAX, 1 << 63, 0xabc0_0000_0000_0000, 7]);
+    let a = transmute([M, M, 1 << 52, M, 1, M, u64::MAX, 0]);
+    let b = transmute([M, 1 << 51, u64::MAX, M, M, M, u64::MAX, u64::MAX]);
+    assert_eq!(
+        transmute::<_, [u64; 8]>(_mm512_madd52lo_epu64(src, a, b)),
+        [1, 1 << 51, 0, 0, M - 1, (1 << 63) + 1, 0xabc0_0000_0000_0001, 7],
+    );
+    assert_eq!(
+        transmute::<_, [u64; 8]>(_mm512_madd52hi_epu64(src, a, b)),
+        [M - 1, (1 << 51) - 1, 0, M - 2, u64::MAX, (1 << 63) + M - 1, 0xabcf_ffff_ffff_fffe, 7],
+    );
+    assert_eq!(
+        transmute::<_, [u64; 8]>(_mm512_mask_madd52lo_epu64(src, 0x55, a, b)),
+        [1, 0, 0, u64::MAX, M - 1, 1 << 63, 0xabc0_0000_0000_0001, 7],
+    );
+    assert_eq!(
+        transmute::<_, [u64; 8]>(_mm512_maskz_madd52hi_epu64(0x55, src, a, b)),
+        [M - 1, 0, 0, 0, u64::MAX, 0, 0xabcf_ffff_ffff_fffe, 0],
     );
 }
 
