@@ -102,7 +102,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
             // Environment related shims
             "_NSGetEnviron" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [] = &this
                     .check_shim_sig(shim_sig!(extern "C" fn() -> *_), (link_name, abi, args))?;
                 let environ = this.machine.env_vars.unix().environ();
