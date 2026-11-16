@@ -42,6 +42,7 @@ use crate::concurrency::{
 };
 use crate::data_structures::range_object_map::RangeObjectMap;
 use crate::helpers::is_no_core;
+use crate::shims::ShimTable;
 use crate::*;
 
 /// First real-time signal.
@@ -549,6 +550,9 @@ pub struct MiriMachine<'tcx> {
     /// Whether to enforce the validity invariant.
     pub(crate) validation: ValidationMode,
 
+    /// The table of all available shimmed functions.
+    pub(crate) shims: ShimTable<'tcx>,
+
     /// The table of file descriptors.
     pub(crate) fds: shims::FdTable,
     /// The table of directory descriptors.
@@ -787,6 +791,7 @@ impl<'tcx> MiriMachine<'tcx> {
             tls: TlsData::default(),
             isolated_op: config.isolated_op,
             validation: config.validation,
+            shims: ShimTable::new(tcx),
             fds: shims::FdTable::init(config.mute_stdout_stderr),
             delayed_callbacks: Rc::new(DelayedCallbacks::default()),
             dirs: Default::default(),
@@ -1042,6 +1047,7 @@ impl VisitProvenance for MiriMachine<'_> {
             data_race,
             alloc_addresses,
             fds,
+            shims: _,
             blocking_io:_,
             delayed_callbacks: _,
             tcx: _,

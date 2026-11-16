@@ -5,6 +5,7 @@ use rustc_middle::ty::{Binder, FnSig, FnSigKind, Ty};
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
 
+use crate::shims::ShimCall;
 use crate::*;
 
 /// Describes the expected signature of a shim.
@@ -201,6 +202,67 @@ impl<'tcx, const ARGS: usize> ShimSig<'tcx, ARGS> {
             fn_sig_kind: FnSigKind::default().set_c_variadic(self.c_variadic).set_abi(self.abi),
         });
         ecx.fn_abi_of_fn_ptr(fn_sig_binder, Default::default()).unwrap()
+    }
+}
+
+impl<'tcx, 'a> ShimCall<'tcx, 'a> {
+    pub fn check_sig<const N: usize>(
+        &self,
+        ecx: &mut MiriInterpCx<'tcx>,
+        shim_sig: &ShimSig<'tcx, N>,
+    ) -> InterpResult<'tcx, ([OpTy<'tcx>; N], MPlaceTy<'tcx>)> {
+        // This is basically a copy of `ecx.check_shim_sig`, just that we also fix
+        // the layout of the destination operand.
+
+        // Compute callee ABI.
+        assert!(!shim_sig.c_variadic);
+        let callee_fn_abi = shim_sig.as_abi(ecx);
+
+        // Check everything.
+        check_shim_abi(ecx, self.link_name, callee_fn_abi, self.abi)?;
+        ecx.check_shim_symbol_clash(self.link_name)?;
+
+        // Transmute arguments.
+        let transmuted_args =
+            std::array::try_from_fn(|i| self.args[i].transmute(callee_fn_abi.args[i].layout, ecx))?;
+
+        // Transmute output destination.
+        let transmuted_dest = self.dest.transmute(callee_fn_abi.ret.layout, ecx)?;
+
+        interp_ok((transmuted_args, transmuted_dest))
+    }
+
+    pub fn check_sig_variadic<const N: usize>(
+        &self,
+        ecx: &mut MiriInterpCx<'tcx>,
+        shim_sig: &ShimSig<'tcx, N>,
+    ) -> InterpResult<'tcx, ([OpTy<'tcx>; N], Varargs<'tcx, 'a>, MPlaceTy<'tcx>)> {
+        // This is basically a copy of `ecx.check_shim_sig_variadic`, just that we also fix
+        // the layout of the destination operand.
+
+        // Compute callee ABI.
+        assert!(shim_sig.c_variadic);
+        let callee_fn_abi = shim_sig.as_abi(ecx);
+
+        // Check everything.
+        check_shim_abi(ecx, self.link_name, callee_fn_abi, self.abi)?;
+        ecx.check_shim_symbol_clash(self.link_name)?;
+
+        if let Some((fixed, var)) = self.args.split_first_chunk::<N>() {
+            // Transmute arguments.
+            let transmuted_args =
+                std::array::try_from_fn(|i| fixed[i].transmute(callee_fn_abi.args[i].layout, ecx))?;
+
+            // Transmute output destination.
+            let transmuted_dest = self.dest.transmute(callee_fn_abi.ret.layout, ecx)?;
+
+            return interp_ok((
+                transmuted_args,
+                Varargs { args: var, already_gone: N },
+                transmuted_dest,
+            ));
+        }
+        unreachable!()
     }
 }
 

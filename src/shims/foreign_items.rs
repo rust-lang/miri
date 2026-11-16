@@ -11,7 +11,7 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def_id::CrateNum;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use rustc_middle::mir::interpret::AllocInit;
-use rustc_middle::ty::{Instance, Ty};
+use rustc_middle::ty::{Instance, Ty, TyCtxt};
 use rustc_middle::{mir, ty};
 use rustc_span::Symbol;
 use rustc_target::callconv::FnAbi;
@@ -21,7 +21,8 @@ use super::alloc::EvalContextExt as _;
 use super::backtrace::EvalContextExt as _;
 use crate::concurrency::GenmcEvalContextExt as _;
 use crate::eval::{ExitType, ProgramExitHandler};
-use crate::helpers::EvalContextExt as _;
+use crate::helpers::{EvalContextExt as _, target_os_is_unix};
+use crate::shims::{ShimCall, ShimTable};
 use crate::*;
 
 /// Type of dynamic symbols (for `dlsym` et al)
@@ -71,12 +72,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
 
-        // FIXME: avoid allocating memory
+        // To avoid bugs due to keeping PlaceTy around too long, we always
+        // force the destination into memory.
         let dest = ecx.force_allocation(dest)?;
 
-        // The rest either implements the logic, or falls back to `lookup_exported_symbol`.
-        let res = ecx.emulate_foreign_item_inner(link_name, abi, args, &dest)?;
-        res.jump_to_next_block(ecx, &dest.clone().into(), ret, Some(unwind), |ecx| {
+        let res = if let Some(shim) = ecx.machine.shims.get(&link_name) {
+            shim(ecx, ShimCall { abi, args, dest: &dest, link_name })?
+        } else {
+            // The rest either implements the logic, or falls back to `lookup_exported_symbol`.
+            ecx.emulate_foreign_item_inner(link_name, abi, args, &dest)?
+        };
+
+        res.jump_to_next_block(ecx, &dest.into(), ret, Some(unwind), |ecx| {
             if let Some(body) = ecx.lookup_exported_fn(link_name)? {
                 return interp_ok(Some(body));
             }
@@ -250,6 +257,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
         }
         interp_ok(instance)
+    }
+
+    fn register_shims(tcx: TyCtxt<'tcx>, shims: &mut ShimTable<'tcx>) {
+        // Platform-specific shims
+        match &tcx.sess.target.os {
+            _ if target_os_is_unix(tcx) =>
+                <MiriInterpCx<'tcx> as shims::unix::foreign_items::EvalContextExt>::register_shims(
+                    tcx, shims,
+                ),
+            Os::Windows => {}
+            _ => {}
+        }
     }
 }
 

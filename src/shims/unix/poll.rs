@@ -1,9 +1,13 @@
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+use rustc_middle::ty::TyCtxt;
+use rustc_span::Symbol;
 use rustc_target::spec::Os;
 
+use crate::shims::ShimTable;
 use crate::shims::files::{FD_LIMIT, FdNum};
 use crate::*;
 
@@ -23,11 +27,27 @@ impl VisitProvenance for PollInterest<'_> {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    fn register_poll<'a>(#[allow(unused)] tcx: TyCtxt<'a>, shims: &mut ShimTable<'a>) {
+        let cell = OnceCell::new();
+        let eval_shim_sig: fn(&mut MiriInterpCx<'a>) -> _ =
+            shim_sig!(extern "C" fn(*libc::pollfd, libc::nfds_t, i32) -> i32);
+
+        shims.register(
+            Symbol::intern("poll"),
+            Rc::new(move |ecx, call| {
+                let shim_sig = cell.get_or_init(|| eval_shim_sig(ecx));
+
+                let (args, ref dest) = call.check_sig(ecx, shim_sig)?;
+                let args = args.each_ref();
+
+                ecx.poll(args, dest).map(|()| EmulateItemResult::NeedsReturn)
+            }),
+        );
+    }
+
     fn poll(
         &mut self,
-        fds: &OpTy<'tcx>,
-        nfds: &OpTy<'tcx>,
-        timeout: &OpTy<'tcx>,
+        [fds, nfds, timeout]: [&OpTy<'tcx>; 3],
         dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
