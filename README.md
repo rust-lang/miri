@@ -8,6 +8,9 @@ Miri is an [Undefined Behavior][reference-ub] detection tool for Rust. It can ru
 suites of cargo projects and detect unsafe code that fails to uphold its safety requirements. For
 instance:
 
+Change 1
+Change 2
+
 * Out-of-bounds memory accesses and use-after-free
 * Invalid use of uninitialized data
 * Violation of intrinsic preconditions (an [`unreachable_unchecked`] being
