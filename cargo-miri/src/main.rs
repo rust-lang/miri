@@ -118,15 +118,17 @@ fn main() {
             args.consume_first();
             phase_rustc(args, RustcPhase::Build);
         }
-        _ if looks_like_rustdoc(&args) => {
-            // This is probably rustdoc. Do NOT consume the first argument! It is meant for rustdoc.
-            phase_rustdoc(args);
-        }
         _ => {
-            show_error!(
-                "`cargo-miri` failed to recognize which phase of the build process this is, please report a bug.\nThe command-line arguments were: {:#?}",
-                args.as_slice(),
-            );
+            let args = args.expand_argfiles().unwrap_or_else(|err| show_error!("{err}"));
+            if looks_like_rustdoc(&args) {
+                // This is probably rustdoc. Do NOT consume the first argument! It is meant for rustdoc.
+                phase_rustdoc(args);
+            } else {
+                show_error!(
+                    "`cargo-miri` failed to recognize which phase of the build process this is, please report a bug.\nThe command-line arguments were: {:#?}",
+                    args.as_slice(),
+                );
+            }
         }
     }
 }
