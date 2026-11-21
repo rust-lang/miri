@@ -1065,7 +1065,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// contains the amount of bytes the value uses at `value_ptr`.
     /// `socket` is a [`socket2::SockRef`] to the underlying host socket of
     /// the shimmed socket.
-    fn set_ip_socket_option(
+    fn set_ipv4_socket_option(
         &self,
         option: i32,
         value_ptr: Pointer,
@@ -1088,6 +1088,45 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         throw_unsup_format!("setsockopt: option {option:#x} is unsupported for level IPPROTO_IP",);
+    }
+
+    /// Set the `option` socket option on level IPPROTO_IPV6 for `socket`.
+    /// `value_ptr` points to the new value of the socket option, and `value_len`
+    /// contains the amount of bytes the value uses at `value_ptr`.
+    /// `socket` is a [`socket2::SockRef`] to the underlying host socket of
+    /// the shimmed socket.
+    fn set_ipv6_socket_option(
+        &self,
+        option: i32,
+        value_ptr: Pointer,
+        value_len: u64,
+        socket: socket2::SockRef<'_>,
+    ) -> InterpResult<'tcx, Result<(), IoError>> {
+        let ecx = self.eval_context_ref();
+
+        let opt_ipv6_unicast_hops = ecx.eval_libc_i32("IPV6_UNICAST_HOPS");
+        let opt_ipv6_multicast_hops = ecx.eval_libc_i32("IPV6_MULTICAST_HOPS");
+
+        if option == opt_ipv6_unicast_hops || option == opt_ipv6_multicast_hops {
+            if value_len != 4 {
+                // Option value should be C-uint which is usually 4 bytes.
+                return interp_ok(Err(LibcError("EINVAL")));
+            }
+            let option_value = ecx.ptr_to_mplace(value_ptr, ecx.machine.layouts.u32);
+            let hop_limit = ecx.read_scalar(&option_value)?.to_u32()?;
+
+            if option == opt_ipv6_unicast_hops {
+                return interp_ok(
+                    socket.set_unicast_hops_v6(hop_limit).map_err(IoError::HostError),
+                );
+            } else {
+                return interp_ok(
+                    socket.set_multicast_hops_v6(hop_limit).map_err(IoError::HostError),
+                );
+            }
+        }
+
+        throw_unsup_format!("setsockopt: option {option:#x} is unsupported for level IPPROTO_IPV6",);
     }
 
     /// Set the `option` socket option on level IPPROTO_TCP for `socket`.
@@ -1241,7 +1280,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Get the `option` socket option on level IPPROTO_IP for `socket`.
     /// `socket` is a [`socket2::SockRef`] to the underlying host socket of
     /// the shimmed socket.
-    fn get_ip_socket_option(
+    fn get_ipv4_socket_option(
         &mut self,
         option: i32,
         socket: socket2::SockRef<'_>,
@@ -1263,6 +1302,40 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
 
         throw_unsup_format!("getsockopt: option {option:#x} is unsupported for level IPPROTO_IP",);
+    }
+
+    /// Get the `option` socket option on level IPPROTO_IPV6 for `socket`.
+    /// `socket` is a [`socket2::SockRef`] to the underlying host socket of
+    /// the shimmed socket.
+    fn get_ipv6_socket_option(
+        &mut self,
+        option: i32,
+        socket: socket2::SockRef<'_>,
+    ) -> InterpResult<'tcx, Result<MPlaceTy<'tcx>, IoError>> {
+        let ecx = self.eval_context_mut();
+
+        let opt_ipv6_unicast_hops = ecx.eval_libc_i32("IPV6_UNICAST_HOPS");
+        let opt_ipv6_multicast_hops = ecx.eval_libc_i32("IPV6_MULTICAST_HOPS");
+
+        if option == opt_ipv6_unicast_hops || option == opt_ipv6_multicast_hops {
+            let hops_result = if option == opt_ipv6_unicast_hops {
+                socket.unicast_hops_v6()
+            } else {
+                socket.multicast_hops_v6()
+            };
+
+            let hops = match hops_result {
+                Ok(hops) => hops,
+                Err(e) => return interp_ok(Err(IoError::HostError(e))),
+            };
+
+            // Allocate new buffer on the stack with the `u32` layout.
+            let value_buffer = ecx.allocate(ecx.machine.layouts.u32, MemoryKind::Stack)?;
+            ecx.write_int(hops, &value_buffer)?;
+            return interp_ok(Ok(value_buffer));
+        }
+
+        throw_unsup_format!("getsockopt: option {option:#x} is unsupported for level IPPROTO_IPV6",);
     }
 
     /// Get the `option` socket option on level IPPROTO_TCP for `socket`.
