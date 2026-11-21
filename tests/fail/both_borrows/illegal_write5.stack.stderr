@@ -2,10 +2,9 @@ error: Undefined Behavior: attempting a read access using <TAG> at ALLOC[0x0], b
   --> tests/fail/both_borrows/illegal_write5.rs:LL:CC
    |
 LL |     let _val = *xref;
-   |                ^^^^^ this error occurs as part of an access at ALLOC[0x0..0x4]
+   |                ^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of an access at ALLOC[0x0..0x4]
 help: <TAG> was created by a Unique retag at offsets [0x0..0x4]
   --> tests/fail/both_borrows/illegal_write5.rs:LL:CC
    |
@@ -16,6 +15,8 @@ help: <TAG> was later invalidated at offsets [0x0..0x4] by a write access
    |
 LL |     unsafe { *xraw = 15 };
    |              ^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

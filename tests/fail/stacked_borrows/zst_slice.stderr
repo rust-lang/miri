@@ -2,15 +2,16 @@ error: Undefined Behavior: trying to retag from <TAG> for SharedReadOnly permiss
   --> tests/fail/stacked_borrows/zst_slice.rs:LL:CC
    |
 LL |         assert_eq!(*s.as_ptr().add(1), 2);
-   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this error occurs as part of retag at ALLOC[0x4..0x8]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of retag at ALLOC[0x4..0x8]
 help: <TAG> would have been created here, but this is a zero-size retag ([0x0..0x0]) so the tag in question does not exist anywhere
   --> tests/fail/stacked_borrows/zst_slice.rs:LL:CC
    |
 LL |         assert_eq!(*s.as_ptr().add(1), 2);
    |                     ^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 
 note: some details are omitted, run with `MIRIFLAGS=-Zmiri-backtrace=full` for a verbose backtrace
 

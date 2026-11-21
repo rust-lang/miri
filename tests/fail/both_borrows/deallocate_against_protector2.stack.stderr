@@ -4,13 +4,13 @@ error: Undefined Behavior: attempting deallocation using <TAG> at ALLOC, but tha
 LL |         std::alloc::dealloc(raw.cast(), Layout::new::<i32>());
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
 help: <TAG> would have been created here, but this is a zero-size retag ([0x0..0x0]) so the tag in question does not exist anywhere
   --> tests/fail/both_borrows/deallocate_against_protector2.rs:LL:CC
    |
 LL |         let raw = x as *mut _ as *mut i32;
    |                   ^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: main::{closure#0}
                at tests/fail/both_borrows/deallocate_against_protector2.rs:LL:CC

@@ -14,7 +14,7 @@ impl Drop for HasDrop {
         unsafe {
             // The error really has to mention a protector to make sure we're checking the right thing!
             P.write(0);
-            //~[stack]^ ERROR: /not granting access .* because that would remove .* which is strongly protected/
+            //~[stack]^ ERROR: /not granting access to tag .* because that would invalidate a function argument with tag .* \(that tag is strongly protected\)/
             //~[tree]| ERROR: forbidden
             // For Tree Borrows, the protector is only mentioned in the "help:" texts unfortunately.
         }

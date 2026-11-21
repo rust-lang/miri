@@ -2,13 +2,10 @@ error: Undefined Behavior: trying to retag from <TAG> for Unique permission at A
   --> tests/fail/stacked_borrows/return_invalid_mut_option.rs:LL:CC
    |
 LL |     ret
-   |     ^^^
-   |     |
-   |     this error occurs as part of retag at ALLOC[0x4..0x8]
-   |     while retagging field .<enum-variant(Some)>.0
+   |     ^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of retag at ALLOC[0x4..0x8]
+   = help: while retagging field .<enum-variant(Some)>.0
 help: <TAG> was created by a Unique retag at offsets [0x4..0x8]
   --> tests/fail/stacked_borrows/return_invalid_mut_option.rs:LL:CC
    |
@@ -19,6 +16,8 @@ help: <TAG> was later invalidated at offsets [0x0..0x8] by a read access
    |
 LL |     let _val = unsafe { *xraw }; // invalidate xref
    |                         ^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: foo
                at tests/fail/stacked_borrows/return_invalid_mut_option.rs:LL:CC

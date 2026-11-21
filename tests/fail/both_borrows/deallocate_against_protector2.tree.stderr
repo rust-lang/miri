@@ -4,15 +4,15 @@ error: Undefined Behavior: deallocation through <TAG> at ALLOC[0x0] is forbidden
 LL |         std::alloc::dealloc(raw.cast(), Layout::new::<i32>());
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
-   = help: the allocation of the accessed tag <TAG> also contains the strongly protected tag <TAG>
-   = help: the strongly protected tag <TAG> disallows deallocations
-help: the strongly protected tag <TAG> was created here, in the initial state Reserved
+   = help: the allocation of the accessed tag <TAG> is also referenced by a function argument with tag <TAG>
+   = help: when a function argument reference points to some memory, that memory cannot be freed before the function returns
+help: the function argument tag <TAG> was created here, in the initial state Reserved
   --> tests/fail/both_borrows/deallocate_against_protector2.rs:LL:CC
    |
 LL |     inner(unsafe { &mut *(ptr as *mut ()) }, |x| unsafe {
    |                                               ^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Tree Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/tree-borrows.md for further information
    = note: stack backtrace:
            0: main::{closure#0}
                at tests/fail/both_borrows/deallocate_against_protector2.rs:LL:CC
