@@ -1,6 +1,5 @@
 #![warn(clippy::arithmetic_side_effects)]
 
-mod alloc;
 mod backtrace;
 mod files;
 mod math;
@@ -9,6 +8,7 @@ pub mod native_lib;
 mod unix;
 mod windows;
 
+pub mod alloc;
 pub mod cpu_affinity;
 pub mod env;
 pub mod extern_static;
