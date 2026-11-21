@@ -143,6 +143,9 @@ pub struct MiriConfig {
     pub mute_stdout_stderr: bool,
     /// The probability of the active thread being preempted at the end of each basic block.
     pub preemption_rate: f64,
+    /// The probability of a blocked futex waiter spuriously waking up each time the scheduler
+    /// picks the next thread to run.
+    pub spurious_wakeup_rate: f64,
     /// Report the current instruction being executed every N basic blocks.
     pub report_progress: Option<u32>,
     /// The location of the shared object files to load when calling external functions
@@ -199,7 +202,8 @@ impl Default for MiriConfig {
             backtrace_style: BacktraceStyle::Short,
             provenance_mode: ProvenanceMode::Default,
             mute_stdout_stderr: false,
-            preemption_rate: 0.01, // 1%
+            preemption_rate: 0.01,      // 1%
+            spurious_wakeup_rate: 0.01, // 1%
             report_progress: None,
             native_lib: vec![],
             native_lib_enable_tracing: false,

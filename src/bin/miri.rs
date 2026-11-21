@@ -557,6 +557,7 @@ fn main() -> ExitCode {
         } else if arg == "-Zmiri-deterministic-concurrency" {
             miri_config.fixed_scheduling = true;
             miri_config.address_reuse_cross_thread_rate = 0.0;
+            miri_config.spurious_wakeup_rate = 0.0;
             miri_config.cmpxchg_weak_failure_rate = 0.0;
             miri_config.weak_memory_emulation = false;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-seed=") {
@@ -617,6 +618,9 @@ fn main() -> ExitCode {
         } else if let Some(param) = arg.strip_prefix("-Zmiri-preemption-rate=") {
             miri_config.preemption_rate = parse_rate(param)
                 .unwrap_or_else(|err| fatal_error!("-Zmiri-preemption-rate {err}"));
+        } else if let Some(param) = arg.strip_prefix("-Zmiri-spurious-wakeup-rate=") {
+            miri_config.spurious_wakeup_rate = parse_rate(param)
+                .unwrap_or_else(|err| fatal_error!("-Zmiri-spurious-wakeup-rate {err}"));
         } else if arg == "-Zmiri-report-progress" {
             // This makes it take a few seconds between progress reports on my laptop.
             miri_config.report_progress = Some(1_000_000);
