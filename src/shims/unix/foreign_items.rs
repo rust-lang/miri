@@ -645,20 +645,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = ecx.listen(socket, backlog)?;
                 ecx.write_scalar(result, dest)?;
             }
-            "accept" => {
-                let [socket, address, address_len] = &ecx.check_shim_sig(
-                    shim_sig!(extern "C" fn(i32, *libc::sockaddr, *libc::socklen_t) -> i32),
-                    (link_name, abi, args),
-                )?;
-                ecx.accept4(socket, address, address_len, /* flags */ None, dest)?;
-            }
-            "accept4" => {
-                let [socket, address, address_len, flags] = &ecx.check_shim_sig(
-                    shim_sig!(extern "C" fn(i32, *libc::sockaddr, *libc::socklen_t, i32) -> i32),
-                    (link_name, abi, args),
-                )?;
-                ecx.accept4(socket, address, address_len, Some(flags), dest)?;
-            }
             "connect" => {
                 let [socket, address, address_len] = &ecx.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *libc::sockaddr, libc::socklen_t) -> i32),
@@ -1356,7 +1342,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     shim_sig!(extern "C" fn(*_) -> panic_unwind::imp::uw::_Unwind_Reason_Code),
                     (link_name, abi, args),
                 )?;
-                ecx.handle_miri_start_unwind(payload)?;
+                ecx.handle_miri_start_unwind([payload])?;
                 return interp_ok(EmulateItemResult::NeedsUnwind);
             }
             "getuid" | "geteuid" => {
@@ -1536,6 +1522,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     fn register_shims(tcx: TyCtxt<'tcx>, shims: &mut ShimTable<'tcx>) {
         MiriInterpCx::register_fcntl(tcx, shims);
+        MiriInterpCx::register_accept(tcx, shims);
+        MiriInterpCx::register_accept4(tcx, shims);
         MiriInterpCx::register_poll(tcx, shims);
     }
 }

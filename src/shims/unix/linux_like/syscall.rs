@@ -85,7 +85,7 @@ pub fn syscall<'tcx>(
                 varargs,
                 "syscall(SYS_accept4, ...)",
             )?;
-            ecx.accept4(&socket, &address, &address_len, Some(&flags), dest)?;
+            ecx.accept4([&socket, &address, &address_len], Some(&flags), dest)?;
         }
         num if num == sys_copy_file_range => {
             let ([fd_in, off_in, fd_out, off_out, len, flags], _) = &ecx.check_varargs(

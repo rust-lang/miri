@@ -260,6 +260,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     fn register_shims(tcx: TyCtxt<'tcx>, shims: &mut ShimTable<'tcx>) {
+        MiriInterpCx::register_miri_start_unwind(tcx, shims);
+
         // Platform-specific shims
         match &tcx.sess.target.os {
             _ if target_os_is_unix(tcx) =>
@@ -394,14 +396,6 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
                         alloc_id, info.size, info.align,
                     ));
                 }
-            }
-            "miri_start_unwind" => {
-                let [payload] = &ecx.check_shim_sig(
-                    shim_sig!(extern "Rust" fn(*()) -> !),
-                    (link_name, abi, args),
-                )?;
-                ecx.handle_miri_start_unwind(payload)?;
-                return interp_ok(EmulateItemResult::NeedsUnwind);
             }
             "miri_run_provenance_gc" => {
                 let [] = &ecx

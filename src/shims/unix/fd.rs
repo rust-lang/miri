@@ -1,22 +1,18 @@
 //! General management of file descriptors, and support for
 //! standard file descriptors (stdin/stdout/stderr).
 
-use std::cell::OnceCell;
 use std::io;
 use std::io::ErrorKind;
-use std::rc::Rc;
 
 use rand::RngExt;
 use rustc_abi::{Align, Size};
-use rustc_middle::ty::TyCtxt;
-use rustc_span::Symbol;
 use rustc_target::spec::Os;
 
 use crate::shims::files::{BIG_ACCESS, DynFileDescriptionRef, FdNum, FileDescription};
 use crate::shims::sig::Varargs;
 use crate::shims::unix::socket::UnixSocketFileDescription;
 use crate::shims::unix::*;
-use crate::shims::{FdTable, FileDescriptionRef, ShimTable};
+use crate::shims::{FdTable, FileDescriptionRef};
 use crate::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -260,24 +256,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
-    fn register_fcntl<'a>(#[allow(unused)] tcx: TyCtxt<'a>, shims: &mut ShimTable<'a>) {
-        let cell = OnceCell::new();
-        let eval_shim_sig: fn(&mut MiriInterpCx<'a>) -> _ =
-            shim_sig!(extern "C" fn(i32, i32, ...) -> i32);
-
-        shims.register(
-            Symbol::intern("fcntl"),
-            Rc::new(move |ecx, call| {
-                let shim_sig = cell.get_or_init(|| eval_shim_sig(ecx));
-
-                let (args, varargs, ref dest) = call.check_sig_variadic(ecx, shim_sig)?;
-                let args = args.each_ref();
-
-                ecx.fcntl(args, varargs, dest).map(|()| EmulateItemResult::NeedsReturn)
-            }),
-        );
+    register! {
+        name: fcntl,
+        sig: variadic extern "C" fn(i32, i32, ...) -> i32,
     }
-
     fn fcntl(
         &mut self,
         [fd_num, cmd]: [&OpTy<'tcx>; 2],
