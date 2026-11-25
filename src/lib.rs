@@ -8,6 +8,7 @@
     ),
     feature(abort_unwind)
 )]
+#![cfg_attr(unix, feature(unix_process_user_group_ids))]
 #![cfg_attr(windows, feature(windows_by_handle))]
 #![feature(array_try_from_fn)]
 #![feature(clamp_to)]

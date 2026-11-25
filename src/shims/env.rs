@@ -1,5 +1,7 @@
 use std::assert_matches;
 use std::ffi::{OsStr, OsString};
+#[cfg(unix)]
+use std::os::unix::process;
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_target::spec::Os;
@@ -7,6 +9,9 @@ use rustc_target::spec::Os;
 use self::shims::unix::UnixEnvVars;
 use self::shims::windows::WindowsEnvVars;
 use crate::*;
+
+const DEFAULT_UID: u32 = 1000;
+const DEFAULT_GID: u32 = 1000;
 
 #[derive(Default)]
 pub enum EnvVars<'tcx> {
@@ -111,38 +116,42 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     /// Get the real or effective user ID of the process.
     fn get_uid(&self, effective: bool) -> u32 {
-        let this = self.eval_context_ref();
-        if !this.machine.communicate() {
-            return 1000;
+        let ecx = self.eval_context_ref();
+        if !ecx.machine.communicate() {
+            return DEFAULT_UID;
         }
 
         cfg_select! {
-            unix => {
-                // SAFETY: these functions are always safe to call.
-                unsafe { if effective { libc::geteuid() } else { libc::getuid() } }
-            }
+            unix =>
+                if effective {
+                    process::effective_uid()
+                } else {
+                    process::uid()
+                },
             _ => {
                 let _ = effective;
-                1000
+                DEFAULT_UID
             }
         }
     }
 
     /// Get the real or effective group ID of the process.
     fn get_gid(&self, effective: bool) -> u32 {
-        let this = self.eval_context_ref();
-        if !this.machine.communicate() {
-            return 1000;
+        let ecx = self.eval_context_ref();
+        if !ecx.machine.communicate() {
+            return DEFAULT_GID;
         }
 
         cfg_select! {
-            unix => {
-                // SAFETY: these functions are always safe to call.
-                unsafe { if effective { libc::getegid() } else { libc::getgid() } }
-            }
+            unix =>
+                if effective {
+                    process::effective_gid()
+                } else {
+                    process::gid()
+                },
             _ => {
                 let _ = effective;
-                1000
+                DEFAULT_GID
             }
         }
     }

@@ -347,32 +347,32 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_u32(ecx.get_pid()))
     }
 
-    fn getuid(&mut self) -> InterpResult<'tcx, Scalar> {
-        let this = self.eval_context_mut();
-        this.assert_target_os_is_unix("getuid");
+    fn getuid(&self) -> InterpResult<'tcx, Scalar> {
+        let ecx = self.eval_context_ref();
+        ecx.assert_target_os_is_unix("getuid");
 
-        interp_ok(Scalar::from_u32(this.get_uid(false)))
+        interp_ok(Scalar::from_u32(ecx.get_uid(false)))
     }
 
-    fn geteuid(&mut self) -> InterpResult<'tcx, Scalar> {
-        let this = self.eval_context_mut();
-        this.assert_target_os_is_unix("geteuid");
+    fn geteuid(&self) -> InterpResult<'tcx, Scalar> {
+        let ecx = self.eval_context_ref();
+        ecx.assert_target_os_is_unix("geteuid");
 
-        interp_ok(Scalar::from_u32(this.get_uid(true)))
+        interp_ok(Scalar::from_u32(ecx.get_uid(true)))
     }
 
-    fn getgid(&mut self) -> InterpResult<'tcx, Scalar> {
-        let this = self.eval_context_mut();
-        this.assert_target_os_is_unix("getgid");
+    fn getgid(&self) -> InterpResult<'tcx, Scalar> {
+        let ecx = self.eval_context_ref();
+        ecx.assert_target_os_is_unix("getgid");
 
-        interp_ok(Scalar::from_u32(this.get_gid(false)))
+        interp_ok(Scalar::from_u32(ecx.get_gid(false)))
     }
 
-    fn getegid(&mut self) -> InterpResult<'tcx, Scalar> {
-        let this = self.eval_context_mut();
-        this.assert_target_os_is_unix("getegid");
+    fn getegid(&self) -> InterpResult<'tcx, Scalar> {
+        let ecx = self.eval_context_ref();
+        ecx.assert_target_os_is_unix("getegid");
 
-        interp_ok(Scalar::from_u32(this.get_gid(true)))
+        interp_ok(Scalar::from_u32(ecx.get_gid(true)))
     }
 
     /// The `gettid`-like function for Unix platforms that take no parameters and return a 32-bit
