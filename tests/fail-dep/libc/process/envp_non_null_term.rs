@@ -1,5 +1,6 @@
 //@compile-flags: -Zmiri-disable-isolation
 //@ignore-target: windows
+//@ignore-host: windows
 
 use std::ffi::CStr;
 use std::ptr;
