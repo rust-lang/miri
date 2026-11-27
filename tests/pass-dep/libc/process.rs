@@ -18,7 +18,7 @@ fn main() {
 
 // some valid default arguments
 const PATH: &CStr = c"/bin/echo";
-const A0: &CStr = c"echo";
+const A0: &CStr = c"/bin/echo";
 const ARGV: [*mut libc::c_char; 2] = [A0.as_ptr() as *mut _, ptr::null_mut()];
 
 fn test_pid_null() {

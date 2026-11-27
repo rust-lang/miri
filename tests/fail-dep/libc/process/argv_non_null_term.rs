@@ -24,7 +24,7 @@ fn test_argv_non_null_term() {
     let path = PATH;
 
     // argv elements
-    let a0 = c"echo";
+    let a0 = c"/bin/echo";
     let a1 = c"Hello";
 
     let premium_data = ArgvPremium {
