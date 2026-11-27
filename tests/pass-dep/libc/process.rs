@@ -1,6 +1,6 @@
-// @ignore-target: windows
-// @compile-flags: -Zmiri-disable-isolation
-// @run-native
+//@ignore-target: windows
+//@compile-flags: -Zmiri-disable-isolation
+//@run-native
 
 use std::ffi::CStr;
 use std::ptr;

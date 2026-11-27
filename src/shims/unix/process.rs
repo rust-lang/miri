@@ -114,7 +114,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     // TODO: emit warning when arg0 doesn't match given "path"
                 }
                 _ => {
-                    !todo("emit warning if arg0!=path");
+                    todo!("emit warning if arg0!=path");
                 }
             }
             command.args(args);
@@ -133,8 +133,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // Write pid
         if !ecx.ptr_is_null(pid_place.ptr())? {
-            let child_id = Scalar::from_i32(child.id() as i32);
-            ecx.write_scalar(child_id, &pid_place)?;
+            if let Ok(child_id_i32) = i32::try_from(child.id()) {
+                let child_id = Scalar::from_i32(child_id_i32);
+                ecx.write_scalar(child_id, &pid_place)?;
+            } else {
+                throw_unsup_format!("child pid doesn't fit into i32");
+            };
         }
 
         interp_ok(Scalar::from_i32(0))
