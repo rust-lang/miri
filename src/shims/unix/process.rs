@@ -114,7 +114,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 }
                 _ => {
                     if arg0 != path {
-                        todo!("emit warning arg0 doesn't match path")
+                        todo!("emit warning arg0 doesn't match path");
                     }
                 }
             }
