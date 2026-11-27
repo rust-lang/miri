@@ -1,6 +1,7 @@
 //@compile-flags: -Zmiri-disable-isolation
 //@ignore-target: windows
 //@ignore-host: windows
+//@normalize-stderr-test: "ALLOC\[[^\]]*\]" -> "ALLOC[]"
 
 use std::ffi::CStr;
 use std::ptr;
