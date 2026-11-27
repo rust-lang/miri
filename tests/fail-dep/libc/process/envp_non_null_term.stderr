@@ -3,9 +3,9 @@ error: Undefined Behavior: attempting a read access using <TAG> at ALLOC[0x10], 
    |
 LL |           let ret = libc::posix_spawn(
    |  ___________________^
+LL | |
 LL | |             &mut child_pid,
 LL | |             path.as_ptr(),
-LL | |             ptr::null(),
 ...  |
 LL | |             envp_ptr,
 LL | |         );
