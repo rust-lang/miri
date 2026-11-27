@@ -1,4 +1,5 @@
 //@ignore-target: windows
+//@ignore-host: windows
 //@compile-flags: -Zmiri-disable-isolation
 //@run-native
 
