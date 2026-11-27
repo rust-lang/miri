@@ -115,11 +115,9 @@ fn test_argv_unconventional() {
 
     // argv elements
     let a0 = c"echo4738219047";
-    let a1 = c"Hello";
 
     // argv: null-terminated C array
-    let argv: [*mut libc::c_char; 3] =
-        [a0.as_ptr() as *mut _, a1.as_ptr() as *mut _, ptr::null_mut()];
+    let argv: [*mut libc::c_char; 2] = [a0.as_ptr() as *mut _, ptr::null_mut()];
 
     unsafe {
         // 6 args: pid, path, file_actions, attrp, argv, envp
