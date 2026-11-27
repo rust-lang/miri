@@ -112,11 +112,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     use std::os::unix::process::CommandExt;
                     command.arg0(arg0);
                 }
-                _ => {
+                _ =>
                     if arg0 != path {
                         todo!("emit warning arg0 doesn't match path");
-                    }
-                }
+                    },
             }
             command.args(args);
         } else {
