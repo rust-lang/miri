@@ -36,7 +36,7 @@ fn test_argv_non_null_term() {
     unsafe {
         // 6 args: pid, path, file_actions, attrp, argv, envp
         let ret = libc::posix_spawn(
-            //~ ERROR: attempting a read access
+            //~^ ERROR: attempting a read access
             &mut child_pid,
             path.as_ptr(),
             ptr::null(),
