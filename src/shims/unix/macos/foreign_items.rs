@@ -158,7 +158,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ecx.write_pointer(ecx.machine.argv.expect("machine must be initialized"), dest)?;
             }
             "_NSGetExecutablePath" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [buf, bufsize] = &ecx.check_shim_sig(
                     shim_sig!(extern "C" fn(*_, *u32) -> i32),
                     (link_name, abi, args),
