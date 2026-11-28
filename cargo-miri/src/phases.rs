@@ -274,6 +274,8 @@ pub enum RustcPhase {
 }
 
 pub fn phase_rustc(args: Args, phase: RustcPhase) {
+    let args = args.expand_argfiles().unwrap_or_else(|err| show_error!("{err}"));
+
     /// Determines if we are being invoked (as rustc) to build a crate for
     /// the "target" architecture, in contrast to the "host" architecture.
     /// Host crates are for build scripts and proc macros and still need to
@@ -340,12 +342,6 @@ pub fn phase_rustc(args: Args, phase: RustcPhase) {
                 String::from_utf8(output.stdout).expect("rustc returned non-UTF-8 filename");
             output.lines().filter(|l| !l.is_empty()).map(|l| path.join(l)).collect()
         }
-    }
-
-    // Ensure we show an error if we encounter an argfile, rather than randomly misbehvaing.
-    // We know rustdoc doesn't put anything important in the argfiles so we can ignore them there.
-    if phase != RustcPhase::Rustdoc && args.iter().any(|arg| arg.starts_with('@')) {
-        show_error!("cargo uses an argfile to invoke rustc, which is not supported by cargo-miri");
     }
 
     let verbose = env::var("MIRI_VERBOSE")
