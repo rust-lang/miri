@@ -187,7 +187,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             }
 
             "pset_info" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [pset, tpe, cpus, list] = &ecx.check_shim_sig(
                     shim_sig!(extern "C" fn(i32, *_, *u32, *_) -> i32),
                     (link_name, abi, args),
