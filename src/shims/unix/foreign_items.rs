@@ -911,6 +911,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     ecx.write_pointer(ptr, dest)?;
                 } else if let Some(&ptr) = ecx.machine.extern_statics.get(&Symbol::intern(name)) {
                     ecx.write_pointer(ptr, dest)?;
+                } else if ecx.machine.error_on_unknown_optional_symbols {
+                    throw_unsup_format!("dlsym: encountered unknown symbol {name:?}");
                 } else {
                     ecx.write_int(0, dest)?;
                 }
