@@ -172,7 +172,7 @@ impl<V> UniValMap<V> {
     /// Reserve enough space to insert the value at the right index.
     fn extend_to_length(&mut self, len: usize) {
         if len > self.data.len() {
-            let nb = len - self.data.len();
+            let nb = len.strict_sub(self.data.len());
             self.data.reserve(nb);
             for _ in 0..nb {
                 self.data.push(None);
@@ -182,7 +182,7 @@ impl<V> UniValMap<V> {
 
     /// Assign a value to the index. Permanently overwrites any previous value.
     pub fn insert(&mut self, idx: UniIndex, val: V) {
-        self.extend_to_length(idx.idx.to_usize() + 1);
+        self.extend_to_length(idx.idx.to_usize().strict_add(1));
         self.data[idx.idx.to_usize()] = Some(val)
     }
 
@@ -230,7 +230,7 @@ pub struct UniEntry<'a, V> {
 impl<'a, V> UniValMap<V> {
     /// Get a wrapper around a mutable access to the value corresponding to `idx`.
     pub fn entry(&'a mut self, idx: UniIndex) -> UniEntry<'a, V> {
-        self.extend_to_length(idx.idx.to_usize() + 1);
+        self.extend_to_length(idx.idx.to_usize().strict_add(1));
         UniEntry { inner: &mut self.data[idx.idx.to_usize()] }
     }
 }

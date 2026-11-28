@@ -106,7 +106,7 @@ impl ExposedCache {
         // always exists a foreign exposed node.
         // (We cannot bake this into the root's count as then if `node == root` it would
         // affect both `total` and `local`.)
-        let total_num = total_num + u16::from(is_wildcard_tree);
+        let total_num = total_num.strict_add(u16::from(is_wildcard_tree));
 
         use WildcardAccessRelatedness::*;
         let relatedness = if total_num == 0 {
@@ -168,13 +168,13 @@ impl ExposedCache {
 
             use WildcardAccessLevel::*;
             match (from, to) {
-                (None | Read, Write) => state.local_writes += 1,
-                (Write, None | Read) => state.local_writes -= 1,
+                (None | Read, Write) => state.local_writes = state.local_writes.strict_add(1),
+                (Write, None | Read) => state.local_writes = state.local_writes.strict_sub(1),
                 _ => {}
             }
             match (from, to) {
-                (None, Read | Write) => state.local_reads += 1,
-                (Read | Write, None) => state.local_reads -= 1,
+                (None, Read | Write) => state.local_reads = state.local_reads.strict_add(1),
+                (Read | Write, None) => state.local_reads = state.local_reads.strict_sub(1),
                 _ => {}
             }
             next_id = node.parent;
@@ -274,11 +274,13 @@ impl Tree {
                     .iter()
                     .copied()
                     .map(|id| exposed_cache.0.get(id).cloned().unwrap_or_default())
-                    .fold((0, 0), |acc, wc| (acc.0 + wc.local_reads, acc.1 + wc.local_writes));
+                    .fold((0u16, 0u16), |acc, wc| {
+                        (acc.0.strict_add(wc.local_reads), acc.1.strict_add(wc.local_writes))
+                    });
                 let expected_reads =
-                    child_reads + u16::from(exposed_as >= WildcardAccessLevel::Read);
+                    child_reads.strict_add(u16::from(exposed_as >= WildcardAccessLevel::Read));
                 let expected_writes =
-                    child_writes + u16::from(exposed_as >= WildcardAccessLevel::Write);
+                    child_writes.strict_add(u16::from(exposed_as >= WildcardAccessLevel::Write));
                 assert_eq!(
                     state.local_reads, expected_reads,
                     "expected {:?}'s (id:{id:?}) local_reads to be {expected_reads:?} instead of {:?} (child_reads: {child_reads:?}, exposed_as: {exposed_as:?})",

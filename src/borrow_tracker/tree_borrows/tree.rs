@@ -446,10 +446,10 @@ impl<'tcx> Tree {
             );
 
             min_sifa = cmp::min(min_sifa, perm.idempotent_foreign_access);
-            for (_range, loc) in self
-                .locations
-                .iter_mut(Size::from_bytes(start) + base_offset, Size::from_bytes(end - start))
-            {
+            for (_range, loc) in self.locations.iter_mut(
+                Size::from_bytes(start) + base_offset,
+                Size::from_bytes(end.strict_sub(start)),
+            ) {
                 loc.perms.insert(idx, perm);
             }
         }
@@ -837,7 +837,7 @@ impl Tree {
                 // Also increase `nth_child` so that when we come back to the `tag` node, we
                 // look at the next child.
                 let next_child = node.children[*nth_child];
-                *nth_child += 1;
+                *nth_child = nth_child.strict_add(1);
                 stack.push((next_child, 0));
                 continue;
             } else {

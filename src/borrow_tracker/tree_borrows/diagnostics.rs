@@ -710,10 +710,11 @@ impl DisplayRepr {
                     header_top.push_str(fmt.perm.range_sep);
                 }
                 let s = range.end.to_string();
-                let l = s.chars().count() + fmt.perm.range_sep.chars().count();
+                let l = s.chars().count().strict_add(fmt.perm.range_sep.chars().count());
                 {
+                    let perm_len = fmt.perm.uninit.chars().count();
                     let target_len =
-                        fmt.perm.uninit.chars().count() + fmt.accessed.yes.chars().count() + 1;
+                        perm_len.strict_add(fmt.accessed.yes.chars().count()).strict_add(1);
                     let tot_len = target_len.max(l);
                     let header_top_pad_len = target_len.saturating_sub(l);
                     let body_pad_len = tot_len.saturating_sub(target_len);
@@ -842,7 +843,7 @@ impl DisplayRepr {
                     fmt,
                     indent,
                     protected_tags,
-                    /* is_last_child */ i + 1 == nb_children,
+                    /* is_last_child */ i.strict_add(1) == nb_children,
                     /* is_wildcard_root */ false,
                     acc,
                 );
