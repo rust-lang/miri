@@ -21,7 +21,8 @@ const TASK_COMM_LEN: u64 = 16;
 pub fn is_dyn_sym(name: &str, target: &Target) -> bool {
     match name {
         "copy_file_range" | "gettid" | "statx" => true,
-        "__cxa_thread_atexit_impl" => target.env == rustc_target::spec::Env::Gnu,
+        "__cxa_thread_atexit_impl" | "__pthread_get_minstack" =>
+            target.env == rustc_target::spec::Env::Gnu,
         // glibc only exposes this symbol on targets with a 32-bit time_t.
         "__futimens64" =>
             target.env == rustc_target::spec::Env::Gnu
@@ -354,7 +355,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ecx.write_int(SIGRTMAX, dest)?;
             }
 
-            // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
+            // Incomplete shims that we "stub out" just to get std to work.
             // These shims are enabled only when the caller is in the standard library.
             "pthread_getattr_np" if ecx.frame_in_std() => {
                 let [_thread, attr] = &ecx.check_shim_sig(
@@ -375,6 +376,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let version = "2.26\0";
                 let version = ecx.allocate_str_dedup(version)?;
                 ecx.write_pointer(version.ptr(), dest)?;
+            }
+            "__pthread_get_minstack"
+                if ecx.frame_in_std()
+                    && ecx.tcx.sess.target.env == rustc_target::spec::Env::Gnu =>
+            {
+                let [_attr] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn(*libc::pthread_attr_t) -> usize),
+                    (link_name, abi, args),
+                )?;
+                let val = ecx.eval_libc("PTHREAD_STACK_MIN");
+                ecx.write_scalar(val, dest)?;
             }
             "sendfile64" if ecx.frame_in_std() => {
                 let [_out_fd, _in_fd, _offset, _count] = &ecx.check_shim_sig(
