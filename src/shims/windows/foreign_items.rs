@@ -1187,7 +1187,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 return interp_ok(EmulateItemResult::NeedsUnwind);
             }
 
-            // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
+            // Incomplete shims that we "stub out" just to get std to work.
             // These shims are enabled only when the caller is in the standard library.
             "NtQueryVolumeInformationFile" if ecx.frame_in_std() => {
                 let [_handle, _iosb, _info, _length, _class] = &ecx.check_shim_sig(
