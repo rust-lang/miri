@@ -1418,13 +1418,37 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ecx.handle_miri_start_unwind(payload)?;
                 return interp_ok(EmulateItemResult::NeedsUnwind);
             }
-            "getuid" | "geteuid" => {
+            "getuid" => {
                 let [] = &ecx.check_shim_sig(
                     shim_sig!(extern "C" fn() -> libc::uid_t),
                     (link_name, abi, args),
                 )?;
-                // For now, just pretend we always have this fixed UID.
-                ecx.write_int(UID, dest)?;
+                let result = ecx.getuid()?;
+                ecx.write_scalar(result, dest)?;
+            }
+            "geteuid" => {
+                let [] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn() -> libc::uid_t),
+                    (link_name, abi, args),
+                )?;
+                let result = ecx.geteuid()?;
+                ecx.write_scalar(result, dest)?;
+            }
+            "getgid" => {
+                let [] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn() -> libc::gid_t),
+                    (link_name, abi, args),
+                )?;
+                let result = ecx.getgid()?;
+                ecx.write_scalar(result, dest)?;
+            }
+            "getegid" => {
+                let [] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn() -> libc::gid_t),
+                    (link_name, abi, args),
+                )?;
+                let result = ecx.getegid()?;
+                ecx.write_scalar(result, dest)?;
             }
             "pause" => {
                 let [] =
@@ -1510,7 +1534,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let result = ecx.deref_pointer(result)?;
 
                 // Must be for "us".
-                if uid != UID {
+                if uid != ecx.get_uid(/* effective */ false) {
                     throw_unsup_format!("`getpwuid_r` on other users is not supported");
                 }
 
