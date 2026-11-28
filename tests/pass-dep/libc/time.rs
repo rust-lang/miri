@@ -51,6 +51,9 @@ fn main() {
         test_clock_nanosleep::absolute();
         test_clock_nanosleep::relative();
     }
+
+    #[cfg(target_os = "macos")]
+    test_mach_wait_until();
 }
 
 /// Tests whether clock support exists at all
@@ -449,4 +452,16 @@ mod test_clock_nanosleep {
         });
         assert!(start_test_sleep.elapsed() > Duration::from_millis(100));
     }
+}
+
+/// Tests that the thread does not wake up before the deadline arrives.
+#[cfg(target_os = "macos")]
+fn test_mach_wait_until() {
+    let deadline = unsafe { mach2::mach_time::mach_absolute_time() } + 100_000_000;
+
+    assert_eq!(
+        unsafe { mach2::mach_time::mach_wait_until(deadline) },
+        mach2::kern_return::KERN_SUCCESS
+    );
+    assert!(unsafe { mach2::mach_time::mach_absolute_time() } >= deadline);
 }
