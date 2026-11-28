@@ -1,3 +1,5 @@
+//@only-target: never # disabled due to https://github.com/rust-lang/miri/issues/5678
+
 // We should be able to spawn and join standard library threads in GenMC mode.
 // Since these threads do nothing, we should only explore 1 program execution.
 

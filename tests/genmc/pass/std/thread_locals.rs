@@ -1,3 +1,4 @@
+//@only-target: never # disabled due to https://github.com/rust-lang/miri/issues/5678
 //@compile-flags: -Zmiri-ignore-leaks
 
 use std::alloc::{Layout, alloc};

@@ -165,7 +165,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ecx.write_scalar(result, dest)?;
             }
 
-            // Incomplete shims that we "stub out" just to get pre-main initialization code to work.
+            // Incomplete shims that we "stub out" just to get std to work.
             // These shims are enabled only when the caller is in the standard library.
             "pthread_attr_get_np" if ecx.frame_in_std() => {
                 let [_thread, attr] = &ecx.check_shim_sig(
