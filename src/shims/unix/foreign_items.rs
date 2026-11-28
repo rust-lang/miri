@@ -129,6 +129,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         // See `fn emulate_foreign_item_inner` in `shims/foreign_items.rs` for the general pattern.
         match link_name.as_str() {
+            "posix_spawn" => {
+                let [pid, path, file_actions, attrp, argv, envp] = &ecx.check_shim_sig(
+                    shim_sig!(extern "C" fn(*libc::pid_t, *_, *_, *_, *_, *_) -> i32),
+                    (link_name, abi, args),
+                )?;
+                let result = ecx.posix_spawn(pid, path, file_actions, attrp, argv, envp)?;
+                ecx.write_scalar(result, dest)?;
+            }
             // Environment related shims
             "getenv" => {
                 let [name] = &ecx
