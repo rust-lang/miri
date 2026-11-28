@@ -2,10 +2,9 @@ error: Undefined Behavior: trying to retag from <TAG> for SharedReadOnly permiss
   --> tests/fail/both_borrows/return_invalid_shr.rs:LL:CC
    |
 LL |     ret
-   |     ^^^ this error occurs as part of retag at ALLOC[0x4..0x8]
+   |     ^^^ Undefined Behavior occurred here
    |
-   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
-   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
+   = help: this error occurs as part of retag at ALLOC[0x4..0x8]
 help: <TAG> was created by a SharedReadOnly retag at offsets [0x4..0x8]
   --> tests/fail/both_borrows/return_invalid_shr.rs:LL:CC
    |
@@ -16,6 +15,8 @@ help: <TAG> was later invalidated at offsets [0x4..0x8] by a write access
    |
 LL |     unsafe { *xraw = (42, 23) }; // unfreeze
    |              ^^^^^^^^^^^^^^^^
+   = help: this indicates a potential bug in the program: it performed an invalid operation, but the Stacked Borrows rules it violated are still experimental
+   = help: see https://github.com/rust-lang/unsafe-code-guidelines/blob/master/wip/stacked-borrows.md for further information
    = note: stack backtrace:
            0: foo
                at tests/fail/both_borrows/return_invalid_shr.rs:LL:CC
