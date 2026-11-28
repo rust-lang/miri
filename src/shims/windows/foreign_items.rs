@@ -729,7 +729,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ecx.GetSystemTimeAsFileTime(link_name.as_str(), filetime)?;
             }
             "QueryPerformanceCounter" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [performance_count] = &ecx.check_shim_sig(
                     shim_sig!(extern "system" fn(*i64) -> winapi::BOOL),
                     (link_name, abi, args),
@@ -738,7 +737,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ecx.write_scalar(result, dest)?;
             }
             "QueryPerformanceFrequency" => {
-                // FIXME: This does not have a direct test (#3179).
                 let [frequency] = &ecx.check_shim_sig(
                     shim_sig!(extern "system" fn(*i64) -> winapi::BOOL),
                     (link_name, abi, args),
