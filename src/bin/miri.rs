@@ -142,6 +142,12 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         _: &rustc_interface::interface::Compiler,
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
+        // We do not need the actual output of the collection, but doing this explicitly before we
+        // start interpreting lets us report some post-mono const-eval errors that regular rustc
+        // builds report at compile time and we would otherwise need a specific monomorphization during
+        // interpretation to encounter and report.
+        let _items = tcx.collect_and_partition_mono_items(());
+
         // Compilation is done, interpretation is starting. Deal with diagnostics from the
         // compilation part. We cannot call `sess.finish_diagnostics()` as then "aborting due to
         // previous errors" gets printed twice.
