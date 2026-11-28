@@ -572,6 +572,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 )?;
                 let system_info = ecx.deref_pointer(system_info)?;
                 // Initialize with `0`.
+                // FIXME: ideally we'd just initialize fields that are guaranteed to be valid.
                 ecx.write_bytes_ptr(
                     system_info.ptr(),
                     iter::repeat_n(0u8, system_info.layout.size.bytes_usize()),

@@ -157,6 +157,7 @@ pub enum NonHaltingDiagnostic {
     UnknownTimezone {
         timezone: String,
     },
+    FileModeIgnored,
 }
 
 /// Level of Miri specific diagnostics
@@ -682,6 +683,7 @@ impl<'tcx> MiriMachine<'tcx> {
             ConnectingSocketGetsockname => format!("connecting sockets return unspecified socket addresses on Windows hosts"),
             SocketAddressResolution { error } => format!("address resolution failed: {error}"),
             UnknownTimezone { timezone } => format!("TZ environment variable is set to unknown timezone {timezone:?}"),
+            FileModeIgnored => format!("mode for creating new files is ignored"),
         };
 
         let (main_span_label, diag_level) = match &e {
@@ -709,6 +711,8 @@ impl<'tcx> MiriMachine<'tcx> {
                 ("error during address resolution".to_string(), DiagLevel::Warning),
             UnknownTimezone { .. } =>
                 ("failed to resvoled timezone name".to_string(), DiagLevel::Warning),
+            FileModeIgnored =>
+                ("opening file with non-default file creation mode".to_string(), DiagLevel::Warning),
         };
 
         let extras = match &e {
@@ -729,6 +733,13 @@ impl<'tcx> MiriMachine<'tcx> {
                 vec![note!(
                     "Miri cannot return proper error information from this call; only a generic error code is being returned"
                 )],
+            FileModeIgnored =>
+                vec![
+                    note!(
+                        "this file was supposed to be created with restricted access for other users, but that is not supported on Windows hosts"
+                    ),
+                    note!("this warning is only shown once per program execution"),
+                ],
             Int2Ptr { details: true } => {
                 let mut v = vec![
                     help!(
