@@ -170,6 +170,32 @@ fn test_nsgetargv_argc() {
     assert!(argv_argc.is_null());
 }
 
+#[expect(deprecated)]
+#[cfg(target_os = "macos")]
+fn test_nsgetexecutablepath() {
+    let mut buf = [1u8; libc::PATH_MAX as usize];
+    let mut bufsize = buf.len() as u32;
+
+    assert_eq!(unsafe { libc::_NSGetExecutablePath(buf.as_mut_ptr().cast(), &mut bufsize) }, 0);
+
+    let cstr = CStr::from_bytes_until_nul(&buf).unwrap();
+    // In Miri, this path is the absolute path to the source file,
+    // whereas natively, it is the absolute path to the compiled program,
+    // so we check that it ends with the file name.
+    if cfg!(miri) {
+        // Since `file!()` contains `\` on Windows hosts, use a fixed filename instead of `file!()`.
+        assert!(cstr.to_bytes().ends_with(b"/env.rs"));
+    } else {
+        assert!(cstr.to_bytes().ends_with(b"/env"));
+    }
+
+    // If the buffer is too small, it returns `-1`,
+    // and the required size (including the null terminator) is written to `bufsize`.
+    bufsize = 0;
+    assert_eq!(unsafe { libc::_NSGetExecutablePath(std::ptr::null_mut(), &mut bufsize) }, -1);
+    assert_eq!(bufsize as usize, cstr.count_bytes() + 1);
+}
+
 fn main() {
     test_getenv();
     test_setenv();
@@ -180,4 +206,6 @@ fn main() {
     test_chdir();
     #[cfg(target_os = "macos")]
     test_nsgetargv_argc();
+    #[cfg(target_os = "macos")]
+    test_nsgetexecutablepath();
 }
