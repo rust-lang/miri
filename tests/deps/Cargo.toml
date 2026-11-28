@@ -36,6 +36,9 @@ windows-sys = { version = "0.61", features = [
     "Wdk_Storage_FileSystem",
 ] }
 
+[target.'cfg(target_vendor = "apple")'.dependencies]
+mach2 = "0.7"
+
 # Make sure we are not part of the rustc workspace.
 [workspace]
 members = ["cross-crate-items"]
