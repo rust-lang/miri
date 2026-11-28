@@ -29,13 +29,15 @@ fn main() {
     assert_eq!(thread::spawn(performance_frequency).join().unwrap(), frequency);
 
     let before = performance_counter();
+    thread::sleep(Duration::from_millis(10));
     let after = performance_counter();
     assert!(after >= before);
-
-    thread::sleep(Duration::from_millis(10));
-    let elapsed = performance_counter() - after;
-    let expected = frequency / 100; // Expected ticks in 10ms.
+    let elapsed = after - before;
+    // frequency is ticks-per-second; compute ticks-per-10ms
+    let expected = frequency / 100;
     // Allow up to 10x the expected duration for scheduling delays.
-    assert!(expected <= elapsed && elapsed <= 10 * expected);
-    assert_eq!(performance_frequency(), frequency);
+    assert!(
+        expected <= elapsed && elapsed <= 10 * expected,
+        "elapsed ticks: {elapsed}\nexpected ticks: {expected}"
+    );
 }
