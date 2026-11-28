@@ -1,6 +1,14 @@
 //@only-target: freebsd
+//@revisions: default spurious
 //@compile-flags: -Zmiri-fixed-schedule -Zmiri-disable-isolation
-//@run-native
+// The regular tests check exact wake/timeout behavior, so they need spurious wakeups disabled.
+// This is already the default; we set it explicitly so the tests keep working if the default
+// changes.
+//@[default]compile-flags: -Zmiri-spurious-wakeup-rate=0
+//@[default]run-native
+// Make every blocked futex waiter wake up spuriously at the next scheduling point.
+// These tests only make sense under Miri: natively, a futex wait that nobody wakes would hang.
+//@[spurious]compile-flags: -Zmiri-spurious-wakeup-rate=1.0
 
 use std::mem::{self, MaybeUninit};
 use std::ptr::{self, addr_of};
@@ -218,10 +226,101 @@ fn wait_absolute_timeout() {
     assert!((100..1000).contains(&start.elapsed().as_millis()));
 }
 
+fn spurious_wait_returns_without_wake() {
+    let futex: u32 = 0;
+
+    // Nobody will ever wake us up, but with a spurious wakeup rate of 1.0 we
+    // still return 0, as if we had been woken up.
+    unsafe {
+        assert_eq!(
+            libc::_umtx_op(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                libc::UMTX_OP_WAIT_UINT_PRIVATE,
+                0,
+                ptr::null_mut::<libc::c_void>(),
+                ptr::null_mut::<libc::c_void>(),
+            ),
+            0
+        );
+    }
+}
+
+fn spurious_expired_deadline_times_out() {
+    // Get the current monotonic timestamp as timespec. By the time we wait, this deadline
+    // has already passed.
+    let timeout = unsafe {
+        let mut now: MaybeUninit<libc::timespec> = MaybeUninit::uninit();
+        assert_eq!(libc::clock_gettime(libc::CLOCK_MONOTONIC, now.as_mut_ptr()), 0);
+        now.assume_init()
+    };
+    let umtx_timeout = libc::_umtx_time {
+        _timeout: timeout,
+        _flags: libc::UMTX_ABSTIME,
+        _clockid: libc::CLOCK_MONOTONIC as u32,
+    };
+    let umtx_timeout_ptr = &umtx_timeout as *const _;
+    let umtx_timeout_size = ptr::without_provenance_mut(mem::size_of_val(&umtx_timeout));
+
+    let futex: u32 = 0;
+
+    // Expired deadlines are handled before spurious wakeups, so we must time out.
+    unsafe {
+        assert_eq!(
+            libc::_umtx_op(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                libc::UMTX_OP_WAIT_UINT_PRIVATE,
+                0,
+                umtx_timeout_size,
+                umtx_timeout_ptr as *mut _,
+            ),
+            -1
+        );
+        assert_eq!(io::Error::last_os_error().raw_os_error().unwrap(), libc::ETIMEDOUT);
+    }
+}
+
+fn spurious_wakeup_removes_waiter() {
+    let futex: u32 = 0;
+
+    unsafe {
+        assert_eq!(
+            libc::_umtx_op(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                libc::UMTX_OP_WAIT_UINT_PRIVATE,
+                0,
+                ptr::null_mut::<libc::c_void>(),
+                ptr::null_mut::<libc::c_void>(),
+            ),
+            0
+        );
+    }
+
+    // `UMTX_OP_WAKE` does not report how many threads it woke. But if we were still in the
+    // waiter queue, waking us up again would make Miri panic, as we are no longer blocked.
+    unsafe {
+        assert_eq!(
+            libc::_umtx_op(
+                ptr::from_ref(&futex).cast_mut().cast(),
+                libc::UMTX_OP_WAKE_PRIVATE,
+                i32::MAX as libc::c_ulong,
+                ptr::null_mut::<libc::c_void>(),
+                ptr::null_mut::<libc::c_void>(),
+            ),
+            0
+        );
+    }
+}
+
 fn main() {
-    wake_count();
-    wake_dangling();
-    wait_wrong_val();
-    wait_relative_timeout();
-    wait_absolute_timeout();
+    if cfg!(spurious) {
+        spurious_wait_returns_without_wake();
+        spurious_expired_deadline_times_out();
+        spurious_wakeup_removes_waiter();
+    } else {
+        wake_count();
+        wake_dangling();
+        wait_wrong_val();
+        wait_relative_timeout();
+        wait_absolute_timeout();
+    }
 }

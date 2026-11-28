@@ -221,8 +221,8 @@ fn park_timeout() {
     let start = Instant::now();
 
     thread::park_timeout(Duration::from_millis(10));
-    // Normally, waiting in park/park_timeout may spuriously wake up early, but we
-    // know Miri's timed synchronization primitives do not do that.
+    // Normally, waiting in park/park_timeout may spuriously wake up early, but this test runs
+    // with `-Zmiri-deterministic-concurrency`, which disables Miri's spurious wakeups.
     let elapsed = start.elapsed();
     assert!(
         (10..MAX_SLEEP_TIME_MS.into()).contains(&elapsed.as_millis()),
@@ -242,8 +242,8 @@ fn park_unpark() {
 
     t2.thread().unpark();
     thread::park();
-    // Normally, waiting in park/park_timeout may spuriously wake up early, but we
-    // know Miri's timed synchronization primitives do not do that.
+    // Normally, waiting in park/park_timeout may spuriously wake up early, but this test runs
+    // with `-Zmiri-deterministic-concurrency`, which disables Miri's spurious wakeups.
     let elapsed = start.elapsed();
     assert!(
         (10..MAX_SLEEP_TIME_MS.into()).contains(&elapsed.as_millis()),

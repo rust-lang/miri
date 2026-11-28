@@ -306,6 +306,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                                 ecx.write_int(0, &dest)?;
                                 interp_ok(())
                             },
+                            UnblockKind::Spurious =>
+                                unreachable!("epoll waiters never receive spurious wakeups"),
                         }
                     }
                 ),
