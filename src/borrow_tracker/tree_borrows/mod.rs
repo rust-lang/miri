@@ -1,3 +1,5 @@
+#![warn(clippy::arithmetic_side_effects)]
+
 use rustc_abi::Size;
 use rustc_attr_ir::find_attr;
 use rustc_middle::mir::Mutability;
@@ -380,7 +382,7 @@ trait EvalContextPrivExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Adjust range to be relative to allocation start (rather than to `place`).
                 let range_in_alloc = AllocRange {
                     start: Size::from_bytes(perm_range.start) + base_offset,
-                    size: Size::from_bytes(perm_range.end - perm_range.start),
+                    size: Size::from_bytes(perm_range.end.strict_sub(perm_range.start)),
                 };
 
                 tree_borrows.perform_access(
