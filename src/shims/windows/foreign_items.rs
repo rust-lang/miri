@@ -832,6 +832,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 {
                     let ptr = ecx.fn_ptr(FnVal::Other(DynSym::from_str(name)));
                     ecx.write_pointer(ptr, dest)?;
+                } else if ecx.machine.error_on_unknown_optional_symbols {
+                    throw_unsup_format!("GetProcAddress: encountered unknown symbol {name:?}");
                 } else {
                     ecx.write_int(0, dest)?;
                 }

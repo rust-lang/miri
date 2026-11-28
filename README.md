@@ -457,6 +457,9 @@ to Miri failing to detect cases of undefined behavior in a program.
   Miri can miss bugs in your program. However, this can also help to make Miri run faster. Using
   this flag is **unsound**.
 * `-Zmiri-disable-weak-memory-emulation` disables the emulation of some C++11 weak memory effects.
+* `-Zmiri-error-on-unknown-optional-symbols` emits an error when the program queries for an unknown
+  weak symbol, `dlsym`, or syscall. This is useful to identify places where the program falls back
+  to different behavior because of missing shims.
 * `-Zmiri-fixed-schedule` disables preemption (like `-Zmiri-preemption-rate=0.0`) and furthermore
   disables the randomization of the next thread to be picked, instead fixing a round-robin schedule.
   Note however that other aspects of Miri's concurrency behavior are still randomize; use

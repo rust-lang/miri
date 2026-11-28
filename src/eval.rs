@@ -171,6 +171,8 @@ pub struct MiriConfig {
     pub short_fd_operations: bool,
     /// A list of crates that are considered user-relevant.
     pub user_relevant_crates: Vec<String>,
+    /// Whether to error when encountering an unknown weak symbol, `dlsym`, or syscall.
+    pub error_on_unknown_optional_symbols: bool,
 }
 
 impl Default for MiriConfig {
@@ -214,6 +216,7 @@ impl Default for MiriConfig {
             float_rounding_error: FloatRoundingErrorMode::Random,
             short_fd_operations: true,
             user_relevant_crates: vec![],
+            error_on_unknown_optional_symbols: false,
         }
     }
 }

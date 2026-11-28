@@ -103,9 +103,12 @@ pub fn syscall<'tcx>(
             )?;
             ecx.linux_statx(dirfd, pathname, flags, mask, statxbuf, dest)?;
         }
-        _ => {
+        num => {
             // ENOSYS for unknown syscalls. That matches us returning null for all
             // unknown weak symbols.
+            if ecx.machine.error_on_unknown_optional_symbols {
+                throw_unsup_format!("encountered unknown syscall number {num}");
+            }
             ecx.set_errno_and_return_neg1(LibcError("ENOSYS"), dest)?;
         }
     };

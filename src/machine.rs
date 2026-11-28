@@ -688,6 +688,9 @@ pub struct MiriMachine<'tcx> {
     /// Whether `exit` has been called (or, equivalently, `main` has returned).
     /// It is UB to call `exit` again.
     pub exit_called: bool,
+
+    /// Whether to error when encountering an unknown weak symbol, `dlsym`, or syscall.
+    pub error_on_unknown_optional_symbols: bool,
 }
 
 impl<'tcx> MiriMachine<'tcx> {
@@ -858,6 +861,7 @@ impl<'tcx> MiriMachine<'tcx> {
             float_rounding_error: config.float_rounding_error,
             short_fd_operations: config.short_fd_operations,
             exit_called: false,
+            error_on_unknown_optional_symbols: config.error_on_unknown_optional_symbols,
         }
     }
 
@@ -1083,6 +1087,7 @@ impl VisitProvenance for MiriMachine<'_> {
             float_rounding_error: _,
             short_fd_operations: _,
             exit_called: _,
+            error_on_unknown_optional_symbols: _,
         } = self;
 
         threads.visit_provenance(visit);
@@ -1499,7 +1504,12 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
                 )
             }
             interp_ok(ptr)
-        } else if ecx.tcx.codegen_fn_attrs(def_id).import_linkage == Some(Linkage::ExternalWeak) {
+        } else if let Some(linkage) = ecx.tcx.codegen_fn_attrs(def_id).import_linkage {
+            if linkage != Linkage::ExternalWeak || ecx.machine.error_on_unknown_optional_symbols {
+                throw_unsup_format!(
+                    "encountered unknown symbol {link_name} with linkage {linkage:?}"
+                );
+            }
             // Symbols with weak linkage default to null if they are not defined. However we can't
             // create new allocations here. On the plus side we know rustc rejects non-ptr-sized
             // weak statics so we can just use a single global "null" allocation for all of them.

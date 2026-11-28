@@ -562,6 +562,8 @@ fn main() -> ExitCode {
             miri_config.address_reuse_cross_thread_rate = 0.0;
             miri_config.cmpxchg_weak_failure_rate = 0.0;
             miri_config.weak_memory_emulation = false;
+        } else if arg == "-Zmiri-error-on-unknown-optional-symbols" {
+            miri_config.error_on_unknown_optional_symbols = true;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-seed=") {
             let seed = param.parse::<u64>().unwrap_or_else(|_| {
                 fatal_error!("-Zmiri-seed must be an integer that fits into u64")
