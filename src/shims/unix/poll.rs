@@ -23,11 +23,13 @@ impl VisitProvenance for PollInterest<'_> {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    register! {
+        name: poll,
+        sig: extern "C" fn(*libc::pollfd, libc::nfds_t, i32) -> i32
+    }
     fn poll(
         &mut self,
-        fds: &OpTy<'tcx>,
-        nfds: &OpTy<'tcx>,
-        timeout: &OpTy<'tcx>,
+        [fds, nfds, timeout]: [&OpTy<'tcx>; 3],
         dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();

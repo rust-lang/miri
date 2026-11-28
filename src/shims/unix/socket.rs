@@ -358,15 +358,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
-    /// For more information on the arguments see the accept manpage:
-    /// <https://linux.die.net/man/2/accept4>
+    register! {
+        name: accept,
+        sig: extern "C" fn(i32, *libc::sockaddr, *libc::socklen_t) -> i32,
+        call: |ecx, args, dest| ecx.accept4(args, /* flags */ None, dest)
+    }
+    register! {
+        name: accept4,
+        sig: extern "C" fn(i32, *libc::sockaddr, *libc::socklen_t, i32) -> i32,
+        call: |ecx, [args @ .., flags], dest| ecx.accept4(args, Some(flags), dest)
+    }
     fn accept4(
         &mut self,
-        socket: &OpTy<'tcx>,
-        address: &OpTy<'tcx>,
-        address_len: &OpTy<'tcx>,
+        [socket, address, address_len]: [&OpTy<'tcx>; 3],
         flags: Option<&OpTy<'tcx>>,
-        // Location where the output scalar is written to.
         dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();

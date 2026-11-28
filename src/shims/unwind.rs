@@ -42,9 +42,15 @@ impl VisitProvenance for CatchUnwindData<'_> {
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+    register! {
+        name: miri_start_unwind,
+        sig: extern "Rust" fn(*()) -> !,
+        call: |ecx, args, _dest| ecx.handle_miri_start_unwind(args),
+        result: EmulateItemResult::NeedsUnwind
+    }
     /// Handles the special `miri_start_unwind` intrinsic, which is called
     /// by libpanic_unwind to delegate the actual unwinding process to Miri.
-    fn handle_miri_start_unwind(&mut self, payload: &OpTy<'tcx>) -> InterpResult<'tcx> {
+    fn handle_miri_start_unwind(&mut self, [payload]: [&OpTy<'tcx>; 1]) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
 
         trace!("miri_start_unwind: {:?}", ecx.frame().instance());

@@ -1181,7 +1181,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     shim_sig!(extern "C" fn(*_) -> panic_unwind::imp::uw::_Unwind_Reason_Code),
                     (link_name, abi, args),
                 )?;
-                ecx.handle_miri_start_unwind(payload)?;
+                ecx.handle_miri_start_unwind([payload])?;
                 return interp_ok(EmulateItemResult::NeedsUnwind);
             }
 

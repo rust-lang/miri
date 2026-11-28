@@ -165,6 +165,11 @@ pub fn iter_exported_symbols<'tcx>(
     interp_ok(())
 }
 
+/// Get whether the current target OS is part of the Unix family of OSes.
+pub fn target_os_is_unix<'tcx>(tcx: TyCtxt<'tcx>) -> bool {
+    tcx.sess.target.families.iter().any(|f| f == "unix")
+}
+
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     /// Checks if the given crate/module exists.
@@ -738,7 +743,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     }
 
     fn target_os_is_unix(&self) -> bool {
-        self.eval_context_ref().tcx.sess.target.families.iter().any(|f| f == "unix")
+        target_os_is_unix(*self.eval_context_ref().tcx)
     }
 
     /// Read bytes from a byte slice.

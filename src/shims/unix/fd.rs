@@ -256,12 +256,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         }
     }
 
+    register! {
+        name: fcntl,
+        sig: variadic extern "C" fn(i32, i32, ...) -> i32,
+    }
     fn fcntl(
         &mut self,
-        fd_num: &OpTy<'tcx>,
-        cmd: &OpTy<'tcx>,
+        [fd_num, cmd]: [&OpTy<'tcx>; 2],
         varargs: Varargs<'tcx, '_>,
-    ) -> InterpResult<'tcx, Scalar> {
+        dest: &MPlaceTy<'tcx>,
+    ) -> InterpResult<'tcx> {
         let ecx = self.eval_context_mut();
 
         let fd_num = ecx.read_scalar(fd_num)?.to_i32()?;
@@ -281,9 +285,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // always sets this flag when opening a file. However we still need to check that the
                 // file itself is open.
                 if !ecx.machine.fds.is_fd_num(fd_num) {
-                    ecx.set_errno_and_return_neg1_i32(LibcError("EBADF"))
+                    ecx.set_errno_and_return_neg1(LibcError("EBADF"), dest)
                 } else {
-                    interp_ok(ecx.eval_libc("FD_CLOEXEC"))
+                    ecx.write_scalar(ecx.eval_libc("FD_CLOEXEC"), dest)
                 }
             }
             cmd if cmd == f_dupfd || cmd == f_dupfd_cloexec => {
@@ -301,35 +305,37 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 let start = ecx.read_scalar(&start)?.to_i32()?;
 
                 let Some(fd) = ecx.machine.fds.get(fd_num) else {
-                    return ecx.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+                    return ecx.set_errno_and_return_neg1(LibcError("EBADF"), dest);
                 };
                 if !FdTable::fd_num_valid(start) {
-                    return ecx.set_errno_and_return_neg1_i32(LibcError("EINVAL"));
+                    return ecx.set_errno_and_return_neg1(LibcError("EINVAL"), dest);
                 }
                 let Some(new_fd_num) = ecx.machine.fds.insert_with_min_num(fd, start) else {
-                    return ecx.set_errno_and_return_neg1_i32(LibcError("EMFILE"));
+                    return ecx.set_errno_and_return_neg1(LibcError("EMFILE"), dest);
                 };
-                interp_ok(Scalar::from_i32(new_fd_num))
+                ecx.write_int(new_fd_num, dest)
             }
             cmd if cmd == f_getfl => {
                 // Check if this is a valid open file descriptor.
                 let Some(fd) = ecx.machine.fds.get(fd_num) else {
-                    return ecx.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+                    return ecx.set_errno_and_return_neg1(LibcError("EBADF"), dest);
                 };
 
-                fd.as_unix().get_flags(ecx)
+                let scalar = fd.as_unix().get_flags(ecx)?;
+                ecx.write_scalar(scalar, dest)
             }
             cmd if cmd == f_setfl => {
                 // Check if this is a valid open file descriptor.
                 let Some(fd) = ecx.machine.fds.get(fd_num) else {
-                    return ecx.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+                    return ecx.set_errno_and_return_neg1(LibcError("EBADF"), dest);
                 };
 
                 let ([flag], _) =
                     ecx.check_varargs(shim_varargs![i32], varargs, "fcntl(fd, F_SETFL, ...)")?;
                 let flag = ecx.read_scalar(&flag)?.to_i32()?;
 
-                fd.as_unix().set_flags(flag & !ecx.setfl_ignored_flags(), ecx)
+                let scalar = fd.as_unix().set_flags(flag & !ecx.setfl_ignored_flags(), ecx)?;
+                ecx.write_scalar(scalar, dest)
             }
             cmd if ecx.tcx.sess.target.os == Os::MacOs
                 && cmd == ecx.eval_libc_i32("F_FULLFSYNC") =>
@@ -337,24 +343,25 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 // Reject if isolation is enabled.
                 if let IsolatedOp::Reject(reject_with) = ecx.machine.isolated_op {
                     ecx.reject_in_isolation("`fcntl`", reject_with)?;
-                    return ecx.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+                    return ecx.set_errno_and_return_neg1(ErrorKind::PermissionDenied, dest);
                 }
 
-                ecx.ffullsync_fd(fd_num)
+                let scalar = ecx.ffullsync_fd(fd_num)?;
+                ecx.write_scalar(scalar, dest)
             }
             cmd if ecx.tcx.sess.target.os == Os::MacOs
                 && ecx.frame_in_std()
                 && cmd == ecx.eval_libc_i32("F_GETPATH") =>
             {
                 // Std uses this when debug-printing `File`. We stub it out by returning an error.
-                ecx.set_errno_and_return_neg1_i32(LibcError("EOPNOTSUPP"))
+                ecx.set_errno_and_return_neg1(LibcError("EOPNOTSUPP"), dest)
             }
             cmd if ecx.tcx.sess.target.os == Os::FreeBsd
                 && ecx.frame_in_std()
                 && cmd == ecx.eval_libc_i32("F_KINFO") =>
             {
                 // Std uses this when debug-printing `File`. We stub it out by returning an error.
-                ecx.set_errno_and_return_neg1_i32(LibcError("EOPNOTSUPP"))
+                ecx.set_errno_and_return_neg1(LibcError("EOPNOTSUPP"), dest)
             }
             cmd => {
                 throw_unsup_format!("fcntl: unsupported command {cmd:#x}");
