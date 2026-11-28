@@ -255,10 +255,6 @@ impl Permission {
     pub fn is_disabled(&self) -> bool {
         self.inner == Disabled
     }
-    /// Check if `self` is the never-allow-writes-again state of a pointer (is `Frozen`).
-    pub fn is_frozen(&self) -> bool {
-        self.inner == Frozen
-    }
 
     /// Check if `self` is the shared-reference-to-interior-mutable-data state of a pointer.
     pub fn is_cell(&self) -> bool {
